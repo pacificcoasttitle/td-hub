@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return NextResponse.json({ error: 'Invalid parameters', details: err.errors }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid parameters', details: err.issues }, { status: 400 });
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

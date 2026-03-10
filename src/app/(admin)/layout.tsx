@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { requireAdmin } from '@/lib/security/auth';
 
+export const dynamic = 'force-dynamic';
+
 const navItems = [
   { label: 'Dashboard', href: '/dashboard', icon: '◫' },
   { label: 'Orders', href: '/orders', icon: '☰' },

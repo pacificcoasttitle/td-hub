@@ -1,6 +1,11 @@
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderParties, orderStatusHistory } from '@/lib/db/schema';
+import { orders, orderProperties, orderParties, orderStatusHistory, contacts } from '@/lib/db/schema';
 import { eq, desc, sql, ilike, or, and, SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
+import type { MappedOrderData } from '@/lib/integrations/softpro';
+
+const salesRepContact = alias(contacts, 'sales_rep');
+const titleOfficerContact = alias(contacts, 'title_officer');
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -15,6 +20,8 @@ export interface OrderListParams {
 export interface OrderListResult {
   orders: Array<typeof orders.$inferSelect & {
     property: typeof orderProperties.$inferSelect | null;
+    salesRepName: string | null;
+    titleOfficerName: string | null;
   }>;
   total: number;
   page: number;
@@ -56,6 +63,8 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
       .select()
       .from(orders)
       .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
+      .leftJoin(salesRepContact, eq(orders.salesRepId, salesRepContact.id))
+      .leftJoin(titleOfficerContact, eq(orders.titleOfficerId, titleOfficerContact.id))
       .where(where)
       .orderBy(desc(orders.openedAt))
       .limit(pageSize)
@@ -70,6 +79,8 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
   const mapped = orderRows.map((row) => ({
     ...row.orders,
     property: row.order_properties,
+    salesRepName: row.sales_rep?.fullName ?? null,
+    titleOfficerName: row.title_officer?.fullName ?? null,
   }));
 
   return {
@@ -117,4 +128,105 @@ export async function getOrderByFileNumber(fileNumber: string) {
     .limit(1);
 
   return result[0] ?? null;
+}
+
+// ─── Transaction Type Validation ─────────────────────────────────────────────
+
+const VALID_TRANSACTION_TYPES = ['Purchase', 'Refinance', 'Equity', 'Other'] as const;
+type TransactionType = (typeof VALID_TRANSACTION_TYPES)[number];
+
+function validTransactionType(value: string | null): TransactionType | null {
+  if (!value) return null;
+  if ((VALID_TRANSACTION_TYPES as readonly string[]).includes(value)) {
+    return value as TransactionType;
+  }
+  return null;
+}
+
+async function resolveContactByOfficerName(name: string | null): Promise<number | null> {
+  if (!name) return null;
+  const result = await db
+    .select({ id: contacts.id })
+    .from(contacts)
+    .where(eq(contacts.officerName, name))
+    .limit(1);
+  return result[0]?.id ?? null;
+}
+
+// ─── Upsert from SoftPro ────────────────────────────────────────────────────
+
+export async function upsertFromSoftPro(
+  mapped: MappedOrderData
+): Promise<{ created: boolean; orderId: number }> {
+  const existing = await getOrderByFileNumber(mapped.fileNumber);
+
+  if (!existing) {
+    const salesRepId = await resolveContactByOfficerName(mapped.marketingRepName);
+    const titleOfficerId = await resolveContactByOfficerName(mapped.titleOfficerName);
+
+    const [newOrder] = await db
+      .insert(orders)
+      .values({
+        fileNumber: mapped.fileNumber,
+        operationalStatus: mapped.operationalStatus,
+        softproStatus: mapped.softproStatus,
+        transactionType: validTransactionType(mapped.transactionType),
+        productType: mapped.productType,
+        orderType: mapped.orderType,
+        salesPrice: mapped.salesPrice,
+        salesRepId,
+        titleOfficerId,
+        openedAt: mapped.openedAt ?? new Date(),
+        completedAt: mapped.completedAt,
+        closedAt: mapped.closedAt,
+        source: 'softpro_sync',
+        isImported: true,
+        softproLastSyncedAt: new Date(),
+      })
+      .returning({ id: orders.id });
+
+    await db.insert(orderProperties).values({
+      orderId: newOrder!.id,
+      address: mapped.property.address,
+      city: mapped.property.city,
+      state: mapped.property.state,
+      county: mapped.property.county,
+      fullAddress: mapped.property.fullAddress,
+    });
+
+    await db.insert(orderStatusHistory).values({
+      orderId: newOrder!.id,
+      status: mapped.operationalStatus,
+      source: 'softpro_sync',
+      notes: 'Initial sync from SoftPro',
+    });
+
+    return { created: true, orderId: newOrder!.id };
+  }
+
+  const statusChanged = existing.operationalStatus !== mapped.operationalStatus;
+
+  await db
+    .update(orders)
+    .set({
+      softproStatus: mapped.softproStatus,
+      operationalStatus: mapped.operationalStatus,
+      completedAt: mapped.completedAt ?? existing.completedAt,
+      closedAt: mapped.closedAt ?? existing.closedAt,
+      salesPrice: mapped.salesPrice ?? existing.salesPrice,
+      softproLastSyncedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(orders.id, existing.id));
+
+  if (statusChanged) {
+    await db.insert(orderStatusHistory).values({
+      orderId: existing.id,
+      status: mapped.operationalStatus,
+      source: 'softpro_sync',
+      notes: `Status changed from ${existing.operationalStatus} to ${mapped.operationalStatus}`,
+    });
+  }
+
+  return { created: false, orderId: existing.id };
 }

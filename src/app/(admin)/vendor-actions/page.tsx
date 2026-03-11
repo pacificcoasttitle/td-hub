@@ -418,14 +418,24 @@ function StepSelectBranch({
 
 // ─── Step 4: Lender Info ────────────────────────────────────────────────────
 
+interface LenderInfo {
+  companyName: string;
+  contactName: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  assignmentClause: string;
+}
+
 function StepLenderInfo({
   lender, setLender, onProceed,
 }: {
-  lender: Record<string, string>;
-  setLender: (l: Record<string, string>) => void;
+  lender: LenderInfo;
+  setLender: (l: LenderInfo) => void;
   onProceed: () => void;
 }) {
-  function update(field: string, value: string) {
+  function update(field: keyof LenderInfo, value: string) {
     setLender({ ...lender, [field]: value });
   }
 

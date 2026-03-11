@@ -172,9 +172,10 @@ export async function GET() {
         property: row.order_properties,
       })),
     });
-  } catch {
+  } catch (err) {
+    console.error('[dashboard] Error:', err);
     return NextResponse.json(
-      { error: 'Failed to load dashboard data' },
+      { error: 'Failed to load dashboard data', detail: err instanceof Error ? err.message : 'Unknown' },
       { status: 500 },
     );
   }

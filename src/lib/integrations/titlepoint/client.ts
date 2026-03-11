@@ -12,6 +12,36 @@ import type {
 
 const VENDOR = 'titlepoint';
 
+// ─── Endpoint Paths ──────────────────────────────────────────────────────────
+
+export const TP_ENDPOINTS = {
+  createService3: 'TpsService.asmx/CreateService3',
+  createService4: 'TpsService.asmx/CreateService4',
+  getRequestSummaries: 'TpsService.asmx/GetRequestSummaries',
+  getResultById: 'TpsService.asmx/GetResultByID',
+  getResultById3: 'TpsService.asmx/GetResultByID3',
+  createRequest3: 'TpsGenerateImage.asmx/CreateRequest3',
+  getRequestStatus: 'TpsGenerateImage.asmx/GetRequestStatus',
+  getGeneratedImage: 'TpsGenerateImage.asmx/GetGeneratedImage',
+  getDocumentsByParameters3: 'TpsImage.asmx/GetDocumentsByParameters3',
+} as const;
+
+// ─── Config ──────────────────────────────────────────────────────────────────
+
+function getConfig() {
+  const baseUrl = process.env.TP_BASE_URL;
+  if (!baseUrl) return null;
+  return {
+    baseUrl: baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl,
+    userID: process.env.TP_USERNAME ?? '',
+    password: process.env.TP_PASSWORD ?? '',
+  };
+}
+
+function authParams(config: { userID: string; password: string }): Record<string, string> {
+  return { userID: config.userID, password: config.password };
+}
+
 // ─── Vendor Logging ─────────────────────────────────────────────────────────
 
 async function logRequest(params: {

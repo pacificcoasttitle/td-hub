@@ -3,6 +3,18 @@ export * from './mapper';
 
 const useMock = !process.env.SOFTPRO_API_URL;
 
+export async function createOrder(payload: Record<string, unknown>) {
+  if (useMock) {
+    const { vendorSuccess } = await import('../types');
+    const tx = (payload as Record<string, Record<string, unknown>>).transactionDetails ?? {};
+    const branch = (tx.LookUpCodeTitleOffice as string) ?? 'GLT';
+    const mockFileNumber = `MOCK-${Date.now()}-${branch}`;
+    return vendorSuccess({ orderNumber: mockFileNumber }, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 0 });
+  }
+  const client = await import('./client');
+  return client.createOrder(payload);
+}
+
 export async function getOrders(params: Parameters<typeof import('./client').getOrders>[0]) {
   if (useMock) {
     const mock = await import('./mock');

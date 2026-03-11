@@ -130,6 +130,55 @@ async function makeRequest<T>(
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
+export async function createOrder(
+  payload: Record<string, unknown>
+): Promise<VendorResult<{ orderNumber: string }>> {
+  const requestId = crypto.randomUUID();
+  const startedAt = new Date();
+  const url = getBaseUrl() + SOFTPRO_ENDPOINTS.createOrder;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    const raw = (await response.json()) as SoftProResponse & { OrderNumber?: string };
+    const durationMs = Date.now() - startedAt.getTime();
+
+    await logRequest({
+      operation: 'create_order', requestId, startedAt,
+      success: raw.Status === 200,
+      httpStatus: response.status,
+      requestMeta: { url, method: 'POST' },
+      responseMeta: { status: raw.Status, message: raw.Message, orderNumber: raw.OrderNumber },
+    });
+
+    if (raw.Status === 200 && raw.OrderNumber) {
+      return vendorSuccess({ orderNumber: raw.OrderNumber }, { requestId, durationMs });
+    }
+
+    return vendorError<{ orderNumber: string }>(VENDOR, 'CREATE_FAILED',
+      raw.Message ?? 'Failed to create order', { httpStatus: response.status, requestId, durationMs });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    const durationMs = Date.now() - startedAt.getTime();
+
+    await logRequest({
+      operation: 'create_order', requestId, startedAt,
+      success: false, errorCategory: 'NETWORK',
+      requestMeta: { url, method: 'POST' },
+      responseMeta: { error: message },
+    });
+
+    return vendorError<{ orderNumber: string }>(VENDOR, 'NETWORK_ERROR', message, {
+      retryable: true, requestId, durationMs,
+    });
+  }
+}
+
 export async function getOrders(params: {
   dateFrom: string;
   dateTo: string;

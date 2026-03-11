@@ -1,6 +1,8 @@
 'use client';
 
 import { FormField } from './step-select-order';
+import { AddressAutocomplete } from '@/components/ui/address-autocomplete';
+import type { ParsedAddress } from '@/components/ui/address-autocomplete';
 
 export interface LenderInfo {
   companyName: string;
@@ -20,6 +22,17 @@ export function CplLenderForm({
   function update(field: keyof LenderInfo, value: string) {
     setLender({ ...lender, [field]: value });
   }
+
+  function handleAddressSelect(parsed: ParsedAddress) {
+    setLender({
+      ...lender,
+      address: parsed.street,
+      city: parsed.city,
+      state: parsed.state,
+      zip: parsed.zip,
+    });
+  }
+
   return (
     <div className="p-6">
       <h3 className="text-lg font-semibold text-[#1A1A2E] mb-1">Lender Information</h3>
@@ -27,10 +40,20 @@ export function CplLenderForm({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <FormField label="Company Name" value={lender.companyName} onChange={(v) => update('companyName', v)} placeholder="Auto from order" />
         <FormField label="Contact Name" value={lender.contactName} onChange={(v) => update('contactName', v)} placeholder="Auto from order" />
-        <FormField label="Address" value={lender.address} onChange={(v) => update('address', v)} placeholder="Auto from order" />
+        <div className="sm:col-span-2">
+          <label className="block text-xs font-medium text-[#6B7280] mb-1">Address</label>
+          <AddressAutocomplete
+            value={lender.address}
+            onChange={(v) => update('address', v)}
+            onSelect={handleAddressSelect}
+            placeholder="Start typing to search, or enter manually"
+          />
+        </div>
         <FormField label="City" value={lender.city} onChange={(v) => update('city', v)} placeholder="Auto from order" />
-        <FormField label="State" value={lender.state} onChange={(v) => update('state', v)} placeholder="CA" />
-        <FormField label="ZIP" value={lender.zip} onChange={(v) => update('zip', v)} placeholder="Auto from order" />
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="State" value={lender.state} onChange={(v) => update('state', v)} placeholder="CA" />
+          <FormField label="ZIP" value={lender.zip} onChange={(v) => update('zip', v)} placeholder="Auto from order" />
+        </div>
         <div className="sm:col-span-2">
           <label className="block text-xs font-medium text-[#6B7280] mb-1">Assignment Clause</label>
           <textarea

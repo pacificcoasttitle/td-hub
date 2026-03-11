@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { OrderFilters } from '@/components/admin/order-filters';
 import { OrderTable, PAGE_SIZE } from '@/components/admin/order-table';
 import type { OrderListResponse } from '@/components/admin/order-table';
@@ -67,6 +68,15 @@ export default function OrdersPage() {
             <p className="text-sm text-[#6B7280] mt-1">{data.total} order{data.total !== 1 ? 's' : ''}</p>
           )}
         </div>
+        <Link
+          href="/orders/new"
+          className="px-4 py-2 text-sm font-medium bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] transition-colors inline-flex items-center gap-2"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          New Order
+        </Link>
       </div>
 
       <OrderFilters

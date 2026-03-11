@@ -43,7 +43,7 @@ export default function ClientOrdersPage() {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const fetchOrders = useCallback((p: number, s: string, signal?: AbortSignal) => {
     setLoading(true);

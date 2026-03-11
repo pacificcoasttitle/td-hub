@@ -140,7 +140,7 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
   for (const url of payload.data) {
     try {
       const { buffer, filename } = await downloadFromUrl(url);
-      await storeDocument({
+      const { documentId } = await storeDocument({
         orderId: order.id,
         fileNumber: order.fileNumber,
         buffer,
@@ -148,6 +148,13 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
         category: 'prelim',
         sourceUrl: url,
       });
+
+      await db.insert(eventOutbox).values({
+        eventType: 'order.document.received',
+        orderId: order.id,
+        payload: { documentId, category: 'prelim', fileNumber: order.fileNumber } as Record<string, unknown>,
+      });
+
       processed++;
     } catch (err) {
       errors.push(`Failed to process ${url}: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -171,7 +178,7 @@ export async function handlePolicyWebhook(payload: PolicyPayload): Promise<Webho
   for (const item of payload.data) {
     try {
       const { buffer } = await downloadFromUrl(item.FileUrl);
-      await storeDocument({
+      const { documentId } = await storeDocument({
         orderId: order.id,
         fileNumber: order.fileNumber,
         buffer,
@@ -179,6 +186,13 @@ export async function handlePolicyWebhook(payload: PolicyPayload): Promise<Webho
         category: 'policy',
         sourceUrl: item.FileUrl,
       });
+
+      await db.insert(eventOutbox).values({
+        eventType: 'order.document.received',
+        orderId: order.id,
+        payload: { documentId, category: 'policy', fileNumber: order.fileNumber } as Record<string, unknown>,
+      });
+
       processed++;
     } catch (err) {
       errors.push(`Failed to process ${item.FileName}: ${err instanceof Error ? err.message : 'Unknown error'}`);

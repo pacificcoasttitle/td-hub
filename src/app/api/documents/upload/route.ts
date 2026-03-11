@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { uploadDocument } from '@/lib/domain/documents/service';
+import { docCategoryEnum } from '@/lib/db/schema/documents';
 
-const ALLOWED_CATEGORIES = [
-  'general', 'title', 'escrow', 'recording', 'insurance',
-  'tax', 'legal', 'correspondence', 'other',
-] as const;
+const ALLOWED_CATEGORIES = docCategoryEnum.enumValues;
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,7 +27,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
     }
 
-    if (!ALLOWED_CATEGORIES.includes(category as typeof ALLOWED_CATEGORIES[number])) {
+    if (!(ALLOWED_CATEGORIES as readonly string[]).includes(category)) {
       return NextResponse.json({ error: 'Invalid category' }, { status: 400 });
     }
 
@@ -40,7 +38,7 @@ export async function POST(req: NextRequest) {
       file: buffer,
       filename: file.name,
       contentType: file.type || 'application/octet-stream',
-      category: category as typeof ALLOWED_CATEGORIES[number],
+      category: category as (typeof ALLOWED_CATEGORIES)[number],
       description,
       userId: session.id,
     });

@@ -30,15 +30,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 
-  if (!result.success) {
+  const data = result.success ? result.data : undefined;
+  if (!data || data.matchCode !== 'S') {
     return NextResponse.json({ success: false, error: 'No property match found' });
   }
 
-  if (result.data.matchCode !== 'S') {
-    return NextResponse.json({ success: false, error: 'No property match found' });
-  }
-
-  const { apn, county, legalDescription, primaryOwner, secondaryOwner, propertyType } = result.data;
+  const { apn, county, legalDescription, primaryOwner, secondaryOwner, propertyType } = data;
 
   return NextResponse.json({
     success: true,

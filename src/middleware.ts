@@ -1,0 +1,89 @@
+import { createServerClient } from '@supabase/ssr';
+import { NextRequest, NextResponse } from 'next/server';
+
+const PUBLIC_PATHS = [
+  '/login',
+  '/api/health',
+];
+
+function isPublic(pathname: string): boolean {
+  if (PUBLIC_PATHS.includes(pathname)) return true;
+  if (pathname.startsWith('/api/webhooks/softpro/')) return true;
+  if (pathname.startsWith('/_next/')) return true;
+  if (pathname.startsWith('/favicon')) return true;
+  return false;
+}
+
+function isJobRoute(pathname: string): boolean {
+  return pathname.startsWith('/api/jobs/');
+}
+
+function isApiRoute(pathname: string): boolean {
+  return pathname.startsWith('/api/');
+}
+
+function isProtectedPage(pathname: string): boolean {
+  return pathname.startsWith('/admin') || pathname.startsWith('/client');
+}
+
+export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  if (isPublic(pathname)) {
+    return NextResponse.next();
+  }
+
+  // Job routes: check JOB_RUNNER_SECRET Bearer token
+  if (isJobRoute(pathname)) {
+    const secret = process.env.JOB_RUNNER_SECRET;
+    if (!secret) {
+      return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
+    }
+    const authHeader = req.headers.get('authorization');
+    if (authHeader === `Bearer ${secret}`) {
+      return NextResponse.next();
+    }
+    // Fall through to Supabase session check — admins can also access job routes
+  }
+
+  // Create Supabase client for Edge middleware
+  const res = NextResponse.next();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            req.cookies.set(name, value);
+            res.cookies.set(name, value, options);
+          });
+        },
+      },
+    }
+  );
+
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    if (isApiRoute(pathname)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (isProtectedPage(pathname)) {
+      const loginUrl = new URL('/login', req.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  return res;
+}
+
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
+};

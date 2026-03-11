@@ -1,5 +1,13 @@
-import { getOrderDetails, mapSoftProOrder } from '@/lib/integrations/softpro';
-import { upsertFromSoftPro } from '@/lib/domain/orders/service';
+import {
+  getOrders,
+  getOrderContacts,
+  mapSoftProOrder,
+  mapOrderContacts,
+} from '@/lib/integrations/softpro';
+import {
+  upsertFromSoftPro,
+  getOrderByFileNumber,
+} from '@/lib/domain/orders/service';
 
 export interface SyncOrdersPayload {
   dateFrom?: string;
@@ -10,12 +18,10 @@ export interface SyncOrdersResult {
   totalFetched: number;
   created: number;
   updated: number;
+  enriched: number;
   errors: Array<{ fileNumber: string; error: string }>;
 }
 
-/**
- * Format a Date as MM-DD-YYYY for SoftPro API query parameters.
- */
 function formatDateForSoftPro(d: Date): string {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -23,9 +29,9 @@ function formatDateForSoftPro(d: Date): string {
 }
 
 /**
- * Sync recent orders from SoftPro via GetOrderDetails.
- * Maps each result and upserts into local orders + order_properties tables.
- * Idempotent: re-running updates existing orders without duplicating.
+ * Sync orders from SoftPro.
+ * Flow: GetOrders → for each NEW order → GetOrderContacts → enrich with contact data.
+ * Existing orders only get status + date updates from GetOrders (no re-fetch of contacts).
  */
 export async function handleSyncOrders(
   payload: SyncOrdersPayload = {}
@@ -34,13 +40,14 @@ export async function handleSyncOrders(
   const dateFrom = payload.dateFrom ?? formatDateForSoftPro(now);
   const dateTo = payload.dateTo ?? formatDateForSoftPro(now);
 
-  const adapterResult = await getOrderDetails({ dateFrom, dateTo });
+  const adapterResult = await getOrders({ dateFrom, dateTo });
 
   if (!adapterResult.success || !adapterResult.data) {
     return {
       totalFetched: 0,
       created: 0,
       updated: 0,
+      enriched: 0,
       errors: [{
         fileNumber: '*',
         error: adapterResult.error?.message ?? 'Failed to fetch orders from SoftPro',
@@ -51,11 +58,23 @@ export async function handleSyncOrders(
   const items = adapterResult.data;
   let created = 0;
   let updated = 0;
+  let enriched = 0;
   const errors: Array<{ fileNumber: string; error: string }> = [];
 
   for (const item of items) {
     try {
+      const existing = await getOrderByFileNumber(item.OrderNumber);
       const mapped = mapSoftProOrder(item);
+
+      if (!existing) {
+        const contactsResult = await getOrderContacts(item.OrderNumber);
+        if (contactsResult.success && contactsResult.data) {
+          const contacts = mapOrderContacts(contactsResult.data);
+          mapped.titleOfficerName = contacts.titleOfficerName;
+          enriched++;
+        }
+      }
+
       const result = await upsertFromSoftPro(mapped);
       if (result.created) created++;
       else updated++;
@@ -67,5 +86,5 @@ export async function handleSyncOrders(
     }
   }
 
-  return { totalFetched: items.length, created, updated, errors };
+  return { totalFetched: items.length, created, updated, enriched, errors };
 }

@@ -8,6 +8,7 @@ import type { SyncOrdersPayload } from '@/lib/jobs/handlers/sync-orders';
 import { handleSyncContacts } from '@/lib/jobs/handlers/sync-contacts';
 import type { SyncContactsPayload } from '@/lib/jobs/handlers/sync-contacts';
 import { handleTitlePointPoll } from '@/lib/jobs/handlers/titlepoint-poll';
+import { processOutboxEvents } from '@/lib/domain/notifications/service';
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -28,6 +29,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleSyncContacts(payload as unknown as SyncContactsPayload),
   'titlepoint.poll': (payload) =>
     handleTitlePointPoll(payload),
+  'notifications.process_outbox': () =>
+    processOutboxEvents(),
 };
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

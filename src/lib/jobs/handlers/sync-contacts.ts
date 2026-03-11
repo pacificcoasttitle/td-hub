@@ -1,4 +1,4 @@
-import { getLookupTable } from '@/lib/integrations/softpro';
+import { getLookupTable, mapLookupTableEntry } from '@/lib/integrations/softpro';
 import type { SoftProLookupItem } from '@/lib/integrations/softpro';
 import {
   upsertContactFromSoftPro,
@@ -38,51 +38,72 @@ const COMPANY_ENTITY_TYPES: Record<string, string> = {
 
 const VALID_ENTITY_TYPES = [...Object.keys(ENTITY_TYPE_ROLES), ...Object.keys(COMPANY_ENTITY_TYPES)];
 
+// GetOrderMarketingRep hangs in production — skip Sales Rep sync for now
+const SKIP_ENTITY_TYPES = new Set(['Sales Rep']);
+
 function isCompanyType(entityType: string): boolean {
   return entityType in COMPANY_ENTITY_TYPES;
 }
 
-// ─── Mappers ─────────────────────────────────────────────────────────────────
+// ─── Field extraction from dynamic lookup items ─────────────────────────────
+// Real API field names have spaces and slashes. We try known field names
+// first, then fall back to legacy camelCase names for forward compatibility.
+
+function extractLookupCode(item: SoftProLookupItem): string {
+  return (
+    item['Title officer/Examiner'] ??
+    item['LookupCode'] ??
+    item['CompanyLookUpCode'] ??
+    item['PersonLookupCode'] ??
+    Object.values(item)[0] ??
+    'unknown'
+  );
+}
 
 function mapToContactUpsert(item: SoftProLookupItem, roles: string[]) {
+  const mapped = mapLookupTableEntry(item);
+  const lookupCode = extractLookupCode(item);
+
   return {
-    softproLookupCode: item.LookupCode,
-    softproFlookupCode: item.FlookupCode,
-    softproUserType: item.UserType ?? '',
-    firstName: item.FirstName,
-    lastName: item.LastName,
-    fullName: item.FullName,
-    companyName: item.CompanyName,
-    officerName: item.OfficerName,
-    email: item.Email,
-    phone: item.Phone,
-    cell: item.Cell,
-    fax: item.Fax,
-    address1: item.Address1,
-    address2: item.Address2,
-    city: item.City,
-    state: item.State,
-    zip: item.Zip,
-    assignmentClause: item.AssignmentClause,
-    licenseNo: item.LicenseNo,
+    softproLookupCode: lookupCode,
+    softproFlookupCode: null,
+    softproUserType: roles[0] ?? '',
+    firstName: null,
+    lastName: null,
+    fullName: mapped.officerName ?? item['FullName'] ?? null,
+    companyName: null,
+    officerName: mapped.officerName ?? item['OfficerName'] ?? null,
+    email: mapped.email ?? item['Email'] ?? null,
+    phone: item['Phone'] ?? null,
+    cell: item['Cell'] ?? null,
+    fax: item['Fax'] ?? null,
+    address1: item['Address1'] ?? null,
+    address2: item['Address2'] ?? null,
+    city: item['City'] ?? null,
+    state: item['State'] ?? null,
+    zip: item['Zip'] ?? null,
+    assignmentClause: item['AssignmentClause'] ?? null,
+    licenseNo: item['LicenseNo'] ?? null,
     roles,
   };
 }
 
 function mapToCompanyUpsert(item: SoftProLookupItem, companyType: string) {
+  const lookupCode = extractLookupCode(item);
+
   return {
-    lookupCode: item.LookupCode,
-    name: item.CompanyName ?? item.FullName ?? item.LookupCode,
+    lookupCode,
+    name: item['CompanyName'] ?? item['Officer Name'] ?? item['FullName'] ?? lookupCode,
     companyType,
-    email: item.Email,
-    phone: item.Phone,
-    fax: item.Fax,
-    address1: item.Address1,
-    address2: item.Address2,
-    city: item.City,
-    state: item.State,
-    zip: item.Zip,
-    assignmentClause: item.AssignmentClause,
+    email: item['Email'] ?? null,
+    phone: item['Phone'] ?? null,
+    fax: item['Fax'] ?? null,
+    address1: item['Address1'] ?? null,
+    address2: item['Address2'] ?? null,
+    city: item['City'] ?? null,
+    state: item['State'] ?? null,
+    zip: item['Zip'] ?? null,
+    assignmentClause: item['AssignmentClause'] ?? null,
   };
 }
 
@@ -100,6 +121,16 @@ export async function handleSyncContacts(
       created: 0,
       updated: 0,
       errors: [{ lookupCode: '*', error: `Invalid entity type: ${entityType}` }],
+    };
+  }
+
+  if (SKIP_ENTITY_TYPES.has(entityType)) {
+    return {
+      entityType,
+      totalFetched: 0,
+      created: 0,
+      updated: 0,
+      errors: [{ lookupCode: '*', error: `Sync for ${entityType} is temporarily disabled (API hangs)` }],
     };
   }
 
@@ -124,6 +155,7 @@ export async function handleSyncContacts(
   const errors: Array<{ lookupCode: string; error: string }> = [];
 
   for (const item of items) {
+    const lookupCode = extractLookupCode(item);
     try {
       if (isCompanyType(entityType)) {
         const companyType = COMPANY_ENTITY_TYPES[entityType]!;
@@ -138,7 +170,7 @@ export async function handleSyncContacts(
       }
     } catch (err) {
       errors.push({
-        lookupCode: item.LookupCode,
+        lookupCode,
         error: err instanceof Error ? err.message : 'Unknown error',
       });
     }

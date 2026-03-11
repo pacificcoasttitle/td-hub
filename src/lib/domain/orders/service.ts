@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { orders, orderProperties, orderParties, orderStatusHistory, contacts } from '@/lib/db/schema';
-import { eq, desc, sql, ilike, or, and, SQL } from 'drizzle-orm';
+import { eq, desc, sql, ilike, or, and, gte, SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { MappedOrderData } from '@/lib/integrations/softpro';
 
@@ -238,4 +238,60 @@ export async function upsertFromSoftPro(
   }
 
   return { created: false, orderId: existing.id };
+}
+
+// ─── Dashboard Stats ────────────────────────────────────────────────────────
+
+export interface OrderStats {
+  total: number; open: number; closed: number;
+  closedThisMonth: number; avgDaysToClose: number | null;
+}
+
+export async function getOrderStats(): Promise<OrderStats> {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const [result] = await db
+    .select({
+      total: sql<number>`count(*)`,
+      open: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'open')`,
+      closed: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'closed')`,
+      closedThisMonth: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'closed' and ${orders.closedAt} >= ${monthStart})`,
+      avgDaysToClose: sql<number | null>`avg(extract(epoch from (${orders.closedAt} - ${orders.openedAt})) / 86400) filter (where ${orders.operationalStatus} = 'closed' and ${orders.closedAt} is not null)`,
+    })
+    .from(orders);
+
+  return {
+    total: Number(result?.total ?? 0),
+    open: Number(result?.open ?? 0),
+    closed: Number(result?.closed ?? 0),
+    closedThisMonth: Number(result?.closedThisMonth ?? 0),
+    avgDaysToClose: result?.avgDaysToClose != null ? Math.round(Number(result.avgDaysToClose) * 10) / 10 : null,
+  };
+}
+
+// ─── Recent Activity ────────────────────────────────────────────────────────
+
+export interface RecentActivityItem {
+  id: number; orderId: number; fileNumber: string;
+  status: string; source: string; notes: string | null; changedAt: Date;
+}
+
+export async function getRecentActivity(limit = 20): Promise<RecentActivityItem[]> {
+  const rows = await db
+    .select({
+      id: orderStatusHistory.id,
+      orderId: orderStatusHistory.orderId,
+      fileNumber: orders.fileNumber,
+      status: orderStatusHistory.status,
+      source: orderStatusHistory.source,
+      notes: orderStatusHistory.notes,
+      changedAt: orderStatusHistory.changedAt,
+    })
+    .from(orderStatusHistory)
+    .innerJoin(orders, eq(orderStatusHistory.orderId, orders.id))
+    .orderBy(desc(orderStatusHistory.changedAt))
+    .limit(limit);
+
+  return rows;
 }

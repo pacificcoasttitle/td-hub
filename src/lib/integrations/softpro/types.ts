@@ -1,6 +1,6 @@
 /**
  * SoftPro API response types.
- * Derived from legacy Cron.php::fetchSoftproOrders() and constants.php SOFTPRO_API_END.
+ * Matched to real production API responses (not documentation).
  */
 
 // ─── API Response Envelope ───────────────────────────────────────────────────
@@ -8,55 +8,68 @@
 export interface SoftProResponse<T = unknown> {
   Status: number;
   Message: string;
+  FileUploadedStatus: boolean;
   data?: T;
-  OrderNumber?: string;
 }
 
-// ─── Order Item (from GetOrderDetails) ───────────────────────────────────────
+// ─── Order Item (from GetOrders) ─────────────────────────────────────────────
+// GetOrders returns only these four fields. GetOrderDetails returns 404.
 
 export interface SoftProOrderItem {
   OrderNumber: string;
   OrderStatus: string;
-  MarketingSource: string | null;
-  OrderType: string | null;
-  Address: string | null;
-  City: string | null;
-  State: string | null;
-  Country: string | null;       // NOTE: Actually contains county name (legacy bug, preserved)
-  TitleOfficer: string | null;
-  SalesPrice: string | null;
-  TransactionType: string | null;
-  ProductType: string | null;
-  ReceivedDate: string | null;
-  CompletedDate: string | null;  // Format: 'n/j/Y g:i:s A' e.g. '3/26/2025 2:30:00 PM'
-  ModifiedDate: string | null;   // Same format
-  MarketingRep: string | null;
-  LastModifiedOn: string | null;
+  LastModifiedOn: string;
+  CompletedDate: string;
+}
+
+// ─── Order Contacts (from GetOrderContacts) ──────────────────────────────────
+// NOTE: "PreimaryBorrower" is a typo in the real API — preserved exactly.
+
+export interface SoftProOrderContactsData {
+  buyer: {
+    PreimaryBorrower: string;
+    SecondaryBorrower: string;
+  };
+  EscrowCompanies: {
+    CompanyLookUpCode: string;
+  };
+  Lenders: {
+    PersonLookupCode: string;
+  };
+  MortgageBrokers: {
+    PersonLookupCode: string;
+  };
+  PayoffLenders: {
+    PersonLookupCode: string;
+  };
+  TitleCompanies: {
+    CompanyLookUpCode: string;
+    PersonLookupCode: string;
+  };
+  Underwriters: {
+    CompanyLookUpCode: string;
+    PersonLookupCode: string;
+  };
 }
 
 // ─── Lookup Item (from GetLookuptable) ──────────────────────────────────────
+// Real field names have spaces and slashes (e.g. "Title officer/Examiner").
+// Shape varies by entity type — use a flexible record.
 
-export interface SoftProLookupItem {
-  LookupCode: string;
-  FlookupCode: string | null;
-  FullName: string | null;
-  FirstName: string | null;
-  LastName: string | null;
-  CompanyName: string | null;
-  OfficerName: string | null;
-  Email: string | null;
-  Phone: string | null;
-  Cell: string | null;
-  Fax: string | null;
-  Address1: string | null;
-  Address2: string | null;
-  City: string | null;
-  State: string | null;
-  Zip: string | null;
-  AssignmentClause: string | null;
-  LicenseNo: string | null;
-  UserType: string | null;
-}
+export type SoftProLookupItem = Record<string, string>;
+
+// Known field names for the Title Officer entity type
+export const TITLE_OFFICER_FIELDS = {
+  code: 'Title officer/Examiner',
+  officeLookupCode: 'Office LookupCode',
+  officerName: 'Officer Name',
+  email: 'Email',
+  rowState: 'Row State',
+} as const;
+
+// ─── Attached Document (from GetAttachedDocuments) ──────────────────────────
+
+export type SoftProAttachedDocument = Record<string, string>;
 
 // ─── Endpoints ───────────────────────────────────────────────────────────────
 
@@ -68,13 +81,12 @@ export const SOFTPRO_ENDPOINTS = {
   getLookupTable: 'lookup/GetLookuptable',
   getSalesReps: 'ordercreation/GetOrderMarketingRep',
   getOrders: 'ordercreation/GetOrders',
-  getOrderDetails: 'ordercreation/GetOrderDetails',
   createUser: 'ordercreation/CreateUser',
   updateUser: 'ordercreation/UpdateUser',
   addNote: 'ordercreation/AddNotes',
   addCompany: 'ordercreation/AddCompany',
   updateCompany: 'ordercreation/UpdateCompany',
-  getPrelimDocuments: 'ordercreation/GetAttachedDocuments',
+  getAttachedDocuments: 'ordercreation/GetAttachedDocuments',
   updateTask: 'ordercreation/AddTask',
 } as const;
 
@@ -82,9 +94,10 @@ export const SOFTPRO_ENDPOINTS = {
 
 /**
  * Parse SoftPro date string to JS Date.
- * Handles: 'n/j/Y g:i:s A' (e.g. '3/26/2025 2:30:00 PM')
- *          'm/d/Y h:i:s A' (e.g. '03/26/2025 02:30:00 PM')
+ * Handles: 'YYYY-MM-DD' (e.g. '2024-03-05')
+ *          'n/j/Y g:i:s A' (e.g. '3/26/2025 2:30:00 PM')
  *          Standard ISO strings
+ *          Empty strings (returns null)
  */
 export function parseSoftProDate(dateStr: string | null | undefined): Date | null {
   if (!dateStr || !dateStr.trim()) return null;

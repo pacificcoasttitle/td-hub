@@ -1,5 +1,12 @@
 import { VendorResult, VendorHealthResult, vendorSuccess, vendorError } from '../types';
-import { SoftProResponse, SoftProOrderItem, SoftProLookupItem, SOFTPRO_ENDPOINTS } from './types';
+import {
+  SoftProResponse,
+  SoftProOrderItem,
+  SoftProLookupItem,
+  SoftProOrderContactsData,
+  SoftProAttachedDocument,
+  SOFTPRO_ENDPOINTS,
+} from './types';
 import { db } from '@/lib/db/client';
 import { vendorApiLogs } from '@/lib/db/schema';
 
@@ -66,7 +73,7 @@ async function makeRequest<T>(
     const fetchOptions: RequestInit = {
       method,
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(60_000), // 60s timeout
+      signal: AbortSignal.timeout(60_000),
     };
 
     if (method === 'POST' && options?.body) {
@@ -123,29 +130,31 @@ async function makeRequest<T>(
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-export async function getOrderDetails(params: {
-  dateFrom?: string;
-  dateTo?: string;
-  orderNumber?: string;
-}): Promise<VendorResult<SoftProOrderItem[]>> {
-  const queryParams: Record<string, string> = {};
-  if (params.dateFrom) queryParams.DateFrom = params.dateFrom;
-  if (params.dateTo) queryParams.DateTo = params.dateTo;
-  if (params.orderNumber) queryParams.OrderNumber = params.orderNumber;
-
-  return makeRequest<SoftProOrderItem[]>('GET', SOFTPRO_ENDPOINTS.getOrderDetails, {
-    queryParams,
-    operation: 'get_order_details',
-  });
-}
-
-export async function getOrderStatuses(params: {
+export async function getOrders(params: {
   dateFrom: string;
   dateTo: string;
 }): Promise<VendorResult<SoftProOrderItem[]>> {
   return makeRequest<SoftProOrderItem[]>('GET', SOFTPRO_ENDPOINTS.getOrders, {
     queryParams: { DateFrom: params.dateFrom, DateTo: params.dateTo },
-    operation: 'get_order_statuses',
+    operation: 'get_orders',
+  });
+}
+
+export async function getOrderContacts(
+  orderNumber: string
+): Promise<VendorResult<SoftProOrderContactsData>> {
+  return makeRequest<SoftProOrderContactsData>('GET', SOFTPRO_ENDPOINTS.getOrderContacts, {
+    queryParams: { OrderNumber: orderNumber },
+    operation: 'get_order_contacts',
+  });
+}
+
+export async function getAttachedDocuments(
+  orderNumber: string
+): Promise<VendorResult<SoftProAttachedDocument[]>> {
+  return makeRequest<SoftProAttachedDocument[]>('GET', SOFTPRO_ENDPOINTS.getAttachedDocuments, {
+    queryParams: { orderNumber },
+    operation: 'get_attached_documents',
   });
 }
 

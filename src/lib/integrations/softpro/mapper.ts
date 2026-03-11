@@ -1,9 +1,13 @@
-import { SoftProOrderItem, parseSoftProDate } from './types';
+import {
+  SoftProOrderItem,
+  SoftProOrderContactsData,
+  SoftProLookupItem,
+  TITLE_OFFICER_FIELDS,
+  parseSoftProDate,
+} from './types';
 
-/**
- * Maps a SoftPro order item to the shape needed for upserting into our orders table.
- * This is the critical translation layer between SoftPro's response format and our domain model.
- */
+// ─── Mapped Order (from GetOrders — limited fields) ─────────────────────────
+
 export interface MappedOrderData {
   fileNumber: string;
   softproStatus: string;
@@ -16,23 +20,45 @@ export interface MappedOrderData {
   completedAt: Date | null;
   closedAt: Date | null;
   isImported: boolean;
-  // Property data
   property: {
     address: string | null;
     city: string | null;
     state: string | null;
-    county: string | null;   // From 'Country' field (legacy bug preserved)
+    county: string | null;
     fullAddress: string | null;
   };
-  // For lookup matching (not IDs — caller resolves these)
   marketingRepName: string | null;
   titleOfficerName: string | null;
 }
 
-/**
- * Map SoftPro status string to our operational status enum.
- * SoftPro statuses come mixed-case. We lowercase first, then map.
- */
+// ─── Mapped Order Contacts (from GetOrderContacts) ──────────────────────────
+
+export interface MappedOrderContacts {
+  primaryBuyer: string | null;
+  secondaryBuyer: string | null;
+  escrowCompanyCode: string | null;
+  lenderCode: string | null;
+  mortgageBrokerCode: string | null;
+  payoffLenderCode: string | null;
+  titleCompanyCode: string | null;
+  titleOfficerName: string | null;
+  underwriterCompanyCode: string | null;
+  underwriterPersonCode: string | null;
+}
+
+// ─── Mapped Lookup Entry ────────────────────────────────────────────────────
+
+export interface MappedLookupEntry {
+  code: string | null;
+  officeLookupCode: string | null;
+  officerName: string | null;
+  email: string | null;
+  rowState: string | null;
+  raw: Record<string, string>;
+}
+
+// ─── Status Mapping ─────────────────────────────────────────────────────────
+
 function mapStatus(softproStatus: string): MappedOrderData['operationalStatus'] {
   const s = softproStatus.toLowerCase().trim();
   switch (s) {
@@ -50,44 +76,83 @@ function mapStatus(softproStatus: string): MappedOrderData['operationalStatus'] 
   }
 }
 
-/**
- * Build a full address string from parts.
- */
-function buildFullAddress(address: string | null, city: string | null, state: string | null): string | null {
-  const parts = [address, city, state].filter(Boolean);
-  return parts.length > 0 ? parts.join(', ') : null;
-}
+// ─── Order Mapper ───────────────────────────────────────────────────────────
 
 /**
- * Map a single SoftPro order item to our domain format.
+ * Map a SoftPro order from GetOrders to our domain format.
+ * GetOrders only returns OrderNumber, OrderStatus, LastModifiedOn, CompletedDate.
+ * All other fields (address, title officer, sales price, etc.) are not available
+ * from this endpoint — they come from GetOrderContacts or not at all.
  */
 export function mapSoftProOrder(item: SoftProOrderItem): MappedOrderData {
   const softproStatus = (item.OrderStatus ?? 'open').toLowerCase().trim();
   const operationalStatus = mapStatus(item.OrderStatus ?? 'open');
 
-  // closedAt is only set when status is 'closed', using ModifiedDate
-  const closedAt = operationalStatus === 'closed' ? parseSoftProDate(item.ModifiedDate) : null;
+  const closedAt = operationalStatus === 'closed' ? parseSoftProDate(item.LastModifiedOn) : null;
 
   return {
     fileNumber: item.OrderNumber,
     softproStatus,
     operationalStatus,
-    transactionType: item.TransactionType ?? null,
-    productType: item.ProductType ?? null,
-    orderType: item.OrderType ?? null,
-    salesPrice: item.SalesPrice ?? null,
-    openedAt: parseSoftProDate(item.ReceivedDate),
+    transactionType: null,
+    productType: null,
+    orderType: null,
+    salesPrice: null,
+    openedAt: null,
     completedAt: parseSoftProDate(item.CompletedDate),
     closedAt,
     isImported: true,
     property: {
-      address: item.Address ?? null,
-      city: item.City ?? null,
-      state: item.State ?? null,
-      county: item.Country ?? null,  // 'Country' field = county (legacy bug)
-      fullAddress: buildFullAddress(item.Address, item.City, item.State),
+      address: null,
+      city: null,
+      state: null,
+      county: null,
+      fullAddress: null,
     },
-    marketingRepName: item.MarketingRep ?? null,
-    titleOfficerName: item.TitleOfficer ?? null,
+    marketingRepName: null,
+    titleOfficerName: null,
+  };
+}
+
+// ─── Contacts Mapper ────────────────────────────────────────────────────────
+
+function emptyToNull(value: string | undefined): string | null {
+  if (!value || !value.trim()) return null;
+  return value;
+}
+
+/**
+ * Map GetOrderContacts response to a structured contacts object.
+ */
+export function mapOrderContacts(data: SoftProOrderContactsData): MappedOrderContacts {
+  return {
+    primaryBuyer: emptyToNull(data.buyer?.PreimaryBorrower),
+    secondaryBuyer: emptyToNull(data.buyer?.SecondaryBorrower),
+    escrowCompanyCode: emptyToNull(data.EscrowCompanies?.CompanyLookUpCode),
+    lenderCode: emptyToNull(data.Lenders?.PersonLookupCode),
+    mortgageBrokerCode: emptyToNull(data.MortgageBrokers?.PersonLookupCode),
+    payoffLenderCode: emptyToNull(data.PayoffLenders?.PersonLookupCode),
+    titleCompanyCode: emptyToNull(data.TitleCompanies?.CompanyLookUpCode),
+    titleOfficerName: emptyToNull(data.TitleCompanies?.PersonLookupCode),
+    underwriterCompanyCode: emptyToNull(data.Underwriters?.CompanyLookUpCode),
+    underwriterPersonCode: emptyToNull(data.Underwriters?.PersonLookupCode),
+  };
+}
+
+// ─── Lookup Table Mapper ────────────────────────────────────────────────────
+
+/**
+ * Map a lookup table entry with space/slash field names to normalized keys.
+ * Extracts known Title Officer fields; preserves all raw fields for
+ * other entity types whose field names we haven't discovered yet.
+ */
+export function mapLookupTableEntry(item: SoftProLookupItem): MappedLookupEntry {
+  return {
+    code: item[TITLE_OFFICER_FIELDS.code] ?? null,
+    officeLookupCode: item[TITLE_OFFICER_FIELDS.officeLookupCode] ?? null,
+    officerName: item[TITLE_OFFICER_FIELDS.officerName] ?? null,
+    email: item[TITLE_OFFICER_FIELDS.email] ?? null,
+    rowState: item[TITLE_OFFICER_FIELDS.rowState] ?? null,
+    raw: item,
   };
 }

@@ -34,9 +34,9 @@ export async function GET(
     const docs = await db
       .select({
         id: documents.id,
-        fileName: documents.fileName,
+        filename: documents.filename,
         category: documents.category,
-        fileSize: documents.fileSize,
+        sizeBytes: documents.sizeBytes,
         createdAt: documents.createdAt,
       })
       .from(documents)

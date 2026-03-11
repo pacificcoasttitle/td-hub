@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import OrderDocuments from '@/components/admin/order-documents';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -81,26 +82,59 @@ export default function OrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('Overview');
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncSuccess, setSyncSuccess] = useState(false);
+
+  const fetchOrder = useCallback(
+    (signal?: AbortSignal) =>
+      fetch(`/api/orders/${params.id}`, { signal })
+        .then((res) => {
+          if (res.status === 404) throw new Error('Order not found');
+          if (!res.ok) throw new Error(`Failed to load order (${res.status})`);
+          return res.json() as Promise<OrderDetail>;
+        })
+        .then(setOrder),
+    [params.id],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
 
-    fetch(`/api/orders/${params.id}`, { signal: controller.signal })
-      .then((res) => {
-        if (res.status === 404) throw new Error('Order not found');
-        if (!res.ok) throw new Error(`Failed to load order (${res.status})`);
-        return res.json() as Promise<OrderDetail>;
-      })
-      .then(setOrder)
+    fetchOrder(controller.signal)
       .catch((err) => {
         if (err.name !== 'AbortError') setError(err.message);
       })
       .finally(() => setLoading(false));
 
     return () => controller.abort();
-  }, [params.id]);
+  }, [fetchOrder]);
+
+  async function handleResync() {
+    setSyncing(true);
+    setSyncError(null);
+    setSyncSuccess(false);
+
+    try {
+      const res = await fetch(`/api/orders/${params.id}/resync`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? `Resync failed (${res.status})`);
+      }
+      await fetchOrder();
+      setSyncSuccess(true);
+      setTimeout(() => setSyncSuccess(false), 4000);
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Resync failed');
+      setTimeout(() => setSyncError(null), 5000);
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   if (loading) return <DetailSkeleton />;
 
@@ -143,12 +177,47 @@ export default function OrderDetailPage() {
             <p className="text-[#6B7280] mt-1">{order.property.fullAddress}</p>
           )}
         </div>
-        {order.softproLastSyncedAt && (
-          <p className="text-xs text-[#6B7280]">
-            Last synced {formatDateTime(order.softproLastSyncedAt)}
-          </p>
-        )}
+        <div className="flex items-center gap-3 shrink-0">
+          {order.softproLastSyncedAt && (
+            <p className="text-xs text-[#6B7280]">
+              Last synced {formatDateTime(order.softproLastSyncedAt)}
+            </p>
+          )}
+          <button
+            onClick={handleResync}
+            disabled={syncing}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium border border-[#1B2A4A] text-[#1B2A4A] rounded-lg hover:bg-[#1B2A4A]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <svg
+              className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+            {syncing ? 'Syncing…' : 'Resync from SoftPro'}
+          </button>
+        </div>
       </div>
+
+      {/* Sync feedback */}
+      {syncError && (
+        <div className="mb-4 px-4 py-2.5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 flex items-center justify-between">
+          <span>{syncError}</span>
+          <button onClick={() => setSyncError(null)} className="text-red-400 hover:text-red-600 ml-4">✕</button>
+        </div>
+      )}
+      {syncSuccess && (
+        <div className="mb-4 px-4 py-2.5 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">
+          Order resynced successfully.
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
@@ -179,7 +248,7 @@ export default function OrderDetailPage() {
         {activeTab === 'History' && (
           <HistoryTab history={order.statusHistory} />
         )}
-        {activeTab === 'Documents' && <DocumentsPlaceholder />}
+        {activeTab === 'Documents' && <OrderDocuments orderId={order.id} />}
       </div>
     </div>
   );
@@ -328,31 +397,6 @@ function HistoryTab({ history }: { history: StatusHistoryEntry[] }) {
   );
 }
 
-function DocumentsPlaceholder() {
-  return (
-    <div className="p-12 text-center">
-      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-4">
-        <svg
-          className="h-6 w-6 text-[#6B7280]"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.5}
-            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-          />
-        </svg>
-      </div>
-      <p className="text-[#1A1A2E] font-medium">Document Management</p>
-      <p className="text-sm text-[#6B7280] mt-1">
-        Coming in Phase 2 — upload, view, and manage order documents.
-      </p>
-    </div>
-  );
-}
 
 // ─── Shared UI ──────────────────────────────────────────────────────────────
 

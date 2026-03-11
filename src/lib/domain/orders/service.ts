@@ -120,6 +120,15 @@ export async function getOrderById(id: number) {
   };
 }
 
+export async function getOrderByIdSimple(id: number) {
+  const result = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.id, id))
+    .limit(1);
+  return result[0] ?? null;
+}
+
 export async function getOrderByFileNumber(fileNumber: string) {
   const result = await db
     .select()

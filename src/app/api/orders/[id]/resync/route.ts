@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getSession } from '@/lib/security/auth';
 import { getOrderById } from '@/lib/domain/orders/service';
+
+const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin'];
 
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getSession();
+  if (!session || !ADMIN_ROLES.includes(session.role)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     const { id } = await params;
     const orderId = parseInt(id, 10);

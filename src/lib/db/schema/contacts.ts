@@ -33,7 +33,7 @@ export const profiles = pgTable('profiles', {
   email: varchar('email', { length: 200 }),
   role: profileRoleEnum('role').notNull().default('client'),
   branchId: integer('branch_id').references(() => branches.id),
-  contactId: integer('contact_id'),
+  contactId: integer('contact_id').references(() => contacts.id),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
@@ -86,6 +86,7 @@ export const contacts = pgTable('contacts', {
   lookupCodeIdx: index('contacts_lookup_code_idx').on(table.softproLookupCode),
   emailIdx: index('contacts_email_idx').on(table.email),
   nameIdx: index('contacts_full_name_idx').on(table.fullName),
+  rolesIdx: index('contacts_roles_idx').using('gin', table.roles),
 }));
 
 // ─── Companies ───────────────────────────────────────────────────────────────

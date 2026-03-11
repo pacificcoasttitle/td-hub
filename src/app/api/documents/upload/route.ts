@@ -1,45 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { uploadDocument } from '@/lib/domain/documents/service';
 import { docCategoryEnum } from '@/lib/db/schema/documents';
 
-const ALLOWED_CATEGORIES = docCategoryEnum.enumValues;
+const fieldSchema = z.object({
+  orderId: z.coerce.number().int().positive(),
+  category: z.enum(docCategoryEnum.enumValues).default('general'),
+  description: z.string().optional(),
+});
 
 export async function POST(req: NextRequest) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
-    const session = await getSession();
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const formData = await req.formData();
-    const file = formData.get('file') as File | null;
-    const orderIdRaw = formData.get('orderId') as string | null;
-    const category = (formData.get('category') as string) || 'general';
-    const description = (formData.get('description') as string) || undefined;
 
+    const file = formData.get('file') as File | null;
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
-    const orderId = parseInt(orderIdRaw ?? '', 10);
-    if (isNaN(orderId)) {
-      return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
-    }
-
-    if (!(ALLOWED_CATEGORIES as readonly string[]).includes(category)) {
-      return NextResponse.json({ error: 'Invalid category' }, { status: 400 });
-    }
+    const fields = fieldSchema.parse({
+      orderId: formData.get('orderId'),
+      category: formData.get('category') || undefined,
+      description: formData.get('description') || undefined,
+    });
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
     const result = await uploadDocument({
-      orderId,
+      orderId: fields.orderId,
       file: buffer,
       filename: file.name,
       contentType: file.type || 'application/octet-stream',
-      category: category as (typeof ALLOWED_CATEGORIES)[number],
-      description,
+      category: fields.category,
+      description: fields.description,
       userId: session.id,
     });
 
@@ -49,6 +48,9 @@ export async function POST(req: NextRequest) {
       storageKey: result.storageKey,
     });
   } catch (err) {
+    if (err instanceof z.ZodError) {
+      return NextResponse.json({ error: 'Invalid parameters', details: err.issues }, { status: 400 });
+    }
     const message = err instanceof Error ? err.message : 'Upload failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }

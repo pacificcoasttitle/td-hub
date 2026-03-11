@@ -6,8 +6,9 @@ import Link from 'next/link';
 import OrderDocuments from '@/components/admin/order-documents';
 import OrderCpl from '@/components/admin/order-cpl';
 import OrderTitlePoint from '@/components/admin/order-titlepoint';
-
-// ─── Types ──────────────────────────────────────────────────────────────────
+import { OrderOverviewTab } from '@/components/admin/order-tabs/order-overview-tab';
+import { OrderPropertyTab } from '@/components/admin/order-tabs/order-property-tab';
+import { OrderHistoryTab } from '@/components/admin/order-tabs/order-history-tab';
 
 interface OrderProperty {
   address: string | null;
@@ -52,8 +53,6 @@ interface OrderDetail {
   statusHistory: StatusHistoryEntry[];
 }
 
-// ─── Constants ──────────────────────────────────────────────────────────────
-
 const TABS = ['Overview', 'Property', 'Documents', 'Vendor Actions', 'History'] as const;
 type Tab = (typeof TABS)[number];
 
@@ -65,17 +64,6 @@ const STATUS_COLORS: Record<string, string> = {
   canceled: 'bg-red-100 text-red-800',
   duplicate: 'bg-gray-100 text-gray-600',
 };
-
-const SOURCE_LABELS: Record<string, string> = {
-  softpro_sync: 'SoftPro Sync',
-  manual: 'Manual',
-  system: 'System',
-  webhook: 'Webhook',
-  manual_entry: 'Manual Entry',
-  web_form: 'Web Form',
-};
-
-// ─── Page ───────────────────────────────────────────────────────────────────
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -104,25 +92,16 @@ export default function OrderDetailPage() {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-
     fetchOrder(controller.signal)
-      .catch((err) => {
-        if (err.name !== 'AbortError') setError(err.message);
-      })
+      .catch((err) => { if (err.name !== 'AbortError') setError(err.message); })
       .finally(() => setLoading(false));
-
     return () => controller.abort();
   }, [fetchOrder]);
 
   async function handleResync() {
-    setSyncing(true);
-    setSyncError(null);
-    setSyncSuccess(false);
-
+    setSyncing(true); setSyncError(null); setSyncSuccess(false);
     try {
-      const res = await fetch(`/api/orders/${params.id}/resync`, {
-        method: 'POST',
-      });
+      const res = await fetch(`/api/orders/${params.id}/resync`, { method: 'POST' });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error ?? `Resync failed (${res.status})`);
@@ -146,13 +125,9 @@ export default function OrderDetailPage() {
         <BackLink />
         <div className="mt-8 bg-white rounded-lg border border-gray-200 shadow-sm p-12 text-center">
           <p className="text-red-600 font-medium">{error}</p>
-          <p className="text-sm text-[#6B7280] mt-1">
-            The order may have been removed or you may not have access.
-          </p>
-          <button
-            onClick={() => router.push('/orders')}
-            className="mt-4 px-4 py-2 text-sm bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] transition-colors"
-          >
+          <p className="text-sm text-[#6B7280] mt-1">The order may have been removed or you may not have access.</p>
+          <button onClick={() => router.push('/orders')}
+            className="mt-4 px-4 py-2 text-sm bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] transition-colors">
             Back to Orders
           </button>
         </div>
@@ -165,50 +140,25 @@ export default function OrderDetailPage() {
   return (
     <div className="p-6">
       <BackLink />
-
-      {/* Header */}
       <div className="flex items-start justify-between mt-4 mb-6">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-[#1A1A2E]">
-              {order.fileNumber}
-            </h1>
+            <h1 className="text-2xl font-semibold text-[#1A1A2E]">{order.fileNumber}</h1>
             <StatusBadge status={order.operationalStatus} />
           </div>
-          {order.property?.fullAddress && (
-            <p className="text-[#6B7280] mt-1">{order.property.fullAddress}</p>
-          )}
+          {order.property?.fullAddress && <p className="text-[#6B7280] mt-1">{order.property.fullAddress}</p>}
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          {order.softproLastSyncedAt && (
-            <p className="text-xs text-[#6B7280]">
-              Last synced {formatDateTime(order.softproLastSyncedAt)}
-            </p>
-          )}
-          <button
-            onClick={handleResync}
-            disabled={syncing}
-            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium border border-[#1B2A4A] text-[#1B2A4A] rounded-lg hover:bg-[#1B2A4A]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <svg
-              className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
+          {order.softproLastSyncedAt && <p className="text-xs text-[#6B7280]">Last synced {formatDateTime(order.softproLastSyncedAt)}</p>}
+          <button onClick={handleResync} disabled={syncing}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium border border-[#1B2A4A] text-[#1B2A4A] rounded-lg hover:bg-[#1B2A4A]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+            <svg className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             {syncing ? 'Syncing…' : 'Resync from SoftPro'}
           </button>
         </div>
       </div>
-
-      {/* Sync feedback */}
       {syncError && (
         <div className="mb-4 px-4 py-2.5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 flex items-center justify-between">
           <span>{syncError}</span>
@@ -216,49 +166,28 @@ export default function OrderDetailPage() {
         </div>
       )}
       {syncSuccess && (
-        <div className="mb-4 px-4 py-2.5 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">
-          Order resynced successfully.
-        </div>
+        <div className="mb-4 px-4 py-2.5 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">Order resynced successfully.</div>
       )}
-
-      {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-6">
           {TABS.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`pb-3 text-sm font-medium transition-colors relative ${
-                activeTab === tab
-                  ? 'text-[#1B2A4A]'
-                  : 'text-[#6B7280] hover:text-[#1A1A2E]'
-              }`}
-            >
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              className={`pb-3 text-sm font-medium transition-colors relative ${activeTab === tab ? 'text-[#1B2A4A]' : 'text-[#6B7280] hover:text-[#1A1A2E]'}`}>
               {tab}
-              {activeTab === tab && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#C5A55A] rounded-full" />
-              )}
+              {activeTab === tab && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#C5A55A] rounded-full" />}
             </button>
           ))}
         </nav>
       </div>
-
-      {/* Tab Content */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-        {activeTab === 'Overview' && <OverviewTab order={order} />}
-        {activeTab === 'Property' && <PropertyTab property={order.property} />}
-        {activeTab === 'History' && (
-          <HistoryTab history={order.statusHistory} />
-        )}
+        {activeTab === 'Overview' && <OrderOverviewTab order={order} />}
+        {activeTab === 'Property' && <OrderPropertyTab property={order.property} />}
+        {activeTab === 'History' && <OrderHistoryTab history={order.statusHistory} />}
         {activeTab === 'Documents' && <OrderDocuments orderId={order.id} />}
         {activeTab === 'Vendor Actions' && (
           <div className="divide-y divide-gray-200">
-            <div className="p-6">
-              <OrderCpl orderId={order.id} fileNumber={order.fileNumber} />
-            </div>
-            <div className="p-6">
-              <OrderTitlePoint orderId={order.id} fileNumber={order.fileNumber} />
-            </div>
+            <div className="p-6"><OrderCpl orderId={order.id} fileNumber={order.fileNumber} /></div>
+            <div className="p-6"><OrderTitlePoint orderId={order.id} fileNumber={order.fileNumber} /></div>
           </div>
         )}
       </div>
@@ -266,158 +195,9 @@ export default function OrderDetailPage() {
   );
 }
 
-// ─── Tab Panels ─────────────────────────────────────────────────────────────
-
-function OverviewTab({ order }: { order: OrderDetail }) {
-  return (
-    <div className="p-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-6">
-        {/* Left Column — Order Info */}
-        <div className="space-y-5">
-          <SectionHeading>Order Details</SectionHeading>
-          <FieldRow label="File Number" value={order.fileNumber} />
-          <FieldRow label="Status">
-            <StatusBadge status={order.operationalStatus} />
-          </FieldRow>
-          {order.softproStatus && (
-            <FieldRow label="SoftPro Status" value={order.softproStatus} />
-          )}
-          <FieldRow
-            label="Transaction Type"
-            value={order.transactionType}
-          />
-          {order.productType && (
-            <FieldRow label="Product Type" value={order.productType} />
-          )}
-          {order.orderType && (
-            <FieldRow label="Order Type" value={order.orderType} />
-          )}
-          <FieldRow
-            label="Source"
-            value={SOURCE_LABELS[order.source] ?? order.source}
-          />
-        </div>
-
-        {/* Right Column — Dates & Financials */}
-        <div className="space-y-5">
-          <SectionHeading>Key Dates</SectionHeading>
-          <FieldRow label="Opened" value={formatDate(order.openedAt)} />
-          <FieldRow
-            label="Completed"
-            value={order.completedAt ? formatDate(order.completedAt) : null}
-          />
-          <FieldRow
-            label="Closed"
-            value={order.closedAt ? formatDate(order.closedAt) : null}
-          />
-
-          <div className="pt-2">
-            <SectionHeading>Financials</SectionHeading>
-          </div>
-          <FieldRow
-            label="Sales Price"
-            value={order.salesPrice ? formatCurrency(order.salesPrice) : null}
-          />
-          <FieldRow
-            label="Loan Amount"
-            value={order.loanAmount ? formatCurrency(order.loanAmount) : null}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PropertyTab({ property }: { property: OrderProperty | null }) {
-  if (!property) {
-    return (
-      <EmptySection message="No property data available for this order." />
-    );
-  }
-
-  return (
-    <div className="p-6 space-y-5">
-      <SectionHeading>Property Information</SectionHeading>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-5">
-        <FieldRow label="Address" value={property.address} />
-        <FieldRow label="City" value={property.city} />
-        <FieldRow label="State" value={property.state} />
-        <FieldRow label="ZIP" value={property.zip} />
-        <FieldRow label="County" value={property.county} />
-        <FieldRow label="APN" value={property.apn} />
-        <FieldRow label="Property Type" value={property.propertyType} />
-        <FieldRow label="Full Address" value={property.fullAddress} />
-      </div>
-      {property.legalDescription && (
-        <div className="pt-2">
-          <SectionHeading>Legal Description</SectionHeading>
-          <p className="text-sm text-[#1A1A2E] mt-2 leading-relaxed whitespace-pre-wrap">
-            {property.legalDescription}
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function HistoryTab({ history }: { history: StatusHistoryEntry[] }) {
-  if (history.length === 0) {
-    return <EmptySection message="No status history recorded for this order." />;
-  }
-
-  return (
-    <div className="p-6">
-      <SectionHeading>Status Timeline</SectionHeading>
-      <div className="mt-4 relative">
-        {/* Vertical line */}
-        <div className="absolute left-[7px] top-2 bottom-2 w-px bg-gray-200" />
-
-        <ol className="space-y-6">
-          {history.map((entry, idx) => (
-            <li key={entry.id} className="relative pl-7">
-              {/* Dot */}
-              <span
-                className={`absolute left-0 top-1.5 h-[15px] w-[15px] rounded-full border-2 border-white ${
-                  idx === 0 ? 'bg-[#C5A55A]' : 'bg-gray-300'
-                }`}
-                style={{ boxShadow: '0 0 0 2px #e5e7eb' }}
-              />
-
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={entry.status} />
-                    <span className="text-xs text-[#6B7280] font-medium">
-                      {SOURCE_LABELS[entry.source] ?? entry.source}
-                    </span>
-                  </div>
-                  {entry.notes && (
-                    <p className="text-sm text-[#6B7280] mt-1">
-                      {entry.notes}
-                    </p>
-                  )}
-                </div>
-                <time className="text-xs text-[#6B7280] whitespace-nowrap shrink-0">
-                  {formatDateTime(entry.changedAt)}
-                </time>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </div>
-    </div>
-  );
-}
-
-
-// ─── Shared UI ──────────────────────────────────────────────────────────────
-
 function BackLink() {
   return (
-    <Link
-      href="/orders"
-      className="inline-flex items-center gap-1.5 text-sm text-[#6B7280] hover:text-[#1B2A4A] transition-colors"
-    >
+    <Link href="/orders" className="inline-flex items-center gap-1.5 text-sm text-[#6B7280] hover:text-[#1B2A4A] transition-colors">
       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
       </svg>
@@ -428,48 +208,7 @@ function BackLink() {
 
 function StatusBadge({ status }: { status: string }) {
   const color = STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-600';
-  return (
-    <span
-      className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${color}`}
-    >
-      {status.replace(/_/g, ' ')}
-    </span>
-  );
-}
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">
-      {children}
-    </h2>
-  );
-}
-
-function FieldRow({
-  label,
-  value,
-  children,
-}: {
-  label: string;
-  value?: string | null;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-start gap-4">
-      <dt className="w-36 shrink-0 text-sm text-[#6B7280]">{label}</dt>
-      <dd className="text-sm text-[#1A1A2E] font-medium">
-        {children ?? value ?? <span className="text-[#6B7280] font-normal">—</span>}
-      </dd>
-    </div>
-  );
-}
-
-function EmptySection({ message }: { message: string }) {
-  return (
-    <div className="p-12 text-center">
-      <p className="text-sm text-[#6B7280]">{message}</p>
-    </div>
-  );
+  return <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${color}`}>{status.replace(/_/g, ' ')}</span>;
 }
 
 function DetailSkeleton() {
@@ -482,9 +221,7 @@ function DetailSkeleton() {
       </div>
       <div className="h-4 w-64 bg-gray-200 rounded mt-2" />
       <div className="mt-8 flex gap-6 border-b border-gray-200 pb-3">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-4 w-20 bg-gray-200 rounded" />
-        ))}
+        {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-4 w-20 bg-gray-200 rounded" />)}
       </div>
       <div className="mt-6 bg-white rounded-lg border border-gray-200 shadow-sm p-6">
         <div className="grid grid-cols-2 gap-6">
@@ -500,38 +237,8 @@ function DetailSkeleton() {
   );
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return '—';
-  }
-}
-
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  } catch {
-    return '—';
-  }
-}
-
-function formatCurrency(value: string): string {
-  const num = parseFloat(value);
-  if (isNaN(num)) return value;
-  return num.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+  try { return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+  catch { return '—'; }
 }

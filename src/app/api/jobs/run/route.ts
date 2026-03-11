@@ -15,6 +15,8 @@ const querySchema = z.object({
   name: z.string().min(1),
 });
 
+const payloadSchema = z.record(z.string(), z.unknown()).default({});
+
 // ─── Job Registry ────────────────────────────────────────────────────────────
 
 type JobHandler = (payload: Record<string, unknown>) => Promise<unknown>;
@@ -65,7 +67,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const payload = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const rawBody = await req.json().catch(() => ({}));
+  const payloadResult = payloadSchema.safeParse(rawBody);
+  if (!payloadResult.success) {
+    return NextResponse.json(
+      { error: 'Invalid payload — expected a JSON object', details: payloadResult.error.issues },
+      { status: 400 }
+    );
+  }
+  const payload = payloadResult.data;
 
   const [job] = await db
     .insert(jobs)

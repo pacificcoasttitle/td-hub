@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { profiles, branches } from '@/lib/db/schema';
 import { eq, desc, ilike, or, and, SQL, sql } from 'drizzle-orm';
+
+const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin'];
 
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
@@ -13,6 +16,11 @@ const querySchema = z.object({
 });
 
 export async function GET(req: NextRequest) {
+  const session = await getSession();
+  if (!session || !ADMIN_ROLES.includes(session.role)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     const rawParams = Object.fromEntries(req.nextUrl.searchParams);
     const params = querySchema.parse(rawParams);

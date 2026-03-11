@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { getSession } from '@/lib/security/auth';
 import { getOrders } from '@/lib/domain/orders/service';
 
 const querySchema = z.object({
@@ -11,6 +12,9 @@ const querySchema = z.object({
 });
 
 export async function GET(req: NextRequest) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
   try {
     const rawParams = Object.fromEntries(req.nextUrl.searchParams);
     const params = querySchema.parse(rawParams);

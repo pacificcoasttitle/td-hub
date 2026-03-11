@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import OrderDocuments from '@/components/admin/order-documents';
+import OrderCpl from '@/components/admin/order-cpl';
+import OrderTitlePoint from '@/components/admin/order-titlepoint';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -52,7 +54,7 @@ interface OrderDetail {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const TABS = ['Overview', 'Property', 'History', 'Documents'] as const;
+const TABS = ['Overview', 'Property', 'Documents', 'Vendor Actions', 'History'] as const;
 type Tab = (typeof TABS)[number];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -249,6 +251,16 @@ export default function OrderDetailPage() {
           <HistoryTab history={order.statusHistory} />
         )}
         {activeTab === 'Documents' && <OrderDocuments orderId={order.id} />}
+        {activeTab === 'Vendor Actions' && (
+          <div className="divide-y divide-gray-200">
+            <div className="p-6">
+              <OrderCpl orderId={order.id} fileNumber={order.fileNumber} />
+            </div>
+            <div className="p-6">
+              <OrderTitlePoint orderId={order.id} fileNumber={order.fileNumber} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

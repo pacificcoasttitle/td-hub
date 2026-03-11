@@ -7,6 +7,7 @@ import { handleSyncOrders } from '@/lib/jobs/handlers/sync-orders';
 import type { SyncOrdersPayload } from '@/lib/jobs/handlers/sync-orders';
 import { handleSyncContacts } from '@/lib/jobs/handlers/sync-contacts';
 import type { SyncContactsPayload } from '@/lib/jobs/handlers/sync-contacts';
+import { handleTitlePointPoll } from '@/lib/jobs/handlers/titlepoint-poll';
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -23,6 +24,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleSyncOrders(payload as SyncOrdersPayload),
   'softpro.sync_contacts': (payload) =>
     handleSyncContacts(payload as SyncContactsPayload),
+  'titlepoint.poll': (payload) =>
+    handleTitlePointPoll(payload),
 };
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

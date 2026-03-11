@@ -13,6 +13,8 @@ interface Document {
   description: string | null;
   createdBy: string | null;
   createdAt: string;
+  isSyncedToSoftpro: boolean;
+  softproSyncedAt: string | null;
 }
 
 interface DocumentListResponse {
@@ -101,7 +103,7 @@ export default function OrderDocuments({ orderId }: { orderId: number }) {
             </p>
           </div>
         ) : (
-          <DocumentTable documents={docs} />
+          <DocumentTable documents={docs} onRefresh={fetchDocs} />
         )}
       </div>
     </div>
@@ -346,86 +348,113 @@ function UploadSection({
 
 // ─── Document Table ─────────────────────────────────────────────────────────
 
-function DocumentTable({ documents }: { documents: Document[] }) {
+function DocumentTable({ documents, onRefresh }: { documents: Document[]; onRefresh: () => void }) {
   return (
     <div className="overflow-x-auto border border-gray-200 rounded-lg">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-200 bg-gray-50/60">
-            <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">
-              Filename
-            </th>
-            <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">
-              Category
-            </th>
-            <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">
-              Size
-            </th>
-            <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">
-              Uploaded By
-            </th>
-            <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">
-              Date
-            </th>
+            <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">Filename</th>
+            <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">Category</th>
+            <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">Size</th>
+            <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">Uploaded By</th>
+            <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">Date</th>
+            <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">SoftPro</th>
             <th className="px-4 py-2.5" />
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
           {documents.map((doc) => (
-            <tr key={doc.id} className="hover:bg-gray-50 transition-colors">
-              <td className="px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <FileIcon filename={doc.filename} />
-                  <span className="font-medium text-[#1A1A2E] truncate max-w-xs">
-                    {doc.originalFilename ?? doc.filename}
-                  </span>
-                </div>
-                {doc.description && (
-                  <p className="text-xs text-[#6B7280] mt-0.5 truncate max-w-xs">
-                    {doc.description}
-                  </p>
-                )}
-              </td>
-              <td className="px-4 py-3 whitespace-nowrap">
-                <CategoryBadge category={doc.category} />
-              </td>
-              <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">
-                {doc.sizeBytes != null ? formatFileSize(doc.sizeBytes) : '—'}
-              </td>
-              <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">
-                {doc.createdBy ?? '—'}
-              </td>
-              <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">
-                {formatDate(doc.createdAt)}
-              </td>
-              <td className="px-4 py-3 text-right">
-                <a
-                  href={`/api/documents/${doc.id}/download`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs font-medium text-[#1B2A4A] hover:text-[#C5A55A] transition-colors"
-                >
-                  <svg
-                    className="h-3.5 w-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                    />
-                  </svg>
-                  Download
-                </a>
-              </td>
-            </tr>
+            <DocumentRow key={doc.id} doc={doc} onRefresh={onRefresh} />
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function DocumentRow({ doc, onRefresh }: { doc: Document; onRefresh: () => void }) {
+  const [attaching, setAttaching] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+
+  async function handleAttach() {
+    setAttaching(true);
+    setAttachError(null);
+    try {
+      const res = await fetch(`/api/documents/${doc.id}/attach`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? `Attach failed (${res.status})`);
+      }
+      onRefresh();
+    } catch (err) {
+      setAttachError(err instanceof Error ? err.message : 'Attach failed');
+      setTimeout(() => setAttachError(null), 5000);
+    } finally {
+      setAttaching(false);
+    }
+  }
+
+  return (
+    <>
+      <tr className="hover:bg-gray-50 transition-colors">
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2">
+            <FileIcon filename={doc.filename} />
+            <span className="font-medium text-[#1A1A2E] truncate max-w-xs">
+              {doc.originalFilename ?? doc.filename}
+            </span>
+          </div>
+          {doc.description && (
+            <p className="text-xs text-[#6B7280] mt-0.5 truncate max-w-xs">{doc.description}</p>
+          )}
+        </td>
+        <td className="px-4 py-3 whitespace-nowrap"><CategoryBadge category={doc.category} /></td>
+        <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">
+          {doc.sizeBytes != null ? formatFileSize(doc.sizeBytes) : '—'}
+        </td>
+        <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{doc.createdBy ?? '—'}</td>
+        <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{formatDate(doc.createdAt)}</td>
+        <td className="px-4 py-3 whitespace-nowrap">
+          {doc.isSyncedToSoftpro ? (
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700" title={doc.softproSyncedAt ? `Synced ${formatDate(doc.softproSyncedAt)}` : undefined}>
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              Synced
+            </span>
+          ) : (
+            <button
+              onClick={handleAttach}
+              disabled={attaching}
+              className="px-2 py-1 text-xs font-medium border border-[#1B2A4A] text-[#1B2A4A] rounded-md hover:bg-[#1B2A4A]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {attaching ? 'Attaching…' : 'Attach to SoftPro'}
+            </button>
+          )}
+        </td>
+        <td className="px-4 py-3 text-right">
+          <a
+            href={`/api/documents/${doc.id}/download`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs font-medium text-[#1B2A4A] hover:text-[#C5A55A] transition-colors"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download
+          </a>
+        </td>
+      </tr>
+      {attachError && (
+        <tr className="bg-red-50/40">
+          <td colSpan={7} className="px-4 py-2">
+            <p className="text-xs text-red-600">{attachError}</p>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

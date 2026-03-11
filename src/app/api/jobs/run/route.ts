@@ -21,9 +21,9 @@ type JobHandler = (payload: Record<string, unknown>) => Promise<unknown>;
 
 const JOB_HANDLERS: Record<string, JobHandler> = {
   'softpro.sync_recent_orders': (payload) =>
-    handleSyncOrders(payload as SyncOrdersPayload),
+    handleSyncOrders(payload as unknown as SyncOrdersPayload),
   'softpro.sync_contacts': (payload) =>
-    handleSyncContacts(payload as SyncContactsPayload),
+    handleSyncContacts(payload as unknown as SyncContactsPayload),
   'titlepoint.poll': (payload) =>
     handleTitlePointPoll(payload),
 };

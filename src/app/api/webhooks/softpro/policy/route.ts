@@ -27,11 +27,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Invalid payload', details: parsed.error.issues });
   }
 
-  const result = await handlePolicyWebhook(parsed.data);
-
-  await logWebhook(requestId, startedAt, 'webhook_policy_processed', rawBody, result.success, undefined, result);
-
-  return NextResponse.json(result);
+  try {
+    const result = await handlePolicyWebhook(parsed.data);
+    await logWebhook(requestId, startedAt, 'webhook_policy_processed', rawBody, result.success, undefined, result);
+    return NextResponse.json(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    await logWebhook(requestId, startedAt, 'webhook_policy_error', rawBody, false, msg);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+  }
 }
 
 async function logWebhook(

@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getSession } from '@/lib/security/auth';
 import { createAndSendToSoftPro } from '@/lib/domain/orders/create-order';
 
+const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin'];
+
 export async function POST(req: NextRequest) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!ADMIN_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
   try {
     const body: unknown = await req.json();
     const result = await createAndSendToSoftPro(body);

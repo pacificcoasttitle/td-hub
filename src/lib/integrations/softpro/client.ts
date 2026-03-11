@@ -70,9 +70,12 @@ async function makeRequest<T>(
   }
 
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (process.env.SOFTPRO_TOKEN) headers['X-API-KEY'] = process.env.SOFTPRO_TOKEN;
+
     const fetchOptions: RequestInit = {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       signal: AbortSignal.timeout(60_000),
     };
 
@@ -138,9 +141,12 @@ export async function createOrder(
   const url = getBaseUrl() + SOFTPRO_ENDPOINTS.createOrder;
 
   try {
+    const hdrs: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (process.env.SOFTPRO_TOKEN) hdrs['X-API-KEY'] = process.env.SOFTPRO_TOKEN;
+
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: hdrs,
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(60_000),
     });

@@ -8,6 +8,22 @@ import type {
   CplBranch,
 } from '../types';
 import { MOCK_PDF_BASE64 } from '../types';
+import { db } from '@/lib/db/client';
+import { vendorApiLogs } from '@/lib/db/schema';
+
+async function logRequest(params: {
+  operation: string; orderId?: number; requestId: string; startedAt: Date;
+  success: boolean; durationMs: number; meta?: Record<string, unknown>;
+}) {
+  try {
+    await db.insert(vendorApiLogs).values({
+      vendor: 'fnf', operation: params.operation, orderId: params.orderId ?? null,
+      requestId: params.requestId, startedAt: params.startedAt, endedAt: new Date(),
+      success: params.success, httpStatus: null, errorCategory: params.success ? null : 'CPL_ERROR',
+      requestMeta: params.meta ?? null, responseMeta: null,
+    });
+  } catch { /* logging must not break the main flow */ }
+}
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────
 
@@ -59,6 +75,9 @@ export const fnfAdapter: CplAdapter = {
       await delay(40);
       const fnfCplId = `FNF-CPL-${Date.now()}`;
 
+      const durationMs = Date.now() - start;
+      await logRequest({ operation: 'generate_cpl', requestId, startedAt: new Date(start), success: true, durationMs });
+
       return vendorSuccess<CplGenerateResult>(
         {
           pdfBase64: MOCK_PDF_BASE64,
@@ -68,24 +87,28 @@ export const fnfAdapter: CplAdapter = {
             fnf_cpl_number: `CPL-${Math.floor(Math.random() * 900000) + 100000}`,
           },
         },
-        { requestId, durationMs: Date.now() - start }
+        { requestId, durationMs }
       );
     } catch (err) {
+      const durationMs = Date.now() - start;
+      await logRequest({ operation: 'generate_cpl', requestId, startedAt: new Date(start), success: false, durationMs });
+
       return vendorError<CplGenerateResult>(
         'fnf',
         'CPL_GENERATION_FAILED',
         err instanceof Error ? err.message : 'Unknown FNF error',
-        { requestId, durationMs: Date.now() - start }
+        { requestId, durationMs }
       );
     }
   },
 
   async getBranches(): Promise<VendorResult<CplBranch[]>> {
+    const rid = `fnf-${crypto.randomUUID()}`;
+    const s = Date.now();
     await delay(30);
-    return vendorSuccess(MOCK_BRANCHES, {
-      requestId: `fnf-${crypto.randomUUID()}`,
-      durationMs: 30,
-    });
+    const durationMs = Date.now() - s;
+    await logRequest({ operation: 'get_branches', requestId: rid, startedAt: new Date(s), success: true, durationMs });
+    return vendorSuccess(MOCK_BRANCHES, { requestId: rid, durationMs });
   },
 };
 

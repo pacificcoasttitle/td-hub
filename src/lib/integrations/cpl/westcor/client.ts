@@ -9,6 +9,22 @@ import type {
   CplForm,
 } from '../types';
 import { MOCK_PDF_BASE64 } from '../types';
+import { db } from '@/lib/db/client';
+import { vendorApiLogs } from '@/lib/db/schema';
+
+async function logRequest(params: {
+  operation: string; orderId?: number; requestId: string; startedAt: Date;
+  success: boolean; durationMs: number; meta?: Record<string, unknown>;
+}) {
+  try {
+    await db.insert(vendorApiLogs).values({
+      vendor: 'westcor', operation: params.operation, orderId: params.orderId ?? null,
+      requestId: params.requestId, startedAt: params.startedAt, endedAt: new Date(),
+      success: params.success, httpStatus: null, errorCategory: params.success ? null : 'CPL_ERROR',
+      requestMeta: params.meta ?? null, responseMeta: null,
+    });
+  } catch { /* logging must not break the main flow */ }
+}
 
 // ─── Form Selection ─────────────────────────────────────────────────────────
 // CRITICAL: Must use name-based matching, NEVER array position.
@@ -106,6 +122,9 @@ export const westcorAdapter: CplAdapter = {
       await delay(30);
       const westcorCplId = `WCCPL-${Date.now()}`;
 
+      const durationMs = Date.now() - start;
+      await logRequest({ operation: 'generate_cpl', requestId, startedAt: new Date(start), success: true, durationMs });
+
       return vendorSuccess<CplGenerateResult>(
         {
           pdfBase64: MOCK_PDF_BASE64,
@@ -117,24 +136,28 @@ export const westcorAdapter: CplAdapter = {
             westcor_form_name: form.name,
           },
         },
-        { requestId, durationMs: Date.now() - start }
+        { requestId, durationMs }
       );
     } catch (err) {
+      const durationMs = Date.now() - start;
+      await logRequest({ operation: 'generate_cpl', requestId, startedAt: new Date(start), success: false, durationMs });
+
       return vendorError<CplGenerateResult>(
         'westcor',
         'CPL_GENERATION_FAILED',
         err instanceof Error ? err.message : 'Unknown Westcor error',
-        { requestId, durationMs: Date.now() - start }
+        { requestId, durationMs }
       );
     }
   },
 
   async getBranches(): Promise<VendorResult<CplBranch[]>> {
+    const rid = `westcor-${crypto.randomUUID()}`;
+    const s = Date.now();
     await delay(30);
-    return vendorSuccess(MOCK_BRANCHES, {
-      requestId: `westcor-${crypto.randomUUID()}`,
-      durationMs: 30,
-    });
+    const durationMs = Date.now() - s;
+    await logRequest({ operation: 'get_branches', requestId: rid, startedAt: new Date(s), success: true, durationMs });
+    return vendorSuccess(MOCK_BRANCHES, { requestId: rid, durationMs });
   },
 };
 

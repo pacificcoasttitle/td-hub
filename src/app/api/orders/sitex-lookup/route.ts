@@ -23,9 +23,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const result = await propertyLookup(parsed.data);
+  let result: Awaited<ReturnType<typeof propertyLookup>>;
+  try {
+    result = await propertyLookup(parsed.data);
+  } catch {
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+  }
 
-  if (!result.success || result.data.matchCode !== 'S') {
+  if (!result.success) {
+    return NextResponse.json({ success: false, error: 'No property match found' });
+  }
+
+  if (result.data.matchCode !== 'S') {
     return NextResponse.json({ success: false, error: 'No property match found' });
   }
 

@@ -8,6 +8,22 @@ import type {
   CplBranch,
 } from '../types';
 import { MOCK_PDF_BASE64 } from '../types';
+import { db } from '@/lib/db/client';
+import { vendorApiLogs } from '@/lib/db/schema';
+
+async function logRequest(vendor: string, params: {
+  operation: string; orderId?: number; requestId: string; startedAt: Date;
+  success: boolean; durationMs: number; meta?: Record<string, unknown>;
+}) {
+  try {
+    await db.insert(vendorApiLogs).values({
+      vendor, operation: params.operation, orderId: params.orderId ?? null,
+      requestId: params.requestId, startedAt: params.startedAt, endedAt: new Date(),
+      success: params.success, httpStatus: null, errorCategory: params.success ? null : 'CPL_ERROR',
+      requestMeta: params.meta ?? null, responseMeta: null,
+    });
+  } catch { /* logging must not break the main flow */ }
+}
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────
 
@@ -60,6 +76,9 @@ function createNaticAdapter(underwriter: 'natic' | 'doma'): CplAdapter {
         await delay(40);
         const cplId = `${underwriter.toUpperCase()}-CPL-${Date.now()}`;
 
+        const durationMs = Date.now() - start;
+        await logRequest(underwriter, { operation: 'generate_cpl', requestId, startedAt: new Date(start), success: true, durationMs });
+
         return vendorSuccess<CplGenerateResult>(
           {
             pdfBase64: MOCK_PDF_BASE64,
@@ -69,24 +88,28 @@ function createNaticAdapter(underwriter: 'natic' | 'doma'): CplAdapter {
               [`${underwriter}_document_id`]: `DOC-${Date.now()}`,
             },
           },
-          { requestId, durationMs: Date.now() - start }
+          { requestId, durationMs }
         );
       } catch (err) {
+        const durationMs = Date.now() - start;
+        await logRequest(underwriter, { operation: 'generate_cpl', requestId, startedAt: new Date(start), success: false, durationMs });
+
         return vendorError<CplGenerateResult>(
           underwriter,
           'CPL_GENERATION_FAILED',
           err instanceof Error ? err.message : `Unknown ${underwriter} error`,
-          { requestId, durationMs: Date.now() - start }
+          { requestId, durationMs }
         );
       }
     },
 
     async getBranches(): Promise<VendorResult<CplBranch[]>> {
+      const rid = `${underwriter}-${crypto.randomUUID()}`;
+      const s = Date.now();
       await delay(30);
-      return vendorSuccess(branches, {
-        requestId: `${underwriter}-${crypto.randomUUID()}`,
-        durationMs: 30,
-      });
+      const durationMs = Date.now() - s;
+      await logRequest(underwriter, { operation: 'get_branches', requestId: rid, startedAt: new Date(s), success: true, durationMs });
+      return vendorSuccess(branches, { requestId: rid, durationMs });
     },
   };
 }

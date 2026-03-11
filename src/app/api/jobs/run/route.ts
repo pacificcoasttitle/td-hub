@@ -5,6 +5,8 @@ import { jobs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { handleSyncOrders } from '@/lib/jobs/handlers/sync-orders';
 import type { SyncOrdersPayload } from '@/lib/jobs/handlers/sync-orders';
+import { handleSyncContacts } from '@/lib/jobs/handlers/sync-contacts';
+import type { SyncContactsPayload } from '@/lib/jobs/handlers/sync-contacts';
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -19,6 +21,8 @@ type JobHandler = (payload: Record<string, unknown>) => Promise<unknown>;
 const JOB_HANDLERS: Record<string, JobHandler> = {
   'softpro.sync_recent_orders': (payload) =>
     handleSyncOrders(payload as SyncOrdersPayload),
+  'softpro.sync_contacts': (payload) =>
+    handleSyncContacts(payload as SyncContactsPayload),
 };
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

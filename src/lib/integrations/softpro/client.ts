@@ -1,5 +1,5 @@
 import { VendorResult, VendorHealthResult, vendorSuccess, vendorError } from '../types';
-import { SoftProResponse, SoftProOrderItem, SOFTPRO_ENDPOINTS } from './types';
+import { SoftProResponse, SoftProOrderItem, SoftProLookupItem, SOFTPRO_ENDPOINTS } from './types';
 import { db } from '@/lib/db/client';
 import { vendorApiLogs } from '@/lib/db/schema';
 
@@ -164,6 +164,15 @@ export async function uploadDocument(params: {
   return makeRequest<{ documentId: string }>('POST', SOFTPRO_ENDPOINTS.uploadDocument, {
     body,
     operation: 'upload_document',
+  });
+}
+
+export async function getLookupTable(
+  userType: string
+): Promise<VendorResult<SoftProLookupItem[]>> {
+  return makeRequest<SoftProLookupItem[]>('GET', SOFTPRO_ENDPOINTS.getLookupTable, {
+    queryParams: { userType },
+    operation: 'get_lookup_table',
   });
 }
 

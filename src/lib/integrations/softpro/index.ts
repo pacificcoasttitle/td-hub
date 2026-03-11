@@ -23,6 +23,15 @@ export async function getOrderStatuses(params: Parameters<typeof import('./clien
   return client.getOrderStatuses(params);
 }
 
+export async function getLookupTable(userType: Parameters<typeof import('./client').getLookupTable>[0]) {
+  if (useMock) {
+    const mock = await import('./mock');
+    return mock.getLookupTable(userType);
+  }
+  const client = await import('./client');
+  return client.getLookupTable(userType);
+}
+
 export async function healthCheck() {
   if (useMock) {
     const mock = await import('./mock');

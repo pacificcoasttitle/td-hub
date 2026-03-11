@@ -34,6 +34,30 @@ export interface SoftProOrderItem {
   LastModifiedOn: string | null;
 }
 
+// ─── Lookup Item (from GetLookuptable) ──────────────────────────────────────
+
+export interface SoftProLookupItem {
+  LookupCode: string;
+  FlookupCode: string | null;
+  FullName: string | null;
+  FirstName: string | null;
+  LastName: string | null;
+  CompanyName: string | null;
+  OfficerName: string | null;
+  Email: string | null;
+  Phone: string | null;
+  Cell: string | null;
+  Fax: string | null;
+  Address1: string | null;
+  Address2: string | null;
+  City: string | null;
+  State: string | null;
+  Zip: string | null;
+  AssignmentClause: string | null;
+  LicenseNo: string | null;
+  UserType: string | null;
+}
+
 // ─── Endpoints ───────────────────────────────────────────────────────────────
 
 export const SOFTPRO_ENDPOINTS = {

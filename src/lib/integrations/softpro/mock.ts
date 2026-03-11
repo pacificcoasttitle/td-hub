@@ -1,5 +1,5 @@
 import { VendorResult, VendorHealthResult, vendorSuccess } from '../types';
-import { SoftProOrderItem } from './types';
+import { SoftProOrderItem, SoftProLookupItem } from './types';
 
 const MOCK_ORDERS: SoftProOrderItem[] = [
   {
@@ -83,6 +83,65 @@ export async function getOrderStatuses(params: {
 }): Promise<VendorResult<SoftProOrderItem[]>> {
   await new Promise((r) => setTimeout(r, 50));
   return vendorSuccess(MOCK_ORDERS, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 50 });
+}
+
+const MOCK_LOOKUP_ITEMS: SoftProLookupItem[] = [
+  {
+    LookupCode: 'TO-001', FlookupCode: 'FTO-001',
+    FullName: 'Jean, Jim', FirstName: 'Jim', LastName: 'Jean',
+    CompanyName: 'Pacific Coast Title', OfficerName: 'Jean, Jim',
+    Email: 'jjean@pctitle.com', Phone: '818-555-0101', Cell: null, Fax: null,
+    Address1: '100 N Brand Blvd', Address2: null, City: 'Glendale', State: 'CA', Zip: '91203',
+    AssignmentClause: null, LicenseNo: null, UserType: 'Title Officer',
+  },
+  {
+    LookupCode: 'TO-002', FlookupCode: 'FTO-002',
+    FullName: 'Smith, Rachel', FirstName: 'Rachel', LastName: 'Smith',
+    CompanyName: 'Pacific Coast Title', OfficerName: 'Smith, Rachel',
+    Email: 'rsmith@pctitle.com', Phone: '714-555-0202', Cell: null, Fax: null,
+    Address1: '200 W Main St', Address2: null, City: 'Orange', State: 'CA', Zip: '92868',
+    AssignmentClause: null, LicenseNo: null, UserType: 'Title Officer',
+  },
+  {
+    LookupCode: 'SR-001', FlookupCode: 'FSR-001',
+    FullName: 'Hernandez, Jerry', FirstName: 'Jerry', LastName: 'Hernandez',
+    CompanyName: 'Pacific Coast Title', OfficerName: 'Hernandez, Jerry',
+    Email: 'jhernandez@pctitle.com', Phone: '818-555-0301', Cell: '818-555-0302', Fax: null,
+    Address1: '100 N Brand Blvd', Address2: null, City: 'Glendale', State: 'CA', Zip: '91203',
+    AssignmentClause: null, LicenseNo: null, UserType: 'Sales Rep',
+  },
+  {
+    LookupCode: 'SR-002', FlookupCode: 'FSR-002',
+    FullName: 'Johnson, Mike', FirstName: 'Mike', LastName: 'Johnson',
+    CompanyName: 'Pacific Coast Title', OfficerName: 'Johnson, Mike',
+    Email: 'mjohnson@pctitle.com', Phone: '714-555-0401', Cell: null, Fax: null,
+    Address1: '200 W Main St', Address2: null, City: 'Orange', State: 'CA', Zip: '92868',
+    AssignmentClause: null, LicenseNo: null, UserType: 'Sales Rep',
+  },
+  {
+    LookupCode: 'EC-001', FlookupCode: 'FEC-001',
+    FullName: 'Pinnacle Escrow', FirstName: null, LastName: null,
+    CompanyName: 'Pinnacle Escrow Inc', OfficerName: null,
+    Email: 'info@pinnacleescrow.com', Phone: '310-555-0501', Cell: null, Fax: '310-555-0502',
+    Address1: '500 Wilshire Blvd', Address2: 'Suite 300', City: 'Los Angeles', State: 'CA', Zip: '90036',
+    AssignmentClause: null, LicenseNo: null, UserType: 'Escrow Company',
+  },
+  {
+    LookupCode: 'EO-001', FlookupCode: 'FEO-001',
+    FullName: 'Park, Susan', FirstName: 'Susan', LastName: 'Park',
+    CompanyName: 'Pinnacle Escrow Inc', OfficerName: 'Park, Susan',
+    Email: 'spark@pinnacleescrow.com', Phone: '310-555-0503', Cell: null, Fax: null,
+    Address1: '500 Wilshire Blvd', Address2: 'Suite 300', City: 'Los Angeles', State: 'CA', Zip: '90036',
+    AssignmentClause: null, LicenseNo: null, UserType: 'Escrow Officer',
+  },
+];
+
+export async function getLookupTable(
+  userType: string
+): Promise<VendorResult<SoftProLookupItem[]>> {
+  await new Promise((r) => setTimeout(r, 50));
+  const filtered = MOCK_LOOKUP_ITEMS.filter((item) => item.UserType === userType);
+  return vendorSuccess(filtered, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 50 });
 }
 
 export async function healthCheck(): Promise<VendorHealthResult> {

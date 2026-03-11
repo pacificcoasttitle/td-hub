@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/jobs/run?name=softpro.sync_recent_orders",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=softpro.enrich_orders",
+      "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=notifications.process_outbox",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}

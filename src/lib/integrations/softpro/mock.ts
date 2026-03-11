@@ -33,24 +33,22 @@ const MOCK_ORDERS: SoftProOrderItem[] = [
 
 const MOCK_ORDER_CONTACTS: Record<string, SoftProOrderContactsData> = {
   '20003483-GLT': {
-    buyer: {
-      PreimaryBorrower: 'Joel S Cruz Pablo',
-      SecondaryBorrower: 'Maria Sebastian',
-    },
-    EscrowCompanies: { CompanyLookUpCode: 'TheE2327' },
-    Lenders: { PersonLookupCode: '' },
+    buyer: { PreimaryBorrower: 'Joel S Cruz Pablo', SecondaryBorrower: 'Maria Sebastian' },
+    Sellers: { PreimarySeller: 'Gerardo J Hernandez', SecondarySeller: 'Yessica S Mendoza' },
+    EscrowCompanies: { CompanyLookUpCode: 'TheE2327', PersonLookupCode: 'FayMazCen1' },
+    Lenders: { CompanyLookUpCode: '', PersonLookupCode: '' },
+    ListingAgentBrokers: { CompanyLookUpCode: 'C&C1475', PersonLookupCode: 'LilPinC&C1' },
     MortgageBrokers: { PersonLookupCode: '' },
     PayoffLenders: { PersonLookupCode: '' },
     TitleCompanies: { CompanyLookUpCode: 'OCT', PersonLookupCode: 'Angeline Wu' },
     Underwriters: { CompanyLookUpCode: 'WC', PersonLookupCode: '' },
   },
   '20003484-OCT': {
-    buyer: {
-      PreimaryBorrower: 'Jane Smith',
-      SecondaryBorrower: '',
-    },
-    EscrowCompanies: { CompanyLookUpCode: 'PinE1234' },
-    Lenders: { PersonLookupCode: 'WF-001' },
+    buyer: { PreimaryBorrower: 'Jane Smith', SecondaryBorrower: '' },
+    Sellers: { PreimarySeller: 'John Doe', SecondarySeller: '' },
+    EscrowCompanies: { CompanyLookUpCode: 'PinE1234', PersonLookupCode: '' },
+    Lenders: { CompanyLookUpCode: 'WF', PersonLookupCode: 'WF-001' },
+    ListingAgentBrokers: { CompanyLookUpCode: '', PersonLookupCode: '' },
     MortgageBrokers: { PersonLookupCode: '' },
     PayoffLenders: { PersonLookupCode: '' },
     TitleCompanies: { CompanyLookUpCode: 'GLT', PersonLookupCode: 'Jim Jean' },
@@ -60,8 +58,10 @@ const MOCK_ORDER_CONTACTS: Record<string, SoftProOrderContactsData> = {
 
 const EMPTY_CONTACTS: SoftProOrderContactsData = {
   buyer: { PreimaryBorrower: '', SecondaryBorrower: '' },
-  EscrowCompanies: { CompanyLookUpCode: '' },
-  Lenders: { PersonLookupCode: '' },
+  Sellers: { PreimarySeller: '', SecondarySeller: '' },
+  EscrowCompanies: { CompanyLookUpCode: '', PersonLookupCode: '' },
+  Lenders: { CompanyLookUpCode: '', PersonLookupCode: '' },
+  ListingAgentBrokers: { CompanyLookUpCode: '', PersonLookupCode: '' },
   MortgageBrokers: { PersonLookupCode: '' },
   PayoffLenders: { PersonLookupCode: '' },
   TitleCompanies: { CompanyLookUpCode: '', PersonLookupCode: '' },

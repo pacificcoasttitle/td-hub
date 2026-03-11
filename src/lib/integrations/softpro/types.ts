@@ -30,10 +30,20 @@ export interface SoftProOrderContactsData {
     PreimaryBorrower: string;
     SecondaryBorrower: string;
   };
+  Sellers: {
+    PreimarySeller: string;
+    SecondarySeller: string;
+  };
   EscrowCompanies: {
     CompanyLookUpCode: string;
+    PersonLookupCode: string;
   };
   Lenders: {
+    CompanyLookUpCode: string;
+    PersonLookupCode: string;
+  };
+  ListingAgentBrokers: {
+    CompanyLookUpCode: string;
     PersonLookupCode: string;
   };
   MortgageBrokers: {

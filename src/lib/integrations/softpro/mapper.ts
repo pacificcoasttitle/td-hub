@@ -36,8 +36,14 @@ export interface MappedOrderData {
 export interface MappedOrderContacts {
   primaryBuyer: string | null;
   secondaryBuyer: string | null;
+  primarySeller: string | null;
+  secondarySeller: string | null;
   escrowCompanyCode: string | null;
+  escrowPersonCode: string | null;
+  lenderCompanyCode: string | null;
   lenderCode: string | null;
+  listingAgentCompanyCode: string | null;
+  listingAgentPersonCode: string | null;
   mortgageBrokerCode: string | null;
   payoffLenderCode: string | null;
   titleCompanyCode: string | null;
@@ -128,8 +134,14 @@ export function mapOrderContacts(data: SoftProOrderContactsData): MappedOrderCon
   return {
     primaryBuyer: emptyToNull(data.buyer?.PreimaryBorrower),
     secondaryBuyer: emptyToNull(data.buyer?.SecondaryBorrower),
+    primarySeller: emptyToNull(data.Sellers?.PreimarySeller),
+    secondarySeller: emptyToNull(data.Sellers?.SecondarySeller),
     escrowCompanyCode: emptyToNull(data.EscrowCompanies?.CompanyLookUpCode),
+    escrowPersonCode: emptyToNull(data.EscrowCompanies?.PersonLookupCode),
+    lenderCompanyCode: emptyToNull(data.Lenders?.CompanyLookUpCode),
     lenderCode: emptyToNull(data.Lenders?.PersonLookupCode),
+    listingAgentCompanyCode: emptyToNull(data.ListingAgentBrokers?.CompanyLookUpCode),
+    listingAgentPersonCode: emptyToNull(data.ListingAgentBrokers?.PersonLookupCode),
     mortgageBrokerCode: emptyToNull(data.MortgageBrokers?.PersonLookupCode),
     payoffLenderCode: emptyToNull(data.PayoffLenders?.PersonLookupCode),
     titleCompanyCode: emptyToNull(data.TitleCompanies?.CompanyLookUpCode),

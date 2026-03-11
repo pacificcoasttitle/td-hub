@@ -26,7 +26,7 @@ let loadPromise: Promise<void> | null = null;
 
 function loadGoogleMaps(): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
-  if (window.google?.maps?.places) return Promise.resolve();
+  if ((window as unknown as { google?: typeof google }).google?.maps?.places) return Promise.resolve();
   if (loadPromise) return loadPromise;
 
   loadPromise = new Promise((resolve, reject) => {

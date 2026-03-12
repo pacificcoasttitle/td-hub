@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
-import { documents, documentAudit, orders } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { documents, documentAudit, orders, documentRequests, eventOutbox } from '@/lib/db/schema';
+import { eq, and, desc } from 'drizzle-orm';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
 import { uploadDocument as softproUpload } from '@/lib/integrations/softpro/client';
 
@@ -63,6 +63,10 @@ export async function uploadDocument(
       storageKey,
     } as Record<string, unknown>,
   });
+
+  try {
+    await autoFulfillRequests(params.orderId, params.category, doc!.id);
+  } catch { /* auto-fulfill is best-effort */ }
 
   return { documentId: doc!.id, storageKey };
 }
@@ -163,4 +167,57 @@ export async function getDocumentById(id: number) {
     .where(eq(documents.id, id))
     .limit(1);
   return result[0] ?? null;
+}
+
+// ─── Auto-Fulfill Document Requests ────────────────────────────────────────
+
+const REQUEST_TYPE_TO_CATEGORY: Record<string, string[]> = {
+  prelim: ['prelim'],
+  cpl: ['cpl'],
+  policy: ['policy'],
+  title_search: ['legal_vesting', 'grant_deed', 'tax'],
+  general: ['general', 'user_upload'],
+};
+
+async function autoFulfillRequests(
+  orderId: number,
+  category: string,
+  documentId: number,
+): Promise<void> {
+  const matchingTypes = Object.entries(REQUEST_TYPE_TO_CATEGORY)
+    .filter(([, cats]) => cats.includes(category))
+    .map(([type]) => type);
+
+  if (matchingTypes.length === 0) return;
+
+  const pending = await db
+    .select()
+    .from(documentRequests)
+    .where(and(
+      eq(documentRequests.orderId, orderId),
+      eq(documentRequests.status, 'pending'),
+    ));
+
+  const toFulfill = pending.filter(r => matchingTypes.includes(r.requestType));
+  if (toFulfill.length === 0) return;
+
+  for (const req of toFulfill) {
+    await db.update(documentRequests).set({
+      status: 'fulfilled',
+      fulfilledDocumentId: documentId,
+      updatedAt: new Date(),
+    }).where(eq(documentRequests.id, req.id));
+
+    await db.insert(eventOutbox).values({
+      eventType: 'document_request.auto_fulfilled',
+      orderId,
+      payload: {
+        requestId: req.id,
+        documentId,
+        requestedBy: req.requestedBy,
+        requestType: req.requestType,
+        category,
+      } as Record<string, unknown>,
+    });
+  }
 }

@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { OrderTimeline } from '@/components/client/order-timeline';
+import { PropertyTab } from '@/components/client/order-detail/property-tab';
+import { DocumentsTab } from '@/components/client/order-detail/documents-tab';
+import { getStatusBanner } from '@/components/client/order-detail/helpers';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -19,10 +22,6 @@ interface OrderDetail {
   id: number;
   fileNumber: string;
   operationalStatus: string;
-  transactionType: string | null;
-  openedAt: string | null;
-  completedAt: string | null;
-  closedAt: string | null;
   property: {
     address: string | null;
     city: string | null;
@@ -35,29 +34,6 @@ interface OrderDetail {
 
 type Tab = 'Timeline' | 'Property' | 'Documents';
 const TABS: Tab[] = ['Timeline', 'Property', 'Documents'];
-
-const CATEGORY_LABELS: Record<string, string> = {
-  cpl: 'CPL',
-  prelim: 'Prelim',
-  policy: 'Policy',
-  legal_vesting: 'Legal Vesting',
-  grant_deed: 'Grant Deed',
-  tax: 'Tax',
-  general: 'General',
-  user_upload: 'Upload',
-};
-
-function getStatusBanner(status: string): { label: string; bg: string; text: string; icon: string } {
-  const isComplete = status === 'completed' || status === 'closed';
-  return {
-    label: isComplete ? 'Your order is COMPLETE' : 'Your order is IN PROGRESS',
-    bg: isComplete ? 'bg-[#1B2A4A]' : 'bg-white border border-[#1B2A4A]',
-    text: isComplete ? 'text-white' : 'text-[#1B2A4A]',
-    icon: isComplete
-      ? 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
-      : 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
-  };
-}
 
 // ─── Page ───────────────────────────────────────────────────────────────────
 
@@ -171,151 +147,4 @@ export default function ClientOrderDetailPage() {
       </div>
     </div>
   );
-}
-
-// ─── Property ───────────────────────────────────────────────────────────────
-
-function PropertyTab({ property }: { property: OrderDetail['property'] }) {
-  if (!property) {
-    return (
-      <div className="p-6 text-center py-12">
-        <p className="text-[#6B7280] text-sm">No property information available.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-6">
-      <h3 className="text-base font-semibold text-[#1A1A2E] mb-4">Property Details</h3>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-5 gap-x-8">
-        <Field label="Address" value={property.address} />
-        <Field label="City" value={property.city} />
-        <Field label="State" value={property.state} />
-        <Field label="County" value={property.county} />
-        {property.fullAddress && (
-          <div className="sm:col-span-2">
-            <Field label="Full Address" value={property.fullAddress} />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Documents ──────────────────────────────────────────────────────────────
-
-function DocumentsTab({ documents }: { documents: Document[] }) {
-  if (documents.length === 0) {
-    return (
-      <div className="p-6 text-center py-12">
-        <svg className="mx-auto h-8 w-8 text-[#9CA3AF] mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-        <p className="text-sm text-[#6B7280]">No documents available for this order.</p>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {/* Desktop table */}
-      <div className="hidden sm:block overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">Document</th>
-              <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">Category</th>
-              <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">Size</th>
-              <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">Date</th>
-              <th className="px-5 py-3 text-right text-xs font-medium text-[#6B7280] uppercase tracking-wider" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {documents.map((doc) => (
-              <tr key={doc.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-4">
-                  <div className="flex items-center gap-2">
-                    <svg className="h-4 w-4 text-[#9CA3AF] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <span className="font-medium text-[#1A1A2E] truncate max-w-xs">{doc.filename}</span>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-[#374151]">
-                    {CATEGORY_LABELS[doc.category ?? ''] ?? doc.category ?? '—'}
-                  </span>
-                </td>
-                <td className="px-5 py-4 text-[#6B7280] whitespace-nowrap">{formatFileSize(doc.sizeBytes)}</td>
-                <td className="px-5 py-4 text-[#6B7280] whitespace-nowrap">{formatDate(doc.createdAt)}</td>
-                <td className="px-5 py-4 text-right">
-                  <a
-                    href={`/api/documents/${doc.id}/download`}
-                    className="inline-flex items-center gap-1 text-sm font-medium text-[#1B2A4A] hover:underline"
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    Download
-                  </a>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Mobile card list */}
-      <div className="sm:hidden divide-y divide-gray-100">
-        {documents.map((doc) => (
-          <div key={doc.id} className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-[#1A1A2E] truncate">{doc.filename}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-[#374151]">
-                    {CATEGORY_LABELS[doc.category ?? ''] ?? doc.category ?? '—'}
-                  </span>
-                  <span className="text-xs text-[#6B7280]">{formatFileSize(doc.sizeBytes)}</span>
-                </div>
-                <p className="text-xs text-[#6B7280] mt-1">{formatDate(doc.createdAt)}</p>
-              </div>
-              <a
-                href={`/api/documents/${doc.id}/download`}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-[#1B2A4A] bg-[#1B2A4A]/5 rounded-lg hover:bg-[#1B2A4A]/10 transition-colors min-h-[44px] flex-shrink-0"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Download
-              </a>
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-// ─── Shared UI ──────────────────────────────────────────────────────────────
-
-function Field({ label, value, capitalize: cap }: { label: string; value: string | null | undefined; capitalize?: boolean }) {
-  return (
-    <div>
-      <p className="text-xs font-medium text-[#6B7280] mb-0.5">{label}</p>
-      <p className={`text-sm text-[#1A1A2E] ${cap ? 'capitalize' : ''}`}>{value || '—'}</p>
-    </div>
-  );
-}
-
-function formatDate(d: string | null | undefined) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-function formatFileSize(bytes: number | null | undefined) {
-  if (!bytes) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

@@ -6,6 +6,7 @@ import { StepSelectOrder, OrderSummaryBanner, SummaryField } from './step-select
 import type { OrderResult } from './step-select-order';
 import { CplLenderForm } from './cpl-lender-form';
 import type { LenderInfo } from './cpl-lender-form';
+import type { Underwriter } from '@/lib/integrations/cpl/types';
 
 interface CplBranch {
   id: number;
@@ -16,7 +17,6 @@ interface CplBranch {
   address: string | null;
 }
 
-type Underwriter = 'westcor' | 'fnf' | 'natic' | 'doma';
 type WizardStep = 1 | 2 | 3 | 4 | 5;
 
 const UNDERWRITERS: { value: Underwriter; label: string; description: string }[] = [

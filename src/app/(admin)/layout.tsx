@@ -1,14 +1,9 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getSession } from '@/lib/security/auth';
+import type { NavItem } from '@/lib/security/permissions';
 
 export const dynamic = 'force-dynamic';
-
-interface NavItem {
-  label: string;
-  href: string;
-  icon: string;
-}
 
 const ALL_NAV: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: '◫' },

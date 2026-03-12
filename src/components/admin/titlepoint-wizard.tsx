@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { StepSelectOrder, OrderSummaryBanner, SummaryField } from './step-select-order';
 import type { OrderResult } from './step-select-order';
-
-type TpSearchType = 'geo_address' | 'legal_vesting' | 'grant_deed' | 'tax';
+import type { TitlePointSearchType as TpSearchType } from '@/lib/integrations/titlepoint/types';
 type TpStep = 'order' | 'type' | 'initiate' | 'status';
 
 interface TpRequest {

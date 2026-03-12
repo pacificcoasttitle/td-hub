@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   MetricCard, MetricCardSkeleton, StatusBadge, SectionCard,
-  ErrorBanner, formatAddress, formatDate, formatRelative,
+  OrdersTable, ErrorBanner, BASE_ORDER_COLUMNS, formatDate, formatRelative,
   type RecentOrder,
 } from './shared';
 
@@ -58,18 +58,15 @@ export function EscrowOfficerDashboard({ displayName }: { displayName: string | 
 
   if (error) return <ErrorBanner message={error} />;
 
-  const orderColumns = [
-    { key: 'file', label: 'File #', render: (o: RecentOrder) => <span className="font-medium text-[#1B2A4A] whitespace-nowrap">{o.fileNumber}</span> },
-    { key: 'address', label: 'Address', render: (o: RecentOrder) => <span className="text-[#1A1A2E] max-w-xs truncate block">{formatAddress(o.property)}</span> },
-    { key: 'status', label: 'Status', render: (o: RecentOrder) => <StatusBadge status={o.operationalStatus} /> },
-    { key: 'type', label: 'Type', render: (o: RecentOrder) => <span className="text-[#6B7280] whitespace-nowrap capitalize">{o.transactionType ?? '—'}</span> },
-    { key: 'cpl', label: 'CPL Status', render: (o: RecentOrder) => {
+  const cplColumn = {
+    key: 'cpl', label: 'CPL Status', render: (o: RecentOrder) => {
       const eo = o as EscrowOrder;
       if (!eo.cplStatus) return <span className="text-[#6B7280]">—</span>;
       return <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${CPL_BADGE[eo.cplStatus] ?? 'bg-gray-100 text-gray-600'}`}>{eo.cplStatus}</span>;
-    }},
-    { key: 'opened', label: 'Opened', render: (o: RecentOrder) => <span className="text-[#6B7280] whitespace-nowrap">{formatDate(o.openedAt)}</span> },
-  ];
+    },
+  };
+  const openedCol = BASE_ORDER_COLUMNS[BASE_ORDER_COLUMNS.length - 1];
+  const orderColumns = [...BASE_ORDER_COLUMNS.slice(0, -1), cplColumn, openedCol];
 
   return (
     <>
@@ -170,29 +167,13 @@ export function EscrowOfficerDashboard({ displayName }: { displayName: string | 
 
       {/* Row 3: Full Orders Table */}
       <SectionCard title="My Orders" action={{ label: 'View all →', href: '/orders' }}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50/60">
-                {orderColumns.map((c) => <th key={c.key} className="text-left px-5 py-2.5 font-medium text-[#6B7280]">{c.label}</th>)}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {loading
-                ? Array.from({ length: 5 }).map((_, i) => (
-                    <tr key={i}>{orderColumns.map((c) => <td key={c.key} className="px-5 py-3"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" /></td>)}</tr>
-                  ))
-                : orders.map((o) => (
-                    <tr key={o.id} onClick={() => router.push(`/orders/${o.id}`)} className="hover:bg-gray-50 cursor-pointer transition-colors">
-                      {orderColumns.map((c) => <td key={c.key} className="px-5 py-3">{c.render(o)}</td>)}
-                    </tr>
-                  ))}
-            </tbody>
-          </table>
-          {!loading && orders.length === 0 && (
-            <div className="p-8 text-center"><p className="text-sm text-[#6B7280]">No orders assigned to you yet.</p></div>
-          )}
-        </div>
+        <OrdersTable
+          orders={orders}
+          loading={loading}
+          columns={orderColumns}
+          onNavigate={(id) => router.push(`/orders/${id}`)}
+          emptyMessage="No orders assigned to you yet."
+        />
       </SectionCard>
     </>
   );

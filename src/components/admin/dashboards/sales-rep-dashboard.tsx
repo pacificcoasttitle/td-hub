@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  MetricCard, MetricCardSkeleton, StatusBadge, SectionCard,
-  ActivityList, OrdersTable, ErrorBanner,
-  formatAddress, formatDate, formatCurrency,
+  MetricCard, MetricCardSkeleton, SectionCard,
+  ActivityList, OrdersTable, ErrorBanner, BASE_ORDER_COLUMNS,
+  formatCurrency,
   type RecentOrder, type ActivityEntry,
 } from './shared';
 
@@ -21,14 +21,6 @@ interface SalesRepStats {
   closingRatio: { closed: number; total: number } | null;
   projected: { revenue: number; workingDaysLeft: number } | null;
 }
-
-const ORDER_COLUMNS = [
-  { key: 'file', label: 'File #', render: (o: RecentOrder) => <span className="font-medium text-[#1B2A4A] whitespace-nowrap">{o.fileNumber}</span> },
-  { key: 'address', label: 'Address', render: (o: RecentOrder) => <span className="text-[#1A1A2E] max-w-xs truncate block">{formatAddress(o.property)}</span> },
-  { key: 'status', label: 'Status', render: (o: RecentOrder) => <StatusBadge status={o.operationalStatus} /> },
-  { key: 'type', label: 'Type', render: (o: RecentOrder) => <span className="text-[#6B7280] whitespace-nowrap capitalize">{o.transactionType ?? '—'}</span> },
-  { key: 'opened', label: 'Opened', render: (o: RecentOrder) => <span className="text-[#6B7280] whitespace-nowrap">{formatDate(o.openedAt)}</span> },
-];
 
 export function SalesRepDashboard({ displayName }: { displayName: string | null }) {
   const router = useRouter();
@@ -175,7 +167,7 @@ export function SalesRepDashboard({ displayName }: { displayName: string | null 
         <OrdersTable
           orders={orders}
           loading={loading}
-          columns={ORDER_COLUMNS}
+          columns={BASE_ORDER_COLUMNS}
           onNavigate={(id) => router.push(`/orders/${id}`)}
           emptyMessage="No orders assigned to you yet."
         />

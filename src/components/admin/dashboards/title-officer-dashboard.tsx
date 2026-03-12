@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  MetricCard, MetricCardSkeleton, StatusBadge, SectionCard,
-  OrdersTable, ErrorBanner, formatAddress, formatDate, formatRelative,
+  MetricCard, MetricCardSkeleton, SectionCard,
+  OrdersTable, ErrorBanner, BASE_ORDER_COLUMNS, formatRelative,
   type RecentOrder,
 } from './shared';
 
@@ -24,14 +24,6 @@ interface PendingTask {
   description: string;
   createdAt: string;
 }
-
-const ORDER_COLUMNS = [
-  { key: 'file', label: 'File #', render: (o: RecentOrder) => <span className="font-medium text-[#1B2A4A] whitespace-nowrap">{o.fileNumber}</span> },
-  { key: 'address', label: 'Address', render: (o: RecentOrder) => <span className="text-[#1A1A2E] max-w-xs truncate block">{formatAddress(o.property)}</span> },
-  { key: 'status', label: 'Status', render: (o: RecentOrder) => <StatusBadge status={o.operationalStatus} /> },
-  { key: 'type', label: 'Type', render: (o: RecentOrder) => <span className="text-[#6B7280] whitespace-nowrap capitalize">{o.transactionType ?? '—'}</span> },
-  { key: 'opened', label: 'Opened', render: (o: RecentOrder) => <span className="text-[#6B7280] whitespace-nowrap">{formatDate(o.openedAt)}</span> },
-];
 
 export function TitleOfficerDashboard({ displayName }: { displayName: string | null }) {
   const router = useRouter();
@@ -88,55 +80,55 @@ export function TitleOfficerDashboard({ displayName }: { displayName: string | n
             <OrdersTable
               orders={orders.slice(0, 10)}
               loading={loading}
-              columns={ORDER_COLUMNS}
-              onNavigate={(id) => router.push(`/orders/${id}`)}
-              emptyMessage="No orders assigned to you."
-            />
-          </SectionCard>
-        </div>
-        <div className="lg:col-span-2">
-          <SectionCard title="Pending Tasks">
-            {loading ? (
-              <div className="divide-y divide-gray-100">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="px-5 py-3 animate-pulse"><div className="h-4 bg-gray-200 rounded w-3/4 mb-1" /><div className="h-3 bg-gray-200 rounded w-1/2" /></div>
-                ))}
-              </div>
-            ) : pending.length > 0 ? (
-              <div className="divide-y divide-gray-100">
-                {pending.map((t) => (
-                  <Link key={t.id} href={`/orders/${t.orderId}`} className="block px-5 py-3 hover:bg-gray-50 transition-colors">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm text-[#1A1A2E]">
-                          <span className="font-semibold text-[#1B2A4A]">{t.fileNumber}</span>
-                        </p>
-                        <p className="text-xs text-[#6B7280] mt-0.5">{t.description}</p>
-                      </div>
-                      <div className="flex-shrink-0">
-                        <TaskTypeBadge type={t.type} />
-                        <p className="text-xs text-[#6B7280] mt-1 whitespace-nowrap">{formatRelative(t.createdAt)}</p>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <div className="p-8 text-center">
-                <p className="text-sm text-green-600 font-medium">All caught up!</p>
-                <p className="text-xs text-[#6B7280] mt-1">No pending tasks.</p>
-              </div>
-            )}
-          </SectionCard>
-        </div>
-      </div>
+          columns={BASE_ORDER_COLUMNS}
+          onNavigate={(id) => router.push(`/orders/${id}`)}
+          emptyMessage="No orders assigned to you."
+        />
+      </SectionCard>
+    </div>
+    <div className="lg:col-span-2">
+      <SectionCard title="Pending Tasks">
+        {loading ? (
+          <div className="divide-y divide-gray-100">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="px-5 py-3 animate-pulse"><div className="h-4 bg-gray-200 rounded w-3/4 mb-1" /><div className="h-3 bg-gray-200 rounded w-1/2" /></div>
+            ))}
+          </div>
+        ) : pending.length > 0 ? (
+          <div className="divide-y divide-gray-100">
+            {pending.map((t) => (
+              <Link key={t.id} href={`/orders/${t.orderId}`} className="block px-5 py-3 hover:bg-gray-50 transition-colors">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-[#1A1A2E]">
+                      <span className="font-semibold text-[#1B2A4A]">{t.fileNumber}</span>
+                    </p>
+                    <p className="text-xs text-[#6B7280] mt-0.5">{t.description}</p>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <TaskTypeBadge type={t.type} />
+                    <p className="text-xs text-[#6B7280] mt-1 whitespace-nowrap">{formatRelative(t.createdAt)}</p>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="p-8 text-center">
+            <p className="text-sm text-green-600 font-medium">All caught up!</p>
+            <p className="text-xs text-[#6B7280] mt-1">No pending tasks.</p>
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  </div>
 
-      {/* Row 3: Full Orders Table */}
-      <SectionCard title="My Orders" action={{ label: 'View all →', href: '/orders' }}>
-        <OrdersTable
-          orders={orders}
-          loading={loading}
-          columns={ORDER_COLUMNS}
+  {/* Row 3: Full Orders Table */}
+  <SectionCard title="My Orders" action={{ label: 'View all →', href: '/orders' }}>
+    <OrdersTable
+      orders={orders}
+      loading={loading}
+      columns={BASE_ORDER_COLUMNS}
           onNavigate={(id) => router.push(`/orders/${id}`)}
           emptyMessage="No orders assigned to you yet."
         />

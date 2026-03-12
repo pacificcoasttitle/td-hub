@@ -203,6 +203,16 @@ export function ErrorBanner({ message }: { message: string }) {
   );
 }
 
+// ─── Shared Column Definitions ──────────────────────────────────────────────
+
+export const BASE_ORDER_COLUMNS = [
+  { key: 'file', label: 'File #', render: (o: RecentOrder) => <span className="font-medium text-[#1B2A4A] whitespace-nowrap">{o.fileNumber}</span> },
+  { key: 'address', label: 'Address', render: (o: RecentOrder) => <span className="text-[#1A1A2E] max-w-xs truncate block">{formatAddress(o.property)}</span> },
+  { key: 'status', label: 'Status', render: (o: RecentOrder) => <StatusBadge status={o.operationalStatus} /> },
+  { key: 'type', label: 'Type', render: (o: RecentOrder) => <span className="text-[#6B7280] whitespace-nowrap capitalize">{o.transactionType ?? '—'}</span> },
+  { key: 'opened', label: 'Opened', render: (o: RecentOrder) => <span className="text-[#6B7280] whitespace-nowrap">{formatDate(o.openedAt)}</span> },
+];
+
 // ─── Formatters ─────────────────────────────────────────────────────────────
 
 export function formatAddress(property: { address: string | null; city: string | null; state: string | null } | null): string {

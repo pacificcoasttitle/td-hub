@@ -601,6 +601,37 @@ export const notificationTemplates = pgTable('notification_templates', {
 });
 ```
 
+### File: `lib/db/schema/document-requests.ts`
+
+```typescript
+import {
+  pgTable, pgEnum, serial, text, varchar, integer,
+  timestamp, index,
+} from 'drizzle-orm/pg-core';
+import { orders } from './orders';
+import { documents } from './documents';
+
+export const docRequestStatusEnum = pgEnum('doc_request_status', [
+  'pending', 'fulfilled', 'canceled',
+]);
+
+export const documentRequests = pgTable('document_requests', {
+  id: serial('id').primaryKey(),
+  orderId: integer('order_id').notNull().references(() => orders.id, { onDelete: 'cascade' }),
+  requestedBy: varchar('requested_by', { length: 64 }).notNull(),
+  requestType: varchar('request_type', { length: 50 }).notNull(),
+  message: text('message'),
+  status: docRequestStatusEnum('status').notNull().default('pending'),
+  fulfilledDocumentId: integer('fulfilled_document_id').references(() => documents.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  orderIdx: index('doc_requests_order_idx').on(table.orderId),
+  statusIdx: index('doc_requests_status_idx').on(table.status),
+  requestedByIdx: index('doc_requests_requested_by_idx').on(table.requestedBy),
+}));
+```
+
 ### File: `lib/db/schema/index.ts`
 
 ```typescript
@@ -608,6 +639,7 @@ export const notificationTemplates = pgTable('notification_templates', {
 export * from './orders';
 export * from './contacts';
 export * from './documents';
+export * from './document-requests';
 export * from './integrations';
 export * from './jobs';
 export * from './admin';
@@ -660,6 +692,7 @@ const DEFAULT_ROLES = [
 | `pct_users_role` | `roles` | Added permissions JSONB |
 | `pct_configs` | `settings` | Key-value config |
 | (no event outbox existed) | `event_outbox` | New — decoupled side effects |
+| (no document request system existed) | `document_requests` | New — clients request documents, admins fulfill, auto-fulfill on upload |
 
 ## Canon References
 - `td-source-extraction.md` §7 — All Phinx migration files (20+ migrations)

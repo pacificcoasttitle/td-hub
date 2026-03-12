@@ -1,7 +1,5 @@
 import { vendorSuccess, vendorError } from '@/lib/integrations/types';
 import type { VendorResult } from '@/lib/integrations/types';
-import { db } from '@/lib/db/client';
-import { vendorApiLogs } from '@/lib/db/schema';
 import type {
   TitlePointCreateInput,
   TitlePointCreateResponse,
@@ -9,8 +7,7 @@ import type {
   TitlePointResultResponse,
   TitlePointImageResponse,
 } from './types';
-
-const VENDOR = 'titlepoint';
+import { VENDOR, logRequest, MOCK_PDF_BASE64, pollCounts, delay } from './logging';
 
 // ─── Endpoint Paths ──────────────────────────────────────────────────────────
 
@@ -25,71 +22,6 @@ export const TP_ENDPOINTS = {
   getGeneratedImage: 'TpsGenerateImage.asmx/GetGeneratedImage',
   getDocumentsByParameters3: 'TpsImage.asmx/GetDocumentsByParameters3',
 } as const;
-
-// ─── Config ──────────────────────────────────────────────────────────────────
-
-function getConfig() {
-  const baseUrl = process.env.TP_BASE_URL;
-  if (!baseUrl) return null;
-  return {
-    baseUrl: baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl,
-    userID: process.env.TP_USERNAME ?? '',
-    password: process.env.TP_PASSWORD ?? '',
-  };
-}
-
-function authParams(config: { userID: string; password: string }): Record<string, string> {
-  return { userID: config.userID, password: config.password };
-}
-
-// ─── Vendor Logging ─────────────────────────────────────────────────────────
-
-async function logRequest(params: {
-  operation: string;
-  orderId?: number;
-  requestId: string;
-  startedAt: Date;
-  success?: boolean;
-  httpStatus?: number;
-  errorCategory?: string;
-  requestMeta?: unknown;
-  responseMeta?: unknown;
-}) {
-  try {
-    await db.insert(vendorApiLogs).values({
-      vendor: VENDOR,
-      operation: params.operation,
-      orderId: params.orderId ?? null,
-      requestId: params.requestId,
-      startedAt: params.startedAt,
-      endedAt: new Date(),
-      success: params.success ?? null,
-      httpStatus: params.httpStatus ?? null,
-      errorCategory: params.errorCategory ?? null,
-      requestMeta: params.requestMeta as Record<string, unknown> ?? null,
-      responseMeta: params.responseMeta as Record<string, unknown> ?? null,
-    });
-  } catch {
-    // Don't let logging failures break the main flow
-  }
-}
-
-// ─── Mock Poll State ────────────────────────────────────────────────────────
-// Simulates: first poll returns 'pending', second returns 'success'
-
-const pollCounts = new Map<string, number>();
-
-// ─── Mock Helpers ───────────────────────────────────────────────────────────
-
-const MOCK_PDF_BASE64 =
-  'JVBERi0xLjAKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq' +
-  'CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq' +
-  'CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiA+PgplbmRvYmoKeHJlZgowIDQK' +
-  'dHJhaWxlcgo8PCAvUm9vdCAxIDAgUiAvU2l6ZSA0ID4+CnN0YXJ0eHJlZgoxNDAKJSVFT0YK';
-
-function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 // ─── CreateService3 ─────────────────────────────────────────────────────────
 

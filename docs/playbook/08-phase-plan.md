@@ -5,14 +5,19 @@
 
 ## Timeline Summary
 
-| Phase | Weeks | What | Success Criteria |
-|-------|-------|------|-----------------|
-| 0 | Week 1 | Foundation + scaffold | Can log in, empty pages load, migrations run |
-| 1 | Weeks 2–3 | SoftPro sync + order hub | Real orders syncing, detail renders, resync works |
-| 2 | Weeks 3–4 | Document pipeline | Upload, view, download, audit, SoftPro attach |
-| 3 | Weeks 4–5 | Contacts, companies, admin | Entity management, no duplicate pages |
-| 4 | Weeks 5–7 | Vendor actions (CPL + TP) | Generate CPL via mock, TitlePoint request via mock |
-| 5 | Weeks 7–8 | Client portal + polish | Client login, scoped views, cutover prep |
+| Phase | Weeks | What | Status |
+|-------|-------|------|--------|
+| 0 | Week 1 | Foundation + scaffold | ✅ Complete |
+| 1 | Weeks 2–3 | SoftPro sync + order hub | ✅ Complete |
+| 2 | Weeks 3–4 | Document pipeline | ✅ Complete |
+| 3 | Weeks 4–5 | Contacts, companies, admin | ✅ Complete |
+| 4 | Weeks 5–7 | Vendor actions (CPL + TP) | ✅ Complete |
+| 5 | Weeks 7–8 | Client portal + polish | ✅ Complete |
+| 6 | TBD | Role-based dashboards (Sales Rep, Title Officer, Escrow Officer) | Planned |
+| 7 | TBD | Sales Manager dashboard | Planned |
+| 8 | TBD | Admin workflow hardening + client portal polish | Planned |
+
+> Phases 6–8 tickets are in `phases-6-7-8.md`.
 
 ---
 

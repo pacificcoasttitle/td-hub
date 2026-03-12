@@ -10,6 +10,7 @@ export type SessionUser = {
   role: string;
   displayName: string | null;
   branchId: number | null;
+  contactId: number | null;
 };
 
 export async function getSession(): Promise<SessionUser | null> {
@@ -30,6 +31,7 @@ export async function getSession(): Promise<SessionUser | null> {
     role: profile.role,
     displayName: profile.displayName,
     branchId: profile.branchId,
+    contactId: profile.contactId,
   };
 }
 

@@ -211,67 +211,74 @@ curl -X POST "http://localhost:3000/api/jobs/run?name=softpro.sync_recent_orders
 
 ## 6. Deployment
 
-### Sandbox-First Flow
+### Production URL
 ```
-1. Push to feature branch
-2. Vercel creates preview deployment automatically
-3. Test preview URL
-4. Merge to main
-5. Vercel deploys to sandbox
-6. Run migrations on sandbox Supabase
-7. Run sync job to verify
-8. Validate UI and logs
-9. Only then promote to production
+https://td-hub.vercel.app/
+```
+
+### Vercel Crons (auto-configured via vercel.json)
+```
+softpro.sync_recent_orders  — every hour at :00
+softpro.enrich_orders       — every hour at :15
+notifications.process_outbox — every 5 minutes
+```
+
+### Webhook URLs (give to SoftPro team)
+```
+Prelim:    https://td-hub.vercel.app/api/webhooks/softpro/prelim
+Policy:    https://td-hub.vercel.app/api/webhooks/softpro/policy
+Milestone: https://td-hub.vercel.app/api/webhooks/softpro/milestone
+```
+
+### Manual Job Triggers
+```bash
+# Sync recent orders from SoftPro
+curl -X POST "https://td-hub.vercel.app/api/jobs/run?name=softpro.sync_recent_orders" \
+  -H "Authorization: Bearer $JOB_RUNNER_SECRET"
+
+# Enrich orders with contacts
+curl -X POST "https://td-hub.vercel.app/api/jobs/run?name=softpro.enrich_orders" \
+  -H "Authorization: Bearer $JOB_RUNNER_SECRET"
+
+# Sync contacts by entity type
+curl -X POST "https://td-hub.vercel.app/api/jobs/run?name=softpro.sync_contacts" \
+  -H "Authorization: Bearer $JOB_RUNNER_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"entityType": "Title Officer"}'
+
+# Process notification outbox
+curl -X POST "https://td-hub.vercel.app/api/jobs/run?name=notifications.process_outbox" \
+  -H "Authorization: Bearer $JOB_RUNNER_SECRET"
 ```
 
 ### Vercel Environment Variables
-Set all `.env.example` variables in Vercel dashboard under Settings → Environment Variables. Use different values for Preview/Production.
+All variables are listed in `.env.example`. Set in Vercel dashboard under Settings → Environment Variables. Key variables include Supabase, SoftPro (URL + token), AWS S3, SendGrid, Twilio, SiteX, TitlePoint, Google Maps, JOB_RUNNER_SECRET, and CRON_SECRET.
 
 ---
 
-## 7. Claude Code Workflow
+## 7. Agent Workflow (Cursor-Based)
 
-### Terminal Setup
-Open 4 terminals (or use tmux/screen):
+### Setup
+Open separate Cursor Composer sessions for each agent. Paste the agent prompt, then give it a ticket.
 
 ```
-Terminal 1: Builder      — implements features
-Terminal 2: Refactorer   — cleanup after features land
-Terminal 3: UI Builder   — builds screens
-Terminal 4: Reviewer     — checks before merge
+Chat 1: Builder      — backend features (services, adapters, jobs, API routes)
+Chat 2: UI Builder   — frontend (pages, components, layouts)
+Chat 3: Gopher       — debugging, testing, wiring up conflicts
+Chat 4: Refactorer   — structural cleanup after features land
+Chat 5: Reviewer     — 10-point checklist before merge
+Chat 6: Director     — Claude.ai conversation for planning and decisions
 ```
-
-### Branch Strategy
-```bash
-# One branch per major feature:
-git checkout -b feature/softpro-sync
-git checkout -b feature/order-workspace
-git checkout -b feature/documents
-git checkout -b feature/contacts
-git checkout -b feature/cpl
-git checkout -b feature/titlepoint
-git checkout -b feature/client-portal
-```
-
-### Agent Prompts
-
-**Full prompts are in `/docs/playbook/agent-prompts.md`.** Copy-paste directly into Claude Code terminals. Each prompt is self-contained — no prior conversation needed.
-
-| Agent | Terminal | What It Does |
-|-------|----------|-------------|
-| Builder | Terminal 1 | Implements features per ticket. Owns `lib/`, `app/api/`. |
-| Refactorer | Terminal 2 | Structural cleanup. No behavior changes. |
-| UI Builder | Terminal 3 | Builds screens. Owns `app/(admin)/`, `app/(client)/`, `components/`. Desktop-first (1280px+). |
-| Reviewer | Terminal 4 | 10-point checklist before merge. PASS or BLOCK. |
 
 ### Workflow Per Feature
 ```
-1. Builder implements on feature branch
-2. Refactorer does cleanup pass
-3. UI Builder adds/polishes screens
-4. Reviewer checks everything
-5. If PASS → merge to main
-6. If BLOCK → fix issues → re-review
+1. Director plans the feature and writes the ticket
+2. Builder + UI Builder work in parallel on their scoped areas
+3. Gopher checks for conflicts (duplicate routes, stubs that need wiring)
+4. Refactorer splits any files over 300 lines
+5. Reviewer runs 10-point checklist
+6. If PASS → commit and push
+7. If BLOCK → fix issues → re-review
 ```
 
 ---

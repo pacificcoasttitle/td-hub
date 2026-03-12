@@ -1,9 +1,16 @@
+import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { requireAdmin } from '@/lib/security/auth';
+import { getSession } from '@/lib/security/auth';
 
 export const dynamic = 'force-dynamic';
 
-const navItems = [
+interface NavItem {
+  label: string;
+  href: string;
+  icon: string;
+}
+
+const ALL_NAV: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: '◫' },
   { label: 'Orders', href: '/orders', icon: '☰' },
   { label: 'Contacts & Companies', href: '/contacts', icon: '⊞' },
@@ -14,12 +21,29 @@ const navItems = [
   { label: 'Users & Roles', href: '/users', icon: '⊕' },
 ];
 
+const NAV_BY_ROLE: Record<string, string[]> = {
+  super_admin: ['/dashboard', '/orders', '/contacts', '/documents', '/vendor-actions', '/jobs', '/settings', '/users'],
+  admin: ['/dashboard', '/orders', '/contacts', '/documents', '/vendor-actions', '/jobs', '/settings', '/users'],
+  cs_admin: ['/dashboard', '/orders', '/contacts', '/documents', '/vendor-actions', '/jobs'],
+  sales_rep: ['/dashboard', '/orders', '/contacts'],
+  title_officer: ['/dashboard', '/orders', '/documents', '/vendor-actions'],
+  escrow_officer: ['/dashboard', '/orders', '/documents', '/vendor-actions'],
+};
+
+const ALLOWED_ROLES = Object.keys(NAV_BY_ROLE);
+
 export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const session = await requireAdmin();
+  const session = await getSession();
+  if (!session) redirect('/login');
+  if (session.role === 'client') redirect('/client/orders');
+  if (!ALLOWED_ROLES.includes(session.role)) redirect('/login');
+
+  const allowedPaths = NAV_BY_ROLE[session.role] ?? [];
+  const visibleNav = ALL_NAV.filter((item) => allowedPaths.includes(item.href));
 
   return (
     <div className="flex h-screen bg-[#F8F9FA]">
@@ -35,7 +59,7 @@ export default async function AdminLayout({
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => (
+          {visibleNav.map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -53,7 +77,7 @@ export default async function AdminLayout({
             {session.displayName ?? session.email}
           </p>
           <p className="text-white/40 text-xs mt-0.5 capitalize">
-            {session.role.replace('_', ' ')}
+            {session.role.replace(/_/g, ' ')}
           </p>
         </div>
       </aside>

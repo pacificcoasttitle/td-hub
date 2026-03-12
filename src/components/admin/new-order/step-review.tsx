@@ -1,19 +1,20 @@
-import Link from 'next/link';
 import type {
   WizardStep, OrderTypeData, PropertyData, PartiesData,
   TransactionData, ContactsData, ContactResult, PartyPerson, SubmitResult,
 } from './types';
 import { ORDER_TYPES, UNDERWRITERS } from './constants';
 import { StepHeader } from './shared';
+import { OrderPostCreation } from '../order-post-creation';
 
 export function Step6Review({
   orderType, property, parties, transaction, contacts,
-  submitting, result, onSubmit, onPrev, onGoTo,
+  submitting, result, onSubmit, onPrev, onGoTo, onReset,
 }: {
   orderType: OrderTypeData; property: PropertyData; parties: PartiesData;
   transaction: TransactionData; contacts: ContactsData;
   submitting: boolean; result: SubmitResult | null;
   onSubmit: () => void; onPrev: () => void; onGoTo: (s: WizardStep) => void;
+  onReset: () => void;
 }) {
   const otLabel = ORDER_TYPES.find((o) => o.value === orderType.orderType)?.label ?? orderType.orderType;
 
@@ -23,6 +24,19 @@ export function Step6Review({
 
   function contactName(c: ContactResult | null): string {
     return c?.fullName ?? c?.companyName ?? '—';
+  }
+
+  if (result?.type === 'success' && result.orderId && result.fileNumber) {
+    return (
+      <div className="p-6">
+        <OrderPostCreation
+          orderId={result.orderId}
+          fileNumber={result.fileNumber}
+          titlePointTriggered={result.titlePointTriggered ?? false}
+          onCreateAnother={onReset}
+        />
+      </div>
+    );
   }
 
   return (
@@ -68,18 +82,9 @@ export function Step6Review({
         </ReviewSection>
       </div>
 
-      {result && (
-        <div className={`mb-4 px-4 py-3 rounded-lg text-sm ${
-          result.type === 'success'
-            ? 'bg-green-50 border border-green-200 text-green-700'
-            : 'bg-red-50 border border-red-200 text-red-700'
-        }`}>
+      {result?.type === 'error' && (
+        <div className="mb-4 px-4 py-3 rounded-lg text-sm bg-red-50 border border-red-200 text-red-700">
           <p className="font-medium">{result.message}</p>
-          {result.type === 'success' && result.orderId && (
-            <Link href={`/orders/${result.orderId}`} className="text-green-800 underline text-xs mt-1 inline-block">
-              View order →
-            </Link>
-          )}
         </div>
       )}
 
@@ -87,20 +92,18 @@ export function Step6Review({
         <button onClick={onPrev} className="px-4 py-2 text-sm font-medium border border-gray-200 text-[#6B7280] rounded-lg hover:bg-gray-50 transition-colors">
           ← Back
         </button>
-        {(!result || result.type === 'error') && (
-          <button
-            onClick={onSubmit}
-            disabled={submitting}
-            className="px-6 py-2.5 text-sm font-medium bg-[#C5A55A] text-white rounded-lg hover:bg-[#b3923e] disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-2"
-          >
-            {submitting && (
-              <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            )}
-            {submitting ? 'Creating order in SoftPro…' : 'Create Order'}
-          </button>
-        )}
+        <button
+          onClick={onSubmit}
+          disabled={submitting}
+          className="px-6 py-2.5 text-sm font-medium bg-[#C5A55A] text-white rounded-lg hover:bg-[#b3923e] disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-2"
+        >
+          {submitting && (
+            <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          )}
+          {submitting ? 'Creating order in SoftPro…' : 'Create Order'}
+        </button>
       </div>
     </div>
   );

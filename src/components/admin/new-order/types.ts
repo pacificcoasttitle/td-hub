@@ -75,4 +75,5 @@ export interface SubmitResult {
   message: string;
   fileNumber?: string;
   orderId?: number;
+  titlePointTriggered?: boolean;
 }

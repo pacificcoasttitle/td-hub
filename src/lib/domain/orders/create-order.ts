@@ -4,6 +4,7 @@ import { orders, orderProperties, orderParties, orderStatusHistory } from '@/lib
 import { createOrder as softproCreateOrder } from '@/lib/integrations/softpro';
 import { propertyLookup } from '@/lib/integrations/sitex/client';
 import type { SiteXPropertyData } from '@/lib/integrations/sitex/types';
+import { autoTriggerTitlePoint } from '@/lib/domain/titlepoint/auto-trigger';
 
 // ─── Zod Schema ─────────────────────────────────────────────────────────────
 
@@ -105,6 +106,19 @@ export async function createAndSendToSoftPro(raw: unknown): Promise<CreateOrderR
   const fileNumber = spResult.data.orderNumber;
 
   const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county });
+
+  if (input.property.address && input.property.state && county) {
+    try {
+      await autoTriggerTitlePoint(orderId, {
+        address: input.property.address,
+        city: input.property.city,
+        state: input.property.state,
+        county,
+        apn: apn || null,
+        fips: null,
+      });
+    } catch { /* TitlePoint failures never block order creation */ }
+  }
 
   return { success: true, orderId, fileNumber };
 }

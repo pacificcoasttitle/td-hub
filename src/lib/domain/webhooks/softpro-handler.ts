@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client';
 import { documents, documentAudit, orders, orderStatusHistory, eventOutbox } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
+import { analyzePrelim } from '@/lib/domain/tessa/service';
 
 // ─── Zod Schemas ────────────────────────────────────────────────────────────
 
@@ -154,6 +155,8 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
         orderId: order.id,
         payload: { documentId, category: 'prelim', fileNumber: order.fileNumber } as Record<string, unknown>,
       });
+
+      try { analyzePrelim(documentId); } catch { /* fire and forget */ }
 
       processed++;
     } catch (err) {

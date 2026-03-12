@@ -44,6 +44,16 @@ export default function NewOrderPage() {
   function goTo(s: WizardStep) { setStep(s); }
   function next() { if (step < 6) setStep((step + 1) as WizardStep); }
   function prev() { if (step > 1) setStep((step - 1) as WizardStep); }
+  function resetWizard() {
+    setStep(1);
+    setOrderType({ orderType: 'title_escrow', rushOrder: false, branchId: null });
+    setProperty({ street: '', city: '', state: '', zip: '', placeId: '', apn: '', county: '', legalDescription: '', siteXLoading: false });
+    setParties({ seller: { ...EMPTY_PERSON }, secondarySeller: { ...EMPTY_PERSON }, hasSecondarySeller: false, buyer: { ...EMPTY_PERSON }, secondaryBuyer: { ...EMPTY_PERSON }, hasSecondaryBuyer: false, buyerIsOrg: false, orgType: '' });
+    setTransaction({ transactionType: '', productType: '', escrowNumber: '', salesAmount: '', loanNumber: '', loanAmount: '', coverageAmount: '', underwriter: '' });
+    setContacts({ escrowCompany: null, lender: null, buyerAgent: null, listingAgent: null, titleOfficer: null });
+    setSubmitting(false);
+    setResult(null);
+  }
 
   async function handleSubmit() {
     setSubmitting(true);
@@ -61,6 +71,7 @@ export default function NewOrderPage() {
         message: `Order ${body.fileNumber} created successfully.`,
         fileNumber: body.fileNumber,
         orderId: body.id,
+        titlePointTriggered: body.titlePointTriggered ?? false,
       });
     } catch (err) {
       setResult({ type: 'error', message: err instanceof Error ? err.message : 'Order creation failed' });
@@ -123,7 +134,7 @@ export default function NewOrderPage() {
               orderType={orderType} property={property} parties={parties}
               transaction={transaction} contacts={contacts}
               submitting={submitting} result={result}
-              onSubmit={handleSubmit} onPrev={prev} onGoTo={goTo}
+              onSubmit={handleSubmit} onPrev={prev} onGoTo={goTo} onReset={resetWizard}
             />
           )}
         </div>

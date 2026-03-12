@@ -10,6 +10,7 @@ import type { SyncContactsPayload } from '@/lib/jobs/handlers/sync-contacts';
 import { handleTitlePointPoll } from '@/lib/jobs/handlers/titlepoint-poll';
 import { handleEnrichOrders } from '@/lib/jobs/handlers/enrich-orders';
 import { handleResolveOfficers } from '@/lib/jobs/handlers/resolve-order-officers';
+import { handleFetchPrelims } from '@/lib/jobs/handlers/fetch-prelims';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -35,6 +36,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleResolveOfficers(),
   'titlepoint.poll': (payload) =>
     handleTitlePointPoll(payload),
+  'softpro.fetch_prelims': () =>
+    handleFetchPrelims(),
   'notifications.process_outbox': () =>
     processOutboxEvents(),
 };

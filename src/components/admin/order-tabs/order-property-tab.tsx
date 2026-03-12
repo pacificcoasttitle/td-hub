@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { SectionHeading, FieldRow } from './order-overview-tab';
 import { AddressAutocomplete } from '@/components/ui/address-autocomplete';
 import type { ParsedAddress } from '@/components/ui/address-autocomplete';
@@ -17,6 +18,21 @@ interface OrderProperty {
   zip: string | null;
 }
 
+interface TitlePointSearch {
+  id: number;
+  searchType: string;
+  status: string;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+const TP_STATUS_COLORS: Record<string, string> = {
+  pending: 'bg-amber-100 text-amber-800',
+  processing: 'bg-blue-100 text-blue-800',
+  completed: 'bg-green-100 text-green-800',
+  failed: 'bg-red-100 text-red-800',
+};
+
 export function OrderPropertyTab({
   property,
   orderId,
@@ -25,6 +41,16 @@ export function OrderPropertyTab({
   orderId: number;
 }) {
   const [lookupOpen, setLookupOpen] = useState(false);
+  const [tpSearches, setTpSearches] = useState<TitlePointSearch[]>([]);
+  const [tpLoading, setTpLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/orders/${orderId}/titlepoint`)
+      .then((r) => r.ok ? r.json() : { searches: [] })
+      .then((d) => setTpSearches(d.searches ?? []))
+      .catch(() => {})
+      .finally(() => setTpLoading(false));
+  }, [orderId]);
 
   if (!property) {
     return (
@@ -78,6 +104,58 @@ export function OrderPropertyTab({
           </p>
         </div>
       )}
+
+      {/* TitlePoint Searches */}
+      <div className="pt-3">
+        <SectionHeading>Title Searches</SectionHeading>
+        {tpLoading ? (
+          <div className="mt-3 space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="h-10 bg-gray-100 rounded animate-pulse" />
+            ))}
+          </div>
+        ) : tpSearches.length > 0 ? (
+          <div className="mt-3 border border-gray-200 rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50/60">
+                  <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">Type</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">Status</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">Initiated</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-[#6B7280]">Completed</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {tpSearches.map((s) => (
+                  <tr key={s.id}>
+                    <td className="px-4 py-2.5 font-medium text-[#1A1A2E] capitalize whitespace-nowrap">
+                      {s.searchType.replace(/_/g, ' ')}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${TP_STATUS_COLORS[s.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                        {s.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap">{formatShortDate(s.createdAt)}</td>
+                    <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap">{s.completedAt ? formatShortDate(s.completedAt) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="mt-3 border border-dashed border-gray-200 rounded-lg p-6 text-center">
+            <p className="text-sm text-[#6B7280]">No TitlePoint searches yet.</p>
+            <Link
+              href={`/vendor-actions?tab=titlepoint&orderId=${orderId}`}
+              className="inline-block mt-2 text-xs font-medium text-[#C5A55A] hover:text-[#b3923e] transition-colors"
+            >
+              Start Search →
+            </Link>
+          </div>
+        )}
+      </div>
+
       {lookupOpen && (
         <PropertyLookupModal
           orderId={orderId}
@@ -86,6 +164,12 @@ export function OrderPropertyTab({
       )}
     </div>
   );
+}
+
+function formatShortDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  } catch { return '—'; }
 }
 
 // ─── Property Lookup Modal ──────────────────────────────────────────────────

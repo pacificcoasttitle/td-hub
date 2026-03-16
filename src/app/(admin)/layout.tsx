@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 const ALL_NAV: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: '◫' },
   { label: 'Orders', href: '/orders', icon: '☰' },
+  { label: 'Quick Entry', href: '/orders/quick-entry', icon: '⚡' },
   { label: 'Open Order (On Behalf)', href: '/orders/new-on-behalf', icon: '✦' },
   { label: 'Contacts & Companies', href: '/contacts', icon: '⊞' },
   { label: 'Documents', href: '/documents', icon: '⎘' },
@@ -24,7 +25,7 @@ const NAV_BY_ROLE: Record<string, string[]> = {
   sales_rep: ['/dashboard', '/orders', '/contacts'],
   title_officer: ['/dashboard', '/orders', '/documents', '/vendor-actions'],
   escrow_officer: ['/dashboard', '/orders', '/documents', '/vendor-actions'],
-  open_order_team: ['/dashboard', '/orders', '/orders/new-on-behalf', '/contacts'],
+  open_order_team: ['/dashboard', '/orders', '/orders/quick-entry', '/orders/new-on-behalf', '/contacts'],
 };
 
 const ALLOWED_ROLES = Object.keys(NAV_BY_ROLE);

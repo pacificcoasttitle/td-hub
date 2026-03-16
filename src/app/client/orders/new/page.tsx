@@ -2,32 +2,49 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { Step, Contact, Profile } from '@/components/client/new-order';
-import { EMPTY, STEPS } from '@/components/client/new-order';
-import { StepType } from '@/components/client/new-order/step-type';
+import type { Step, ClientDetails, PropertyData, SellerData, TransactionData, PartiesData, Profile } from '@/components/client/new-order';
+import { EMPTY, STEPS, EMPTY_PARTY } from '@/components/client/new-order';
+import { StepDetails } from '@/components/client/new-order/step-details';
 import { StepProperty } from '@/components/client/new-order/step-property';
-import { StepParties } from '@/components/client/new-order/step-parties';
+import { StepSeller } from '@/components/client/new-order/step-seller';
 import { StepTransaction } from '@/components/client/new-order/step-transaction';
-import { StepContacts } from '@/components/client/new-order/step-contacts';
+import { StepAddParties } from '@/components/client/new-order/step-add-parties';
 import { StepReview } from '@/components/client/new-order/step-review';
+import type { SiteXPropertyResult } from '@/components/shared/property-confirm-modal';
 
 export default function ClientNewOrderPage() {
   const [step, setStep] = useState<Step>(1);
   const [profile, setProfile] = useState<Profile | null>(null);
 
-  const [orderType, setOrderType] = useState<{ type: string; rush: boolean }>({ type: 'title_escrow', rush: false });
-  const [property, setProperty] = useState({ street: '', city: '', state: '', zip: '', placeId: '', apn: '', county: '', legalDescription: '', siteXLoading: false });
-  const [parties, setParties] = useState({
-    seller: { ...EMPTY }, secondarySeller: { ...EMPTY }, hasSecondary: false,
-    buyer: { ...EMPTY }, secondaryBuyer: { ...EMPTY }, hasSecondaryBuyer: false,
-    buyerIsOrg: false, orgType: '',
+  const [clientDetails, setClientDetails] = useState<ClientDetails>({
+    clientType: '', emailNotifications: true,
   });
-  const [transaction, setTransaction] = useState({ transactionType: '' as string, productType: '', escrowNumber: '', salesAmount: '', loanNumber: '', loanAmount: '', coverageAmount: '', underwriter: '' });
-  const [contacts, setContacts] = useState<{ escrowCompany: Contact | null; lender: Contact | null; buyerAgent: Contact | null; listingAgent: Contact | null; titleOfficer: Contact | null }>({
-    escrowCompany: null, lender: null, buyerAgent: null, listingAgent: null, titleOfficer: null,
+  const [property, setProperty] = useState<PropertyData>({
+    street: '', city: '', state: '', zip: '', placeId: '',
+    apn: '', county: '', legalDescription: '', propertyType: '',
+    unitNumber: '', siteXFilled: false, searchMode: 'address',
   });
+  const [seller, setSeller] = useState<SellerData>({
+    primary: { ...EMPTY }, secondary: { ...EMPTY },
+    hasSecondary: false, isOrg: false, orgType: '', siteXFilled: false,
+  });
+  const [transaction, setTransaction] = useState<TransactionData>({
+    transactionType: '', productType: '', orderType: '', salesRep: '', titleOfficer: '',
+    escrowNumber: '', salesAmount: '', loanNumber: '', loanAmount: '', coverageAmount: '',
+    primaryBorrower: { ...EMPTY }, secondaryBorrower: { ...EMPTY },
+    hasSecondaryBorrower: false, borrowerIsOrg: false, borrowerOrgType: '',
+  });
+  const [parties, setParties] = useState<PartiesData>({
+    showAgents: false, buyerAgent: { ...EMPTY_PARTY }, listingAgent: { ...EMPTY_PARTY },
+    showLender: false, lender: { ...EMPTY_PARTY },
+    showEscrow: false, escrow: { ...EMPTY_PARTY },
+    showEscrowOfficer: false, escrowOfficer: '',
+    deliverableEmails: [],
+  });
+  const [, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ type: 'success' | 'error'; message: string; orderId?: number } | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/client/profile').then((r) => r.ok ? r.json() : null).then((d) => setProfile(d)).catch(() => {});
@@ -36,6 +53,32 @@ export default function ClientNewOrderPage() {
   function next() { if (step < 6) setStep((step + 1) as Step); }
   function prev() { if (step > 1) setStep((step - 1) as Step); }
 
+  function handleSiteXResult(siteX: SiteXPropertyResult) {
+    if (siteX.primaryOwner) {
+      const parts = siteX.primaryOwner.split(' ');
+      const first = parts[0] ?? '';
+      const last = parts.length > 1 ? parts[parts.length - 1] : '';
+      const middle = parts.length > 2 ? parts.slice(1, -1).join(' ') : '';
+      setSeller((prev) => ({
+        ...prev,
+        primary: { firstName: first, middleName: middle, lastName: last },
+        siteXFilled: true,
+      }));
+    }
+    if (siteX.secondaryOwner) {
+      const parts = siteX.secondaryOwner.split(' ');
+      const first = parts[0] ?? '';
+      const last = parts.length > 1 ? parts[parts.length - 1] : '';
+      const middle = parts.length > 2 ? parts.slice(1, -1).join(' ') : '';
+      setSeller((prev) => ({
+        ...prev,
+        secondary: { firstName: first, middleName: middle, lastName: last },
+        hasSecondary: true,
+        siteXFilled: true,
+      }));
+    }
+  }
+
   async function handleSubmit() {
     setSubmitting(true);
     setResult(null);
@@ -43,17 +86,34 @@ export default function ClientNewOrderPage() {
       const res = await fetch('/api/client/orders/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderType, property, parties, transaction, contacts }),
+        body: JSON.stringify({ clientDetails, property, seller, transaction, parties, deliverableEmails: parties.deliverableEmails }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? `Order creation failed (${res.status})`);
-      setResult({ type: 'success', message: `Order ${body.fileNumber} created.`, orderId: body.id });
+      setResult({ type: 'success', message: `Order ${body.fileNumber ?? body.orderId ?? ''} created.`, orderId: body.orderId });
     } catch (err) {
       setResult({ type: 'error', message: err instanceof Error ? err.message : 'Order creation failed' });
     } finally {
       setSubmitting(false);
     }
   }
+
+  useEffect(() => {
+    if (!property.apn) { setDuplicateWarning(null); return; }
+    const timeout = setTimeout(() => {
+      fetch(`/api/orders?apn=${encodeURIComponent(property.apn)}&pageSize=1`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => {
+          if (d?.orders?.length > 0) {
+            setDuplicateWarning(`An order with APN ${property.apn} already exists (File #${d.orders[0].fileNumber}). Please verify this isn't a duplicate.`);
+          } else {
+            setDuplicateWarning(null);
+          }
+        })
+        .catch(() => setDuplicateWarning(null));
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [property.apn]);
 
   if (result?.type === 'success' && result.orderId) {
     return (
@@ -144,17 +204,19 @@ export default function ClientNewOrderPage() {
       {/* Step Content */}
       <div className="max-w-2xl">
         <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm">
-          {step === 1 && <StepType data={orderType} onChange={setOrderType} onNext={next} />}
-          {step === 2 && <StepProperty data={property} onChange={setProperty} onNext={next} onPrev={prev} />}
-          {step === 3 && <StepParties data={parties} onChange={setParties} onNext={next} onPrev={prev} />}
+          {step === 1 && <StepDetails profile={profile} data={clientDetails} onChange={setClientDetails} onNext={next} />}
+          {step === 2 && <StepProperty data={property} onChange={setProperty} onSiteXResult={handleSiteXResult} onNext={next} onPrev={prev} />}
+          {step === 3 && <StepSeller data={seller} onChange={setSeller} onNext={next} onPrev={prev} />}
           {step === 4 && <StepTransaction data={transaction} onChange={setTransaction} onNext={next} onPrev={prev} />}
-          {step === 5 && <StepContacts data={contacts} onChange={setContacts} onNext={next} onPrev={prev} />}
+          {step === 5 && <StepAddParties data={parties} onChange={setParties} orderTypeValue={transaction.orderType} onNext={next} onPrev={prev} />}
           {step === 6 && (
             <StepReview
-              orderType={orderType} property={property} parties={parties}
-              transaction={transaction} contacts={contacts}
+              clientDetails={clientDetails} property={property} seller={seller}
+              transaction={transaction} parties={parties}
               submitting={submitting} error={result?.type === 'error' ? result.message : null}
+              duplicateWarning={duplicateWarning}
               onSubmit={handleSubmit} onPrev={prev} onGoTo={setStep}
+              onFilesChange={setFiles}
             />
           )}
         </div>

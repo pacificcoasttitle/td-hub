@@ -28,6 +28,7 @@ export const createOrderInputSchema = z.object({
     apn: z.string().optional(),
     legalDescription: z.string().optional(),
     county: z.string().optional(),
+    unitNumber: z.string().optional(),
   }),
   seller: z.object({
     firstName: z.string().min(1), middleName: z.string().optional(), lastName: z.string().min(1),
@@ -42,6 +43,8 @@ export const createOrderInputSchema = z.object({
   transaction: z.object({
     type: z.string().min(1),
     product: z.string().min(1),
+    productTypeId: z.string().optional(),
+    orderTypeId: z.string().optional(),
     escrowNumber: z.string().optional(),
     salesAmount: z.number().default(0),
     loanNumber: z.string().optional(),
@@ -49,6 +52,7 @@ export const createOrderInputSchema = z.object({
     coverageAmount: z.number().default(0),
     branchCode: z.string().min(1),
     titleOfficer: z.string().optional(),
+    escrowOfficer: z.string().optional(),
     underwriterCode: z.string().optional(),
   }),
   contacts: z.object({
@@ -58,6 +62,9 @@ export const createOrderInputSchema = z.object({
     listingAgent: contactSchema.optional(),
     mortgageBroker: contactSchema.optional(),
   }).optional(),
+  deliverableEmails: z.array(z.string().email()).optional(),
+  clientType: z.string().optional(),
+  onBehalfOfContactId: z.number().int().positive().optional(),
 });
 
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>;
@@ -152,7 +159,7 @@ function buildSoftProPayload(
     },
     propertyDetails: [{
       Address1: input.property.address,
-      Address2: '',
+      Address2: input.property.unitNumber ?? '',
       APNNumberParcelID: enriched.apn,
       Country: enriched.county,
       Description: enriched.legal,
@@ -249,7 +256,13 @@ async function createLocalRecords(
     propertyType: sitex?.propertyType ?? null,
     primaryOwner: sitex?.primaryOwner ?? null,
     secondaryOwner: sitex?.secondaryOwner ?? null,
-    fullAddress: [input.property.address, input.property.city, input.property.state].filter(Boolean).join(', '),
+    fullAddress: [
+      input.property.unitNumber
+        ? `${input.property.address} ${input.property.unitNumber}`
+        : input.property.address,
+      input.property.city,
+      input.property.state,
+    ].filter(Boolean).join(', '),
   });
 
   const partyInserts = buildPartyInserts(orderId, input);

@@ -134,14 +134,16 @@ export async function pollSearch(
     return { status: 'failed', error: summary.message };
   }
 
-  // success — store first serviceId
+  // success — store first serviceId + resultId (resultId is needed for GetResultByID3)
   const serviceId = summary.serviceIds[0] ?? null;
+  const resultId = summary.resultIds[0] ?? null;
   await db
     .update(titlePointData)
     .set({
       status: 'ready',
       serviceId,
       message: `Completed with ${summary.serviceIds.length} service(s)`,
+      metadata: { ...((await db.select().from(titlePointData).where(eq(titlePointData.id, titlePointDataId)).limit(1))[0]?.metadata as Record<string, unknown> ?? {}), resultId } as Record<string, unknown>,
       updatedAt: new Date(),
     })
     .where(eq(titlePointData.id, titlePointDataId));
@@ -161,9 +163,11 @@ export async function fetchResult(
     .limit(1);
 
   if (!record) return { success: false, error: 'TitlePoint record not found' };
-  if (!record.serviceId) return { success: false, error: 'No serviceId available' };
+  const meta = (record.metadata as Record<string, unknown>) ?? {};
+  const resultId = (meta.resultId as string) ?? record.serviceId;
+  if (!resultId) return { success: false, error: 'No resultId available' };
 
-  const result = await getResult(record.serviceId, record.orderId);
+  const result = await getResult(resultId, record.orderId);
 
   if (!result.success) {
     await db

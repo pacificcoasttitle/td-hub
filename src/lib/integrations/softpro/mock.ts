@@ -4,6 +4,7 @@ import {
   SoftProOrderContactsData,
   SoftProLookupItem,
   SoftProAttachedDocument,
+  SoftProFeeResponse,
 } from './types';
 
 // ─── Mock Orders (matches real GetOrders response shape) ────────────────────
@@ -139,6 +140,25 @@ export async function addNotes(
 ): Promise<VendorResult<{ success: boolean }>> {
   await new Promise((r) => setTimeout(r, 30));
   return vendorSuccess({ success: true }, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 30 });
+}
+
+export async function getFees(
+  _orderNumber: string,
+): Promise<VendorResult<SoftProFeeResponse>> {
+  await new Promise((r) => setTimeout(r, 40));
+  const mockFees: SoftProFeeResponse = [
+    {
+      InvoiceNumber: 'INV-MOCK-001',
+      Fees: [
+        { Description: 'Title Search Fee', Amount: 250.00 },
+        { Description: 'Recording Fee', Amount: 150.00 },
+        { Description: 'Escrow Fee', Amount: 475.00 },
+        { Description: 'Notary Fee', Amount: 50.00 },
+      ],
+      Total: { Amount: 925.00 },
+    },
+  ];
+  return vendorSuccess(mockFees, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 40 });
 }
 
 export async function healthCheck(): Promise<VendorHealthResult> {

@@ -7,6 +7,7 @@ export interface NavItem {
 const ALL_NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: '◫' },
   { label: 'Orders', href: '/orders', icon: '☰' },
+  { label: 'Open Order (On Behalf)', href: '/orders/new-on-behalf', icon: '✦' },
   { label: 'Contacts & Companies', href: '/contacts', icon: '⊞' },
   { label: 'Documents', href: '/documents', icon: '⎘' },
   { label: 'Vendor Actions', href: '/vendor-actions', icon: '⚡' },
@@ -22,6 +23,7 @@ const NAV_LABELS_BY_ROLE: Record<string, string[]> = {
   sales_rep: ['Dashboard', 'Orders', 'Contacts & Companies'],
   title_officer: ['Dashboard', 'Orders', 'Documents', 'Vendor Actions'],
   escrow_officer: ['Dashboard', 'Orders', 'Documents', 'Vendor Actions'],
+  open_order_team: ['Dashboard', 'Orders', 'Open Order (On Behalf)', 'Contacts & Companies'],
 };
 
 export function getNavItemsForRole(role: string): NavItem[] {
@@ -41,6 +43,7 @@ const FEATURES_BY_ROLE: Record<string, Feature[]> = {
   sales_rep: ['orders', 'contacts', 'dashboard'],
   title_officer: ['orders', 'documents', 'vendor_actions', 'dashboard'],
   escrow_officer: ['orders', 'documents', 'vendor_actions', 'dashboard'],
+  open_order_team: ['orders', 'contacts', 'dashboard'],
 };
 
 export function canAccessFeature(role: string, feature: Feature): boolean {

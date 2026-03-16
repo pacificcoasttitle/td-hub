@@ -15,6 +15,13 @@
       "when": 1773343246943,
       "tag": "0001_dry_hobgoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1773692796867,
+      "tag": "0002_keen_the_captain",
+      "breakpoints": true
     }
   ]
 }

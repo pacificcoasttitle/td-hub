@@ -24,6 +24,7 @@ export const branches = pgTable('branches', {
 export const profileRoleEnum = pgEnum('profile_role', [
   'super_admin', 'admin', 'cs_admin',
   'sales_rep', 'title_officer', 'escrow_officer',
+  'open_order_team',
   'client',
 ]);
 

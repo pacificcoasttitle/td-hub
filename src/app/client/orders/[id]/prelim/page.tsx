@@ -73,7 +73,11 @@ export default function ClientPrelimPage() {
     setFetching(true);
     setFetchResult(null);
     try {
-      const res = await fetch(`/api/orders/${orderId}/fetch-prelim`, { method: 'POST' });
+      const res = await fetch(`/api/client/orders/${orderId}/prelim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'fetch' }),
+      });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? 'Request failed');
       const count = body?.documentsFound ?? 0;

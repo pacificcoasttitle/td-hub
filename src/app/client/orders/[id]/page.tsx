@@ -141,7 +141,22 @@ export default function ClientOrderDetailPage() {
 
       {/* Tab Content */}
       <div className="bg-white rounded-lg border border-gray-200">
-        {activeTab === 'Timeline' && <OrderTimeline orderId={order.id} />}
+        {activeTab === 'Timeline' && (
+          <div>
+            <OrderTimeline orderId={order.id} />
+            <div className="px-4 sm:px-6 pb-5">
+              <Link
+                href={`/client/orders/${order.id}/fees`}
+                className="inline-flex items-center gap-2 text-sm font-medium text-[#1B2A4A] hover:underline min-h-[44px]"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                View Fee Estimate →
+              </Link>
+            </div>
+          </div>
+        )}
         {activeTab === 'Property' && <PropertyTab property={order.property} />}
         {activeTab === 'Documents' && <DocumentsTab documents={order.documents} orderId={order.id} />}
       </div>

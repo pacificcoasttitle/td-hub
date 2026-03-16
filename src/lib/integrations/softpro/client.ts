@@ -5,6 +5,7 @@ import {
   SoftProLookupItem,
   SoftProOrderContactsData,
   SoftProAttachedDocument,
+  SoftProFeeResponse,
   SOFTPRO_ENDPOINTS,
 } from './types';
 import { db } from '@/lib/db/client';
@@ -254,6 +255,15 @@ export async function addNotes(
   return makeRequest<{ success: boolean }>('POST', SOFTPRO_ENDPOINTS.addNote, {
     body,
     operation: 'add_notes',
+  });
+}
+
+export async function getFees(
+  orderNumber: string,
+): Promise<VendorResult<SoftProFeeResponse>> {
+  return makeRequest<SoftProFeeResponse>('GET', SOFTPRO_ENDPOINTS.getFees, {
+    queryParams: { orderNumber },
+    operation: 'get_fees',
   });
 }
 

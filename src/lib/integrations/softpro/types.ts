@@ -81,6 +81,21 @@ export const TITLE_OFFICER_FIELDS = {
 
 export type SoftProAttachedDocument = Record<string, string>;
 
+// ─── Fee Types (from GetFees) ────────────────────────────────────────────────
+
+export interface SoftProFeeItem {
+  Description: string;
+  Amount: number;
+}
+
+export interface SoftProInvoice {
+  InvoiceNumber: string;
+  Fees: SoftProFeeItem[];
+  Total: { Amount: number };
+}
+
+export type SoftProFeeResponse = SoftProInvoice[];
+
 // ─── Endpoints ───────────────────────────────────────────────────────────────
 
 export const SOFTPRO_ENDPOINTS = {
@@ -97,6 +112,7 @@ export const SOFTPRO_ENDPOINTS = {
   addCompany: 'ordercreation/AddCompany',
   updateCompany: 'ordercreation/UpdateCompany',
   getAttachedDocuments: 'ordercreation/GetAttachedDocuments',
+  getFees: 'ordercreation/GetFees',
   updateTask: 'ordercreation/AddTask',
 } as const;
 

@@ -6,9 +6,11 @@ import { db } from '@/lib/db/client';
 import { documents, orders } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { addNotes } from '@/lib/integrations/softpro';
+import { fetchPrelimsForOrder } from '@/lib/jobs/handlers/fetch-prelims';
 
-const noteSchema = z.object({
-  text: z.string().min(1).max(5000),
+const postSchema = z.object({
+  action: z.enum(['fetch', 'note']).optional().default('note'),
+  text: z.string().min(1).max(5000).optional(),
 });
 
 export async function GET(
@@ -80,7 +82,7 @@ export async function POST(
     }
 
     const body = await req.json().catch(() => null);
-    const parsed = noteSchema.safeParse(body);
+    const parsed = postSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid input', details: parsed.error.issues }, { status: 400 });
     }
@@ -93,6 +95,20 @@ export async function POST(
 
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+
+    if (parsed.data.action === 'fetch') {
+      const documentsStored = await fetchPrelimsForOrder(orderId, order.fileNumber);
+      return NextResponse.json({
+        success: true,
+        documentsFound: documentsStored,
+        documentsStored,
+      });
+    }
+
+    // action === 'note'
+    if (!parsed.data.text) {
+      return NextResponse.json({ error: 'Text is required for notes' }, { status: 400 });
     }
 
     const result = await addNotes(order.fileNumber, parsed.data.text);

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import OrderDocuments from '@/components/admin/order-documents';
+import OrderFees from '@/components/admin/order-fees';
 import OrderCpl from '@/components/admin/order-cpl';
 import OrderTitlePoint from '@/components/admin/order-titlepoint';
 import { OrderOverviewTab } from '@/components/admin/order-tabs/order-overview-tab';
@@ -53,7 +54,7 @@ interface OrderDetail {
   statusHistory: StatusHistoryEntry[];
 }
 
-const TABS = ['Overview', 'Property', 'Documents', 'Vendor Actions', 'History'] as const;
+const TABS = ['Overview', 'Property', 'Documents', 'Fees', 'Vendor Actions', 'History'] as const;
 type Tab = (typeof TABS)[number];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -184,6 +185,7 @@ export default function OrderDetailPage() {
         {activeTab === 'Property' && <OrderPropertyTab property={order.property} orderId={order.id} />}
         {activeTab === 'History' && <OrderHistoryTab history={order.statusHistory} />}
         {activeTab === 'Documents' && <OrderDocuments orderId={order.id} />}
+        {activeTab === 'Fees' && <OrderFees orderId={order.id} />}
         {activeTab === 'Vendor Actions' && (
           <div className="divide-y divide-gray-200">
             <div className="p-6"><OrderCpl orderId={order.id} fileNumber={order.fileNumber} /></div>

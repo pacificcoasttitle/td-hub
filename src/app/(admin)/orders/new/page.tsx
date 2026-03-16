@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type {
   WizardStep, OrderTypeData, PropertyData, PartiesData,
@@ -14,10 +14,21 @@ import { Step3Parties } from '@/components/admin/new-order/step-parties';
 import { Step4Transaction } from '@/components/admin/new-order/step-transaction';
 import { Step5Contacts } from '@/components/admin/new-order/step-contacts';
 import { Step6Review } from '@/components/admin/new-order/step-review';
+import { ClientSelector, type ClientContact } from '@/components/admin/client-selector';
+
+interface SessionInfo {
+  role: string;
+  displayName: string;
+}
+
+const SELECTOR_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
 
 export default function NewOrderPage() {
-  const router = useRouter();
+  const searchParams = useSearchParams();
   const [step, setStep] = useState<WizardStep>(1);
+  const [session, setSession] = useState<SessionInfo | null>(null);
+  const [selectedClient, setSelectedClient] = useState<ClientContact | null>(null);
+  const [clientLoading, setClientLoading] = useState(false);
 
   const [orderType, setOrderType] = useState<OrderTypeData>({
     orderType: 'title_escrow', rushOrder: false, branchId: null,
@@ -41,6 +52,58 @@ export default function NewOrderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<SubmitResult | null>(null);
 
+  const showSelector = session && SELECTOR_ROLES.includes(session.role);
+
+  useEffect(() => {
+    fetch('/api/auth/session')
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d) setSession({ role: d.role, displayName: d.displayName ?? d.email }); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const clientId = searchParams.get('clientId');
+    if (clientId && session && SELECTOR_ROLES.includes(session.role)) {
+      setClientLoading(true);
+      fetch(`/api/contacts/${clientId}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((c) => { if (c) handleClientSelect(c); })
+        .catch(() => {})
+        .finally(() => setClientLoading(false));
+    }
+  }, [searchParams, session]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleClientSelect(client: ClientContact) {
+    setSelectedClient(client);
+    if (client.fullName) {
+      const parts = client.fullName.split(' ');
+      const firstName = parts[0] ?? '';
+      const lastName = parts.length > 1 ? parts[parts.length - 1] : '';
+      const middleName = parts.length > 2 ? parts.slice(1, -1).join(' ') : '';
+      setParties((prev) => ({
+        ...prev,
+        buyer: { firstName, middleName, lastName },
+      }));
+    }
+    if (client.companyName) {
+      setParties((prev) => ({
+        ...prev,
+        buyerIsOrg: true,
+        orgType: prev.orgType || '',
+      }));
+    }
+  }
+
+  function handleClientClear() {
+    setSelectedClient(null);
+    setParties((prev) => ({
+      ...prev,
+      buyer: { ...EMPTY_PERSON },
+      buyerIsOrg: false,
+      orgType: '',
+    }));
+  }
+
   function goTo(s: WizardStep) { setStep(s); }
   function next() { if (step < 6) setStep((step + 1) as WizardStep); }
   function prev() { if (step > 1) setStep((step - 1) as WizardStep); }
@@ -51,6 +114,7 @@ export default function NewOrderPage() {
     setParties({ seller: { ...EMPTY_PERSON }, secondarySeller: { ...EMPTY_PERSON }, hasSecondarySeller: false, buyer: { ...EMPTY_PERSON }, secondaryBuyer: { ...EMPTY_PERSON }, hasSecondaryBuyer: false, buyerIsOrg: false, orgType: '' });
     setTransaction({ transactionType: '', productType: '', escrowNumber: '', salesAmount: '', loanNumber: '', loanAmount: '', coverageAmount: '', underwriter: '' });
     setContacts({ escrowCompany: null, lender: null, buyerAgent: null, listingAgent: null, titleOfficer: null });
+    setSelectedClient(null);
     setSubmitting(false);
     setResult(null);
   }
@@ -62,7 +126,10 @@ export default function NewOrderPage() {
       const res = await fetch('/api/orders/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderType, property, parties, transaction, contacts }),
+        body: JSON.stringify({
+          orderType, property, parties, transaction, contacts,
+          clientId: selectedClient?.id ?? null,
+        }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? `Order creation failed (${res.status})`);
@@ -93,6 +160,44 @@ export default function NewOrderPage() {
           <p className="text-sm text-[#6B7280] mt-0.5">Create a title/escrow order and send to SoftPro</p>
         </div>
       </div>
+
+      {/* Client Selector (for admin/open_order_team roles) */}
+      {showSelector && (
+        <div className="max-w-3xl mb-6">
+          <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <svg className="h-4 w-4 text-[#1B2A4A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Client</p>
+            </div>
+            {clientLoading ? (
+              <div className="h-10 bg-gray-100 rounded-lg animate-pulse" />
+            ) : (
+              <ClientSelector
+                selected={selectedClient}
+                onSelect={handleClientSelect}
+                onClear={handleClientClear}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* "Opening on behalf of" banner */}
+      {showSelector && selectedClient && (
+        <div className="max-w-3xl mb-6">
+          <div className="bg-[#C5A55A]/10 border border-[#C5A55A]/20 rounded-lg px-4 py-2.5 flex items-center gap-2">
+            <svg className="h-4 w-4 text-[#8B7340] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-sm text-[#8B7340]">
+              Opening on behalf of: <span className="font-semibold">{selectedClient.fullName ?? selectedClient.companyName}</span>
+              {selectedClient.email && <span className="text-[#8B7340]/60"> ({selectedClient.email})</span>}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Progress Bar */}
       <div className="flex items-center gap-1 mb-8 overflow-x-auto pb-1">

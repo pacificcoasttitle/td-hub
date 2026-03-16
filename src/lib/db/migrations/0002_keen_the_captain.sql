@@ -1,0 +1,1 @@
+ALTER TYPE "public"."profile_role" ADD VALUE 'open_order_team' BEFORE 'client';

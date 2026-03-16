@@ -1,16 +1,18 @@
-import https from 'https';
 import { parseStringPromise } from 'xml2js';
 import { vendorSuccess, vendorError } from '@/lib/integrations/types';
 import type { VendorResult } from '@/lib/integrations/types';
 import type {
-  TitlePointCreateInput,
-  TitlePointCreateResponse,
-  TitlePointSummaryResponse,
-  TitlePointResultResponse,
+  TitlePointCreateInput, TitlePointCreateResponse,
+  TitlePointSummaryResponse, TitlePointResultResponse,
   TitlePointImageResponse,
-  TitlePointSearchType,
 } from './types';
-import { VENDOR, logRequest, MOCK_PDF_BASE64, pollCounts, delay } from './logging';
+import { VENDOR, logRequest } from './logging';
+import { rawPost, buildRawBody, dig, extractXmlResult } from './http';
+import { SERVICE_TYPE_MAP, buildParameters } from './params';
+import {
+  mockCreateService, mockGetRequestSummaries, mockGetResult,
+  mockRequestImage, mockGetImage,
+} from './mocks';
 
 // ─── Endpoint Paths ──────────────────────────────────────────────────────────
 
@@ -38,97 +40,6 @@ function getConfig() {
   };
 }
 
-// ─── Raw HTTP Transport ─────────────────────────────────────────────────────
-// TitlePoint's FortiWeb WAF blocks requests where special characters (#, ;)
-// are URL-encoded. The legacy PHP sends a raw body via curl_post() with
-// CURLOPT_POSTFIELDS as a string — characters like # ; and spaces are NOT
-// encoded. Node's fetch/URLSearchParams always encodes them, triggering the
-// WAF. We use Node https.request to send a truly raw body.
-
-function rawPost(url: string, rawBody: string, timeoutMs = 30_000): Promise<{ status: number; body: string }> {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const req = https.request({
-      hostname: parsed.hostname,
-      port: parsed.port ? Number(parsed.port) : 443,
-      path: parsed.pathname + parsed.search,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(rawBody),
-      },
-    }, (res) => {
-      let data = '';
-      res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
-    });
-    req.on('error', reject);
-    const timer = setTimeout(() => { req.destroy(); reject(new Error('TitlePoint request timeout')); }, timeoutMs);
-    req.on('close', () => clearTimeout(timer));
-    req.write(rawBody);
-    req.end();
-  });
-}
-
-function buildRawBody(params: Record<string, string>): string {
-  return Object.entries(params)
-    .map(([key, value]) => `${key}=${value}`)
-    .join('&') + '&';
-}
-
-// ─── XML Helpers ────────────────────────────────────────────────────────────
-
-function dig(obj: unknown, ...keys: string[]): unknown {
-  let current = obj;
-  for (const key of keys) {
-    if (current == null || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[key];
-  }
-  return current;
-}
-
-function extractXmlResult(parsed: Record<string, unknown>, rootTag: string): Record<string, unknown> {
-  const root = parsed[rootTag] ?? parsed;
-  return (typeof root === 'object' && root !== null ? root : {}) as Record<string, unknown>;
-}
-
-// ─── Service Type Mapping ────────────────────────────────────────────────────
-
-const SERVICE_TYPE_MAP: Record<TitlePointSearchType, string> = {
-  geo_address: 'TitlePoint.Geo.Address',
-  tax: 'TitlePoint.TaxSearch',
-  legal_vesting: 'TitlePoint.LegalAndVesting2',
-  grant_deed: 'TitlePoint.Geo.Address',
-};
-
-function buildParameters(input: TitlePointCreateInput): string {
-  switch (input.searchType) {
-    case 'tax':
-      return [
-        `APN=${input.fips ?? ''}`,
-        'Property.AutoSearchTaxes=True',
-        'Property.AutoSearchProperty=True',
-      ].join(';');
-    case 'legal_vesting':
-      return [
-        input.fips ? `FIPS=${input.fips}` : '',
-        `APN=${input.fips ?? ''}`,
-        `Address1=${input.address}`,
-        `City=${input.city}`,
-      ].filter(Boolean).join(';');
-    default:
-      return [
-        `Address.FullAddress=${input.address}`,
-        'General.AutoSearchTaxes=False',
-        'Tax.CurrentYearTaxesOnly=False',
-        'General.AutoSearchProperty=True',
-        'General.AutoSearchOwnerNames=False',
-        'General.AutoSearchStarters=False',
-        'Property.IntelligentPropertyGrouping=true',
-      ].join(';') + ';';
-  }
-}
-
 // ─── CreateService ───────────────────────────────────────────────────────────
 
 export async function createService(
@@ -146,17 +57,11 @@ export async function createService(
 
   try {
     const params: Record<string, string> = {
-      userID: cfg.userID,
-      password: cfg.password,
+      userID: cfg.userID, password: cfg.password,
       serviceType: SERVICE_TYPE_MAP[input.searchType],
       parameters: buildParameters(input),
-      department: '',
-      orderNo: orderId ? String(orderId) : '',
-      customerRef: '',
-      company: '',
-      titleOfficer: '',
-      orderComment: '',
-      starterRemarks: '',
+      department: '', orderNo: '', customerRef: orderId ? String(orderId) : '',
+      company: '', titleOfficer: '', orderComment: '', starterRemarks: '',
     };
 
     if (isLV) {
@@ -176,10 +81,7 @@ export async function createService(
     const tpOrderId = String(result.OrderID ?? '');
 
     if (returnStatus !== 'Success') {
-      const errDesc = String(
-        dig(result, 'ReturnErrors', 'ReturnError', 'ErrorDescription') ??
-        result.Message ?? `TitlePoint returned ${returnStatus}`
-      );
+      const errDesc = String(dig(result, 'ReturnErrors', 'ReturnError', 'ErrorDescription') ?? result.Message ?? `TitlePoint returned ${returnStatus}`);
       await logRequest({ operation: 'create_service', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'TP_ERROR', requestMeta: { searchType: input.searchType, endpoint }, responseMeta: { returnStatus, error: errDesc } });
       return vendorError(VENDOR, 'CREATE_SERVICE_FAILED', errDesc, { requestId, durationMs: Date.now() - startedAt.getTime() });
     }
@@ -211,13 +113,8 @@ export async function getRequestSummaries(
   try {
     const url = `${cfg.baseUrl}${TP_ENDPOINTS.getRequestSummaries}?`;
     const { status: httpStatus, body: xml } = await rawPost(url, buildRawBody({
-      userID: cfg.userID,
-      password: cfg.password,
-      requestID: tpRequestId,
-      company: '',
-      department: '',
-      titleOfficer: '',
-      maxWaitSeconds: '15',
+      userID: cfg.userID, password: cfg.password,
+      requestID: tpRequestId, company: '', department: '', titleOfficer: '', maxWaitSeconds: '15',
     }));
     const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
     const result = extractXmlResult(parsed, 'GetRequestSummariesReturn');
@@ -235,6 +132,7 @@ export async function getRequestSummaries(
 
     let status: 'pending' | 'success' | 'failed' = 'pending';
     const serviceIds: string[] = [];
+    const resultIds: string[] = [];
     let message: string | undefined;
 
     for (const s of summaryList) {
@@ -247,6 +145,12 @@ export async function getRequestSummaries(
         for (const svc of svcList) {
           const sid = typeof svc === 'string' ? svc : String(dig(svc, 'ID') ?? dig(svc, 'ServiceID') ?? '');
           if (sid) serviceIds.push(sid);
+          const thumbs = dig(svc, 'ThumbNails', 'ResultThumbNail');
+          const thumbList = Array.isArray(thumbs) ? thumbs : thumbs ? [thumbs] : [];
+          for (const t of thumbList) {
+            const rid = String(dig(t, 'ID') ?? '');
+            if (rid && rid !== '0') resultIds.push(rid);
+          }
         }
         const directSid = String(dig(s, 'ServiceID') ?? '');
         if (directSid && !serviceIds.includes(directSid)) serviceIds.push(directSid);
@@ -256,7 +160,7 @@ export async function getRequestSummaries(
       }
     }
 
-    const response: TitlePointSummaryResponse = { status, serviceIds, message };
+    const response: TitlePointSummaryResponse = { status, serviceIds, resultIds, message };
     await logRequest({ operation: 'get_request_summaries', orderId, requestId, startedAt, success: true, httpStatus, requestMeta: { tpRequestId }, responseMeta: { status, serviceCount: serviceIds.length } });
     return vendorSuccess(response, { requestId, durationMs: Date.now() - startedAt.getTime() });
   } catch (err) {
@@ -281,15 +185,11 @@ export async function getResult(
   try {
     const url = `${cfg.baseUrl}${TP_ENDPOINTS.getResultById3}?`;
     const { status: httpStatus, body: xml } = await rawPost(url, buildRawBody({
-      userID: cfg.userID,
-      password: cfg.password,
-      serviceID: serviceId,
-      company: '',
-      department: '',
-      titleOfficer: '',
+      userID: cfg.userID, password: cfg.password,
+      resultID: serviceId, requestingTPXML: 'true', company: '', department: '', titleOfficer: '',
     }));
     const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
-    const result = extractXmlResult(parsed, 'GetResultByID3Return') as Record<string, unknown>;
+    const result = extractXmlResult(parsed, 'GetResultReturn', 'GetResultByID3Return') as Record<string, unknown>;
 
     const returnStatus = String(result.ReturnStatus ?? '');
     const resultData = (result.ResultData ?? result.ServiceResult ?? result) as Record<string, unknown>;
@@ -319,16 +219,12 @@ export async function requestImage(
   try {
     const url = `${cfg.baseUrl}${TP_ENDPOINTS.createRequest3}?`;
     const { status: httpStatus, body: xml } = await rawPost(url, buildRawBody({
-      userID: cfg.userID,
-      password: cfg.password,
-      serviceId1: serviceId,
-      fileType: 'pdf',
-      company: '',
-      department: '',
-      titleOfficer: '',
+      username: cfg.userID, password: cfg.password,
+      serviceId1: serviceId, fileType: 'pdf', source: '', clientKey1: '', clientKey2: '',
+      sortOrder: '', serviceId2: '', serviceId3: '', serviceId4: '', serviceId5: '',
     }));
     const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
-    const result = extractXmlResult(parsed, 'CreateRequest3Return') as Record<string, unknown>;
+    const result = extractXmlResult(parsed, 'CreateAsynchServicesReturn', 'CreateRequest3Return') as Record<string, unknown>;
 
     const returnStatus = String(result.ReturnStatus ?? '');
     const imgRequestId = String(result.RequestID ?? '');
@@ -341,10 +237,7 @@ export async function requestImage(
     }
 
     await logRequest({ operation: 'request_image', orderId, requestId, startedAt, success: true, httpStatus, requestMeta: { serviceId }, responseMeta: { imgRequestId } });
-    return vendorSuccess(
-      { requestId: imgRequestId, orderId: imgOrderId },
-      { requestId, durationMs: Date.now() - startedAt.getTime() }
-    );
+    return vendorSuccess({ requestId: imgRequestId, orderId: imgOrderId }, { requestId, durationMs: Date.now() - startedAt.getTime() });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     await logRequest({ operation: 'request_image', orderId, requestId, startedAt, success: false, errorCategory: 'image_request_failed' });
@@ -364,33 +257,48 @@ export async function getImage(
 
   if (!cfg) return mockGetImage(imgRequestId, orderId, requestId, startedAt);
 
+  const MAX_POLLS = 10;
+  const POLL_INTERVAL_MS = 5_000;
+
   try {
     const url = `${cfg.baseUrl}${TP_ENDPOINTS.getGeneratedImage}?`;
-    const { status: httpStatus, body: xml } = await rawPost(url, buildRawBody({
-      userID: cfg.userID,
-      password: cfg.password,
-      requestID: imgRequestId,
-      company: '',
-      department: '',
-      titleOfficer: '',
-    }));
-    const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
-    const result = extractXmlResult(parsed, 'GetGeneratedImageReturn') as Record<string, unknown>;
+    const body = buildRawBody({ username: cfg.userID, password: cfg.password, requestID: imgRequestId });
 
-    const returnStatus = String(result.ReturnStatus ?? '');
-    const base64Data = String(
-      result.Base64Data ?? result.ImageData ?? result.FileData ?? ''
-    );
-    const imgStatus = String(result.Status ?? returnStatus);
+    for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
+      const { status: httpStatus, body: xml } = await rawPost(url, body);
+      const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+      const result = extractXmlResult(parsed, 'GenerateImageData', 'GetGeneratedImageReturn') as Record<string, unknown>;
 
-    if (!base64Data) {
-      await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'TP_NO_IMAGE', requestMeta: { imgRequestId } });
-      return vendorError(VENDOR, 'IMAGE_FETCH_FAILED', 'No image data in response', { requestId, durationMs: Date.now() - startedAt.getTime() });
+      const returnStatus = String(result.ReturnStatus ?? '');
+      const imgStatus = String(result.Status ?? returnStatus).toLowerCase();
+
+      if (imgStatus === 'processing' || imgStatus === 'pending') {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+        continue;
+      }
+
+      if (returnStatus !== 'Success') {
+        const msg = String(dig(result, 'ReturnErrors', 'ReturnError', 'ErrorDescription') ?? `Image generation returned ${returnStatus}`);
+        await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'TP_IMAGE_ERROR', requestMeta: { imgRequestId } });
+        return vendorError(VENDOR, 'IMAGE_FETCH_FAILED', msg, { requestId, durationMs: Date.now() - startedAt.getTime() });
+      }
+
+      const docs = dig(result, 'Documents', 'DocumentResponse', 'Document');
+      const docNode = Array.isArray(docs) ? docs[0] : docs;
+      const base64Data = String(dig(docNode, 'Body', 'Data') ?? dig(docNode, 'Body', 'Body') ?? result.Data ?? result.Base64Data ?? result.ImageData ?? '');
+
+      if (!base64Data) {
+        await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'TP_NO_IMAGE', requestMeta: { imgRequestId } });
+        return vendorError(VENDOR, 'IMAGE_FETCH_FAILED', 'No image data in response', { requestId, durationMs: Date.now() - startedAt.getTime() });
+      }
+
+      const response: TitlePointImageResponse = { base64Data, status: imgStatus, returnStatus };
+      await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: true, httpStatus, requestMeta: { imgRequestId }, responseMeta: { size: base64Data.length } });
+      return vendorSuccess(response, { requestId, durationMs: Date.now() - startedAt.getTime() });
     }
 
-    const response: TitlePointImageResponse = { base64Data, status: imgStatus, returnStatus };
-    await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: true, httpStatus, requestMeta: { imgRequestId }, responseMeta: { size: base64Data.length } });
-    return vendorSuccess(response, { requestId, durationMs: Date.now() - startedAt.getTime() });
+    await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: false, errorCategory: 'TP_IMAGE_TIMEOUT', requestMeta: { imgRequestId } });
+    return vendorError(VENDOR, 'IMAGE_FETCH_FAILED', `Image generation timed out after ${MAX_POLLS} polls`, { requestId, durationMs: Date.now() - startedAt.getTime() });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: false, errorCategory: 'image_fetch_failed' });
@@ -398,64 +306,3 @@ export async function getImage(
   }
 }
 
-// ─── Mock Fallbacks ─────────────────────────────────────────────────────────
-
-async function mockCreateService(
-  input: TitlePointCreateInput, orderId: number | undefined, requestId: string, startedAt: Date,
-): Promise<VendorResult<TitlePointCreateResponse>> {
-  await delay(40);
-  const tpRequestId = `REQ-${Date.now()}`;
-  const tpOrderId = `ORD-${Date.now()}`;
-  await logRequest({ operation: 'create_service', orderId, requestId, startedAt, success: true, httpStatus: 200, requestMeta: { searchType: input.searchType, address: input.address, mock: true }, responseMeta: { tpRequestId, tpOrderId } });
-  return vendorSuccess<TitlePointCreateResponse>(
-    { requestId: tpRequestId, orderId: tpOrderId, returnStatus: 'OK' },
-    { requestId, durationMs: Date.now() - startedAt.getTime() }
-  );
-}
-
-async function mockGetRequestSummaries(
-  tpRequestId: string, orderId: number | undefined, requestId: string, startedAt: Date,
-): Promise<VendorResult<TitlePointSummaryResponse>> {
-  await delay(30);
-  const count = (pollCounts.get(tpRequestId) ?? 0) + 1;
-  pollCounts.set(tpRequestId, count);
-  const isPending = count === 1;
-  const response: TitlePointSummaryResponse = isPending
-    ? { status: 'pending', serviceIds: [], message: 'Processing...' }
-    : { status: 'success', serviceIds: [`SVC-${tpRequestId}-001`] };
-  if (!isPending) pollCounts.delete(tpRequestId);
-  await logRequest({ operation: 'get_request_summaries', orderId, requestId, startedAt, success: true, httpStatus: 200, requestMeta: { tpRequestId, pollCount: count, mock: true }, responseMeta: { status: response.status, serviceCount: response.serviceIds.length } });
-  return vendorSuccess(response, { requestId, durationMs: Date.now() - startedAt.getTime() });
-}
-
-async function mockGetResult(
-  serviceId: string, orderId: number | undefined, requestId: string, startedAt: Date,
-): Promise<VendorResult<TitlePointResultResponse>> {
-  await delay(30);
-  const response: TitlePointResultResponse = {
-    serviceId,
-    data: { propertyAddress: '123 Main St', city: 'Glendale', state: 'CA', zip: '91203', owner: 'John Doe & Jane Doe', legalDescription: 'Lot 1, Block A, Tract 12345', apn: '5678-001-001' },
-    returnStatus: 'Success',
-  };
-  await logRequest({ operation: 'get_result', orderId, requestId, startedAt, success: true, httpStatus: 200, requestMeta: { serviceId, mock: true } });
-  return vendorSuccess(response, { requestId, durationMs: Date.now() - startedAt.getTime() });
-}
-
-async function mockRequestImage(
-  serviceId: string, orderId: number | undefined, requestId: string, startedAt: Date,
-): Promise<VendorResult<{ requestId: string; orderId: string }>> {
-  await delay(20);
-  const imgRequestId = `IMG-${Date.now()}`;
-  const imgOrderId = `IORD-${Date.now()}`;
-  await logRequest({ operation: 'request_image', orderId, requestId, startedAt, success: true, httpStatus: 200, requestMeta: { serviceId, mock: true }, responseMeta: { imgRequestId } });
-  return vendorSuccess({ requestId: imgRequestId, orderId: imgOrderId }, { requestId, durationMs: Date.now() - startedAt.getTime() });
-}
-
-async function mockGetImage(
-  imgRequestId: string, orderId: number | undefined, requestId: string, startedAt: Date,
-): Promise<VendorResult<TitlePointImageResponse>> {
-  await delay(30);
-  const response: TitlePointImageResponse = { base64Data: MOCK_PDF_BASE64, status: 'Success', returnStatus: 'OK' };
-  await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: true, httpStatus: 200, requestMeta: { imgRequestId, mock: true } });
-  return vendorSuccess(response, { requestId, durationMs: Date.now() - startedAt.getTime() });
-}

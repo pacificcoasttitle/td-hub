@@ -13,6 +13,7 @@ export interface TitlePointCreateResponse {
 export interface TitlePointSummaryResponse {
   status: 'pending' | 'success' | 'failed';
   serviceIds: string[];
+  resultIds: string[];
   message?: string;
 }
 

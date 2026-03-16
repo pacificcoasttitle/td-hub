@@ -1,0 +1,94 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Pacific Coast Title Brand Colors */
+  --navy: #1B2A4A;
+  --orange: #F26B2B;
+  --warm-white: #FAFAFA;
+  --pure-white: #FFFFFF;
+  --body-gray: #4B5563;
+  --success: #059669;
+  --warning: #D97706;
+  --error: #DC2626;
+  
+  /* Semantic tokens */
+  --background: #FAFAFA;
+  --foreground: #1B2A4A;
+  --card: #FFFFFF;
+  --card-foreground: #1B2A4A;
+  --popover: #FFFFFF;
+  --popover-foreground: #1B2A4A;
+  --primary: #F26B2B;
+  --primary-foreground: #FFFFFF;
+  --secondary: #1B2A4A;
+  --secondary-foreground: #FFFFFF;
+  --muted: #F3F4F6;
+  --muted-foreground: #4B5563;
+  --accent: #F26B2B;
+  --accent-foreground: #FFFFFF;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --border: #E5E7EB;
+  --input: #E5E7EB;
+  --ring: #F26B2B;
+  --radius: 0.75rem;
+  
+  /* Status colors */
+  --status-open: #DBEAFE;
+  --status-open-text: #1E40AF;
+  --status-in-process: #FEF3C7;
+  --status-in-process-text: #92400E;
+  --status-completed: #D1FAE5;
+  --status-completed-text: #065F46;
+  --status-closed: #F1F5F9;
+  --status-closed-text: #475569;
+}
+
+@theme inline {
+  --font-sans: 'Inter', 'Inter Fallback', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback', monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  
+  /* Custom colors for Pacific Coast Title */
+  --color-navy: var(--navy);
+  --color-orange: var(--orange);
+  --color-warm-white: var(--warm-white);
+  --color-body-gray: var(--body-gray);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

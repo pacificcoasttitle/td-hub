@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { EmptyState } from '@/components/client/empty-state';
+import { STATUS_STYLES, formatDate } from '@/components/client/order-detail/helpers';
 
 interface Order {
   id: number;
@@ -15,172 +17,198 @@ interface Order {
   state: string | null;
 }
 
-interface DashboardData {
-  orders: Order[];
-  total: number;
+interface Profile {
+  displayName: string;
+  email: string;
 }
-
-const STATUS_STYLES: Record<string, string> = {
-  open: 'bg-blue-50 text-blue-700',
-  in_process: 'bg-amber-50 text-amber-700',
-  completed: 'bg-green-50 text-green-700',
-  closed: 'bg-slate-100 text-slate-600',
-  canceled: 'bg-red-50 text-red-700',
-};
-
-const ACTIONS = [
-  {
-    label: 'Open New Order',
-    sub: 'Start a title or escrow order',
-    href: '/client/orders/new',
-    icon: 'M12 4v16m8-8H4',
-  },
-  {
-    label: 'My Orders',
-    sub: 'View all your orders',
-    href: '/client/orders',
-    icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
-  },
-  {
-    label: 'Fee Estimates',
-    sub: 'View fees for your orders',
-    href: '/client/orders',
-    icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
-  },
-  {
-    label: 'Review Prelim',
-    sub: 'Check your preliminary report',
-    href: '/client/orders',
-    icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
-  },
-  {
-    label: 'My Documents',
-    sub: 'Download order documents',
-    href: '/client/orders',
-    icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4',
-  },
-];
 
 export default function ClientDashboardPage() {
   const router = useRouter();
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<Profile | null>(null);
 
   const fetchData = useCallback(() => {
-    fetch('/api/client/orders?page=1&pageSize=8')
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => setData(d))
+    Promise.all([
+      fetch('/api/client/orders?page=1&pageSize=12').then((r) => r.ok ? r.json() : null),
+      fetch('/api/client/profile').then((r) => r.ok ? r.json() : null),
+    ])
+      .then(([orderData, prof]) => {
+        if (orderData) { setOrders(orderData.orders ?? []); setTotal(orderData.total ?? 0); }
+        if (prof) setProfile(prof);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const firstName = profile?.displayName?.split(' ')[0] ?? 'there';
+  const activeCount = orders.filter((o) => o.operationalStatus === 'open' || o.operationalStatus === 'in_process').length;
+
   return (
-    <div className="px-1 sm:px-0">
-      <div className="mb-6 sm:mb-8">
-        <h1 className="text-xl sm:text-2xl font-semibold text-[#1A1A2E]">Welcome back</h1>
-        <p className="text-sm text-[#6B7280] mt-0.5">Manage your title and escrow transactions</p>
+    <div className="max-w-7xl mx-auto">
+      {/* Welcome Section */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 sm:mb-10">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-semibold text-[#1B2A4A] mb-1">
+            Welcome back, {firstName}
+          </h1>
+          <p className="text-[#4B5563]">
+            You have {activeCount} active {activeCount === 1 ? 'file' : 'files'}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/client/orders"
+            className="px-4 py-2.5 text-sm font-medium border border-[#1B2A4A] text-[#1B2A4A] rounded-lg hover:bg-[#1B2A4A]/5 transition-colors h-11 inline-flex items-center gap-2"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            Upload Document
+          </Link>
+          <Link
+            href="/client/orders/new"
+            className="px-4 py-2.5 text-sm font-medium bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] transition-colors h-11 inline-flex items-center gap-2"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Open New Order
+          </Link>
+        </div>
       </div>
 
-      {/* Action Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-8">
-        {ACTIONS.map((a) => (
+      {loading ? (
+        <DashboardSkeleton />
+      ) : orders.length === 0 ? (
+        <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm">
+          <EmptyState type="no-files" />
+        </div>
+      ) : (
+        <>
+          {/* File Cards Grid */}
+          <section className="mb-12">
+            <h2 className="text-lg font-semibold text-[#1B2A4A] mb-6">Your Files</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {orders.map((o) => (
+                <FileCard key={o.id} order={o} />
+              ))}
+            </div>
+          </section>
+
+          {/* Recent Activity */}
+          <section>
+            <h2 className="text-lg font-semibold text-[#1B2A4A] mb-6">Recent Activity</h2>
+            <div className="space-y-3">
+              {orders.slice(0, 6).map((o) => {
+                const addr = [o.address, o.city, o.state].filter(Boolean).join(', ');
+                return (
+                  <Link
+                    key={o.id}
+                    href={`/client/orders/${o.id}`}
+                    className="flex items-start gap-4 p-4 bg-white rounded-xl border border-[#E5E7EB] hover:shadow-sm transition-shadow"
+                  >
+                    <div className="flex-shrink-0 p-2 bg-[#DBEAFE] rounded-lg">
+                      <svg className="h-4 w-4 text-[#1E40AF]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-[#1B2A4A]">File opened</p>
+                      <p className="text-sm text-[#4B5563] truncate">
+                        <span className="font-mono text-xs">{o.fileNumber}</span>
+                        {addr && <> &middot; {addr}</>}
+                      </p>
+                    </div>
+                    <span className="flex-shrink-0 text-xs text-[#6B7280]">{formatDate(o.openedAt)}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─── File Card ────────────────────────────────────────────────────────────── */
+
+function FileCard({ order }: { order: Order }) {
+  const addr = [order.address, order.city, order.state].filter(Boolean).join(', ');
+  const s = STATUS_STYLES[order.operationalStatus] ?? { bg: 'bg-[#F3F4F6]', text: 'text-[#4B5563]', label: order.operationalStatus };
+
+  return (
+    <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm hover:shadow-md transition-shadow p-6">
+      <div className="flex items-start justify-between mb-4">
+        <span className="font-mono text-sm text-[#4B5563] tracking-wide">{order.fileNumber}</span>
+        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${s.bg} ${s.text}`}>
+          {s.label}
+        </span>
+      </div>
+
+      <div className="mb-4">
+        {addr ? (
+          <h3 className="text-lg font-semibold text-[#1B2A4A] leading-snug">{addr}</h3>
+        ) : (
+          <p className="text-base text-[#4B5563] italic">Property details pending</p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-4 text-sm text-[#4B5563] mb-6">
+        {order.transactionType && <span className="capitalize">{order.transactionType.replace(/_/g, ' ')}</span>}
+        {order.transactionType && order.openedAt && <span className="w-1 h-1 rounded-full bg-[#D1D5DB]" />}
+        {order.openedAt && <span>Opened {formatDate(order.openedAt)}</span>}
+      </div>
+
+      <div className="flex items-center gap-1 pt-4 border-t border-[#E5E7EB] flex-wrap">
+        {[
+          { label: 'View', href: `/client/orders/${order.id}`, icon: 'M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z' },
+          { label: 'Docs', href: `/client/orders/${order.id}?tab=documents`, icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+          { label: 'CPL', href: `/client/orders/${order.id}/cpl`, icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
+          { label: 'Prelim', href: `/client/orders/${order.id}/prelim`, icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
+          { label: 'Fees', href: `/client/orders/${order.id}/fees`, icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+        ].map((a) => (
           <Link
             key={a.label}
             href={a.href}
-            className="bg-[#1B2A4A] rounded-xl p-4 sm:p-5 hover:bg-[#243658] transition-colors group min-h-[100px] flex flex-col justify-between"
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-[#4B5563] rounded-lg hover:bg-[#F3F4F6] hover:text-[#1B2A4A] transition-colors min-h-[40px]"
           >
-            <svg className="h-6 w-6 text-white/60 group-hover:text-white/80 transition-colors mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={a.icon} />
             </svg>
-            <div>
-              <p className="text-sm font-semibold text-white">{a.label}</p>
-              <p className="text-xs text-white/50 mt-0.5 hidden sm:block">{a.sub}</p>
-            </div>
+            {a.label}
           </Link>
         ))}
-      </div>
-
-      {/* Recent Orders */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-          <h2 className="text-sm font-semibold text-[#1A1A2E]">Recent Orders</h2>
-          <Link href="/client/orders" className="text-sm font-medium text-[#1B2A4A] hover:underline">
-            View all →
-          </Link>
-        </div>
-
-        {/* Desktop table */}
-        <div className="hidden sm:block overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">File #</th>
-                <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">Address</th>
-                <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">Status</th>
-                <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">Opened</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {loading && Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i}>{Array.from({ length: 4 }).map((__, j) => (
-                  <td key={j} className="px-5 py-4"><div className="h-4 bg-gray-100 rounded animate-pulse" style={{ width: `${50 + Math.random() * 40}%` }} /></td>
-                ))}</tr>
-              ))}
-              {data?.orders.map((o) => {
-                const addr = [o.address, o.city, o.state].filter(Boolean).join(', ');
-                return (
-                  <tr key={o.id} onClick={() => router.push(`/client/orders/${o.id}`)} className="hover:bg-gray-50 cursor-pointer transition-colors">
-                    <td className="px-5 py-4 font-medium text-[#1A1A2E] whitespace-nowrap">{o.fileNumber}</td>
-                    <td className="px-5 py-4 text-[#374151] max-w-xs truncate">{addr || '—'}</td>
-                    <td className="px-5 py-4 whitespace-nowrap">
-                      <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_STYLES[o.operationalStatus] ?? 'bg-gray-50 text-gray-600'}`}>
-                        {o.operationalStatus.replace(/_/g, ' ')}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-[#6B7280] whitespace-nowrap">{formatDate(o.openedAt)}</td>
-                  </tr>
-                );
-              })}
-              {data && data.orders.length === 0 && (
-                <tr><td colSpan={4} className="px-5 py-12 text-center text-[#6B7280]">No orders yet. Open your first order above.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile list */}
-        <div className="sm:hidden divide-y divide-gray-100">
-          {loading && Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="p-4 animate-pulse"><div className="h-4 bg-gray-100 rounded w-1/2 mb-2" /><div className="h-3 bg-gray-100 rounded w-3/4" /></div>
-          ))}
-          {data?.orders.map((o) => {
-            const addr = [o.address, o.city, o.state].filter(Boolean).join(', ');
-            return (
-              <Link key={o.id} href={`/client/orders/${o.id}`} className="block p-4 hover:bg-gray-50 transition-colors min-h-[60px]">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-[#1A1A2E]">{o.fileNumber}</p>
-                    <p className="text-xs text-[#6B7280] truncate">{addr || '—'}</p>
-                  </div>
-                  <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium capitalize flex-shrink-0 ${STATUS_STYLES[o.operationalStatus] ?? 'bg-gray-50 text-gray-600'}`}>
-                    {o.operationalStatus.replace(/_/g, ' ')}
-                  </span>
-                </div>
-              </Link>
-            );
-          })}
-          {data && data.orders.length === 0 && (
-            <div className="p-8 text-center"><p className="text-sm text-[#6B7280]">No orders yet.</p></div>
-          )}
-        </div>
       </div>
     </div>
   );
 }
 
-function formatDate(d: string | null) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+/* ─── Skeleton ─────────────────────────────────────────────────────────────── */
+
+function DashboardSkeleton() {
+  return (
+    <div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="bg-white rounded-xl border border-[#E5E7EB] p-6 animate-pulse">
+            <div className="flex justify-between mb-4">
+              <div className="h-4 w-32 bg-gray-100 rounded" />
+              <div className="h-5 w-16 bg-gray-100 rounded-full" />
+            </div>
+            <div className="h-6 bg-gray-100 rounded w-3/4 mb-4" />
+            <div className="h-4 bg-gray-100 rounded w-1/2 mb-6" />
+            <div className="h-px bg-gray-100 mb-4" />
+            <div className="flex gap-2">
+              {Array.from({ length: 4 }).map((__, j) => <div key={j} className="h-8 w-14 bg-gray-100 rounded" />)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }

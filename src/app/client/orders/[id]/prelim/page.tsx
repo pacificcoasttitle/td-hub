@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { formatDate, formatFileSize } from '@/components/client/order-detail/helpers';
+import { EmptyState } from '@/components/client/empty-state';
 
 interface PrelimDoc {
   id: number;
@@ -98,65 +99,64 @@ export default function ClientPrelimPage() {
 
   if (loading) {
     return (
-      <div className="px-1 sm:px-0">
-        <div className="h-8 w-48 bg-gray-100 rounded animate-pulse mb-6" />
-        <div className="bg-white rounded-lg border border-gray-200 p-8"><div className="space-y-4">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />)}</div></div>
+      <div className="max-w-4xl mx-auto animate-pulse">
+        <div className="h-4 w-28 bg-gray-100 rounded mb-6" />
+        <div className="h-8 w-56 bg-gray-100 rounded mb-6" />
+        <div className="bg-white rounded-xl border border-[#E5E7EB] p-8"><div className="space-y-4">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-4 bg-gray-100 rounded" />)}</div></div>
       </div>
     );
   }
 
   return (
-    <div className="px-1 sm:px-0">
-      <Link href={`/client/orders/${orderId}`} className="inline-flex items-center gap-1 text-sm text-[#6B7280] hover:text-[#1A1A2E] transition-colors mb-4 min-h-[44px]">
+    <div className="max-w-4xl mx-auto">
+      <Link href={`/client/orders/${orderId}`} className="inline-flex items-center gap-2 text-sm text-[#4B5563] hover:text-[#1B2A4A] transition-colors mb-6 min-h-[44px]">
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         Back to order
       </Link>
 
-      <h1 className="text-xl sm:text-2xl font-semibold text-[#1A1A2E] mb-1">
-        Preliminary Report {fileNumber && <span className="text-[#6B7280]">— {fileNumber}</span>}
-      </h1>
-      <p className="text-sm text-[#6B7280] mb-6">Review and download your preliminary title report</p>
+      <h1 className="text-2xl sm:text-3xl font-semibold text-[#1B2A4A] mb-1">Preliminary Report</h1>
+      <p className="text-[#4B5563] mb-8">
+        {fileNumber && <><span className="font-mono text-sm">{fileNumber}</span> &middot; </>}
+        Review and download your preliminary title report
+      </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Documents */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Prelim docs */}
-          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-              <h2 className="text-sm font-semibold text-[#1A1A2E]">Prelim Documents</h2>
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E5E7EB]">
+              <h2 className="font-semibold text-[#1B2A4A]">Prelim Documents</h2>
               <button
                 onClick={handleRequestPrelim}
                 disabled={fetching}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-200 text-[#1B2A4A] rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors min-h-[44px]"
+                className="px-4 py-2 text-sm font-medium border border-[#F26B2B] text-[#F26B2B] rounded-lg hover:bg-[#F26B2B]/5 disabled:opacity-50 transition-colors min-h-[40px]"
               >
                 {fetching ? 'Checking…' : 'Request Updated Prelim'}
               </button>
             </div>
             {fetchResult && (
-              <div className={`mx-5 mt-3 px-3 py-2 rounded-lg text-xs font-medium ${
+              <div className={`mx-6 mt-4 px-4 py-3 rounded-xl text-sm font-medium ${
                 fetchResult.type === 'success' ? 'bg-green-50 border border-green-200 text-green-700'
                 : fetchResult.type === 'info' ? 'bg-blue-50 border border-blue-200 text-blue-700'
                 : 'bg-red-50 border border-red-200 text-red-700'
               }`}>{fetchResult.message}</div>
             )}
             {docs.length === 0 ? (
-              <div className="p-8 text-center">
-                <svg className="mx-auto h-8 w-8 text-[#9CA3AF] mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <p className="text-sm text-[#6B7280]">No prelim received yet.</p>
-                <p className="text-xs text-[#6B7280] mt-1">It will appear here once available from SoftPro.</p>
-              </div>
+              <EmptyState type="no-prelim" />
             ) : (
-              <div className="divide-y divide-gray-100">
+              <div className="divide-y divide-[#E5E7EB]">
                 {docs.map((doc) => (
-                  <div key={doc.id} className="px-5 py-4 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-[#1A1A2E] truncate">{doc.filename}</p>
+                  <div key={doc.id} className="px-6 py-4 flex items-center gap-4">
+                    <div className="flex-shrink-0 p-3 bg-[#DBEAFE] rounded-lg">
+                      <svg className="h-5 w-5 text-[#1E40AF]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-[#1B2A4A] truncate">{doc.filename}</p>
                       <p className="text-xs text-[#6B7280]">{formatDate(doc.createdAt)}{doc.sizeBytes ? ` · ${formatFileSize(doc.sizeBytes)}` : ''}</p>
                     </div>
-                    <a href={`/api/documents/${doc.id}/download`} className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium text-white bg-[#1B2A4A] rounded-lg hover:bg-[#243658] transition-colors min-h-[44px] flex-shrink-0">
-                      View / Download
+                    <a href={`/api/documents/${doc.id}/download`} className="flex-shrink-0 px-4 py-2 text-sm font-medium border border-[#F26B2B] text-[#F26B2B] rounded-lg hover:bg-[#F26B2B]/5 transition-colors inline-flex items-center gap-1.5 min-h-[40px]">
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                      Download
                     </a>
                   </div>
                 ))}
@@ -164,17 +164,15 @@ export default function ClientPrelimPage() {
             )}
           </div>
 
-          {/* TESSA placeholder */}
-          <div className="bg-white rounded-lg border border-gray-200 p-5">
+          {/* AI Analysis placeholder */}
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-6">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-lg bg-[#1B2A4A]/10 flex items-center justify-center flex-shrink-0">
-                <svg className="h-5 w-5 text-[#1B2A4A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
+              <div className="h-10 w-10 rounded-lg bg-[#F3F4F6] flex items-center justify-center flex-shrink-0">
+                <svg className="h-5 w-5 text-[#4B5563]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
               </div>
               <div>
-                <p className="text-sm font-medium text-[#1A1A2E]">AI Analysis</p>
-                <p className="text-xs text-[#6B7280]">Automated prelim analysis coming soon</p>
+                <p className="font-medium text-[#1B2A4A]">AI Analysis</p>
+                <p className="text-sm text-[#4B5563]">Automated prelim analysis coming soon</p>
               </div>
             </div>
           </div>
@@ -182,22 +180,22 @@ export default function ClientPrelimPage() {
 
         {/* Right: Notes */}
         <div className="space-y-6">
-          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-200">
-              <h2 className="text-sm font-semibold text-[#1A1A2E]">Notes</h2>
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-[#E5E7EB]">
+              <h2 className="font-semibold text-[#1B2A4A]">Notes</h2>
             </div>
-            <div className="p-4">
+            <div className="p-5">
               <textarea
                 value={noteText}
                 onChange={(e) => setNoteText(e.target.value)}
                 placeholder="Add a note about this prelim…"
                 rows={3}
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm resize-none min-h-[80px] focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20"
+                className="w-full px-4 py-3 border border-[#E5E7EB] rounded-lg text-sm text-[#1B2A4A] placeholder:text-[#9CA3AF] resize-none focus:outline-none focus:ring-2 focus:ring-[#F26B2B]/20 focus:border-[#F26B2B]"
               />
               <button
                 onClick={handleAddNote}
                 disabled={savingNote || !noteText.trim()}
-                className="mt-2 px-4 py-2.5 text-sm font-medium bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] disabled:opacity-50 transition-colors min-h-[44px] w-full"
+                className="mt-3 w-full px-4 py-2.5 text-sm font-medium bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors min-h-[44px]"
               >
                 {savingNote ? 'Saving…' : 'Add Note'}
               </button>
@@ -207,18 +205,20 @@ export default function ClientPrelimPage() {
                 }`}>{noteResult.message}</div>
               )}
             </div>
-            {notes.length > 0 && (
-              <div className="border-t border-gray-200 divide-y divide-gray-100 max-h-80 overflow-y-auto">
+            {notes.length > 0 ? (
+              <div className="border-t border-[#E5E7EB] divide-y divide-[#E5E7EB] max-h-80 overflow-y-auto">
                 {notes.map((n) => (
-                  <div key={n.id} className="px-4 py-3">
-                    <p className="text-sm text-[#1A1A2E] whitespace-pre-wrap">{n.content}</p>
-                    <p className="text-xs text-[#6B7280] mt-1">{n.author} · {formatDate(n.createdAt)}</p>
+                  <div key={n.id} className="px-5 py-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-[#1B2A4A]">{n.author}</span>
+                      <span className="text-xs text-[#6B7280]">{formatDate(n.createdAt)}</span>
+                    </div>
+                    <p className="text-sm text-[#4B5563] whitespace-pre-wrap">{n.content}</p>
                   </div>
                 ))}
               </div>
-            )}
-            {notes.length === 0 && (
-              <div className="px-4 pb-4"><p className="text-xs text-[#6B7280] text-center">No notes yet.</p></div>
+            ) : (
+              <div className="px-5 pb-4"><p className="text-xs text-[#6B7280] text-center">No notes yet.</p></div>
             )}
           </div>
         </div>

@@ -22,11 +22,13 @@ export const ORDER_TYPES = [
 ] as const;
 
 export const UNDERWRITERS = [
-  { value: '', label: 'Select…' }, { value: 'westcor', label: 'Westcor' },
-  { value: 'fnf', label: 'FNF / Commonwealth' }, { value: 'natic', label: 'NATIC' }, { value: 'doma', label: 'Doma' },
+  { value: '', label: 'Select…' },
+  { value: 'westcor', label: 'Westcor' },
+  { value: 'fnf', label: 'FNF / Commonwealth' },
+  { value: 'natic', label: 'NATIC' },
 ];
 
 export const ORG_TYPES = ['LLC', 'Corporation', 'Partnership', 'Trust', 'Other'];
 
-export const IN = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A]/40 bg-white min-h-[44px]';
+export const IN = 'w-full h-12 px-3 border border-[#E5E7EB] rounded-lg text-sm text-[#1B2A4A] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#F26B2B]/20 focus:border-[#F26B2B] bg-white';
 export const SEL = IN;

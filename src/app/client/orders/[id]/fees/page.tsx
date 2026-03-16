@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { EmptyState } from '@/components/client/empty-state';
 
 interface FeeItem {
   description: string;
@@ -43,104 +44,101 @@ export default function ClientFeesPage() {
   }, [orderId]);
 
   return (
-    <div className="px-1 sm:px-0">
-      <Link
-        href={`/client/orders/${orderId}`}
-        className="inline-flex items-center gap-1 text-sm text-[#6B7280] hover:text-[#1A1A2E] transition-colors mb-4 min-h-[44px]"
-      >
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
+    <div className="max-w-3xl mx-auto">
+      <Link href={`/client/orders/${orderId}`} className="inline-flex items-center gap-2 text-sm text-[#4B5563] hover:text-[#1B2A4A] transition-colors mb-6 min-h-[44px]">
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         Back to order
       </Link>
 
-      <h1 className="text-xl sm:text-2xl font-semibold text-[#1A1A2E] mb-1">
-        Estimated Fees {data?.fileNumber && <span className="text-[#6B7280]">— {data.fileNumber}</span>}
-      </h1>
-      <p className="text-sm text-[#6B7280] mb-6">Title and escrow fee breakdown for your order</p>
+      <h1 className="text-2xl sm:text-3xl font-semibold text-[#1B2A4A] mb-1">Estimated Fees</h1>
+      <p className="text-[#4B5563] mb-8">
+        {data?.fileNumber && <><span className="font-mono text-sm">{data.fileNumber}</span> &middot; </>}
+        Title and escrow fee breakdown
+      </p>
 
       {loading && <FeesSkeleton />}
 
       {error && (
-        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+        <div className="bg-white rounded-xl border border-[#E5E7EB] p-8 text-center">
           <p className="text-sm text-red-600 font-medium">{error}</p>
           <p className="text-xs text-[#6B7280] mt-1">Please try again later or contact your escrow officer.</p>
         </div>
       )}
 
       {!loading && !error && data && data.invoices.length === 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-          <svg className="mx-auto h-8 w-8 text-[#9CA3AF] mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <p className="text-sm text-[#6B7280]">No fee estimate available yet.</p>
-          <p className="text-xs text-[#6B7280] mt-1">Fees will appear here once your order has been processed.</p>
+        <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm">
+          <EmptyState type="no-fees" />
         </div>
       )}
 
       {!loading && !error && data && data.invoices.length > 0 && (
         <>
-          {data.invoices.map((inv) => (
-            <div key={inv.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-4">
-              {data.invoices.length > 1 && (
-                <div className="px-5 py-3 border-b border-gray-200 bg-gray-50/60">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">{inv.label}</p>
-                </div>
-              )}
-              {/* Desktop */}
-              <div className="hidden sm:block">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50/40">
-                      <th className="text-left px-5 py-3 font-medium text-[#6B7280]">Description</th>
-                      <th className="text-right px-5 py-3 font-medium text-[#6B7280] w-32">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {inv.items.map((item, i) => (
-                      <tr key={i}>
-                        <td className="px-5 py-3 text-[#1A1A2E]">{item.description}</td>
-                        <td className="px-5 py-3 text-right text-[#1A1A2E] tabular-nums">{fmt(item.amount)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-gray-50/60 border-t border-gray-200">
-                      <td className="px-5 py-3 font-semibold text-[#1A1A2E]">{data.invoices.length > 1 ? 'Subtotal' : 'Total'}</td>
-                      <td className="px-5 py-3 text-right font-semibold text-[#1A1A2E] tabular-nums">{fmt(inv.total)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-              {/* Mobile */}
-              <div className="sm:hidden divide-y divide-gray-100">
-                {inv.items.map((item, i) => (
-                  <div key={i} className="px-4 py-3 flex items-center justify-between gap-3">
-                    <span className="text-sm text-[#1A1A2E] min-w-0">{item.description}</span>
-                    <span className="text-sm text-[#1A1A2E] font-medium tabular-nums flex-shrink-0">{fmt(item.amount)}</span>
-                  </div>
-                ))}
-                <div className="px-4 py-3 flex items-center justify-between gap-3 bg-gray-50/60">
-                  <span className="text-sm font-semibold text-[#1A1A2E]">{data.invoices.length > 1 ? 'Subtotal' : 'Total'}</span>
-                  <span className="text-sm font-semibold text-[#1A1A2E] tabular-nums">{fmt(inv.total)}</span>
-                </div>
-              </div>
+          {/* Disclaimer */}
+          <div className="flex items-start gap-3 p-4 bg-[#FEF3C7] rounded-xl border border-[#FCD34D] mb-6">
+            <svg className="h-5 w-5 text-[#D97706] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+            <div>
+              <p className="font-medium text-[#92400E] text-sm">Fee Estimate Notice</p>
+              <p className="text-sm text-[#92400E]/80 mt-1">
+                These fees are estimates and may change based on final transaction details. Final fees will be confirmed at closing.
+              </p>
             </div>
-          ))}
+          </div>
+
+          {data.invoices.map((inv) => {
+            const allItems = inv.items;
+            return (
+              <div key={inv.id} className="bg-white rounded-xl border border-[#E5E7EB] overflow-hidden shadow-sm mb-6">
+                {data.invoices.length > 1 && (
+                  <div className="px-6 py-3 border-b border-[#E5E7EB] bg-[#FAFAFA]">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">{inv.label}</p>
+                  </div>
+                )}
+
+                {/* Desktop Table */}
+                <div className="hidden sm:block">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-[#E5E7EB]">
+                        <th className="text-left px-6 py-4 text-sm font-medium text-[#4B5563]">Description</th>
+                        <th className="text-right px-6 py-4 text-sm font-medium text-[#4B5563]">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allItems.map((fee, i) => (
+                        <tr key={i} className={i % 2 === 1 ? 'bg-[#FAFAFA]' : ''}>
+                          <td className="px-6 py-4 text-sm text-[#1B2A4A]">{fee.description}</td>
+                          <td className="px-6 py-4 text-sm text-[#1B2A4A] text-right font-mono tabular-nums">{fmt(fee.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile */}
+                <div className="sm:hidden divide-y divide-[#E5E7EB]">
+                  {allItems.map((fee, i) => (
+                    <div key={i} className={`px-5 py-3.5 flex items-center justify-between gap-3 ${i % 2 === 1 ? 'bg-[#FAFAFA]' : ''}`}>
+                      <span className="text-sm text-[#1B2A4A] min-w-0">{fee.description}</span>
+                      <span className="text-sm text-[#1B2A4A] font-medium font-mono tabular-nums flex-shrink-0">{fmt(fee.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Total Bar */}
+                <div className="flex items-center justify-between px-6 py-4 bg-[#1B2A4A]">
+                  <span className="font-semibold text-white">{data.invoices.length > 1 ? 'Subtotal' : 'Total Estimated Fees'}</span>
+                  <span className="font-bold text-white text-lg font-mono tabular-nums">{fmt(inv.total)}</span>
+                </div>
+              </div>
+            );
+          })}
 
           {data.invoices.length > 1 && (
-            <div className="bg-[#1B2A4A] rounded-lg px-5 py-4 flex items-center justify-between mb-4">
-              <span className="text-sm font-semibold text-white">Estimated Total</span>
-              <span className="text-xl font-bold text-white tabular-nums">{fmt(data.grandTotal)}</span>
+            <div className="bg-[#1B2A4A] rounded-xl px-6 py-5 flex items-center justify-between">
+              <span className="font-semibold text-white">Grand Total</span>
+              <span className="text-2xl font-bold text-white font-mono tabular-nums">{fmt(data.grandTotal)}</span>
             </div>
           )}
-
-          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-            <p className="text-xs text-amber-800">
-              <span className="font-semibold">Disclaimer:</span> These are estimated fees and may change before closing.
-              Final fees will be reflected on your closing statement.
-            </p>
-          </div>
         </>
       )}
     </div>
@@ -149,20 +147,20 @@ export default function ClientFeesPage() {
 
 function FeesSkeleton() {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden animate-pulse">
-      <div className="border-b border-gray-200 px-5 py-3 flex justify-between">
+    <div className="bg-white rounded-xl border border-[#E5E7EB] overflow-hidden animate-pulse">
+      <div className="border-b border-[#E5E7EB] px-6 py-4 flex justify-between">
         <div className="h-4 w-24 bg-gray-100 rounded" />
         <div className="h-4 w-16 bg-gray-100 rounded" />
       </div>
       {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="px-5 py-3 flex justify-between border-b border-gray-100">
+        <div key={i} className="px-6 py-4 flex justify-between border-b border-gray-100">
           <div className="h-4 bg-gray-100 rounded" style={{ width: `${30 + Math.random() * 40}%` }} />
-          <div className="h-4 w-16 bg-gray-100 rounded" />
+          <div className="h-4 w-20 bg-gray-100 rounded" />
         </div>
       ))}
-      <div className="bg-gray-50/60 px-5 py-3 flex justify-between">
-        <div className="h-4 w-12 bg-gray-100 rounded" />
-        <div className="h-4 w-20 bg-gray-100 rounded" />
+      <div className="bg-[#1B2A4A] px-6 py-4 flex justify-between">
+        <div className="h-4 w-24 bg-white/20 rounded" />
+        <div className="h-5 w-28 bg-white/20 rounded" />
       </div>
     </div>
   );

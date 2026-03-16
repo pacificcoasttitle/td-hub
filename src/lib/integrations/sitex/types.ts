@@ -13,6 +13,11 @@ export interface SiteXPropertyData {
   propertyType: string | null;
   primaryOwner: string | null;
   secondaryOwner: string | null;
+  fullAddress: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  unitNumber: string | null;
   beds: number | null;
   baths: number | null;
   sqft: number | null;
@@ -42,6 +47,12 @@ export interface SiteXRawPropertyProfile {
   PropertyType?: string;
   OwnerName1?: string;
   OwnerName2?: string;
+  FullAddress?: string;
+  Address?: string;
+  City?: string;
+  State?: string;
+  Zip?: string;
+  UnitNumber?: string;
   Bedrooms?: string | number;
   Bathrooms?: string | number;
   SquareFootage?: string | number;
@@ -77,4 +88,10 @@ export interface PropertyLookupParams {
   city: string;
   state: string;
   zip: string;
+}
+
+export interface ApnLookupParams {
+  apn: string;
+  county: string;
+  state?: string;
 }

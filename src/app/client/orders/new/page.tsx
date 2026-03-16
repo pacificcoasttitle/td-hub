@@ -57,8 +57,8 @@ export default function ClientNewOrderPage() {
 
   if (result?.type === 'success' && result.orderId) {
     return (
-      <div className="px-1 sm:px-0 max-w-2xl mx-auto">
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="max-w-2xl mx-auto">
+        <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm overflow-hidden">
           <div className="bg-[#1B2A4A] px-6 py-5 flex items-center gap-3">
             <svg className="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -69,12 +69,12 @@ export default function ClientNewOrderPage() {
             </div>
           </div>
           <div className="p-6 space-y-4">
-            <p className="text-sm text-[#1A1A2E]">{result.message}</p>
+            <p className="text-sm text-[#1B2A4A]">{result.message}</p>
             <div className="flex flex-col sm:flex-row gap-3">
-              <Link href={`/client/orders/${result.orderId}`} className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-medium bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] transition-colors min-h-[44px]">
+              <Link href={`/client/orders/${result.orderId}`} className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-medium bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] transition-colors min-h-[48px]">
                 View Order Timeline
               </Link>
-              <Link href="/client/dashboard" className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-medium border border-gray-200 text-[#6B7280] rounded-lg hover:bg-gray-50 transition-colors min-h-[44px]">
+              <Link href="/client/dashboard" className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-medium border border-[#E5E7EB] text-[#4B5563] rounded-lg hover:bg-[#F3F4F6] transition-colors min-h-[48px]">
                 Back to Dashboard
               </Link>
             </div>
@@ -85,49 +85,65 @@ export default function ClientNewOrderPage() {
   }
 
   return (
-    <div className="px-1 sm:px-0">
-      <Link href="/client/dashboard" className="inline-flex items-center gap-1 text-sm text-[#6B7280] hover:text-[#1A1A2E] transition-colors mb-4 min-h-[44px]">
+    <div className="max-w-4xl mx-auto">
+      <Link href="/client/dashboard" className="inline-flex items-center gap-2 text-sm text-[#4B5563] hover:text-[#1B2A4A] transition-colors mb-6 min-h-[44px]">
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-        Back
+        Back to Dashboard
       </Link>
 
-      <h1 className="text-xl sm:text-2xl font-semibold text-[#1A1A2E] mb-1">Open New Order</h1>
-      <p className="text-sm text-[#6B7280] mb-6">Create a title or escrow order</p>
+      <div className="mb-8">
+        <h1 className="text-2xl sm:text-3xl font-semibold text-[#1B2A4A] mb-2">Open New Order</h1>
+        <p className="text-[#4B5563]">Complete the form below to submit your title order</p>
+      </div>
 
       {profile && (
-        <div className="bg-[#1B2A4A]/5 border border-[#1B2A4A]/10 rounded-lg px-4 py-3 mb-6 flex items-center gap-3">
-          <div className="h-8 w-8 bg-[#1B2A4A] rounded-full flex items-center justify-center flex-shrink-0">
-            <span className="text-white text-xs font-bold">{profile.displayName?.charAt(0)?.toUpperCase() ?? 'U'}</span>
+        <div className="bg-[#1B2A4A]/5 border border-[#1B2A4A]/10 rounded-xl px-5 py-4 mb-8 flex items-center gap-3">
+          <div className="h-9 w-9 bg-[#1B2A4A] rounded-full flex items-center justify-center flex-shrink-0">
+            <span className="text-white text-sm font-bold">{profile.displayName?.charAt(0)?.toUpperCase() ?? 'U'}</span>
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-[#1A1A2E]">Opening as: {profile.displayName}</p>
-            <p className="text-xs text-[#6B7280] truncate">{profile.email}{profile.company ? ` · ${profile.company}` : ''}</p>
+            <p className="text-sm font-medium text-[#1B2A4A]">Opening as: {profile.displayName}</p>
+            <p className="text-xs text-[#4B5563] truncate">{profile.email}{profile.company ? ` · ${profile.company}` : ''}</p>
           </div>
         </div>
       )}
 
-      <div className="flex items-center gap-1 mb-6 overflow-x-auto pb-1">
-        {STEPS.map((s, i) => (
-          <div key={s.n} className="flex items-center gap-1 flex-shrink-0">
-            <button
-              onClick={() => { if (s.n < step) setStep(s.n); }}
-              disabled={s.n > step}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors min-h-[36px] ${
-                s.n === step ? 'bg-[#1B2A4A] text-white' : s.n < step ? 'bg-[#1B2A4A]/10 text-[#1B2A4A]' : 'bg-gray-100 text-gray-400'
-              }`}
-            >
-              <span className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold ${s.n < step ? 'bg-[#1B2A4A] text-white' : s.n === step ? 'bg-white/20' : ''}`}>
-                {s.n < step ? '✓' : s.n}
-              </span>
-              <span className="hidden sm:inline">{s.label}</span>
-            </button>
-            {i < STEPS.length - 1 && <div className="w-3 h-px bg-gray-200 flex-shrink-0" />}
-          </div>
-        ))}
+      {/* Progress Steps */}
+      <div className="mb-10">
+        <div className="flex items-center justify-between">
+          {STEPS.map((s, i) => {
+            const isComplete = s.n < step;
+            const isCurrent = s.n === step;
+            return (
+              <div key={s.n} className="flex items-center">
+                <button
+                  onClick={() => { if (s.n < step) setStep(s.n); }}
+                  disabled={s.n > step}
+                  className={`flex flex-col items-center gap-2 transition-all ${s.n <= step ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                >
+                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center transition-all text-sm font-bold ${
+                    isComplete ? 'bg-[#1B2A4A] text-white' : isCurrent ? 'bg-[#F26B2B] text-white' : 'bg-[#F3F4F6] text-[#9CA3AF]'
+                  }`}>
+                    {isComplete ? (
+                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                    ) : s.n}
+                  </div>
+                  <span className={`text-xs font-medium hidden sm:block ${isCurrent ? 'text-[#F26B2B]' : 'text-[#4B5563]'}`}>
+                    {s.label}
+                  </span>
+                </button>
+                {i < STEPS.length - 1 && (
+                  <div className={`w-6 sm:w-16 h-0.5 mx-1 sm:mx-2 ${isComplete ? 'bg-[#1B2A4A]' : 'bg-[#E5E7EB]'}`} />
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
+      {/* Step Content */}
       <div className="max-w-2xl">
-        <div className="bg-white rounded-lg border border-gray-200">
+        <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm">
           {step === 1 && <StepType data={orderType} onChange={setOrderType} onNext={next} />}
           {step === 2 && <StepProperty data={property} onChange={setProperty} onNext={next} onPrev={prev} />}
           {step === 3 && <StepParties data={parties} onChange={setParties} onNext={next} onPrev={prev} />}

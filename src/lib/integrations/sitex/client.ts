@@ -7,6 +7,7 @@ import type {
   SiteXTokenResponse,
   SiteXRawPropertyProfile,
   PropertyLookupParams,
+  ApnLookupParams,
 } from './types';
 
 const VENDOR = 'sitex';
@@ -110,6 +111,11 @@ function mapProfile(profile: SiteXRawPropertyProfile): Omit<SiteXPropertyData, '
     propertyType: profile.PropertyType ?? null,
     primaryOwner: profile.OwnerName1 ?? null,
     secondaryOwner: profile.OwnerName2 ?? null,
+    fullAddress: profile.FullAddress ?? profile.Address ?? null,
+    city: profile.City ?? null,
+    state: profile.State ?? null,
+    zip: profile.Zip ?? null,
+    unitNumber: profile.UnitNumber ?? null,
     beds: toNum(profile.Bedrooms),
     baths: toNum(profile.Bathrooms),
     sqft: toNum(profile.SquareFootage),
@@ -125,6 +131,7 @@ function emptyResult(matchCode: 'M' | 'N'): SiteXPropertyData {
   return {
     matchCode, apn: null, legalDescription: null, county: null,
     propertyType: null, primaryOwner: null, secondaryOwner: null,
+    fullAddress: null, city: null, state: null, zip: null, unitNumber: null,
     beds: null, baths: null, sqft: null, lotSize: null,
     yearBuilt: null, assessedValue: null, lastSaleDate: null, lastSalePrice: null,
   };
@@ -140,10 +147,118 @@ const MOCK_PROPERTY: SiteXPropertyData = {
   propertyType: 'Single Family Residence',
   primaryOwner: 'Joel S Cruz Pablo',
   secondaryOwner: 'Maria Sebastian',
+  fullAddress: '123 Main St, Glendale, CA 91203',
+  city: 'Glendale', state: 'CA', zip: '91203', unitNumber: null,
   beds: 3, baths: 2, sqft: 1850, lotSize: 6500,
   yearBuilt: 1975, assessedValue: 485000,
   lastSaleDate: '2020-06-15', lastSalePrice: 625000,
 };
+
+// ─── Search Result (includes multi-match locations) ─────────────────────────
+
+export interface PropertySearchResult {
+  match: 'single' | 'multi' | 'none';
+  property: SiteXPropertyData | null;
+  locations: Array<{ address: string; city: string; state: string; zip: string; apn: string }>;
+}
+
+export async function propertySearch(
+  params: PropertyLookupParams
+): Promise<VendorResult<PropertySearchResult>> {
+  const requestId = crypto.randomUUID();
+  const startedAt = new Date();
+  const config = getConfig();
+
+  if (!config) {
+    await logRequest({
+      operation: 'property_search_mock', requestId, startedAt, success: true,
+      requestMeta: { ...params, mock: true },
+    });
+    return vendorSuccess<PropertySearchResult>({
+      match: 'single',
+      property: MOCK_PROPERTY,
+      locations: [],
+    }, { requestId, durationMs: 0 });
+  }
+
+  const zip5 = truncateZip(params.zip);
+  const lastLine = `${params.city}, ${params.state}, ${zip5}`;
+  const searchUrl = new URL(`${config.baseUrl}/realestatedata/search`);
+  searchUrl.searchParams.set('addr', params.street);
+  searchUrl.searchParams.set('lastLine', lastLine);
+  searchUrl.searchParams.set('feedId', config.feedId);
+
+  try {
+    const token = await getAccessToken(config.baseUrl, config.clientId, config.clientSecret);
+
+    const response = await fetch(searchUrl.toString(), {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+
+    const durationMs = Date.now() - startedAt.getTime();
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      await logRequest({
+        operation: 'property_search', requestId, startedAt, success: false,
+        errorCategory: 'API_ERROR',
+        requestMeta: { addr: params.street, lastLine },
+        responseMeta: { status: response.status, body: errorBody.slice(0, 500) },
+      });
+      return vendorError<PropertySearchResult>(VENDOR, 'SEARCH_FAILED', `SiteX ${response.status}`, {
+        httpStatus: response.status, retryable: response.status >= 500, requestId, durationMs,
+      });
+    }
+
+    const raw = (await response.json()) as SiteXSearchResponse;
+    const matchCode = (raw.MatchCode ?? 'N').toUpperCase();
+
+    let result: PropertySearchResult;
+
+    if (matchCode === 'S' && raw.Feed?.PropertyProfile) {
+      const mapped = { matchCode: 'S' as const, ...mapProfile(raw.Feed.PropertyProfile) };
+      result = { match: 'single', property: mapped, locations: [] };
+    } else if (matchCode === 'M' && raw.Locations) {
+      result = {
+        match: 'multi',
+        property: null,
+        locations: raw.Locations.map((loc) => ({
+          address: loc.Address ?? '',
+          city: loc.City ?? '',
+          state: loc.State ?? '',
+          zip: loc.Zip ?? '',
+          apn: loc.APN ?? '',
+        })),
+      };
+    } else {
+      result = { match: 'none', property: null, locations: [] };
+    }
+
+    await logRequest({
+      operation: 'property_search', requestId, startedAt, success: true,
+      requestMeta: { addr: params.street, lastLine },
+      responseMeta: { match: result.match, locationCount: result.locations.length },
+    });
+
+    return vendorSuccess(result, { requestId, durationMs });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    const durationMs = Date.now() - startedAt.getTime();
+
+    await logRequest({
+      operation: 'property_search', requestId, startedAt, success: false,
+      errorCategory: 'NETWORK',
+      requestMeta: { addr: params.street, lastLine },
+      responseMeta: { error: message },
+    });
+
+    return vendorError<PropertySearchResult>(VENDOR, 'NETWORK_ERROR', message, {
+      retryable: true, requestId, durationMs,
+    });
+  }
+}
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
@@ -231,4 +346,86 @@ export async function propertyLookup(
   }
 }
 
-export { type SiteXPropertyData, type PropertyLookupParams } from './types';
+export async function apnLookup(
+  params: ApnLookupParams
+): Promise<VendorResult<SiteXPropertyData>> {
+  const requestId = crypto.randomUUID();
+  const startedAt = new Date();
+  const config = getConfig();
+
+  if (!config) {
+    await logRequest({
+      operation: 'apn_lookup_mock', requestId, startedAt, success: true,
+      requestMeta: { ...params, mock: true },
+    });
+    return vendorSuccess(MOCK_PROPERTY, { requestId, durationMs: 0 });
+  }
+
+  const searchUrl = new URL(`${config.baseUrl}/realestatedata/search`);
+  searchUrl.searchParams.set('apn', params.apn);
+  searchUrl.searchParams.set('county', params.county);
+  searchUrl.searchParams.set('state', params.state ?? 'CA');
+  searchUrl.searchParams.set('feedId', config.feedId);
+
+  try {
+    const token = await getAccessToken(config.baseUrl, config.clientId, config.clientSecret);
+
+    const response = await fetch(searchUrl.toString(), {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+
+    const durationMs = Date.now() - startedAt.getTime();
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      await logRequest({
+        operation: 'apn_lookup', requestId, startedAt, success: false,
+        errorCategory: 'API_ERROR',
+        requestMeta: { apn: params.apn, county: params.county },
+        responseMeta: { status: response.status, body: errorBody.slice(0, 500) },
+      });
+      return vendorError<SiteXPropertyData>(VENDOR, 'SEARCH_FAILED', `SiteX ${response.status}`, {
+        httpStatus: response.status, retryable: response.status >= 500, requestId, durationMs,
+      });
+    }
+
+    const raw = (await response.json()) as SiteXSearchResponse;
+    const matchCode = (raw.MatchCode ?? 'N').toUpperCase();
+
+    let result: SiteXPropertyData;
+
+    if (matchCode === 'S' && raw.Feed?.PropertyProfile) {
+      result = { matchCode: 'S', ...mapProfile(raw.Feed.PropertyProfile) };
+    } else if (matchCode === 'M') {
+      result = emptyResult('M');
+    } else {
+      result = emptyResult('N');
+    }
+
+    await logRequest({
+      operation: 'apn_lookup', requestId, startedAt, success: true,
+      requestMeta: { apn: params.apn, county: params.county },
+      responseMeta: { matchCode: result.matchCode, apn: result.apn },
+    });
+
+    return vendorSuccess(result, { requestId, durationMs });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    const durationMs = Date.now() - startedAt.getTime();
+
+    await logRequest({
+      operation: 'apn_lookup', requestId, startedAt, success: false,
+      errorCategory: 'NETWORK',
+      requestMeta: { apn: params.apn, county: params.county },
+      responseMeta: { error: message },
+    });
+
+    return vendorError<SiteXPropertyData>(VENDOR, 'NETWORK_ERROR', message, {
+      retryable: true, requestId, durationMs,
+    });
+  }
+}
+
+export { type SiteXPropertyData, type PropertyLookupParams, type ApnLookupParams } from './types';

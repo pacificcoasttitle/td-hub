@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CATEGORY_LABELS, formatDate, formatFileSize } from './helpers';
+import { CATEGORY_LABELS, CATEGORY_STYLES, formatDate, formatFileSize } from './helpers';
+import { EmptyState } from '@/components/client/empty-state';
 
 interface Document {
   id: number;
@@ -11,11 +12,7 @@ interface Document {
   createdAt: string;
 }
 
-const UPLOAD_CATEGORIES = [
-  { value: 'general', label: 'General' },
-  { value: 'curative', label: 'Curative' },
-  { value: 'user_upload', label: 'Supporting Document' },
-];
+const UPLOAD_CATEGORIES = ['General', 'Curative', 'Supporting'];
 
 export function DocumentsTab({ documents, orderId }: { documents: Document[]; orderId?: number }) {
   const [docs, setDocs] = useState(documents);
@@ -62,101 +59,97 @@ export function DocumentsTab({ documents, orderId }: { documents: Document[]; or
   }
 
   return (
-    <div>
-      {/* Upload zone */}
+    <div className="space-y-6">
+      {/* Upload Zone */}
       {orderId && (
-        <div className="p-4 sm:p-5 border-b border-gray-200">
-          <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-3">Upload Document</p>
-          <div className="flex items-center gap-3 mb-3">
-            <select value={category} onChange={(e) => setCategory(e.target.value)}
-              className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20">
-              {UPLOAD_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
-          </div>
-          <div
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
-            onClick={() => fileRef.current?.click()}
-            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors min-h-[80px] flex flex-col items-center justify-center ${
-              dragOver ? 'border-[#1B2A4A] bg-[#1B2A4A]/5' : 'border-gray-200 hover:border-[#1B2A4A]/40'
-            }`}
-          >
-            <input ref={fileRef} type="file" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
-            {uploading ? (
-              <p className="text-sm text-[#6B7280]">Uploading…</p>
-            ) : (
-              <>
-                <svg className="h-6 w-6 text-[#9CA3AF] mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                <p className="text-sm text-[#6B7280]">Drop a file here or <span className="text-[#1B2A4A] font-medium">browse</span></p>
-              </>
-            )}
-          </div>
-          {uploadResult && (
-            <div className={`mt-3 px-3 py-2 rounded-lg text-xs font-medium ${
-              uploadResult.type === 'success' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'
-            }`}>{uploadResult.message}</div>
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+            dragOver ? 'border-[#F26B2B] bg-[#F26B2B]/5' : 'border-[#D1D5DB] hover:border-[#9CA3AF]'
+          }`}
+        >
+          <input ref={fileRef} type="file" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+          <svg className="h-10 w-10 text-[#9CA3AF] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+          {uploading ? (
+            <p className="text-[#4B5563] mb-4">Uploading…</p>
+          ) : (
+            <p className="text-[#4B5563] mb-4">Drag and drop files here, or click to browse</p>
           )}
+          <div className="flex items-center justify-center gap-2 mb-4">
+            {UPLOAD_CATEGORIES.map((cat) => {
+              const val = cat.toLowerCase() === 'supporting' ? 'user_upload' : cat.toLowerCase();
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setCategory(val)}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-full transition-colors ${
+                    category === val ? 'bg-[#1B2A4A] text-white' : 'bg-[#F3F4F6] text-[#4B5563] hover:bg-[#E5E7EB]'
+                  }`}
+                >
+                  {cat}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="px-5 py-2.5 text-sm font-medium border border-[#F26B2B] text-[#F26B2B] rounded-lg hover:bg-[#F26B2B]/5 transition-colors"
+          >
+            Browse Files
+          </button>
         </div>
       )}
 
-      {/* Document list */}
+      {uploadResult && (
+        <div className={`px-4 py-3 rounded-xl text-sm font-medium ${
+          uploadResult.type === 'success' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'
+        }`}>{uploadResult.message}</div>
+      )}
+
+      {/* Document Cards */}
       {docs.length === 0 ? (
-        <div className="p-6 text-center py-12">
-          <svg className="mx-auto h-8 w-8 text-[#9CA3AF] mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          <p className="text-sm text-[#6B7280]">No documents available for this order.</p>
+        <div className="bg-white rounded-xl border border-[#E5E7EB]">
+          <EmptyState type="no-documents" />
         </div>
       ) : (
-        <>
-          {/* Desktop */}
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">Document</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">Category</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">Size</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-[#6B7280] uppercase tracking-wider">Date</th>
-                  <th className="px-5 py-3 text-right text-xs font-medium text-[#6B7280] uppercase tracking-wider" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {docs.map((doc) => (
-                  <tr key={doc.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-4"><span className="font-medium text-[#1A1A2E] truncate max-w-xs block">{doc.filename}</span></td>
-                    <td className="px-5 py-4"><span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-[#374151]">{CATEGORY_LABELS[doc.category ?? ''] ?? doc.category ?? '—'}</span></td>
-                    <td className="px-5 py-4 text-[#6B7280] whitespace-nowrap">{formatFileSize(doc.sizeBytes)}</td>
-                    <td className="px-5 py-4 text-[#6B7280] whitespace-nowrap">{formatDate(doc.createdAt)}</td>
-                    <td className="px-5 py-4 text-right">
-                      <a href={`/api/documents/${doc.id}/download`} className="inline-flex items-center gap-1 text-sm font-medium text-[#1B2A4A] hover:underline">Download</a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {/* Mobile */}
-          <div className="sm:hidden divide-y divide-gray-100">
-            {docs.map((doc) => (
-              <div key={doc.id} className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-[#1A1A2E] truncate">{doc.filename}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-[#374151]">{CATEGORY_LABELS[doc.category ?? ''] ?? doc.category ?? '—'}</span>
-                      <span className="text-xs text-[#6B7280]">{formatFileSize(doc.sizeBytes)}</span>
-                    </div>
-                  </div>
-                  <a href={`/api/documents/${doc.id}/download`} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-[#1B2A4A] bg-[#1B2A4A]/5 rounded-lg hover:bg-[#1B2A4A]/10 transition-colors min-h-[44px] flex-shrink-0">Download</a>
+        <div className="space-y-3">
+          {docs.map((doc) => {
+            const catKey = doc.category ?? 'general';
+            const catStyle = CATEGORY_STYLES[catKey] ?? 'bg-[#F3F4F6] text-[#4B5563]';
+            return (
+              <div key={doc.id} className="flex items-center gap-4 p-4 bg-white rounded-xl border border-[#E5E7EB]">
+                <div className="flex-shrink-0 p-2.5 bg-[#F3F4F6] rounded-lg">
+                  <svg className="h-5 w-5 text-[#4B5563]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
                 </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-[#1B2A4A] truncate">{doc.filename}</p>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${catStyle}`}>
+                      {CATEGORY_LABELS[catKey] ?? catKey}
+                    </span>
+                    <span className="text-xs text-[#6B7280]">{formatFileSize(doc.sizeBytes)}</span>
+                    <span className="text-xs text-[#6B7280]">{formatDate(doc.createdAt)}</span>
+                  </div>
+                </div>
+                <a
+                  href={`/api/documents/${doc.id}/download`}
+                  className="flex-shrink-0 px-4 py-2 text-sm font-medium border border-[#F26B2B] text-[#F26B2B] rounded-lg hover:bg-[#F26B2B]/5 transition-colors inline-flex items-center gap-1.5 min-h-[40px]"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  <span className="hidden sm:inline">Download</span>
+                </a>
               </div>
-            ))}
-          </div>
-        </>
+            );
+          })}
+        </div>
       )}
     </div>
   );

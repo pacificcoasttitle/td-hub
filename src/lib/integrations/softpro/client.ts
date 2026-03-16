@@ -240,6 +240,23 @@ export async function getLookupTable(
   });
 }
 
+export async function addNotes(
+  orderNumber: string,
+  text: string,
+  noteId?: string,
+): Promise<VendorResult<{ success: boolean }>> {
+  const body = [{
+    OrderNumber: orderNumber,
+    Text: text,
+    ...(noteId ? { Id: noteId } : {}),
+  }];
+
+  return makeRequest<{ success: boolean }>('POST', SOFTPRO_ENDPOINTS.addNote, {
+    body,
+    operation: 'add_notes',
+  });
+}
+
 export async function healthCheck(): Promise<VendorHealthResult> {
   const start = Date.now();
   try {

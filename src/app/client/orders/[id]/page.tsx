@@ -143,7 +143,7 @@ export default function ClientOrderDetailPage() {
       <div className="bg-white rounded-lg border border-gray-200">
         {activeTab === 'Timeline' && <OrderTimeline orderId={order.id} />}
         {activeTab === 'Property' && <PropertyTab property={order.property} />}
-        {activeTab === 'Documents' && <DocumentsTab documents={order.documents} />}
+        {activeTab === 'Documents' && <DocumentsTab documents={order.documents} orderId={order.id} />}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
 
 export default function ClientRoot() {
-  redirect('/client/orders');
+  redirect('/client/dashboard');
 }

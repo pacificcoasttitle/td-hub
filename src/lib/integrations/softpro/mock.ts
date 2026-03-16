@@ -132,6 +132,15 @@ export async function getLookupTable(
   return vendorSuccess(items, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 50 });
 }
 
+export async function addNotes(
+  _orderNumber: string,
+  _text: string,
+  _noteId?: string,
+): Promise<VendorResult<{ success: boolean }>> {
+  await new Promise((r) => setTimeout(r, 30));
+  return vendorSuccess({ success: true }, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 30 });
+}
+
 export async function healthCheck(): Promise<VendorHealthResult> {
   return { healthy: true, vendor: 'softpro-mock', latencyMs: 1 };
 }

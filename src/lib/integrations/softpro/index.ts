@@ -59,6 +59,15 @@ export async function uploadDocument(params: Parameters<typeof import('./client'
   return client.uploadDocument(params);
 }
 
+export async function addNotes(orderNumber: string, text: string, noteId?: string) {
+  if (useMock) {
+    const mock = await import('./mock');
+    return mock.addNotes(orderNumber, text, noteId);
+  }
+  const client = await import('./client');
+  return client.addNotes(orderNumber, text, noteId);
+}
+
 export async function healthCheck() {
   if (useMock) {
     const mock = await import('./mock');

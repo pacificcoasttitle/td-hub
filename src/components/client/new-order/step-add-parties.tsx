@@ -182,11 +182,36 @@ function PartyFields({ label, contact, onChange, searchRole, companyFirst }: {
 
   const doSearch = useCallback((q: string) => {
     if (q.length < 2) { setSuggestions([]); return; }
-    fetch(`/api/contacts?role=${searchRole}&search=${encodeURIComponent(q)}&pageSize=6`)
+    const enc = encodeURIComponent(q);
+
+    const contactsP = fetch(`/api/contacts?search=${enc}&pageSize=6`)
       .then((r) => r.ok ? r.json() : { contacts: [] })
-      .then((d) => setSuggestions(d.contacts ?? []))
-      .catch(() => setSuggestions([]));
-  }, [searchRole]);
+      .then((d: { contacts?: Array<{ id: number; fullName: string | null; companyName: string | null; email: string | null; phone: string | null }> }) =>
+        (d.contacts ?? []).map((c) => ({ ...c, id: c.id }))
+      );
+
+    if (companyFirst) {
+      const companiesP = fetch(`/api/companies?search=${enc}&pageSize=6`)
+        .then((r) => r.ok ? r.json() : { companies: [] })
+        .then((d: { companies?: Array<{ id: number; name: string; email: string | null; phone: string | null }> }) =>
+          (d.companies ?? []).map((c) => ({
+            id: -(c.id + 1),
+            fullName: null as string | null,
+            companyName: c.name,
+            email: c.email,
+            phone: c.phone,
+          }))
+        );
+
+      Promise.all([companiesP, contactsP])
+        .then(([co, ct]) => setSuggestions([...co, ...ct].slice(0, 8)))
+        .catch(() => setSuggestions([]));
+    } else {
+      contactsP
+        .then((ct) => setSuggestions(ct))
+        .catch(() => setSuggestions([]));
+    }
+  }, [companyFirst]);
 
   function handleSearchInput(value: string) {
     onChange(searchField, value);

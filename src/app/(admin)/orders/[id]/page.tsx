@@ -76,6 +76,8 @@ export default function OrderDetailPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncSuccess, setSyncSuccess] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<{ match: boolean; changes: { field: string; old: string; new: string }[] } | null>(null);
 
   const fetchOrder = useCallback(
     (signal?: AbortSignal) =>
@@ -118,6 +120,20 @@ export default function OrderDetailPage() {
     }
   }
 
+  async function handleVerifySync() {
+    setVerifying(true); setVerifyResult(null);
+    try {
+      const res = await fetch(`/api/orders/${params.id}/verify-sync`, { method: 'POST' });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? 'Verification failed');
+      setVerifyResult({ match: body.match ?? true, changes: body.changes ?? [] });
+      if (!body.match) await fetchOrder();
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Verification failed');
+      setTimeout(() => setSyncError(null), 5000);
+    } finally { setVerifying(false); }
+  }
+
   if (loading) return <DetailSkeleton />;
 
   if (error) {
@@ -151,7 +167,14 @@ export default function OrderDetailPage() {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {order.softproLastSyncedAt && <p className="text-xs text-[#6B7280]">Last synced {formatDateTime(order.softproLastSyncedAt)}</p>}
-          <button onClick={handleResync} disabled={syncing}
+          <button onClick={handleVerifySync} disabled={verifying || syncing}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium border border-[#1B2A4A] text-[#1B2A4A] rounded-lg hover:bg-[#1B2A4A]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+            <svg className={`h-3.5 w-3.5 ${verifying ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {verifying ? 'Checking SoftPro…' : 'Verify Sync'}
+          </button>
+          <button onClick={handleResync} disabled={syncing || verifying}
             className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium border border-[#1B2A4A] text-[#1B2A4A] rounded-lg hover:bg-[#1B2A4A]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
             <svg className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -168,6 +191,37 @@ export default function OrderDetailPage() {
       )}
       {syncSuccess && (
         <div className="mb-4 px-4 py-2.5 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">Order resynced successfully.</div>
+      )}
+      {verifyResult && (
+        <div className={`mb-4 rounded-lg border shadow-sm overflow-hidden ${verifyResult.match ? 'border-green-200' : 'border-amber-200'}`}>
+          <div className={`px-4 py-2.5 flex items-center justify-between ${verifyResult.match ? 'bg-green-50' : 'bg-amber-50'}`}>
+            <div className="flex items-center gap-2">
+              {verifyResult.match ? (
+                <svg className="h-4 w-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              ) : (
+                <svg className="h-4 w-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              )}
+              <span className={`text-sm font-medium ${verifyResult.match ? 'text-green-700' : 'text-amber-700'}`}>
+                {verifyResult.match ? 'Order data matches SoftPro' : `${verifyResult.changes.length} change${verifyResult.changes.length !== 1 ? 's' : ''} applied`}
+              </span>
+            </div>
+            <button onClick={() => setVerifyResult(null)} className="text-gray-400 hover:text-gray-600">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+          {!verifyResult.match && verifyResult.changes.length > 0 && (
+            <div className="divide-y divide-gray-100 bg-white">
+              {verifyResult.changes.map((c, i) => (
+                <div key={i} className="px-4 py-2.5 flex items-center gap-3 text-sm">
+                  <span className="font-medium text-[#1A1A2E] w-40 shrink-0">{c.field}</span>
+                  <span className="text-red-600 line-through">{c.old || '(empty)'}</span>
+                  <svg className="h-3 w-3 text-[#9CA3AF] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+                  <span className="text-green-700 font-medium">{c.new || '(empty)'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-6">

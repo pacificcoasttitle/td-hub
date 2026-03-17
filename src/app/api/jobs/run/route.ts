@@ -11,6 +11,8 @@ import { handleTitlePointPoll } from '@/lib/jobs/handlers/titlepoint-poll';
 import { handleEnrichOrders } from '@/lib/jobs/handlers/enrich-orders';
 import { handleResolveOfficers } from '@/lib/jobs/handlers/resolve-order-officers';
 import { handleFetchPrelims } from '@/lib/jobs/handlers/fetch-prelims';
+import { handleVerifyOrderSync } from '@/lib/jobs/handlers/verify-order-sync';
+import { handleSyncNewUsers } from '@/lib/jobs/handlers/sync-new-users';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -38,6 +40,10 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleTitlePointPoll(payload),
   'softpro.fetch_prelims': () =>
     handleFetchPrelims(),
+  'softpro.verify_sync': () =>
+    handleVerifyOrderSync(),
+  'softpro.sync_new_users': () =>
+    handleSyncNewUsers(),
   'notifications.process_outbox': () =>
     processOutboxEvents(),
 };

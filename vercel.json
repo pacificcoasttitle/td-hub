@@ -15,6 +15,14 @@
     {
       "path": "/api/jobs/run?name=notifications.process_outbox",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=softpro.verify_sync",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=softpro.sync_new_users",
+      "schedule": "0 5 * * *"
     }
   ]
 }

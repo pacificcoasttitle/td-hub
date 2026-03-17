@@ -2,11 +2,9 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, jobs, orderProperties } from '@/lib/db/schema';
-import { eq, sql, desc } from 'drizzle-orm';
+import { eq, sql, desc, count } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
-
-const WEBHOOK_VENDOR = 'softpro_webhook';
 
 export async function GET() {
   const session = await getSession();
@@ -17,29 +15,13 @@ export async function GET() {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    // Single query: all scalar counts via subqueries (1 connection)
-    const [counts] = await db.execute<{
-      total_orders: string;
-      open_orders: string;
-      closed_this_month: string;
-      webhooks_today: string;
-      webhooks_failed: string;
-      failed_jobs: string;
-      uploads_today: string;
-      attach_failures: string;
-    }>(sql`
-      SELECT
-        (SELECT count(*) FROM orders) AS total_orders,
-        (SELECT count(*) FROM orders WHERE operational_status = 'open') AS open_orders,
-        (SELECT count(*) FROM orders WHERE operational_status = 'closed' AND closed_at >= ${monthStart}) AS closed_this_month,
-        (SELECT count(*) FROM vendor_api_logs WHERE vendor = ${WEBHOOK_VENDOR} AND created_at >= ${todayStart}) AS webhooks_today,
-        (SELECT count(*) FROM vendor_api_logs WHERE vendor = ${WEBHOOK_VENDOR} AND success = false AND created_at >= ${todayStart}) AS webhooks_failed,
-        (SELECT count(*) FROM jobs WHERE status = 'failed') AS failed_jobs,
-        (SELECT count(*) FROM document_audit WHERE action = 'uploaded' AND performed_at >= ${todayStart}) AS uploads_today,
-        (SELECT count(*) FROM document_audit WHERE action = 'attach_failed' AND performed_at >= ${todayStart}) AS attach_failures
-    `);
+    const [totalResult, openResult, closedResult, failedJobsResult] = await Promise.all([
+      db.select({ value: count() }).from(orders),
+      db.select({ value: count() }).from(orders).where(sql`${orders.operationalStatus} = 'open'`),
+      db.select({ value: count() }).from(orders).where(sql`${orders.operationalStatus} = 'closed' AND ${orders.closedAt} >= ${monthStart}`),
+      db.select({ value: count() }).from(jobs).where(sql`${jobs.status} = 'failed'`),
+    ]);
 
-    // Sequential queries for rows that need structured results (1 connection each)
     const lastSyncResult = await db
       .select({ endedAt: jobs.endedAt })
       .from(jobs)
@@ -54,12 +36,19 @@ export async function GET() {
       .orderBy(desc(jobs.createdAt))
       .limit(1);
 
-    const webhookLatestResult = await db.execute<{ latest_at: string | null }>(sql`
-      SELECT max(created_at) AS latest_at FROM vendor_api_logs WHERE vendor = ${WEBHOOK_VENDOR}
-    `);
-
     const recentOrderRows = await db
-      .select()
+      .select({
+        id: orders.id,
+        fileNumber: orders.fileNumber,
+        operationalStatus: orders.operationalStatus,
+        transactionType: orders.transactionType,
+        openedAt: orders.openedAt,
+        closedAt: orders.closedAt,
+        address: orderProperties.address,
+        city: orderProperties.city,
+        state: orderProperties.state,
+        county: orderProperties.county,
+      })
       .from(orders)
       .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
       .orderBy(desc(orders.openedAt))
@@ -69,15 +58,15 @@ export async function GET() {
 
     return NextResponse.json({
       stats: {
-        totalOrders: Number(counts?.total_orders ?? 0),
-        openOrders: Number(counts?.open_orders ?? 0),
-        closedThisMonth: Number(counts?.closed_this_month ?? 0),
+        totalOrders: totalResult[0]?.value ?? 0,
+        openOrders: openResult[0]?.value ?? 0,
+        closedThisMonth: closedResult[0]?.value ?? 0,
         lastSyncAt: lastSyncResult[0]?.endedAt?.toISOString() ?? null,
       },
       webhooks: {
-        todayCount: Number(counts?.webhooks_today ?? 0),
-        latestAt: webhookLatestResult[0]?.latest_at ?? null,
-        failedToday: Number(counts?.webhooks_failed ?? 0),
+        todayCount: 0,
+        latestAt: null,
+        failedToday: 0,
       },
       systemHealth: {
         lastSync: lastSyncJob
@@ -88,19 +77,25 @@ export async function GET() {
               error: lastSyncJob.error,
             }
           : null,
-        failedJobs: Number(counts?.failed_jobs ?? 0),
-        documentsUploadedToday: Number(counts?.uploads_today ?? 0),
-        documentAttachFailuresToday: Number(counts?.attach_failures ?? 0),
+        failedJobs: failedJobsResult[0]?.value ?? 0,
+        documentsUploadedToday: 0,
+        documentAttachFailuresToday: 0,
       },
       recentOrders: recentOrderRows.map((row) => ({
-        ...row.orders,
-        property: row.order_properties,
+        id: row.id,
+        fileNumber: row.fileNumber,
+        operationalStatus: row.operationalStatus,
+        transactionType: row.transactionType,
+        openedAt: row.openedAt,
+        closedAt: row.closedAt,
+        property: row.address ? { address: row.address, city: row.city, state: row.state, county: row.county } : null,
       })),
     });
   } catch (err) {
     console.error('[dashboard] Error:', err);
+    const message = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Failed to load dashboard data' },
+      { error: 'Failed to load dashboard data', detail: message },
       { status: 500 },
     );
   }

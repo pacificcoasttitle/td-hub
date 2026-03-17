@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic';
 
 const ALL_NAV: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: '◫' },
+  { label: 'Hub', href: '/hub', icon: '▣' },
   { label: 'Orders', href: '/orders', icon: '☰' },
   { label: 'Quick Entry', href: '/orders/quick-entry', icon: '⚡' },
   { label: 'Open Order (On Behalf)', href: '/orders/new-on-behalf', icon: '✦' },
@@ -19,13 +20,13 @@ const ALL_NAV: NavItem[] = [
 ];
 
 const NAV_BY_ROLE: Record<string, string[]> = {
-  super_admin: ['/dashboard', '/orders', '/contacts', '/documents', '/vendor-actions', '/jobs', '/settings', '/users'],
-  admin: ['/dashboard', '/orders', '/contacts', '/documents', '/vendor-actions', '/jobs', '/settings', '/users'],
-  cs_admin: ['/dashboard', '/orders', '/contacts', '/documents', '/vendor-actions', '/jobs'],
+  super_admin: ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/vendor-actions', '/jobs', '/settings', '/users'],
+  admin: ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/vendor-actions', '/jobs', '/settings', '/users'],
+  cs_admin: ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/vendor-actions', '/jobs'],
   sales_rep: ['/dashboard', '/orders', '/contacts'],
   title_officer: ['/dashboard', '/orders', '/documents', '/vendor-actions'],
   escrow_officer: ['/dashboard', '/orders', '/documents', '/vendor-actions'],
-  open_order_team: ['/dashboard', '/orders', '/orders/quick-entry', '/orders/new-on-behalf', '/contacts'],
+  open_order_team: ['/hub', '/orders', '/orders/quick-entry', '/orders/new-on-behalf', '/contacts'],
 };
 
 const ALLOWED_ROLES = Object.keys(NAV_BY_ROLE);

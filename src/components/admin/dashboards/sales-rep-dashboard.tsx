@@ -1,13 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   MetricCard, MetricCardSkeleton, SectionCard,
-  ActivityList, OrdersTable, ErrorBanner, BASE_ORDER_COLUMNS,
-  formatCurrency,
-  type RecentOrder, type ActivityEntry,
+  ErrorBanner, formatCurrency,
 } from './shared';
+import { OrdersHubTable } from '@/components/shared/orders-hub-table';
 
 interface SalesRepStats {
   openOrders: number;
@@ -23,22 +21,16 @@ interface SalesRepStats {
 }
 
 export function SalesRepDashboard({ displayName }: { displayName: string | null }) {
-  const router = useRouter();
   const [stats, setStats] = useState<SalesRepStats | null>(null);
-  const [orders, setOrders] = useState<RecentOrder[]>([]);
-  const [activity, setActivity] = useState<ActivityEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     const opts = { signal: controller.signal };
-    Promise.all([
-      fetch('/api/dashboard/sales-rep/stats', opts).then((r) => r.ok ? r.json() : null),
-      fetch('/api/dashboard/sales-rep/orders?pageSize=10', opts).then((r) => r.ok ? r.json() : { orders: [] }),
-      fetch('/api/dashboard/sales-rep/activity?limit=10', opts).then((r) => r.ok ? r.json() : { activity: [] }),
-    ])
-      .then(([s, o, a]) => { setStats(s); setOrders(o.orders ?? []); setActivity(a.activity ?? []); })
+    fetch('/api/dashboard/sales-rep/stats', opts)
+      .then((r) => r.ok ? r.json() : null)
+      .then((s) => setStats(s))
       .catch((e) => { if (e.name !== 'AbortError') setError(e.message); })
       .finally(() => setLoading(false));
     return () => controller.abort();
@@ -162,14 +154,15 @@ export function SalesRepDashboard({ displayName }: { displayName: string | null 
         </div>
       )}
 
-      {/* Row 4: My Recent Orders */}
+      {/* Row 4: My Recent Orders with modal actions */}
       <SectionCard title="My Recent Orders" action={{ label: 'View all my orders →', href: '/orders' }}>
-        <OrdersTable
-          orders={orders}
-          loading={loading}
-          columns={BASE_ORDER_COLUMNS}
-          onNavigate={(id) => router.push(`/orders/${id}`)}
-          emptyMessage="No orders assigned to you yet."
+        <OrdersHubTable
+          fetchUrl="/api/dashboard/sales-rep/orders"
+          actions={['cpl', 'prelim', 'notes', 'detail']}
+          accentColor="#C5A55A"
+          showSearch
+          showStatusFilter={false}
+          pageSize={10}
         />
       </SectionCard>
     </>

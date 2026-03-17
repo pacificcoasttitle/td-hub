@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { EmptyState } from '@/components/client/empty-state';
 import { STATUS_STYLES, formatDate } from '@/components/client/order-detail/helpers';
+import { OrdersHubTable } from '@/components/shared/orders-hub-table';
 
 interface Order {
   id: number;
@@ -23,7 +23,6 @@ interface Profile {
 }
 
 export default function ClientDashboardPage() {
-  const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -99,34 +98,20 @@ export default function ClientDashboardPage() {
             </div>
           </section>
 
-          {/* Recent Activity */}
+          {/* All Orders — full action table */}
           <section>
-            <h2 className="text-lg font-semibold text-[#1B2A4A] mb-6">Recent Activity</h2>
-            <div className="space-y-3">
-              {orders.slice(0, 6).map((o) => {
-                const addr = [o.address, o.city, o.state].filter(Boolean).join(', ');
-                return (
-                  <Link
-                    key={o.id}
-                    href={`/client/orders/${o.id}`}
-                    className="flex items-start gap-4 p-4 bg-white rounded-xl border border-[#E5E7EB] hover:shadow-sm transition-shadow"
-                  >
-                    <div className="flex-shrink-0 p-2 bg-[#DBEAFE] rounded-lg">
-                      <svg className="h-4 w-4 text-[#1E40AF]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-[#1B2A4A]">File opened</p>
-                      <p className="text-sm text-[#4B5563] truncate">
-                        <span className="font-mono text-xs">{o.fileNumber}</span>
-                        {addr && <> &middot; {addr}</>}
-                      </p>
-                    </div>
-                    <span className="flex-shrink-0 text-xs text-[#6B7280]">{formatDate(o.openedAt)}</span>
-                  </Link>
-                );
-              })}
+            <h2 className="text-lg font-semibold text-[#1B2A4A] mb-6">All Files</h2>
+            <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm overflow-hidden">
+              <OrdersHubTable
+                fetchUrl="/api/client/orders"
+                actions={['cpl', 'prelim', 'detail', 'fees']}
+                isClient
+                accentColor="#F26B2B"
+                showSearch
+                showStatusFilter
+                pageSize={15}
+                feesHrefBuilder={(id) => `/client/orders/${id}/fees`}
+              />
             </div>
           </section>
         </>

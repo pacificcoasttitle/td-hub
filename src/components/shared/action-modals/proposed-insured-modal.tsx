@@ -5,14 +5,16 @@ import { ModalShell } from './modal-shell';
 
 interface ProposedDoc { id: number; fileName: string; createdAt: string; }
 
-export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, address }: {
+export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, address, accentColor }: {
   open: boolean; onClose: () => void;
   orderId: number; fileNumber: string; address: string;
+  accentColor?: string;
 }) {
   const [orderData, setOrderData] = useState<{ buyer?: string; lender?: string } | null>(null);
   const [docs, setDocs] = useState<ProposedDoc[]>([]);
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; docId?: number; error?: string } | null>(null);
+  const accent = accentColor ?? '#C5A55A';
 
   useEffect(() => {
     if (!open) return;
@@ -42,13 +44,11 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
       setDocs(d2.documents ?? []);
     } catch (err) {
       setResult({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
-    } finally {
-      setGenerating(false);
-    }
+    } finally { setGenerating(false); }
   }
 
   return (
-    <ModalShell open={open} onClose={onClose} title="Proposed Insured" subtitle={`${fileNumber} · ${address}`}>
+    <ModalShell open={open} onClose={onClose} title="Proposed Insured" subtitle={`${fileNumber} · ${address}`} accentColor={accentColor}>
       <div className="p-5 space-y-4">
         {orderData && (
           <div className="grid grid-cols-2 gap-3">
@@ -62,23 +62,15 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
             </div>
           </div>
         )}
-
-        <button
-          onClick={generate}
-          disabled={generating}
-          className="w-full h-10 bg-[#1B2A4A] text-white text-sm font-medium rounded-lg hover:bg-[#16233D] disabled:opacity-50 transition-colors"
-        >
+        <button onClick={generate} disabled={generating}
+          className="w-full h-10 bg-[#1B2A4A] text-white text-sm font-medium rounded-lg hover:bg-[#16233D] disabled:opacity-50 transition-colors">
           {generating ? 'Generating…' : 'Generate Proposed Insured'}
         </button>
-
         {result && (
           <div className={`px-3 py-2 rounded-lg text-sm ${result.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-            {result.ok ? (
-              <span>Document generated. <a href={`/api/documents/${result.docId}/download`} className="underline font-medium">Download</a></span>
-            ) : result.error}
+            {result.ok ? <span>Document generated. <a href={`/api/documents/${result.docId}/download`} className="underline font-medium">Download</a></span> : result.error}
           </div>
         )}
-
         {docs.length > 0 && (
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2">Existing Documents</p>
@@ -89,7 +81,7 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
                     <p className="text-sm text-[#1A1A2E] truncate">{d.fileName}</p>
                     <p className="text-xs text-[#6B7280]">{new Date(d.createdAt).toLocaleDateString()}</p>
                   </div>
-                  <a href={`/api/documents/${d.id}/download`} className="text-xs font-medium text-[#C5A55A] hover:text-[#B8953D] ml-3 shrink-0">Download</a>
+                  <a href={`/api/documents/${d.id}/download`} className="text-xs font-medium ml-3 shrink-0" style={{ color: accent }}>Download</a>
                 </div>
               ))}
             </div>

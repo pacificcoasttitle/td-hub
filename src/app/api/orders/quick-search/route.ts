@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
-import { orders } from '@/lib/db/schema';
-import { or, ilike, desc } from 'drizzle-orm';
+import { orders, orderProperties } from '@/lib/db/schema';
+import { or, ilike, desc, eq } from 'drizzle-orm';
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -19,17 +19,18 @@ export async function GET(req: NextRequest) {
       .select({
         id: orders.id,
         fileNumber: orders.fileNumber,
-        propertyStreet: orders.propertyStreet,
-        propertyCity: orders.propertyCity,
-        propertyState: orders.propertyState,
+        propertyStreet: orderProperties.address,
+        propertyCity: orderProperties.city,
+        propertyState: orderProperties.state,
         operationalStatus: orders.operationalStatus,
       })
       .from(orders)
+      .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
       .where(
         or(
           ilike(orders.fileNumber, pattern),
-          ilike(orders.propertyStreet, pattern),
-          ilike(orders.propertyCity, pattern),
+          ilike(orderProperties.address, pattern),
+          ilike(orderProperties.city, pattern),
         ),
       )
       .orderBy(desc(orders.openedAt))

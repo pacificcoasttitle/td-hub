@@ -6,17 +6,19 @@ interface ModalShellProps {
   title: string;
   subtitle?: string;
   wide?: boolean;
+  accentColor?: string;
   children: React.ReactNode;
 }
 
-export function ModalShell({ open, onClose, title, subtitle, wide, children }: ModalShellProps) {
+export function ModalShell({ open, onClose, title, subtitle, wide, accentColor, children }: ModalShellProps) {
   if (!open) return null;
+  const bg = accentColor === '#F26B2B' ? 'bg-[#F26B2B]' : 'bg-[#1B2A4A]';
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] px-4">
       <div className="fixed inset-0 bg-black/40" onClick={onClose} />
       <div className={`relative bg-white rounded-xl shadow-2xl overflow-hidden ${wide ? 'w-full max-w-4xl' : 'w-full max-w-lg'} max-h-[80vh] flex flex-col`}>
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0 bg-[#1B2A4A]">
+        <div className={`flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0 ${bg}`}>
           <div>
             <h3 className="text-sm font-semibold text-white">{title}</h3>
             {subtitle && <p className="text-xs text-white/50 mt-0.5 font-mono">{subtitle}</p>}

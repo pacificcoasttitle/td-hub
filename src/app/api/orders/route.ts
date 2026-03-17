@@ -9,6 +9,8 @@ const querySchema = z.object({
   status: z.string().optional(),
   search: z.string().optional(),
   branchId: z.coerce.number().optional(),
+  sortBy: z.enum(['openedAt', 'fileNumber', 'operationalStatus']).default('openedAt'),
+  sortDir: z.enum(['asc', 'desc']).default('desc'),
 });
 
 export async function GET(req: NextRequest) {

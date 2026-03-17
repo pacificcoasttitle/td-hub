@@ -132,6 +132,7 @@ export const orderStatusHistory = pgTable('order_status_history', {
   changedAt: timestamp('changed_at').notNull().defaultNow(),
 }, (table) => ({
   orderIdx: index('order_status_history_order_idx').on(table.orderId),
+  changedAtIdx: index('order_status_history_changed_at_idx').on(table.changedAt),
 }));
 
 // ─── Order External References ───────────────────────────────────────────────

@@ -60,6 +60,7 @@ export const documentAudit = pgTable('document_audit', {
   performedAt: timestamp('performed_at').notNull().defaultNow(),
 }, (table) => ({
   documentIdx: index('doc_audit_document_idx').on(table.documentId),
+  performedAtIdx: index('doc_audit_performed_at_idx').on(table.performedAt),
 }));
 
 // ─── Relations ───────────────────────────────────────────────────────────────

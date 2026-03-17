@@ -1,92 +1,319 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ModalShell } from './modal-shell';
 
-interface ProposedDoc { id: number; fileName: string; createdAt: string; }
+interface Branch { id: number; code: string; name: string; }
+interface TitleOfficer { value: string; label: string; }
+interface OrderData {
+  branchId?: number; titleOfficerId?: number;
+  lenderCompanyName?: string; lenderAddress?: string;
+  lenderCity?: string; lenderState?: string; lenderZip?: string;
+  loanNumber?: string; loanAmount?: string;
+  buyerFirstName?: string; buyerLastName?: string;
+  secondaryBuyerFirstName?: string; secondaryBuyerLastName?: string;
+  propertyStreet?: string; propertyCity?: string; propertyState?: string; propertyZip?: string;
+  prelimDate?: string;
+}
+interface ExistingDoc { id: number; fileName: string; createdAt: string; }
+interface LenderResult { id: number; companyName: string; address?: string; city?: string; state?: string; zip?: string; }
 
 export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, address, accentColor }: {
   open: boolean; onClose: () => void;
   orderId: number; fileNumber: string; address: string;
   accentColor?: string;
 }) {
-  const [orderData, setOrderData] = useState<{ buyer?: string; lender?: string } | null>(null);
-  const [docs, setDocs] = useState<ProposedDoc[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchId, setBranchId] = useState<number | null>(null);
+  const [titleOfficers, setTitleOfficers] = useState<TitleOfficer[]>([]);
+  const [titleOfficerId, setTitleOfficerId] = useState<string>('');
+  const [existingDocs, setExistingDocs] = useState<ExistingDoc[]>([]);
+
+  const [lenderType, setLenderType] = useState<'existing' | 'new'>('new');
+  const [lenderCompany, setLenderCompany] = useState('');
+  const [assignmentClause, setAssignmentClause] = useState('');
+  const [lenderAddr, setLenderAddr] = useState('');
+  const [lenderCity, setLenderCity] = useState('');
+  const [lenderState, setLenderState] = useState('');
+  const [lenderZip, setLenderZip] = useState('');
+  const [lenderSearch, setLenderSearch] = useState('');
+  const [lenderResults, setLenderResults] = useState<LenderResult[]>([]);
+  const lenderDebRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const [propStreet, setPropStreet] = useState('');
+  const [propCity, setPropCity] = useState('');
+  const [propState, setPropState] = useState('');
+  const [propZip, setPropZip] = useState('');
+
+  const [loanNumber, setLoanNumber] = useState('');
+  const [loanAmount, setLoanAmount] = useState('');
+  const [borrower, setBorrower] = useState('');
+  const [supplementalDate, setSupplementalDate] = useState('');
+  const [prelimDate, setPrelimDate] = useState('');
+
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; docId?: number; error?: string } | null>(null);
 
+  const hasLender = !!lenderCompany;
+  const hasProperty = !!propStreet;
+  const [lenderExpanded, setLenderExpanded] = useState(true);
+  const [propertyExpanded, setPropertyExpanded] = useState(true);
+
   useEffect(() => {
     if (!open) return;
-    setResult(null);
+    setLoading(true); setResult(null); setLenderType('new');
+
     Promise.all([
+      fetch('/api/branches').then((r) => r.ok ? r.json() : null),
+      fetch('/api/form-options').then((r) => r.ok ? r.json() : null),
       fetch(`/api/orders/${orderId}`).then((r) => r.ok ? r.json() : null),
       fetch(`/api/orders/${orderId}/documents?category=proposed_insured`).then((r) => r.ok ? r.json() : { documents: [] }),
-    ]).then(([order, docData]) => {
-      if (order) {
-        const buyer = [order.buyerFirstName, order.buyerLastName].filter(Boolean).join(' ');
-        const lender = order.lenderName ?? order.lenderCompanyName ?? '';
-        setOrderData({ buyer: buyer || undefined, lender: lender || undefined });
+    ]).then(([brData, formOpts, od, docData]) => {
+      if (brData?.branches) setBranches(brData.branches);
+      if (formOpts?.titleOfficers) {
+        const officers = (formOpts.titleOfficers as Array<{ id: number; name?: string; email?: string }>)
+          .map(t => ({ value: String(t.id), label: t.name ?? t.email ?? '' }));
+        setTitleOfficers(officers);
       }
-      setDocs(docData?.documents ?? []);
-    }).catch(() => {});
+      if (docData?.documents) setExistingDocs(docData.documents);
+
+      if (od) {
+        const o = od as OrderData;
+        if (o.branchId) setBranchId(o.branchId);
+        if (o.titleOfficerId) setTitleOfficerId(String(o.titleOfficerId));
+        setLenderCompany(o.lenderCompanyName ?? '');
+        setLenderAddr(o.lenderAddress ?? '');
+        setLenderCity(o.lenderCity ?? '');
+        setLenderState(o.lenderState ?? '');
+        setLenderZip(o.lenderZip ?? '');
+        setLoanNumber(o.loanNumber ?? '');
+        setLoanAmount(o.loanAmount ?? '');
+        setPropStreet(o.propertyStreet ?? '');
+        setPropCity(o.propertyCity ?? '');
+        setPropState(o.propertyState ?? '');
+        setPropZip(o.propertyZip ?? '');
+        const buyers = [
+          [o.buyerFirstName, o.buyerLastName].filter(Boolean).join(' '),
+          [o.secondaryBuyerFirstName, o.secondaryBuyerLastName].filter(Boolean).join(' '),
+        ].filter(Boolean).join(', ');
+        setBorrower(buyers);
+        if (o.prelimDate) setPrelimDate(o.prelimDate.slice(0, 10));
+        setLenderExpanded(!o.lenderCompanyName);
+        setPropertyExpanded(!o.propertyStreet);
+      }
+    }).catch(() => {}).finally(() => setLoading(false));
   }, [open, orderId]);
 
+  function handleLenderSearch(v: string) {
+    setLenderSearch(v);
+    clearTimeout(lenderDebRef.current);
+    if (v.length < 2) { setLenderResults([]); return; }
+    lenderDebRef.current = setTimeout(() => {
+      fetch(`/api/contacts/search?q=${encodeURIComponent(v)}&type=lender`)
+        .then((r) => r.ok ? r.json() : { results: [] })
+        .then((d) => setLenderResults(d.results ?? d.contacts ?? []))
+        .catch(() => setLenderResults([]));
+    }, 250);
+  }
+
+  function selectLender(l: LenderResult) {
+    setLenderCompany(l.companyName ?? '');
+    setLenderAddr(l.address ?? '');
+    setLenderCity(l.city ?? '');
+    setLenderState(l.state ?? '');
+    setLenderZip(l.zip ?? '');
+    setLenderSearch(''); setLenderResults([]);
+  }
+
   async function generate() {
+    if (!branchId) return;
     setGenerating(true); setResult(null);
     try {
-      const res = await fetch(`/api/orders/${orderId}/proposed-insured`, { method: 'POST' });
+      const res = await fetch(`/api/orders/${orderId}/proposed-insured`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          branchId, titleOfficerId: titleOfficerId || undefined,
+          lenderCompany, assignmentClause,
+          lenderAddress: lenderAddr, lenderCity, lenderState, lenderZip,
+          propertyAddress: propStreet, propertyCity: propCity, propertyState: propState, propertyZip: propZip,
+          loanNumber, loanAmount, borrowerNames: borrower,
+          supplementalDate: supplementalDate || undefined,
+          prelimDate: prelimDate || undefined,
+        }),
+      });
       const body = await res.json();
       if (!res.ok || !body.success) throw new Error(body.error ?? 'Generation failed');
       setResult({ ok: true, docId: body.documentId });
       const r2 = await fetch(`/api/orders/${orderId}/documents?category=proposed_insured`);
       const d2 = await r2.json();
-      setDocs(d2.documents ?? []);
+      setExistingDocs(d2.documents ?? []);
     } catch (err) {
       setResult({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
     } finally { setGenerating(false); }
   }
 
   return (
-    <ModalShell open={open} onClose={onClose} title="Proposed Insured" subtitle={`${fileNumber} · ${address}`} accentColor={accentColor}>
-      <div className="p-5 space-y-4">
-        {orderData && (
-          <div className="grid grid-cols-2 gap-3">
-            <div className="px-3 py-2.5 bg-gray-50 rounded-lg">
-              <p className="text-[10px] uppercase tracking-wider text-[#6B7280]">Buyer / Borrower</p>
-              <p className="text-sm font-medium text-[#1A1A2E] mt-0.5">{orderData.buyer || '—'}</p>
-            </div>
-            <div className="px-3 py-2.5 bg-gray-50 rounded-lg">
-              <p className="text-[10px] uppercase tracking-wider text-[#6B7280]">Lender</p>
-              <p className="text-sm font-medium text-[#1A1A2E] mt-0.5">{orderData.lender || '—'}</p>
-            </div>
-          </div>
-        )}
-        <button onClick={generate} disabled={generating}
-          className="w-full h-11 bg-[#F26B2B] text-white text-sm font-semibold rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors">
-          {generating ? 'Generating…' : 'Generate Proposed Insured'}
-        </button>
-        {result && (
-          <div className={`px-3 py-2 rounded-lg text-sm ${result.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-            {result.ok ? <span>Document generated. <a href={`/api/documents/${result.docId}/download`} className="underline font-semibold text-[#F26B2B]">Download</a></span> : result.error}
-          </div>
-        )}
-        {docs.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2">Existing Documents</p>
-            <div className="space-y-1.5">
-              {docs.map((d) => (
-                <div key={d.id} className="flex items-center justify-between px-3 py-2.5 bg-gray-50 rounded-lg">
-                  <div className="min-w-0">
-                    <p className="text-sm text-[#1A1A2E] truncate">{d.fileName}</p>
-                    <p className="text-xs text-[#6B7280]">{new Date(d.createdAt).toLocaleDateString()}</p>
-                  </div>
-                  <a href={`/api/documents/${d.id}/download`} className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">Download</a>
+    <ModalShell open={open} onClose={onClose} title="Proposed Insured" subtitle={`File #${fileNumber} — ${address}`} wide>
+      {loading ? (
+        <div className="p-10 text-center">
+          <div className="w-6 h-6 border-2 border-gray-200 border-t-[#F26B2B] rounded-full animate-spin mx-auto" />
+          <p className="text-sm text-[#6B7280] mt-3">Loading order data…</p>
+        </div>
+      ) : (
+        <div className="p-5 space-y-4">
+          {/* ── Lender ── */}
+          <Collapse title="Lender Information" complete={hasLender && !lenderExpanded} summary={lenderCompany}
+            expanded={lenderExpanded} onToggle={() => setLenderExpanded(!lenderExpanded)}>
+            <div className="space-y-3">
+              <div className="flex gap-4 mb-2">
+                <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                  <input type="radio" name="piLenderType" checked={lenderType === 'existing'} onChange={() => setLenderType('existing')} className="accent-[#F26B2B]" />
+                  Existing Lender
+                </label>
+                <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                  <input type="radio" name="piLenderType" checked={lenderType === 'new'} onChange={() => setLenderType('new')} className="accent-[#F26B2B]" />
+                  New Lender
+                </label>
+              </div>
+              {lenderType === 'existing' && (
+                <div className="relative">
+                  <Inp label="Search Lender" value={lenderSearch} onChange={handleLenderSearch} placeholder="Type to search…" />
+                  {lenderResults.length > 0 && (
+                    <div className="absolute z-10 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                      {lenderResults.map((l) => (
+                        <button key={l.id} onClick={() => selectLender(l)} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-100 last:border-0">
+                          <span className="font-medium text-[#1A1A2E]">{l.companyName}</span>
+                          {l.city && <span className="text-[#6B7280] ml-2 text-xs">{l.city}, {l.state}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Inp label="Lender Company" value={lenderCompany} onChange={setLenderCompany} />
+                <Inp label="Assignment Clause" value={assignmentClause} onChange={setAssignmentClause} />
+                <Inp label="Address" value={lenderAddr} onChange={setLenderAddr} className="sm:col-span-2" />
+                <Inp label="City" value={lenderCity} onChange={setLenderCity} />
+                <Inp label="State" value={lenderState} onChange={setLenderState} />
+                <Inp label="Zipcode" value={lenderZip} onChange={setLenderZip} />
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          </Collapse>
+
+          {/* ── Property ── */}
+          <Collapse title="Property" complete={hasProperty && !propertyExpanded}
+            summary={[propStreet, propCity, propState].filter(Boolean).join(', ')}
+            expanded={propertyExpanded} onToggle={() => setPropertyExpanded(!propertyExpanded)}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Inp label="Property Address" value={propStreet} onChange={setPropStreet} className="sm:col-span-2" />
+              <Inp label="City" value={propCity} onChange={setPropCity} />
+              <Inp label="State" value={propState} onChange={setPropState} />
+              <Inp label="Zipcode" value={propZip} onChange={setPropZip} />
+            </div>
+          </Collapse>
+
+          {/* ── Transaction ── */}
+          <Section label="Transaction">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Inp label="Loan Number" value={loanNumber} onChange={setLoanNumber} />
+              <Inp label="Loan Amount" value={loanAmount} onChange={setLoanAmount} prefix="$" />
+              <Inp label="Primary Borrower / Vesting" value={borrower} onChange={setBorrower} className="sm:col-span-2" />
+              <div>
+                <label className="block text-xs text-[#6B7280] mb-1">Title Officer</label>
+                <select value={titleOfficerId} onChange={(e) => setTitleOfficerId(e.target.value)}
+                  className="w-full h-10 px-3 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20">
+                  <option value="">Select title officer…</option>
+                  {titleOfficers.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              <Inp label="Supplemental Report Date" value={supplementalDate} onChange={setSupplementalDate} type="date" />
+              <Inp label="Preliminary Report Date" value={prelimDate} onChange={setPrelimDate} type="date" />
+            </div>
+          </Section>
+
+          {/* ── Branch ── */}
+          <Section label="Branch">
+            <select value={branchId ?? ''} onChange={(e) => setBranchId(e.target.value ? Number(e.target.value) : null)}
+              className="w-full h-11 px-3 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20">
+              <option value="">Select branch…</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}
+            </select>
+          </Section>
+
+          {/* ── Result ── */}
+          {result && (
+            <div className={`px-4 py-3 rounded-lg text-sm ${result.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+              {result.ok ? <span>Document generated. <a href={`/api/documents/${result.docId}/download`} className="underline font-semibold text-[#F26B2B]">Download</a></span> : result.error}
+            </div>
+          )}
+
+          <button onClick={generate} disabled={!branchId || generating}
+            className="w-full h-12 bg-[#F26B2B] text-white text-sm font-semibold rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors">
+            {generating ? 'Generating…' : 'Generate Proposed Insured'}
+          </button>
+
+          {/* ── Existing Documents ── */}
+          {existingDocs.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2">Existing Documents</p>
+              <div className="space-y-1.5">
+                {existingDocs.map((d) => (
+                  <div key={d.id} className="flex items-center justify-between px-3 py-2.5 bg-gray-50 rounded-lg">
+                    <div className="min-w-0">
+                      <p className="text-sm text-[#1A1A2E] truncate">{d.fileName}</p>
+                      <p className="text-xs text-[#6B7280]">{new Date(d.createdAt).toLocaleDateString()}</p>
+                    </div>
+                    <a href={`/api/documents/${d.id}/download`} className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">Download</a>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </ModalShell>
+  );
+}
+
+/* ── Collapsible Section ── */
+
+function Collapse({ title, complete, summary, expanded, onToggle, children }: {
+  title: string; complete: boolean; summary: string; expanded: boolean; onToggle: () => void; children: React.ReactNode;
+}) {
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <button type="button" onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left">
+        <div className="flex items-center gap-2">
+          {complete && <svg className="h-4 w-4 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>}
+          <span className="text-xs font-semibold uppercase tracking-wider text-[#1A1A2E]">{title}</span>
+          {complete && <span className="text-xs text-[#6B7280] truncate max-w-[200px]">{summary}</span>}
+        </div>
+        {complete && <span className="text-xs font-medium text-[#F26B2B]">Edit</span>}
+        <svg className={`h-4 w-4 text-[#6B7280] transition-transform ml-2 shrink-0 ${expanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {expanded && <div className="p-4 border-t border-gray-100">{children}</div>}
+    </div>
+  );
+}
+
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div><p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2">{label}</p>{children}</div>;
+}
+
+function Inp({ label, value, onChange, prefix, className = '', placeholder, type = 'text' }: {
+  label: string; value: string; onChange: (v: string) => void; prefix?: string; className?: string; placeholder?: string; type?: string;
+}) {
+  return (
+    <div className={className}>
+      <label className="block text-xs text-[#6B7280] mb-1">{label}</label>
+      <div className="relative">
+        {prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#9CA3AF]">{prefix}</span>}
+        <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+          className={`w-full h-10 ${prefix ? 'pl-7' : 'pl-3'} pr-3 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20`} />
+      </div>
+    </div>
   );
 }

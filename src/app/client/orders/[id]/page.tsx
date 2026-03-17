@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { OrderTimeline } from '@/components/client/order-timeline';
 import { DocumentsTab } from '@/components/client/order-detail/documents-tab';
 import { STATUS_STYLES, formatDate as fmtDate } from '@/components/client/order-detail/helpers';
+import { ActivityFeed } from '@/components/shared/activity-feed';
 
 interface Document {
   id: number;
@@ -38,6 +39,7 @@ const TABS = [
   { id: 'prelim', label: 'Prelim' },
   { id: 'fees', label: 'Fees' },
   { id: 'notes', label: 'Notes' },
+  { id: 'activity', label: 'Activity' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
@@ -159,6 +161,11 @@ export default function ClientOrderDetailPage() {
         {activeTab === 'prelim' && <PrelimTabContent orderId={order.id} />}
         {activeTab === 'fees' && <FeesTabContent orderId={order.id} />}
         {activeTab === 'notes' && <NotesTabContent orderId={order.id} />}
+        {activeTab === 'activity' && (
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm overflow-hidden">
+            <ActivityFeed fetchUrl={`/api/client/orders/${order.id}/activity`} accentColor="#F26B2B" />
+          </div>
+        )}
       </div>
     </div>
   );

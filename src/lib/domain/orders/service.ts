@@ -15,6 +15,8 @@ export interface OrderListParams {
   status?: string;
   search?: string;
   branchId?: number;
+  sortBy?: 'openedAt' | 'fileNumber' | 'operationalStatus';
+  sortDir?: 'asc' | 'desc';
 }
 
 export interface OrderListResult {
@@ -22,6 +24,7 @@ export interface OrderListResult {
     property: typeof orderProperties.$inferSelect | null;
     salesRepName: string | null;
     titleOfficerName: string | null;
+    openedBy: string | null;
   }>;
   total: number;
   page: number;
@@ -29,6 +32,12 @@ export interface OrderListResult {
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
+
+const SORT_COLUMNS = {
+  openedAt: orders.openedAt,
+  fileNumber: orders.fileNumber,
+  operationalStatus: orders.operationalStatus,
+} as const;
 
 export async function getOrders(params: OrderListParams = {}): Promise<OrderListResult> {
   const page = params.page ?? 1;
@@ -58,6 +67,17 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
+  const sortCol = SORT_COLUMNS[params.sortBy ?? 'openedAt'];
+  const orderByClause = params.sortDir === 'asc'
+    ? sql`${sortCol} ASC NULLS LAST`
+    : sql`${sortCol} DESC NULLS LAST`;
+
+  const openedBySubquery = db
+    .select({ orderId: orderParties.orderId, name: orderParties.externalName })
+    .from(orderParties)
+    .where(and(eq(orderParties.role, 'buyer'), eq(orderParties.isPrimary, true)))
+    .as('opened_by');
+
   const [orderRows, countResult] = await Promise.all([
     db
       .select()
@@ -65,8 +85,9 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
       .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
       .leftJoin(salesRepContact, eq(orders.salesRepId, salesRepContact.id))
       .leftJoin(titleOfficerContact, eq(orders.titleOfficerId, titleOfficerContact.id))
+      .leftJoin(openedBySubquery, eq(orders.id, openedBySubquery.orderId))
       .where(where)
-      .orderBy(desc(orders.openedAt))
+      .orderBy(orderByClause)
       .limit(pageSize)
       .offset(offset),
     db
@@ -81,6 +102,7 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
     property: row.order_properties,
     salesRepName: row.sales_rep?.fullName ?? null,
     titleOfficerName: row.title_officer?.fullName ?? null,
+    openedBy: row.opened_by?.name ?? null,
   }));
 
   return {

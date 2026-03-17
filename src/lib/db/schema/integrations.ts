@@ -83,7 +83,10 @@ export const titlePointData = pgTable('title_point_data', {
   metadata: jsonb('metadata'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  orderIdx: index('title_point_data_order_idx').on(table.orderId),
+  createdAtIdx: index('title_point_data_created_at_idx').on(table.createdAt),
+}));
 
 // ─── CPL Error Logs ──────────────────────────────────────────────────────────
 

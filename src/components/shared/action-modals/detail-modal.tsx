@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ModalShell } from './modal-shell';
+import { ActivityFeed } from '@/components/shared/activity-feed';
 
 interface OrderDetail {
   id: number; fileNumber: string; operationalStatus: string;
@@ -17,7 +18,7 @@ interface OrderDetail {
 
 interface Doc { id: number; fileName: string; category: string | null; createdAt: string; }
 
-const TABS = ['Overview', 'Property', 'Parties', 'Documents'] as const;
+const TABS = ['Overview', 'Property', 'Parties', 'Documents', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 
 export function DetailModal({ open, onClose, orderId, fileNumber, address, isClient, accentColor }: {
@@ -109,6 +110,9 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
                   ))}
                 </div>
               ) : <p className="text-sm text-[#6B7280] text-center py-4">No documents.</p>
+            )}
+            {tab === 'Activity' && (
+              <ActivityFeed fetchUrl={`${base}/activity`} accentColor={accentColor} />
             )}
             <div className="mt-6 pt-4 border-t border-gray-100">
               <Link href={detailHref} className="text-xs font-semibold text-[#F26B2B] hover:text-[#E05A1A]" onClick={onClose}>Open Full Page →</Link>

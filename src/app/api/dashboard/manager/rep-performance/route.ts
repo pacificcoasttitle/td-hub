@@ -24,7 +24,8 @@ export async function GET(req: NextRequest) {
   const allContacts = await db
     .select({ id: contacts.id, fullName: contacts.fullName, officerName: contacts.officerName })
     .from(contacts)
-    .where(sql`${contacts.roles} @> '["Sales Rep"]'::jsonb`);
+    .where(sql`${contacts.roles} @> '["Sales Rep"]'::jsonb`)
+    .limit(100);
 
   const enriched = await Promise.all(
     lbResult.data.leaderboard.map(async (entry) => {

@@ -132,7 +132,8 @@ export async function getOrderById(id: number) {
     .select()
     .from(orderStatusHistory)
     .where(eq(orderStatusHistory.orderId, id))
-    .orderBy(desc(orderStatusHistory.changedAt));
+    .orderBy(desc(orderStatusHistory.changedAt))
+    .limit(200);
 
   return {
     ...result[0]!.orders,

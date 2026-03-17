@@ -24,7 +24,8 @@ export async function GET(
       .select()
       .from(titlePointData)
       .where(eq(titlePointData.orderId, orderId))
-      .orderBy(desc(titlePointData.createdAt));
+      .orderBy(desc(titlePointData.createdAt))
+      .limit(50);
 
     return NextResponse.json({ requests: rows });
   } catch {

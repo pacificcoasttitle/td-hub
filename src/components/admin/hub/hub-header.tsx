@@ -5,8 +5,8 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
 const NAV = [
-  { label: 'Orders', href: '/orders' },
-  { label: 'Quick Entry', href: '/orders/quick-entry' },
+  { label: 'Orders', href: '/hub' },
+  { label: 'New Order', href: '/hub/new-order' },
 ];
 
 export function HubHeader({ displayName, signOutAction }: {
@@ -19,7 +19,7 @@ export function HubHeader({ displayName, signOutAction }: {
   return (
     <header className="h-11 bg-[#1B2A4A] flex items-center px-4 gap-6 shrink-0 text-sm select-none">
       <Link href="/hub" className="flex items-center gap-2 text-white font-bold tracking-tight mr-2">
-        <span className="text-[#C5A55A]">PCT</span>
+        <span className="text-[#F26B2B]">PCT</span>
         <span className="text-white/60 font-normal">Hub</span>
       </Link>
 
@@ -46,7 +46,7 @@ export function HubHeader({ displayName, signOutAction }: {
           onClick={() => setMenuOpen(!menuOpen)}
           className="flex items-center gap-2 text-white/70 hover:text-white transition-colors"
         >
-          <div className="w-6 h-6 rounded-full bg-[#C5A55A] flex items-center justify-center text-[10px] font-bold text-white">
+          <div className="w-6 h-6 rounded-full bg-[#F26B2B] flex items-center justify-center text-[10px] font-bold text-white">
             {displayName?.charAt(0)?.toUpperCase() ?? 'U'}
           </div>
           <span className="text-xs hidden sm:inline">{displayName}</span>

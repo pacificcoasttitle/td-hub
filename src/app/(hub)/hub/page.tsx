@@ -53,8 +53,8 @@ export default function HubPage() {
     <div className="flex flex-col h-full">
       {/* Quick Actions Bar */}
       <div className="sticky top-0 z-20 bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-3 shrink-0">
-        <Link href="/orders/quick-entry"
-          className="px-4 h-9 bg-[#C5A55A] text-white text-xs font-semibold rounded-lg hover:bg-[#B8953D] transition-colors inline-flex items-center gap-1.5">
+        <Link href="/hub/new-order"
+          className="px-4 h-9 bg-[#F26B2B] text-white text-xs font-semibold rounded-lg hover:bg-[#E05A1A] transition-colors inline-flex items-center gap-1.5">
           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
           New Order
         </Link>
@@ -72,7 +72,7 @@ export default function HubPage() {
             <input type="text" value={qsQuery} onChange={(e) => handleQsInput(e.target.value)}
               onFocus={() => { if (qsQuery.length >= 2 && qsResults.length > 0) setQsOpen(true); }}
               placeholder="Quick find file # or address…"
-              className="w-full h-9 pl-8 pr-3 border border-gray-200 rounded-lg text-xs bg-white focus:ring-1 focus:ring-[#C5A55A]/30 focus:border-[#C5A55A] outline-none" />
+              className="w-full h-9 pl-8 pr-3 border border-gray-200 rounded-lg text-xs bg-white focus:ring-1 focus:ring-[#F26B2B]/30 focus:border-[#F26B2B] outline-none" />
           </div>
           {qsOpen && qsResults.length > 0 && (
             <div className="absolute z-30 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
@@ -96,7 +96,7 @@ export default function HubPage() {
         fetchUrl="/api/orders"
         actions={['cpl', 'prelim', 'proposed', 'notes', 'detail']}
         compact
-        accentColor="#C5A55A"
+        accentColor="#F26B2B"
         showSearch
         showStatusFilter
         pageSize={25}

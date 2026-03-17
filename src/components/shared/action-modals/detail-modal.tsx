@@ -31,9 +31,7 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
   const [loading, setLoading] = useState(true);
 
   const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
-  const accent = accentColor ?? '#C5A55A';
   const detailHref = isClient ? `/client/orders/${orderId}` : `/orders/${orderId}`;
-  const tabBorder = accent === '#F26B2B' ? 'border-[#F26B2B]' : 'border-[#C5A55A]';
 
   useEffect(() => {
     if (!open) { setTab('Overview'); return; }
@@ -51,7 +49,7 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
   return (
     <ModalShell open={open} onClose={onClose} title={`Order ${fileNumber}`} subtitle={address} wide accentColor={accentColor}>
       {loading ? (
-        <div className="p-10 text-center"><div className="w-6 h-6 border-2 border-gray-200 rounded-full animate-spin mx-auto" style={{ borderTopColor: accent }} /></div>
+        <div className="p-10 text-center"><div className="w-6 h-6 border-2 border-gray-200 border-t-[#F26B2B] rounded-full animate-spin mx-auto" /></div>
       ) : !order ? (
         <div className="p-10 text-center text-sm text-[#6B7280]">Order not found.</div>
       ) : (
@@ -59,7 +57,7 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
           <div className="flex border-b border-gray-100 px-5">
             {TABS.map((t) => (
               <button key={t} onClick={() => setTab(t)}
-                className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors -mb-px ${tab === t ? `${tabBorder} text-[#1A1A2E]` : 'border-transparent text-[#6B7280] hover:text-[#1A1A2E]'}`}>
+                className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors -mb-px ${tab === t ? 'border-[#F26B2B] text-[#1A1A2E]' : 'border-transparent text-[#6B7280] hover:text-[#1A1A2E]'}`}>
                 {t}
               </button>
             ))}
@@ -101,19 +99,19 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
               docs.length > 0 ? (
                 <div className="space-y-1.5">
                   {docs.map((d) => (
-                    <div key={d.id} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg">
+                    <div key={d.id} className="flex items-center justify-between px-3 py-2.5 bg-gray-50 rounded-lg">
                       <div className="min-w-0">
                         <p className="text-sm text-[#1A1A2E] truncate">{d.fileName}</p>
                         <p className="text-xs text-[#6B7280]">{d.category ?? 'general'} · {new Date(d.createdAt).toLocaleDateString()}</p>
                       </div>
-                      <a href={`/api/documents/${d.id}/download`} className="text-xs font-medium ml-3 shrink-0" style={{ color: accent }}>Download</a>
+                      <a href={`/api/documents/${d.id}/download`} className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">Download</a>
                     </div>
                   ))}
                 </div>
               ) : <p className="text-sm text-[#6B7280] text-center py-4">No documents.</p>
             )}
             <div className="mt-6 pt-4 border-t border-gray-100">
-              <Link href={detailHref} className="text-xs font-medium" style={{ color: accent }} onClick={onClose}>Open Full Page →</Link>
+              <Link href={detailHref} className="text-xs font-semibold text-[#F26B2B] hover:text-[#E05A1A]" onClick={onClose}>Open Full Page →</Link>
             </div>
           </div>
         </>
@@ -123,5 +121,5 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
 }
 
 function F({ l, v }: { l: string; v: string }) {
-  return <div className="px-3 py-2 bg-gray-50 rounded-lg"><p className="text-[10px] uppercase tracking-wider text-[#6B7280]">{l}</p><p className="text-sm font-medium text-[#1A1A2E] mt-0.5 truncate">{v}</p></div>;
+  return <div className="px-3 py-2.5 bg-gray-50 rounded-lg"><p className="text-[10px] uppercase tracking-wider text-[#6B7280]">{l}</p><p className="text-sm font-medium text-[#1A1A2E] mt-0.5 truncate">{v}</p></div>;
 }

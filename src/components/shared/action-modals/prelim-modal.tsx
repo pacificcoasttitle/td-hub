@@ -17,7 +17,6 @@ export function PrelimModal({ open, onClose, orderId, fileNumber, address, isCli
   const [loaded, setLoaded] = useState(false);
 
   const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
-  const accent = accentColor ?? '#C5A55A';
 
   useEffect(() => {
     if (!open) { setLoaded(false); return; }
@@ -51,7 +50,7 @@ export function PrelimModal({ open, onClose, orderId, fileNumber, address, isCli
       <div className="p-5 space-y-4">
         {!isClient && (
           <button onClick={checkPrelim} disabled={checking}
-            className="w-full h-10 bg-[#1B2A4A] text-white text-sm font-medium rounded-lg hover:bg-[#16233D] disabled:opacity-50 transition-colors">
+            className="w-full h-11 bg-[#F26B2B] text-white text-sm font-semibold rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors">
             {checking ? 'Checking SoftPro…' : 'Check for Prelim'}
           </button>
         )}
@@ -66,12 +65,12 @@ export function PrelimModal({ open, onClose, orderId, fileNumber, address, isCli
             <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2">Prelim Documents</p>
             <div className="space-y-1.5">
               {docs.map((d) => (
-                <div key={d.id} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg">
+                <div key={d.id} className="flex items-center justify-between px-3 py-2.5 bg-gray-50 rounded-lg">
                   <div className="min-w-0">
                     <p className="text-sm text-[#1A1A2E] truncate">{d.fileName}</p>
                     <p className="text-xs text-[#6B7280]">{new Date(d.createdAt).toLocaleDateString()}</p>
                   </div>
-                  <a href={`/api/documents/${d.id}/download`} className="text-xs font-medium ml-3 shrink-0" style={{ color: accent }}>Download</a>
+                  <a href={`/api/documents/${d.id}/download`} className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">Download</a>
                 </div>
               ))}
             </div>

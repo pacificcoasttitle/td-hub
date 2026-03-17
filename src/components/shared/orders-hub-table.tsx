@@ -55,7 +55,7 @@ export function OrdersHubTable({
   fetchUrl,
   actions,
   compact = false,
-  accentColor = '#C5A55A',
+  accentColor = '#F26B2B',
   isClient = false,
   onOrderSelect,
   showSearch = true,
@@ -78,10 +78,9 @@ export function OrdersHubTable({
   const [selectedOrder, setSelectedOrder] = useState<HubOrder | null>(null);
   const debRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const selBg = accentColor === '#F26B2B' ? 'bg-[#F26B2B]/10' : 'bg-[#C5A55A]/10';
-  const selDot = accentColor === '#F26B2B' ? 'bg-[#F26B2B]' : 'bg-[#C5A55A]';
-  const cellPy = compact ? 'py-1.5' : 'py-3';
-  const textSz = compact ? 'text-xs' : 'text-sm';
+  const cellPy = compact ? 'py-2.5' : 'py-4';
+  const textSz = compact ? 'text-sm' : 'text-base';
+  const headPy = 'py-3';
 
   const fetchOrders = useCallback(() => {
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
@@ -141,27 +140,26 @@ export function OrdersHubTable({
   const selFile = selectedOrder?.fileNumber ?? '';
   const selAddr = selectedOrder ? addr(selectedOrder) : '';
   const hasActions = actions.length > 0;
+  const colCount = (compact ? 8 : 7) + (hasActions ? 1 : 0);
 
   return (
     <div className={`flex flex-col ${className}`}>
-      {/* Toolbar: search + filter */}
+      {/* Toolbar */}
       {(showSearch || showStatusFilter) && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100 bg-white shrink-0">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 bg-white shrink-0">
           {showStatusFilter && (
             <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}
-              className={`h-9 px-2 border border-gray-200 rounded-lg ${textSz} bg-white outline-none`}
-              style={{ outlineColor: accentColor }}
-            >
+              className="h-9 px-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20">
               <option value="">All Status</option>
               {STATUS_OPTS.filter(Boolean).map((s) => <option key={s} value={s}>{STATUS_LABELS[s] ?? s}</option>)}
             </select>
           )}
           {showSearch && (
             <form onSubmit={handleSearchSubmit} className="flex-1 max-w-xs ml-auto relative">
-              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#9CA3AF]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#9CA3AF]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
               <input type="text" value={searchInput} onChange={(e) => handleSearchInput(e.target.value)}
                 placeholder="File # or address…"
-                className={`w-full h-9 pl-8 pr-3 border border-gray-200 rounded-lg ${textSz} bg-white outline-none`} />
+                className="w-full h-9 pl-9 pr-3 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20" />
             </form>
           )}
         </div>
@@ -172,50 +170,50 @@ export function OrdersHubTable({
         <table className={`w-full ${textSz}`}>
           <thead className="sticky top-0 bg-[#F8F9FA] border-b border-gray-200 z-10">
             <tr>
-              {compact && <th className={`text-left px-3 ${cellPy} font-semibold text-[#6B7280] uppercase tracking-wider w-8`} />}
-              <th className={`text-left px-3 ${cellPy} font-semibold text-[#6B7280] uppercase tracking-wider`}>File #</th>
-              <th className={`text-left px-3 ${cellPy} font-semibold text-[#6B7280] uppercase tracking-wider`}>Address</th>
-              <th className={`text-left px-3 ${cellPy} font-semibold text-[#6B7280] uppercase tracking-wider`}>Client</th>
-              <th className={`text-left px-3 ${cellPy} font-semibold text-[#6B7280] uppercase tracking-wider`}>Status</th>
-              <th className={`text-left px-3 ${cellPy} font-semibold text-[#6B7280] uppercase tracking-wider`}>Type</th>
-              <th className={`text-left px-3 ${cellPy} font-semibold text-[#6B7280] uppercase tracking-wider`}>Opened</th>
-              {hasActions && <th className={`text-center px-3 ${cellPy} font-semibold text-[#6B7280] uppercase tracking-wider`}>Actions</th>}
+              {compact && <th className={`text-left px-4 ${headPy} font-semibold text-[#6B7280] uppercase tracking-wide text-xs w-8`} />}
+              <th className={`text-left px-4 ${headPy} font-semibold text-[#6B7280] uppercase tracking-wide text-xs`}>File #</th>
+              <th className={`text-left px-4 ${headPy} font-semibold text-[#6B7280] uppercase tracking-wide text-xs`}>Address</th>
+              <th className={`text-left px-4 ${headPy} font-semibold text-[#6B7280] uppercase tracking-wide text-xs`}>Client</th>
+              <th className={`text-left px-4 ${headPy} font-semibold text-[#6B7280] uppercase tracking-wide text-xs`}>Status</th>
+              <th className={`text-left px-4 ${headPy} font-semibold text-[#6B7280] uppercase tracking-wide text-xs`}>Type</th>
+              <th className={`text-left px-4 ${headPy} font-semibold text-[#6B7280] uppercase tracking-wide text-xs`}>Opened</th>
+              {hasActions && <th className={`text-center px-4 ${headPy} font-semibold text-[#6B7280] uppercase tracking-wide text-xs`}>Actions</th>}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={hasActions ? 8 : 7} className={`text-center py-10 text-[#6B7280]`}>Loading…</td></tr>
+              <tr><td colSpan={colCount} className="text-center py-12 text-[#6B7280]">Loading…</td></tr>
             ) : orders.length === 0 ? (
-              <tr><td colSpan={hasActions ? 8 : 7} className={`text-center py-10 text-[#6B7280]`}>No orders found.</td></tr>
+              <tr><td colSpan={colCount} className="text-center py-12 text-[#6B7280]">No orders found.</td></tr>
             ) : orders.map((o) => {
               const isSel = selectedOrder?.id === o.id;
               return (
                 <tr key={o.id} onClick={() => selectOrder(o)}
-                  className={`border-b border-gray-100 cursor-pointer transition-colors ${isSel ? selBg : 'hover:bg-gray-50'}`}>
+                  className={`border-b border-gray-100 cursor-pointer transition-colors ${isSel ? 'bg-[#F26B2B]/8' : 'hover:bg-gray-50'}`}>
                   {compact && (
-                    <td className={`px-3 ${cellPy}`}>
-                      <div className={`w-2 h-2 rounded-full ${isSel ? selDot : 'bg-transparent'}`} />
+                    <td className={`px-4 ${cellPy}`}>
+                      <div className={`w-2.5 h-2.5 rounded-full ${isSel ? 'bg-[#F26B2B]' : 'bg-transparent'}`} />
                     </td>
                   )}
-                  <td className={`px-3 ${cellPy} font-mono font-semibold text-[#1A1A2E]`}>{o.fileNumber}</td>
-                  <td className={`px-3 ${cellPy} text-[#1A1A2E] max-w-[260px] truncate`}>{addr(o)}</td>
-                  <td className={`px-3 ${cellPy} text-[#4B5563] truncate max-w-[140px]`}>{o.clientName ?? '—'}</td>
-                  <td className={`px-3 ${cellPy}`}><StatusBadge status={o.operationalStatus} /></td>
-                  <td className={`px-3 ${cellPy} text-[#4B5563]`}>{o.transactionType ?? '—'}</td>
-                  <td className={`px-3 ${cellPy} text-[#4B5563] tabular-nums`}>{o.openedAt ? new Date(o.openedAt).toLocaleDateString() : '—'}</td>
+                  <td className={`px-4 ${cellPy} font-mono font-medium text-[#1A1A2E]`}>{o.fileNumber}</td>
+                  <td className={`px-4 ${cellPy} text-[#1A1A2E] max-w-[300px]`}>{addr(o)}</td>
+                  <td className={`px-4 ${cellPy} text-[#4B5563] max-w-[160px] truncate`}>{o.clientName ?? '—'}</td>
+                  <td className={`px-4 ${cellPy}`}><StatusBadge status={o.operationalStatus} /></td>
+                  <td className={`px-4 ${cellPy} text-[#4B5563]`}>{o.transactionType ?? '—'}</td>
+                  <td className={`px-4 ${cellPy} text-[#4B5563] tabular-nums`}>{o.openedAt ? new Date(o.openedAt).toLocaleDateString() : '—'}</td>
                   {hasActions && (
-                    <td className={`px-3 ${cellPy}`}>
-                      <div className="flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
-                        {actions.includes('cpl') && <ActionBtn icon="cpl" title="CPL" onClick={() => openModal(o, 'cpl')} accent={accentColor} />}
-                        {actions.includes('prelim') && <ActionBtn icon="prelim" title="Prelim" onClick={() => openModal(o, 'prelim')} accent={accentColor} />}
-                        {actions.includes('proposed') && <ActionBtn icon="proposed" title="Proposed Insured" onClick={() => openModal(o, 'proposed')} accent={accentColor} />}
-                        {actions.includes('notes') && <ActionBtn icon="notes" title="Notes" onClick={() => openModal(o, 'notes')} accent={accentColor} />}
+                    <td className={`px-4 ${cellPy}`}>
+                      <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        {actions.includes('cpl') && <ActionBtn icon="cpl" title="CPL" onClick={() => openModal(o, 'cpl')} />}
+                        {actions.includes('prelim') && <ActionBtn icon="prelim" title="Prelim" onClick={() => openModal(o, 'prelim')} />}
+                        {actions.includes('proposed') && <ActionBtn icon="proposed" title="Proposed Insured" onClick={() => openModal(o, 'proposed')} />}
+                        {actions.includes('notes') && <ActionBtn icon="notes" title="Notes" onClick={() => openModal(o, 'notes')} />}
                         {actions.includes('fees') && feesHrefBuilder && (
-                          <Link href={feesHrefBuilder(o.id)} className="w-7 h-7 rounded flex items-center justify-center text-[#6B7280] hover:bg-gray-100 transition-colors" title="Fees">
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          <Link href={feesHrefBuilder(o.id)} className="w-8 h-8 rounded-md flex items-center justify-center text-[#6B7280] hover:bg-[#F26B2B]/10 hover:text-[#F26B2B] transition-colors" title="Fees">
+                            <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                           </Link>
                         )}
-                        {actions.includes('detail') && <ActionBtn icon="detail" title="Detail" onClick={() => openModal(o, 'detail')} accent={accentColor} />}
+                        {actions.includes('detail') && <ActionBtn icon="detail" title="Detail" onClick={() => openModal(o, 'detail')} />}
                       </div>
                     </td>
                   )}
@@ -228,13 +226,13 @@ export function OrdersHubTable({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className={`shrink-0 flex items-center justify-between px-4 py-2 border-t border-gray-200 bg-white ${textSz}`}>
+        <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-t border-gray-200 bg-white text-sm">
           <span className="text-[#6B7280]">{total} orders · Page {page}/{totalPages}</span>
           <div className="flex gap-1">
             <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}
-              className="px-3 h-7 border border-gray-200 rounded text-[#4B5563] hover:bg-gray-50 disabled:opacity-30 transition-colors">Prev</button>
+              className="px-3 h-8 border border-gray-200 rounded-md text-[#4B5563] hover:bg-gray-50 disabled:opacity-30 transition-colors">Prev</button>
             <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
-              className="px-3 h-7 border border-gray-200 rounded text-[#4B5563] hover:bg-gray-50 disabled:opacity-30 transition-colors">Next</button>
+              className="px-3 h-8 border border-gray-200 rounded-md text-[#4B5563] hover:bg-gray-50 disabled:opacity-30 transition-colors">Next</button>
           </div>
         </div>
       )}
@@ -265,18 +263,17 @@ function StatusBadge({ status }: { status: string | null }) {
   const s = status?.toLowerCase() ?? '';
   const color = STATUS_COLORS[s] ?? 'bg-gray-100 text-gray-500 border-gray-200';
   const label = STATUS_LABELS[s] ?? status ?? '—';
-  return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium border ${color}`}>{label}</span>;
+  return <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-medium border ${color}`}>{label}</span>;
 }
 
-function ActionBtn({ icon, title, onClick, accent }: { icon: string; title: string; onClick: () => void; accent: string }) {
-  const hoverBg = accent === '#F26B2B' ? 'hover:bg-[#F26B2B]/10 hover:text-[#F26B2B]' : 'hover:bg-[#1B2A4A]/10 hover:text-[#1B2A4A]';
+function ActionBtn({ icon, title, onClick }: { icon: string; title: string; onClick: () => void }) {
   return (
-    <button onClick={onClick} title={title} className={`w-7 h-7 rounded flex items-center justify-center text-[#6B7280] ${hoverBg} transition-colors`}>
-      {icon === 'cpl' && <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
-      {icon === 'prelim' && <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>}
-      {icon === 'proposed' && <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>}
-      {icon === 'notes' && <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" /></svg>}
-      {icon === 'detail' && <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>}
+    <button onClick={onClick} title={title} className="w-8 h-8 rounded-md flex items-center justify-center text-[#6B7280] hover:bg-[#F26B2B]/10 hover:text-[#F26B2B] transition-colors">
+      {icon === 'cpl' && <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
+      {icon === 'prelim' && <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>}
+      {icon === 'proposed' && <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>}
+      {icon === 'notes' && <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" /></svg>}
+      {icon === 'detail' && <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>}
     </button>
   );
 }

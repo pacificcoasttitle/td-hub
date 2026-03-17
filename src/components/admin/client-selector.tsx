@@ -9,6 +9,7 @@ export interface ClientContact {
   email: string | null;
   phone: string | null;
   role: string | null;
+  contactType?: string | null;
 }
 
 interface ClientSelectorProps {
@@ -96,7 +97,7 @@ export function ClientSelector({ selected, onSelect, onClear }: ClientSelectorPr
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
         </svg>
         {searching && (
-          <svg className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#C5A55A] animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#F26B2B] animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
         )}
@@ -106,7 +107,7 @@ export function ClientSelector({ selected, onSelect, onClear }: ClientSelectorPr
           onChange={(e) => handleInput(e.target.value)}
           onFocus={() => { if (query.length >= 2) setOpen(true); }}
           placeholder="Search client by name or email…"
-          className="w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#C5A55A]/40 focus:border-[#C5A55A] bg-white"
+          className="w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#F26B2B]/40 focus:border-[#F26B2B] bg-white"
         />
       </div>
 

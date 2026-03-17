@@ -79,6 +79,11 @@ export function AddressAutocomplete({
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const [ready, setReady] = useState(false);
 
+  const onSelectRef = useRef(onSelect);
+  const onChangeRef = useRef(onChange);
+  onSelectRef.current = onSelect;
+  onChangeRef.current = onChange;
+
   const handlePlaceChanged = useCallback(() => {
     const ac = autocompleteRef.current;
     if (!ac) return;
@@ -86,9 +91,9 @@ export function AddressAutocomplete({
     if (!place?.address_components) return;
 
     const parsed = parsePlace(place);
-    onSelect(parsed);
-    onChange(parsed.street);
-  }, [onSelect, onChange]);
+    onSelectRef.current(parsed);
+    onChangeRef.current(parsed.street);
+  }, []);
 
   useEffect(() => {
     if (!API_KEY) return;
@@ -120,8 +125,8 @@ export function AddressAutocomplete({
 
   const baseClass =
     'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] ' +
-    'placeholder:text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-[#C5A55A]/40 ' +
-    'focus:border-[#C5A55A] bg-white';
+    'placeholder:text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-[#F26B2B]/40 ' +
+    'focus:border-[#F26B2B] bg-white';
 
   return (
     <input

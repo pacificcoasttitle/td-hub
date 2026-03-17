@@ -155,15 +155,67 @@ export function useQuickEntry() {
     setSubmitting(true);
     setResult(null);
     try {
-      const payload = {
-        clientId: client?.id,
-        property: { street, city, state, zip, apn, county, legalDescription: legalDesc, propertyType: propType },
-        seller: { primary: sellerPrimary, secondary: hasSecondarySeller ? sellerSecondary : undefined, isOrg: sellerIsOrg, orgType: sellerOrgType },
-        transaction: { transactionType: txType, productType, orderType, salesRep, titleOfficer, escrowNumber, salesAmount, loanNumber, loanAmount, coverageAmount },
-        borrower: { primary: borrower, secondary: hasSecBorrower ? secBorrower : undefined, isOrg: borrowerIsOrg, orgType: borrowerOrgType },
-        parties: { buyerAgent, listingAgent, lender, escrow, escrowOfficer },
-        deliverableEmails: deliverableEmails.filter(Boolean),
+      const num = (s: string) => {
+        const n = parseFloat(s.replace(/[^0-9.]/g, ''));
+        return isNaN(n) ? 0 : n;
       };
+
+      const hasContact = (c: { name: string; company: string }) => !!(c.name || c.company);
+
+      const payload = {
+        orderType: orderType || 'Title only',
+        isRushOrder: false,
+        property: {
+          address: street,
+          city: city || 'Unknown',
+          state: state || 'CA',
+          zip: zip || '00000',
+          apn: apn || undefined,
+          legalDescription: legalDesc || undefined,
+          county: county || undefined,
+        },
+        seller: {
+          firstName: sellerPrimary.firstName || 'TBD',
+          middleName: sellerPrimary.middleName || undefined,
+          lastName: sellerPrimary.lastName || 'TBD',
+          secondaryFirstName: hasSecondarySeller ? sellerSecondary.firstName || undefined : undefined,
+          secondaryMiddleName: hasSecondarySeller ? sellerSecondary.middleName || undefined : undefined,
+          secondaryLastName: hasSecondarySeller ? sellerSecondary.lastName || undefined : undefined,
+          isOrganization: sellerIsOrg,
+        },
+        buyer: {
+          firstName: borrower.firstName || 'TBD',
+          middleName: borrower.middleName || undefined,
+          lastName: borrower.lastName || 'TBD',
+          secondaryFirstName: hasSecBorrower ? secBorrower.firstName || undefined : undefined,
+          secondaryMiddleName: hasSecBorrower ? secBorrower.middleName || undefined : undefined,
+          secondaryLastName: hasSecBorrower ? secBorrower.lastName || undefined : undefined,
+          isOrganization: borrowerIsOrg,
+          organizationType: borrowerOrgType || undefined,
+        },
+        transaction: {
+          type: txType || 'Purchase',
+          product: productType || 'residential_resale',
+          escrowNumber: escrowNumber || undefined,
+          salesAmount: num(salesAmount),
+          loanNumber: loanNumber || undefined,
+          loanAmount: num(loanAmount),
+          coverageAmount: num(coverageAmount),
+          branchCode: 'PCT',
+          titleOfficer: titleOfficer || undefined,
+          escrowOfficer: escrowOfficer || undefined,
+        },
+        contacts: {
+          buyerAgent: hasContact(buyerAgent) ? { name: buyerAgent.name, email: buyerAgent.email || undefined, phone: buyerAgent.phone || undefined, companyName: buyerAgent.company || undefined } : undefined,
+          listingAgent: hasContact(listingAgent) ? { name: listingAgent.name, email: listingAgent.email || undefined, phone: listingAgent.phone || undefined, companyName: listingAgent.company || undefined } : undefined,
+          lender: hasContact(lender) ? { name: lender.name, email: lender.email || undefined, phone: lender.phone || undefined, companyName: lender.company || undefined } : undefined,
+          escrowCompany: hasContact(escrow) ? { name: escrow.name, email: escrow.email || undefined, phone: escrow.phone || undefined, companyName: escrow.company || undefined } : undefined,
+        },
+        deliverableEmails: deliverableEmails.filter(Boolean),
+        clientType: client?.contactType ?? undefined,
+        onBehalfOfContactId: client?.id || undefined,
+      };
+
       const res = await fetch('/api/orders/create', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

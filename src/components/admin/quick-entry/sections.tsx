@@ -12,7 +12,7 @@ export function PropertySection({ s }: { s: QuickEntryState }) {
   return (
     <div className={SECTION}>
       <p className={SH}>
-        <svg className="h-5 w-5 text-[#C5A55A]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+        <svg className="h-5 w-5 text-[#F26B2B]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
         Property
       </p>
       <div className="flex gap-2 mb-4">
@@ -26,7 +26,7 @@ export function PropertySection({ s }: { s: QuickEntryState }) {
               <label className={FL}>Address</label>
               <AddressAutocomplete value={s.street} onChange={s.setStreet} onSelect={s.handleAddressSelect} placeholder="Start typing…" />
             </div>
-            <button onClick={s.handleSearchClick} disabled={!s.street || !s.city} className="self-end px-4 h-11 text-sm font-medium bg-[#C5A55A] text-white rounded-lg hover:bg-[#B8953D] disabled:opacity-50 transition-colors">Search</button>
+            <button onClick={s.handleSearchClick} disabled={!s.street || !s.city} className="self-end px-4 h-11 text-sm font-medium bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors">Search</button>
           </div>
           <div className="grid grid-cols-3 gap-3 mb-3">
             <div><label className={FL}>City</label><input className={IN} value={s.city} onChange={(e) => s.setCity(e.target.value)} /></div>
@@ -38,7 +38,7 @@ export function PropertySection({ s }: { s: QuickEntryState }) {
         <div className="flex gap-3 items-end mb-3">
           <div className="flex-1"><label className={FL}>APN</label><input className={IN} value={s.apn} onChange={(e) => s.setApn(e.target.value)} placeholder="1234-567-890" /></div>
           <div className="flex-1"><label className={FL}>County</label><input className={IN} value={s.county} onChange={(e) => s.setCounty(e.target.value)} placeholder="Los Angeles" /></div>
-          <button onClick={s.handleApnSearch} disabled={!s.apn || !s.county || s.apnSearching} className="px-4 h-11 text-sm font-medium bg-[#C5A55A] text-white rounded-lg hover:bg-[#B8953D] disabled:opacity-50 transition-colors">{s.apnSearching ? 'Searching…' : 'Search'}</button>
+          <button onClick={s.handleApnSearch} disabled={!s.apn || !s.county || s.apnSearching} className="px-4 h-11 text-sm font-medium bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors">{s.apnSearching ? 'Searching…' : 'Search'}</button>
         </div>
       )}
       {s.noMatchMsg && (
@@ -68,7 +68,7 @@ export function SellerSection({ s }: { s: QuickEntryState }) {
   return (
     <div className={SECTION}>
       <p className={SH}>
-        <svg className="h-5 w-5 text-[#C5A55A]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+        <svg className="h-5 w-5 text-[#F26B2B]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
         Seller
       </p>
       {s.sellerSiteX && (
@@ -79,7 +79,7 @@ export function SellerSection({ s }: { s: QuickEntryState }) {
       )}
       <div className="flex items-center gap-3 mb-3">
         <label className="flex items-center gap-2 text-xs text-[#6B7280]">
-          <input type="checkbox" checked={s.sellerIsOrg} onChange={(e) => s.setSellerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#C5A55A] h-4 w-4" /> Organization
+          <input type="checkbox" checked={s.sellerIsOrg} onChange={(e) => s.setSellerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4" /> Organization
         </label>
         {s.sellerIsOrg && (
           <select value={s.sellerOrgType} onChange={(e) => s.setSellerOrgType(e.target.value)} className="h-9 px-2 border border-gray-200 rounded-lg text-xs">
@@ -110,7 +110,7 @@ export function TransactionSection({ s }: { s: QuickEntryState }) {
   return (
     <div className={SECTION}>
       <p className={SH}>
-        <svg className="h-5 w-5 text-[#C5A55A]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+        <svg className="h-5 w-5 text-[#F26B2B]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
         Transaction
       </p>
       <div className="grid grid-cols-2 gap-3 mb-3">
@@ -196,7 +196,7 @@ export function TransactionSection({ s }: { s: QuickEntryState }) {
             </>
           )}
           <label className="flex items-center gap-2 text-xs text-[#6B7280] mt-2">
-            <input type="checkbox" checked={s.borrowerIsOrg} onChange={(e) => s.setBorrowerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#C5A55A] h-4 w-4" /> Borrower is an organization
+            <input type="checkbox" checked={s.borrowerIsOrg} onChange={(e) => s.setBorrowerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4" /> Borrower is an organization
           </label>
           {s.borrowerIsOrg && (
             <select value={s.borrowerOrgType} onChange={(e) => s.setBorrowerOrgType(e.target.value)} className="mt-2 h-9 px-2 border border-gray-200 rounded-lg text-xs">
@@ -216,7 +216,7 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
   return (
     <div className={SECTION}>
       <p className={SH}>
-        <svg className="h-5 w-5 text-[#C5A55A]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+        <svg className="h-5 w-5 text-[#F26B2B]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
         Parties
       </p>
       <ContactFields contact={s.buyerAgent} onChange={s.setBuyerAgent} label="Buyer's Agent" searchRole="buyer_agent" />
@@ -238,7 +238,7 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Deliverable Emails</p>
           {s.deliverableEmails.length < 5 && (
-            <button onClick={() => s.setDeliverableEmails([...s.deliverableEmails, ''])} className="text-xs font-medium text-[#C5A55A] hover:text-[#B8953D] min-h-[36px]">+ Add</button>
+            <button onClick={() => s.setDeliverableEmails([...s.deliverableEmails, ''])} className="text-xs font-medium text-[#F26B2B] hover:text-[#E05A1A] min-h-[36px]">+ Add</button>
           )}
         </div>
         {s.deliverableEmails.map((em, i) => (

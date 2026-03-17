@@ -1,21 +1,28 @@
 # 00 — Playbook Overview
 
 > Transaction Desk Hub vNext — Lean Build Playbook
-> Last updated: 2026-03-11
+> Last updated: 2026-03-17
 
 ## Current Status
 
-**Phases 0–5: COMPLETE.** Deployed to https://td-hub.vercel.app/
+**All phases COMPLETE.** Deployed to https://td-hub.vercel.app/
 
 | What | Count |
 |------|-------|
-| Real production orders | 43 (synced from SoftPro) |
-| Contacts | 5,696 |
+| Real production orders | 43 (synced from SoftPro hourly) |
+| Contacts | 18,134 |
 | Companies | 2,748 |
-| Order parties | 189 (enriched via GetOrderContacts) |
-| Live integrations | 6 (S3, SendGrid, Twilio, SiteX, TitlePoint, SoftPro) + Google Maps |
+| Order parties | 183 |
+| Live integrations | 10 (SoftPro, S3, SendGrid, Twilio, SiteX, TitlePoint, Google Maps, Managers Report, Westcor CPL, FNF CPL) |
+| User accounts | 16 (10 open order team + 6 admin) |
+| Automated cron jobs | 6 |
+| API routes | 77 |
 
-**Phases 6–8: PLANNED.** Role-based dashboards, sales manager views, admin workflow hardening, client portal polish.
+**Active external blockers:**
+- SoftPro GetOrderDetails endpoint (404 — dev team notified)
+- SoftPro GetOrderMarketingRep endpoint (hangs — dev team notified)
+- NATIC credentials expired
+- Doma API decommissioned
 
 ## What This Playbook Is
 

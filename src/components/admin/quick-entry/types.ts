@@ -16,7 +16,7 @@ export const EC: PartyContact = { name: '', email: '', phone: '', company: '' };
 export const ORG_TYPES = ['LLC', 'Corporation', 'Partnership', 'Trust', 'Other'];
 export const TX_TYPES = ['', 'Purchase', 'Refinance', 'Equity', 'Other'];
 
-export const IN = 'w-full h-11 px-3 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#C5A55A]/30 focus:border-[#C5A55A] bg-white';
+export const IN = 'w-full h-11 px-3 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#F26B2B]/30 focus:border-[#F26B2B] bg-white';
 export const SEL = IN;
 export const SECTION = 'bg-white border border-gray-200 rounded-xl p-6 mb-6';
 export const SH = 'text-base font-semibold text-[#1A1A2E] mb-4 flex items-center gap-2';

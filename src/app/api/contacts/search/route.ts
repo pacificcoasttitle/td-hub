@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { contacts } from '@/lib/db/schema';
+import { contacts, companies } from '@/lib/db/schema';
 import { sql } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
 
@@ -13,6 +13,21 @@ const querySchema = z.object({
   pageSize: z.coerce.number().min(1).max(50).default(10),
   type: z.enum(['all', 'person', 'company']).default('all'),
 });
+
+function deriveClientType(row: {
+  isEscrow: boolean; isLender: boolean; isMortgageBroker: boolean;
+  isSellingAgent: boolean; isTitleOfficer: boolean; isEscrowOfficer: boolean;
+  isSalesRep: boolean; userType: string | null;
+}): string {
+  if (row.isEscrow) return 'escrow';
+  if (row.isLender) return 'lender';
+  if (row.isMortgageBroker) return 'mortgage_broker';
+  if (row.isSellingAgent) return 'realtor';
+  if (row.isTitleOfficer) return 'title_officer';
+  if (row.isEscrowOfficer) return 'escrow_officer';
+  if (row.isSalesRep) return 'sales_rep';
+  return row.userType ?? 'contact';
+}
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -26,65 +41,103 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ results: [] });
   }
 
-  const { q, pageSize, type } = parsed.data;
+  const { q, pageSize } = parsed.data;
 
   try {
     const isEmailSearch = q.includes('@');
     const pattern = `%${q}%`;
 
-    const typeFilter = type === 'all'
-      ? sql`true`
-      : sql`${contacts.type} = ${type}`;
-
     const searchCondition = isEmailSearch
       ? sql`${contacts.email} ILIKE ${pattern}`
       : sql`(
-          ${contacts.fullName} ILIKE ${pattern}
-          OR ${contacts.email} ILIKE ${pattern}
+          ${contacts.email} ILIKE ${pattern}
+          OR ${contacts.firstName} ILIKE ${pattern}
+          OR ${contacts.lastName} ILIKE ${pattern}
+          OR ${contacts.fullName} ILIKE ${pattern}
           OR ${contacts.companyName} ILIKE ${pattern}
+          OR ${contacts.lookupCode} ILIKE ${pattern}
+          OR co.name ILIKE ${pattern}
         )`;
 
-    const rows = await db
-      .select({
-        id: contacts.id,
-        fullName: contacts.fullName,
-        email: contacts.email,
-        phone: contacts.phone,
-        cell: contacts.cell,
-        companyName: contacts.companyName,
-        type: contacts.type,
-        softproLookupCode: contacts.softproLookupCode,
-        address1: contacts.address1,
-        city: contacts.city,
-        state: contacts.state,
-        zip: contacts.zip,
-      })
-      .from(contacts)
-      .where(sql`${searchCondition} AND ${typeFilter} AND ${contacts.isActive} = true`)
-      .orderBy(
-        isEmailSearch
-          ? sql`CASE WHEN ${contacts.email} ILIKE ${q} THEN 0 ELSE 1 END`
-          : sql`CASE WHEN ${contacts.fullName} ILIKE ${`${q}%`} THEN 0 ELSE 1 END`,
-      )
-      .limit(pageSize);
+    const rows = await db.execute(sql`
+      SELECT
+        c.id,
+        c.first_name,
+        c.last_name,
+        c.full_name,
+        c.email,
+        c.phone,
+        c.cell,
+        c.lookup_code,
+        c.flookup_code,
+        c.address1,
+        c.city,
+        c.state,
+        c.zip,
+        c.company_name,
+        c.is_escrow,
+        c.is_lender,
+        c.is_mortgage_broker,
+        c.is_selling_agent,
+        c.is_title_officer,
+        c.is_escrow_officer,
+        c.is_sales_rep,
+        c.user_type,
+        co.name AS joined_company_name,
+        co.lookup_code AS company_lookup_code,
+        co.address1 AS company_address,
+        co.city AS company_city,
+        co.state AS company_state,
+        co.zip AS company_zip
+      FROM contacts c
+      LEFT JOIN companies co ON c.flookup_code = co.lookup_code AND c.flookup_code IS NOT NULL
+      WHERE ${searchCondition}
+        AND c.is_active = true
+      ORDER BY
+        CASE WHEN c.email ILIKE ${q} THEN 0 ELSE 1 END,
+        CASE WHEN c.email ILIKE ${pattern} THEN 0 ELSE 1 END,
+        c.full_name ASC NULLS LAST
+      LIMIT ${pageSize}
+    `);
 
-    const results = rows.map((r) => ({
-      id: r.id,
-      fullName: r.fullName,
-      email: r.email,
-      phone: r.phone ?? r.cell ?? null,
-      companyName: r.companyName,
-      type: r.type,
-      contactType: r.type,
-      lookupCode: r.softproLookupCode,
-      address: r.address1,
-      city: r.city,
-      state: r.state,
-      zip: r.zip,
-    }));
+    const results = (rows as unknown as Record<string, unknown>[]).map((r) => {
+      const companyName = (r.joined_company_name as string) ?? (r.company_name as string) ?? null;
+      const clientType = deriveClientType({
+        isEscrow: r.is_escrow as boolean,
+        isLender: r.is_lender as boolean,
+        isMortgageBroker: r.is_mortgage_broker as boolean,
+        isSellingAgent: r.is_selling_agent as boolean,
+        isTitleOfficer: r.is_title_officer as boolean,
+        isEscrowOfficer: r.is_escrow_officer as boolean,
+        isSalesRep: r.is_sales_rep as boolean,
+        userType: r.user_type as string | null,
+      });
+
+      return {
+        id: r.id as number,
+        firstName: r.first_name as string | null,
+        lastName: r.last_name as string | null,
+        fullName: r.full_name as string | null,
+        email: r.email as string | null,
+        phone: (r.phone as string) ?? (r.cell as string) ?? null,
+        cell: r.cell as string | null,
+        companyName,
+        companyLookupCode: (r.company_lookup_code as string) ?? (r.flookup_code as string) ?? null,
+        clientLookupCode: (r.lookup_code as string) ?? null,
+        lookupCode: (r.lookup_code as string) ?? null,
+        address: (r.address1 as string) ?? (r.company_address as string) ?? null,
+        city: (r.city as string) ?? (r.company_city as string) ?? null,
+        state: (r.state as string) ?? (r.company_state as string) ?? null,
+        zip: (r.zip as string) ?? (r.company_zip as string) ?? null,
+        clientType,
+        contactType: clientType,
+        type: clientType,
+      };
+    });
 
     return NextResponse.json({ results });
-  } catch {
+  } catch (err) {
+    console.error('[contacts/search] Error:', err);
     return NextResponse.json({ error: 'Search failed' }, { status: 500 });
   }
 }

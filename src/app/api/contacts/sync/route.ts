@@ -6,13 +6,14 @@ import { handleSyncContacts } from '@/lib/jobs/handlers/sync-contacts';
 const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
 
 const VALID_USER_TYPES = [
+  'Order Contact - Person',
+  'Title Officer',
   'Escrow Officer',
+  'Sales Rep',
+  'Escrow Company',
   'Lender',
   'Mortgage Broker',
   'Selling Agent/Broker',
-  'Title Officer',
-  'Order Contact - Person',
-  'Escrow Company',
   'Underwriter',
 ] as const;
 
@@ -38,7 +39,10 @@ export async function POST(req: NextRequest) {
   try {
     const result = await handleSyncContacts({ entityType: parsed.data.userType });
     return NextResponse.json(result);
-  } catch {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json(
+      { error: 'Sync failed', detail: err instanceof Error ? err.message : 'Unknown' },
+      { status: 500 },
+    );
   }
 }

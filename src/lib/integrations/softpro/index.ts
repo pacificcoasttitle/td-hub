@@ -77,6 +77,15 @@ export async function addNotes(orderNumber: string, text: string, noteId?: strin
   return client.addNotes(orderNumber, text, noteId);
 }
 
+export async function getSalesReps() {
+  if (useMock) {
+    const { vendorSuccess } = await import('../types');
+    return vendorSuccess([] as Record<string, string>[], { requestId: 'mock-' + crypto.randomUUID(), durationMs: 0 });
+  }
+  const client = await import('./client');
+  return client.getSalesReps();
+}
+
 export async function createUser(payload: Record<string, unknown>) {
   if (useMock) {
     const { vendorSuccess } = await import('../types');

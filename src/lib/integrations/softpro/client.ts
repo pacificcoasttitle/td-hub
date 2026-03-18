@@ -267,6 +267,12 @@ export async function getFees(
   });
 }
 
+export async function getSalesReps(): Promise<VendorResult<SoftProLookupItem[]>> {
+  return makeRequest<SoftProLookupItem[]>('GET', SOFTPRO_ENDPOINTS.getSalesReps, {
+    operation: 'get_sales_reps',
+  });
+}
+
 export async function createUser(
   payload: Record<string, unknown>
 ): Promise<VendorResult<Record<string, unknown>>> {

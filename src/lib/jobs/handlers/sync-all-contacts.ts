@@ -1,13 +1,14 @@
 import { handleSyncContacts, type SyncContactsResult } from './sync-contacts';
 
 const ALL_ENTITY_TYPES = [
+  'Order Contact - Person',
+  'Title Officer',
   'Escrow Officer',
+  'Sales Rep',
+  'Escrow Company',
   'Lender',
   'Mortgage Broker',
   'Selling Agent/Broker',
-  'Title Officer',
-  'Order Contact - Person',
-  'Escrow Company',
   'Underwriter',
 ];
 

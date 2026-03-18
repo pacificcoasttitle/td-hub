@@ -11,8 +11,10 @@ interface Company {
   name: string;
   companyType: string | null;
   lookupCode: string | null;
+  address1: string | null;
   city: string | null;
   state: string | null;
+  zip: string | null;
   phone: string | null;
   email: string | null;
   isActive: boolean;
@@ -23,8 +25,11 @@ interface Company {
   deliverableEmails: string[] | null;
 }
 
+type SortField = 'name' | 'companyType' | 'city' | 'createdAt';
+type SortDir = 'asc' | 'desc';
+
 const PAGE_SIZE = 25;
-const TYPE_OPTS = [{ value: '', label: 'All Types' }, { value: 'Escrow Company', label: 'Escrow Company' }, { value: 'Lender', label: 'Lender' }, { value: 'Title Company', label: 'Title Company' }];
+const TYPE_OPTS = [{ value: '', label: 'All Types' }, { value: 'escrow_company', label: 'Escrow Company' }, { value: 'lender', label: 'Lender' }, { value: 'mortgage_broker', label: 'Mortgage Broker' }, { value: 'selling_agent', label: 'Selling Agent' }, { value: 'underwriter', label: 'Underwriter' }];
 const SEL = 'h-8 px-1.5 border border-gray-200 rounded text-xs bg-white focus:outline-none focus:border-[#1B2A4A] min-w-[120px] max-w-[160px] truncate';
 
 export default function CompaniesPage() {
@@ -35,6 +40,8 @@ export default function CompaniesPage() {
   const [searchInput, setSearchInput] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [activeFilter, setActiveFilter] = useState('true');
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [staff, setStaff] = useState<{ salesReps: StaffOption[]; titleOfficers: StaffOption[] }>({ salesReps: [], titleOfficers: [] });
@@ -45,7 +52,7 @@ export default function CompaniesPage() {
 
   const fetchCompanies = useCallback(() => {
     setLoading(true); setError(null);
-    const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), active: activeFilter });
+    const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), active: activeFilter, sortField, sortDir });
     if (typeFilter) p.set('type', typeFilter);
     if (search) p.set('search', search);
     fetch(`/api/companies?${p}`)
@@ -53,7 +60,24 @@ export default function CompaniesPage() {
       .then(d => { setCompanies(d.companies ?? []); setTotal(d.total ?? 0); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, [page, search, typeFilter, activeFilter]);
+  }, [page, search, typeFilter, activeFilter, sortField, sortDir]);
+
+  function toggleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+    setPage(1);
+  }
+
+  function SortIcon({ field }: { field: SortField }) {
+    if (sortField !== field) return <svg className="h-3 w-3 ml-1 opacity-0 group-hover/th:opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>;
+    return sortDir === 'asc'
+      ? <svg className="h-3 w-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+      : <svg className="h-3 w-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>;
+  }
 
   useEffect(() => { fetchCompanies(); }, [fetchCompanies]);
 
@@ -136,9 +160,15 @@ export default function CompaniesPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50/60">
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Name</th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Type</th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">City</th>
+                  <th className="text-left px-4 py-3 font-medium text-[#6B7280] cursor-pointer select-none group/th" onClick={() => toggleSort('name')}>
+                    <span className="inline-flex items-center">Name<SortIcon field="name" /></span>
+                  </th>
+                  <th className="text-left px-4 py-3 font-medium text-[#6B7280] cursor-pointer select-none group/th" onClick={() => toggleSort('companyType')}>
+                    <span className="inline-flex items-center">Type<SortIcon field="companyType" /></span>
+                  </th>
+                  <th className="text-left px-4 py-3 font-medium text-[#6B7280] cursor-pointer select-none group/th" onClick={() => toggleSort('city')}>
+                    <span className="inline-flex items-center">Address<SortIcon field="city" /></span>
+                  </th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Sales Rep</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Title Officer</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Loan UW</th>
@@ -155,7 +185,7 @@ export default function CompaniesPage() {
                   <tr key={co.id} className="hover:bg-gray-50 transition-colors group">
                     <td className="px-4 py-3 font-medium text-[#1A1A2E] whitespace-nowrap">{co.name}</td>
                     <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap text-xs">{co.companyType ?? '—'}</td>
-                    <td className="px-4 py-3 text-[#6B7280]">{[co.city, co.state].filter(Boolean).join(', ') || '—'}</td>
+                    <td className="px-4 py-3 text-[#6B7280] max-w-[260px] truncate">{[co.address1, co.city, [co.state, co.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ') || '—'}</td>
                     <td className="px-4 py-2">
                       <select className={SEL} value={co.salesRepId ?? ''}
                         onChange={e => patchCompany(co.id, 'salesRepId', e.target.value ? Number(e.target.value) : null)}>

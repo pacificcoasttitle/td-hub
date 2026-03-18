@@ -16,19 +16,27 @@ export function SyncButton({ endpoint, label = 'Sync from SoftPro', userType, on
   async function run() {
     setSyncing(true);
     setToast(null);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: userType ? { 'Content-Type': 'application/json' } : undefined,
         body: userType ? JSON.stringify({ userType }) : undefined,
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? `Sync failed (${res.status})`);
       const msg = body?.message ?? `Synced ${body?.created ?? 0} new, ${body?.updated ?? 0} updated`;
       setToast({ ok: true, msg });
       onSuccess?.();
     } catch (e) {
-      setToast({ ok: false, msg: e instanceof Error ? e.message : 'Sync failed' });
+      clearTimeout(timeout);
+      const msg = e instanceof DOMException && e.name === 'AbortError'
+        ? 'Sync timed out — SoftPro may be slow. Try again later.'
+        : e instanceof Error ? e.message : 'Sync failed';
+      setToast({ ok: false, msg });
     } finally {
       setSyncing(false);
       setTimeout(() => setToast(null), 6000);

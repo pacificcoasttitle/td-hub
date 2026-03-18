@@ -58,6 +58,7 @@ async function makeRequest<T>(
     body?: unknown;
     operation?: string;
     orderId?: number;
+    timeoutMs?: number;
   }
 ): Promise<VendorResult<T>> {
   const requestId = crypto.randomUUID();
@@ -77,7 +78,7 @@ async function makeRequest<T>(
     const fetchOptions: RequestInit = {
       method,
       headers,
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(options?.timeoutMs ?? 60_000),
     };
 
     if (method === 'POST' && options?.body) {
@@ -270,6 +271,7 @@ export async function getFees(
 export async function getSalesReps(): Promise<VendorResult<SoftProLookupItem[]>> {
   return makeRequest<SoftProLookupItem[]>('GET', SOFTPRO_ENDPOINTS.getSalesReps, {
     operation: 'get_sales_reps',
+    timeoutMs: 10_000,
   });
 }
 

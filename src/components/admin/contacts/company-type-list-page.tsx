@@ -7,10 +7,12 @@ interface Company {
   id: number;
   name: string;
   lookupCode: string | null;
+  address1: string | null;
   email: string | null;
   phone: string | null;
   city: string | null;
   state: string | null;
+  zip: string | null;
   isActive: boolean;
 }
 
@@ -97,7 +99,7 @@ export function CompanyTypeListPage({ title, subtitle, companyType, syncUserType
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Code</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Email</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Phone</th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Location</th>
+                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Address</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Status</th>
                 </tr>
               </thead>
@@ -112,7 +114,7 @@ export function CompanyTypeListPage({ title, subtitle, companyType, syncUserType
                     <td className="px-4 py-3 text-[#6B7280] text-xs font-mono">{co.lookupCode ?? '—'}</td>
                     <td className="px-4 py-3 text-[#6B7280] max-w-[200px] truncate">{co.email ?? '—'}</td>
                     <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{co.phone ?? '—'}</td>
-                    <td className="px-4 py-3 text-[#6B7280]">{[co.city, co.state].filter(Boolean).join(', ') || '—'}</td>
+                    <td className="px-4 py-3 text-[#6B7280] max-w-[260px] truncate">{[co.address1, co.city, [co.state, co.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ') || '—'}</td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5 text-xs">
                         <span className={`h-2 w-2 rounded-full ${co.isActive ? 'bg-green-500' : 'bg-gray-300'}`} />

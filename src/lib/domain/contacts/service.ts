@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { contacts, companies } from '@/lib/db/schema';
-import { eq, desc, sql, ilike, or, and, SQL } from 'drizzle-orm';
+import { eq, desc, asc, sql, ilike, or, and, SQL } from 'drizzle-orm';
 
 // ─── Role → Boolean Flag Mapping ──────────────────────────────────────────────
 
@@ -55,6 +55,8 @@ export interface CompanyListParams {
   search?: string;
   type?: string;
   active?: boolean;
+  sortField?: 'name' | 'companyType' | 'city' | 'createdAt';
+  sortDir?: 'asc' | 'desc';
 }
 
 export interface CompanyListResult {
@@ -245,9 +247,19 @@ export async function getCompanies(params: CompanyListParams = {}): Promise<Comp
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
+  const sortCol = (() => {
+    switch (params.sortField) {
+      case 'name': return companies.name;
+      case 'companyType': return companies.companyType;
+      case 'city': return companies.city;
+      default: return companies.createdAt;
+    }
+  })();
+  const orderFn = params.sortDir === 'asc' ? asc : desc;
+
   const [rows, countResult] = await Promise.all([
     db.select().from(companies).where(where)
-      .orderBy(desc(companies.createdAt))
+      .orderBy(orderFn(sortCol))
       .limit(pageSize).offset(offset),
     db.select({ count: sql<number>`count(*)` }).from(companies).where(where),
   ]);

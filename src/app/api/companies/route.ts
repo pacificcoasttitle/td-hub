@@ -15,6 +15,8 @@ const querySchema = z.object({
   search: z.string().optional(),
   type: z.string().optional(),
   active: z.string().optional(),
+  sortField: z.enum(['name', 'companyType', 'city', 'createdAt']).optional(),
+  sortDir: z.enum(['asc', 'desc']).optional(),
 });
 
 const createSchema = z.object({

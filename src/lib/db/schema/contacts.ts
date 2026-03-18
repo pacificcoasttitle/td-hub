@@ -116,6 +116,10 @@ export const companies = pgTable('companies', {
   feeTransferLedger: varchar('fee_transfer_ledger', { length: 200 }),
 
   branchId: integer('branch_id').references(() => branches.id),
+  salesRepId: integer('sales_rep_id').references(() => contacts.id),
+  titleOfficerId: integer('title_officer_id').references(() => contacts.id),
+  loanUnderwriter: varchar('loan_underwriter', { length: 200 }),
+  salesUnderwriter: varchar('sales_underwriter', { length: 200 }),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

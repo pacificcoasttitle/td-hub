@@ -3,7 +3,7 @@ import {
   timestamp, boolean, jsonb, uniqueIndex, index,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { branches, contacts } from './contacts';
+import { branches, contacts, profiles } from './contacts';
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -60,6 +60,10 @@ export const orders = pgTable('orders', {
 
   softproLastSyncedAt: timestamp('softpro_last_synced_at'),
   isImported: boolean('is_imported').notNull().default(false),
+
+  dupOverride: boolean('dup_override').notNull().default(false),
+  emailStatus: varchar('email_status', { length: 20 }).notNull().default('pending'),
+  createdBy: varchar('created_by', { length: 64 }).references(() => profiles.id),
 
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

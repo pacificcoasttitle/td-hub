@@ -56,16 +56,14 @@ export function AdminOpsDashboard() {
     const controller = new AbortController();
     const opts = { signal: controller.signal };
     Promise.all([
-      fetch('/api/dashboard', opts).then((r) => { if (!r.ok) throw new Error(`Failed (${r.status})`); return r.json() as Promise<DashboardData>; }),
-      fetch('/api/dashboard/activity?limit=10', opts).then((r) => { if (!r.ok) throw new Error(`Failed (${r.status})`); return r.json() as Promise<{ activity: ActivityEntry[] }>; }),
+      fetch('/api/dashboard', opts).then((r) => r.ok ? r.json() as Promise<DashboardData> : null),
+      fetch('/api/dashboard/activity?limit=10', opts).then((r) => r.ok ? r.json() as Promise<{ activity: ActivityEntry[] }> : null),
     ])
-      .then(([d, a]) => { setData(d); setActivity(a.activity); })
+      .then(([d, a]) => { if (d) setData(d); if (a) setActivity(a.activity); })
       .catch((e) => { if (e.name !== 'AbortError') setError(e.message); })
       .finally(() => setLoading(false));
     return () => controller.abort();
   }, []);
-
-  if (error) return <ErrorBanner message={error} />;
 
   const health = data?.systemHealth;
   const webhooks = data?.webhooks;
@@ -87,7 +85,14 @@ export function AdminOpsDashboard() {
             <MetricCard label="Closed This Month" value={data.stats.closedThisMonth.toLocaleString()} accent="bg-green-500" />
             <SyncCard lastSyncAt={data.stats.lastSyncAt} />
           </>
-        ) : null}
+        ) : (
+          <>
+            <MetricCard label="Total Orders" value="—" accent="bg-gray-300" />
+            <MetricCard label="Open Orders" value="—" accent="bg-gray-300" />
+            <MetricCard label="Closed This Month" value="—" accent="bg-gray-300" />
+            <MetricCard label="Last Sync" value="—" accent="bg-gray-300" />
+          </>
+        )}
       </div>
 
       {/* Row 2: Activity + System Health */}

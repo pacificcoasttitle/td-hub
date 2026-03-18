@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 interface OrderProperty {
   address: string | null;
   city: string | null;
@@ -13,8 +15,12 @@ export interface Order {
   fileNumber: string;
   operationalStatus: string;
   transactionType: string | null;
+  productType?: string | null;
   salesRepId: number | null;
   salesRepName?: string | null;
+  createdByName?: string | null;
+  emailStatus?: string | null;
+  dupOverride?: boolean | null;
   openedAt: string;
   property: OrderProperty | null;
 }
@@ -35,6 +41,13 @@ const STATUS_COLORS: Record<string, string> = {
   closed: 'bg-slate-100 text-slate-800',
   canceled: 'bg-red-100 text-red-800',
   duplicate: 'bg-gray-100 text-gray-600',
+};
+
+const EMAIL_STATUS_COLORS: Record<string, string> = {
+  sent: 'bg-green-100 text-green-700',
+  pending: 'bg-amber-100 text-amber-700',
+  failed: 'bg-red-100 text-red-700',
+  none: 'bg-gray-100 text-gray-500',
 };
 
 export function OrderTable({
@@ -65,7 +78,11 @@ export function OrderTable({
                 <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Address</th>
                 <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Status</th>
                 <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Type</th>
+                <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Product</th>
                 <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Sales Rep</th>
+                <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Created By</th>
+                <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Email</th>
+                <th className="text-center px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Dup Override</th>
                 <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Opened</th>
               </tr>
             </thead>
@@ -74,15 +91,7 @@ export function OrderTable({
                 ? Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} />)
                 : orders && orders.length > 0
                   ? orders.map((order) => (
-                      <tr key={order.id} onClick={() => onRowClick(order.id)}
-                        className="hover:bg-gray-50 cursor-pointer transition-colors">
-                        <td className="px-4 py-3 font-medium text-[#1B2A4A] whitespace-nowrap">{order.fileNumber}</td>
-                        <td className="px-4 py-3 text-[#1A1A2E] max-w-xs truncate">{formatAddress(order.property)}</td>
-                        <td className="px-4 py-3 whitespace-nowrap"><StatusBadge status={order.operationalStatus} /></td>
-                        <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.transactionType ?? '—'}</td>
-                        <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.salesRepName ?? '—'}</td>
-                        <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{formatDate(order.openedAt)}</td>
-                      </tr>
+                      <OrderRow key={order.id} order={order} onClick={() => onRowClick(order.id)} />
                     ))
                   : null}
             </tbody>
@@ -120,6 +129,53 @@ export function OrderTable({
   );
 }
 
+function OrderRow({ order, onClick }: { order: Order; onClick: () => void }) {
+  const [dupOverride, setDupOverride] = useState(order.dupOverride ?? false);
+  const [toggling, setToggling] = useState(false);
+
+  async function toggleDup(e: React.MouseEvent) {
+    e.stopPropagation();
+    const next = !dupOverride;
+    setToggling(true);
+    try {
+      const res = await fetch(`/api/orders/${order.id}/dup-override`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (res.ok) setDupOverride(next);
+    } catch { /* noop */ }
+    finally { setToggling(false); }
+  }
+
+  const emailSt = order.emailStatus ?? 'none';
+  const emailColor = EMAIL_STATUS_COLORS[emailSt] ?? EMAIL_STATUS_COLORS.none;
+
+  return (
+    <tr onClick={onClick} className="hover:bg-gray-50 cursor-pointer transition-colors">
+      <td className="px-4 py-3 font-medium text-[#1B2A4A] whitespace-nowrap">{order.fileNumber}</td>
+      <td className="px-4 py-3 text-[#1A1A2E] max-w-xs truncate">{formatAddress(order.property)}</td>
+      <td className="px-4 py-3 whitespace-nowrap"><StatusBadge status={order.operationalStatus} /></td>
+      <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.transactionType ?? '—'}</td>
+      <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap text-xs">{order.productType ?? '—'}</td>
+      <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.salesRepName ?? '—'}</td>
+      <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap text-xs">{order.createdByName ?? '—'}</td>
+      <td className="px-4 py-3 whitespace-nowrap">
+        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${emailColor}`}>
+          {emailSt}
+        </span>
+      </td>
+      <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+        <button onClick={toggleDup} disabled={toggling} title={dupOverride ? 'Dup override ON' : 'Dup override OFF'}
+          className={`w-5 h-5 rounded border transition-colors ${dupOverride ? 'bg-[#1B2A4A] border-[#1B2A4A]' : 'bg-white border-gray-300 hover:border-[#1B2A4A]'} ${toggling ? 'opacity-50' : ''}`}>
+          {dupOverride && <svg className="w-full h-full text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+        </button>
+      </td>
+      <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{formatDate(order.openedAt)}</td>
+    </tr>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const color = STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-600';
   return <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${color}`}>{status.replace(/_/g, ' ')}</span>;
@@ -128,16 +184,14 @@ function StatusBadge({ status }: { status: string }) {
 function SkeletonRow() {
   return (
     <tr>
-      {Array.from({ length: 6 }).map((_, i) => (
+      {Array.from({ length: 10 }).map((_, i) => (
         <td key={i} className="px-4 py-3"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" /></td>
       ))}
     </tr>
   );
 }
 
-function PagBtn({ children, disabled, active, onClick }: {
-  children: React.ReactNode; disabled?: boolean; active?: boolean; onClick: () => void;
-}) {
+function PagBtn({ children, disabled, active, onClick }: { children: React.ReactNode; disabled?: boolean; active?: boolean; onClick: () => void }) {
   return (
     <button disabled={disabled} onClick={onClick}
       className={`px-3 py-1.5 text-sm rounded-md transition-colors ${

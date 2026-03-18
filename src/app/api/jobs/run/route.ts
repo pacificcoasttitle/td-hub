@@ -13,6 +13,7 @@ import { handleResolveOfficers } from '@/lib/jobs/handlers/resolve-order-officer
 import { handleFetchPrelims } from '@/lib/jobs/handlers/fetch-prelims';
 import { handleVerifyOrderSync } from '@/lib/jobs/handlers/verify-order-sync';
 import { handleSyncNewUsers } from '@/lib/jobs/handlers/sync-new-users';
+import { handleSyncAllContacts } from '@/lib/jobs/handlers/sync-all-contacts';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -44,6 +45,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleVerifyOrderSync(),
   'softpro.sync_new_users': () =>
     handleSyncNewUsers(),
+  'softpro.sync_all_contacts': () =>
+    handleSyncAllContacts(),
   'notifications.process_outbox': () =>
     processOutboxEvents(),
 };

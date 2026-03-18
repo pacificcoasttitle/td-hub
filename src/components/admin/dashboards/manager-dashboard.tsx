@@ -53,7 +53,9 @@ export function ManagerDashboard() {
     const opts = { signal: controller.signal };
     Promise.all([
       fetch('/api/dashboard/manager/team-stats', opts).then((r) => r.ok ? r.json() : null),
-      fetch('/api/dashboard/manager/rep-performance', opts).then((r) => r.ok ? r.json() : { reps: [] }),
+      fetch('/api/managers-report/leaderboard', opts)
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => d ?? fetch('/api/dashboard/manager/rep-performance', opts).then((r) => r.ok ? r.json() : { reps: [] })),
       fetch('/api/dashboard/manager/branch-stats', opts).then((r) => r.ok ? r.json() : { branches: [] }),
       fetch('/api/dashboard/manager/recent-closings?limit=20', opts).then((r) => r.ok ? r.json() : { orders: [] }),
     ])
@@ -87,7 +89,7 @@ export function ManagerDashboard() {
     return sortDir === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
   });
 
-  if (error) return <ErrorBanner message={error} />;
+  /* Show empty states, not errors — B8/B9 hardening */
 
   return (
     <>

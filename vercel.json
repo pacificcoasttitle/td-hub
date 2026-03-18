@@ -23,6 +23,10 @@
     {
       "path": "/api/jobs/run?name=softpro.sync_new_users",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=softpro.sync_all_contacts",
+      "schedule": "0 3 * * *"
     }
   ]
 }

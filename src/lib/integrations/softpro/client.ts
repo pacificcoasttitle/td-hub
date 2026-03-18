@@ -267,6 +267,42 @@ export async function getFees(
   });
 }
 
+export async function createUser(
+  payload: Record<string, unknown>
+): Promise<VendorResult<Record<string, unknown>>> {
+  return makeRequest<Record<string, unknown>>('POST', SOFTPRO_ENDPOINTS.createUser, {
+    body: payload,
+    operation: 'create_user',
+  });
+}
+
+export async function updateUser(
+  payload: Record<string, unknown>
+): Promise<VendorResult<Record<string, unknown>>> {
+  return makeRequest<Record<string, unknown>>('POST', SOFTPRO_ENDPOINTS.updateUser, {
+    body: payload,
+    operation: 'update_user',
+  });
+}
+
+export async function addCompany(
+  payload: Record<string, unknown>
+): Promise<VendorResult<Record<string, unknown>>> {
+  return makeRequest<Record<string, unknown>>('POST', SOFTPRO_ENDPOINTS.addCompany, {
+    body: payload,
+    operation: 'add_company',
+  });
+}
+
+export async function updateCompany(
+  payload: Record<string, unknown>
+): Promise<VendorResult<Record<string, unknown>>> {
+  return makeRequest<Record<string, unknown>>('POST', SOFTPRO_ENDPOINTS.updateCompany, {
+    body: payload,
+    operation: 'update_company',
+  });
+}
+
 export async function healthCheck(): Promise<VendorHealthResult> {
   const start = Date.now();
   try {

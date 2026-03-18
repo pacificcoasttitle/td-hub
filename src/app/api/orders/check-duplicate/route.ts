@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, orderProperties } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 
 const bodySchema = z.object({
   apn: z.string().min(1),
@@ -27,23 +27,30 @@ export async function POST(req: NextRequest) {
         orderId: orderProperties.orderId,
         fileNumber: orders.fileNumber,
         status: orders.operationalStatus,
+        dupOverride: orders.dupOverride,
       })
       .from(orderProperties)
       .innerJoin(orders, eq(orders.id, orderProperties.orderId))
       .where(eq(orderProperties.apn, parsed.data.apn))
-      .limit(1);
+      .limit(5);
 
-    if (rows.length > 0) {
-      const existing = rows[0]!;
+    const blocking = rows.filter(r => !r.dupOverride);
+
+    if (blocking.length > 0) {
+      const first = blocking[0]!;
       return NextResponse.json({
         isDuplicate: true,
-        existingFileNumber: existing.fileNumber,
-        existingOrderId: existing.orderId,
-        existingStatus: existing.status,
+        existingFileNumber: first.fileNumber,
+        existingOrderId: first.orderId,
+        existingStatus: first.status,
+        overriddenCount: rows.length - blocking.length,
       });
     }
 
-    return NextResponse.json({ isDuplicate: false });
+    return NextResponse.json({
+      isDuplicate: false,
+      overriddenCount: rows.length,
+    });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

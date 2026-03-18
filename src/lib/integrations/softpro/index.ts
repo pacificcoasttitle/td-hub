@@ -77,6 +77,42 @@ export async function addNotes(orderNumber: string, text: string, noteId?: strin
   return client.addNotes(orderNumber, text, noteId);
 }
 
+export async function createUser(payload: Record<string, unknown>) {
+  if (useMock) {
+    const { vendorSuccess } = await import('../types');
+    return vendorSuccess({ message: 'Mock user created' }, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 0 });
+  }
+  const client = await import('./client');
+  return client.createUser(payload);
+}
+
+export async function updateUser(payload: Record<string, unknown>) {
+  if (useMock) {
+    const { vendorSuccess } = await import('../types');
+    return vendorSuccess({ message: 'Mock user updated' }, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 0 });
+  }
+  const client = await import('./client');
+  return client.updateUser(payload);
+}
+
+export async function addCompany(payload: Record<string, unknown>) {
+  if (useMock) {
+    const { vendorSuccess } = await import('../types');
+    return vendorSuccess({ message: 'Mock company created' }, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 0 });
+  }
+  const client = await import('./client');
+  return client.addCompany(payload);
+}
+
+export async function updateCompany(payload: Record<string, unknown>) {
+  if (useMock) {
+    const { vendorSuccess } = await import('../types');
+    return vendorSuccess({ message: 'Mock company updated' }, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 0 });
+  }
+  const client = await import('./client');
+  return client.updateCompany(payload);
+}
+
 export async function healthCheck() {
   if (useMock) {
     const mock = await import('./mock');

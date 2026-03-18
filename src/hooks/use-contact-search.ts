@@ -9,6 +9,8 @@ export interface ContactResult {
   email?: string;
   phone?: string;
   contactType?: string;
+  clientLookupCode?: string;
+  companyLookupCode?: string;
 }
 
 export function useContactSearch(spType?: string, maxResults = 10) {

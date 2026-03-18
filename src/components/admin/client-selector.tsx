@@ -10,6 +10,8 @@ export interface ClientContact {
   phone: string | null;
   role: string | null;
   contactType?: string | null;
+  clientLookupCode?: string | null;
+  companyLookupCode?: string | null;
 }
 
 interface ClientSelectorProps {

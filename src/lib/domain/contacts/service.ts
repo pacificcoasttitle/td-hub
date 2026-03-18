@@ -2,6 +2,34 @@ import { db } from '@/lib/db/client';
 import { contacts, companies } from '@/lib/db/schema';
 import { eq, desc, sql, ilike, or, and, SQL } from 'drizzle-orm';
 
+// ─── Role → Boolean Flag Mapping ──────────────────────────────────────────────
+
+function roleToBooleanFilter(role: string): SQL | null {
+  switch (role) {
+    case 'title_officer': return eq(contacts.isTitleOfficer, true);
+    case 'escrow_officer': return eq(contacts.isEscrowOfficer, true);
+    case 'sales_rep': return eq(contacts.isSalesRep, true);
+    case 'agent':
+    case 'selling_agent': return eq(contacts.isSellingAgent, true);
+    case 'escrow': return eq(contacts.isEscrow, true);
+    case 'lender': return eq(contacts.isLender, true);
+    case 'mortgage_broker': return eq(contacts.isMortgageBroker, true);
+    case 'underwriter': return eq(contacts.isUnderwriter, true);
+    default: return null;
+  }
+}
+
+function companyTypeToBooleanFilter(type: string): SQL | null {
+  switch (type) {
+    case 'escrow_company': return eq(companies.isEscrowCompany, true);
+    case 'lender': return eq(companies.isLender, true);
+    case 'mortgage_broker': return eq(companies.isMortgageBroker, true);
+    case 'selling_agent': return eq(companies.isSellingAgent, true);
+    case 'underwriter': return eq(companies.isUnderwriter, true);
+    default: return null;
+  }
+}
+
 // ─── Contact Types ───────────────────────────────────────────────────────────
 
 export interface ContactListParams {
@@ -46,7 +74,10 @@ export async function getContacts(params: ContactListParams = {}): Promise<Conta
   const conditions: SQL[] = [];
 
   if (params.role) {
-    conditions.push(sql`${contacts.roles} @> ${JSON.stringify([params.role])}::jsonb`);
+    const boolFilter = roleToBooleanFilter(params.role);
+    if (boolFilter) {
+      conditions.push(boolFilter);
+    }
   }
 
   if (params.active !== undefined) {
@@ -189,7 +220,12 @@ export async function getCompanies(params: CompanyListParams = {}): Promise<Comp
   const conditions: SQL[] = [];
 
   if (params.type) {
-    conditions.push(eq(companies.companyType, params.type));
+    const flagFilter = companyTypeToBooleanFilter(params.type);
+    if (flagFilter) {
+      conditions.push(flagFilter);
+    } else {
+      conditions.push(eq(companies.companyType, params.type));
+    }
   }
 
   if (params.active !== undefined) {

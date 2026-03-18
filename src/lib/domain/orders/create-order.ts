@@ -78,7 +78,7 @@ export interface CreateOrderResult {
 
 // ─── Main Entry Point ───────────────────────────────────────────────────────
 
-export async function createAndSendToSoftPro(raw: unknown): Promise<CreateOrderResult> {
+export async function createAndSendToSoftPro(raw: unknown, userId?: string): Promise<CreateOrderResult> {
   const parsed = createOrderInputSchema.safeParse(raw);
   if (!parsed.success) {
     return { success: false, error: `Validation failed: ${parsed.error.message}` };
@@ -112,7 +112,7 @@ export async function createAndSendToSoftPro(raw: unknown): Promise<CreateOrderR
 
   const fileNumber = spResult.data.orderNumber;
 
-  const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county });
+  const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county }, userId);
 
   if (input.property.address && input.property.state && county) {
     try {
@@ -226,7 +226,8 @@ async function createLocalRecords(
   input: CreateOrderInput,
   fileNumber: string,
   sitex: SiteXPropertyData | null,
-  enriched: { apn: string; legal: string; county: string }
+  enriched: { apn: string; legal: string; county: string },
+  userId?: string,
 ): Promise<{ orderId: number }> {
   const [newOrder] = await db.insert(orders).values({
     fileNumber,
@@ -240,6 +241,7 @@ async function createLocalRecords(
     source: 'manual_entry',
     isImported: false,
     softproLastSyncedAt: new Date(),
+    createdBy: userId ?? null,
   }).returning({ id: orders.id });
 
   const orderId = newOrder!.id;

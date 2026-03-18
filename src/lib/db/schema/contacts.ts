@@ -105,6 +105,7 @@ export const contacts = pgTable('contacts', {
   isSellingAgent: boolean('is_selling_agent').notNull().default(false),
   isTitleOfficer: boolean('is_title_officer').notNull().default(false),
   isSalesRep: boolean('is_sales_rep').notNull().default(false),
+  isUnderwriter: boolean('is_underwriter').notNull().default(false),
   isNewUser: boolean('is_new_user').notNull().default(false),
   isMailNotification: boolean('is_mail_notification').notNull().default(false),
 

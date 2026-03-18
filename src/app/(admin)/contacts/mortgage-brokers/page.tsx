@@ -1,5 +1,5 @@
-import { ContactListPage } from '@/components/admin/contacts/contact-list-page';
+import { CompanyTypeListPage } from '@/components/admin/contacts/company-type-list-page';
 
 export default function MortgageBrokersPage() {
-  return <ContactListPage title="Mortgage Brokers" subtitle="External clients — mortgage brokers" typeFilter="mortgage_broker" />;
+  return <CompanyTypeListPage title="Mortgage Brokers" subtitle="External clients — mortgage brokers" companyType="mortgage_broker" syncUserType="Mortgage Broker" />;
 }

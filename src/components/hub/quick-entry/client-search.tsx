@@ -16,6 +16,8 @@ function toClientContact(c: ContactResult): ClientContact {
     phone: c.phone ?? null,
     role: null,
     contactType: c.contactType ?? null,
+    clientLookupCode: c.clientLookupCode ?? null,
+    companyLookupCode: c.companyLookupCode ?? null,
   };
 }
 

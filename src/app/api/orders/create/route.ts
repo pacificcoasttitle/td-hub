@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body: unknown = await req.json();
-    const result = await createAndSendToSoftPro(body);
+    const result = await createAndSendToSoftPro(body, session.id);
 
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 422 });

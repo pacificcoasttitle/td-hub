@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SyncButton } from '@/components/admin/contacts/sync-button';
+import { CompanySyncAllButton } from '@/components/admin/contacts/company-sync-all-button';
 import { CompanyFormModal, type CompanyRecord } from '@/components/admin/contacts/company-form-modal';
 
 interface StaffOption { id: number; name: string; }
@@ -102,7 +102,7 @@ export default function CompaniesPage() {
           <p className="text-sm text-[#6B7280] mt-1">Company directory with assignment management</p>
         </div>
         <div className="flex items-center gap-2">
-          <SyncButton endpoint="/api/contacts/sync" userType="Escrow Company" onSuccess={fetchCompanies} />
+          <CompanySyncAllButton onSuccess={fetchCompanies} />
           <button onClick={() => { setEditCompany(null); setModalOpen(true); }}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] transition-colors">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>

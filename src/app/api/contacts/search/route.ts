@@ -11,8 +11,24 @@ const ALLOWED_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team',
 const querySchema = z.object({
   q: z.string().min(2).max(100),
   pageSize: z.coerce.number().min(1).max(50).default(10),
-  type: z.enum(['all', 'person', 'company']).default('all'),
+  type: z.string().default('all'),
 });
+
+function typeToSql(type: string) {
+  switch (type) {
+    case 'escrow': return sql`c.is_escrow = true`;
+    case 'lender': return sql`c.is_lender = true`;
+    case 'mortgage_broker': return sql`c.is_mortgage_broker = true`;
+    case 'selling_agent':
+    case 'agent':
+    case 'realtor': return sql`c.is_selling_agent = true`;
+    case 'title_officer': return sql`c.is_title_officer = true`;
+    case 'escrow_officer': return sql`c.is_escrow_officer = true`;
+    case 'sales_rep': return sql`c.is_sales_rep = true`;
+    case 'underwriter': return sql`c.is_underwriter = true`;
+    default: return sql`true`;
+  }
+}
 
 function deriveClientType(row: {
   isEscrow: boolean; isLender: boolean; isMortgageBroker: boolean;
@@ -41,7 +57,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ results: [] });
   }
 
-  const { q, pageSize } = parsed.data;
+  const { q, pageSize, type } = parsed.data;
 
   try {
     const isEmailSearch = q.includes('@');
@@ -58,6 +74,8 @@ export async function GET(req: NextRequest) {
           OR ${contacts.lookupCode} ILIKE ${pattern}
           OR co.name ILIKE ${pattern}
         )`;
+
+    const typeCondition = type === 'all' ? sql`true` : typeToSql(type);
 
     const rows = await db.execute(sql`
       SELECT
@@ -92,6 +110,7 @@ export async function GET(req: NextRequest) {
       FROM contacts c
       LEFT JOIN companies co ON c.flookup_code = co.lookup_code AND c.flookup_code IS NOT NULL
       WHERE ${searchCondition}
+        AND ${typeCondition}
         AND c.is_active = true
       ORDER BY
         CASE WHEN c.email ILIKE ${q} THEN 0 ELSE 1 END,

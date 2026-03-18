@@ -247,7 +247,7 @@ async function syncSalesReps(): Promise<SyncContactsResult> {
 interface CompanySyncConfig {
   entityType: string;
   userType: string;
-  contactFlag: 'isEscrow' | 'isLender' | 'isMortgageBroker' | 'isSellingAgent';
+  contactFlag: 'isEscrow' | 'isLender' | 'isMortgageBroker' | 'isSellingAgent' | 'isUnderwriter';
   companyFlag: 'isEscrowCompany' | 'isLender' | 'isMortgageBroker' | 'isSellingAgent' | 'isUnderwriter';
   useSpacedFields: boolean;
   extraCompanyFields?: (item: SyncRow) => Record<string, string | null>;
@@ -424,7 +424,7 @@ const COMPANY_CONFIGS: Record<string, CompanySyncConfig> = {
   'Underwriter': {
     entityType: 'Underwriter',
     userType: 'Underwriter',
-    contactFlag: 'isEscrow',
+    contactFlag: 'isUnderwriter',
     companyFlag: 'isUnderwriter',
     useSpacedFields: true,
   },

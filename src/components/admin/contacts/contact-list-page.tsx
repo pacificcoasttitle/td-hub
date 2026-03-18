@@ -32,7 +32,7 @@ interface Props {
 const SYNC_USER_TYPE: Record<string, string> = {
   title_officer: 'Title Officer',
   escrow_officer: 'Escrow Officer',
-  sales_rep: 'Order Contact - Person',
+  sales_rep: 'Sales Rep',
   agent: 'Selling Agent/Broker',
   escrow: 'Escrow Company',
   lender: 'Lender',

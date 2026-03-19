@@ -5,12 +5,20 @@ import { vendorApiLogs } from '@/lib/db/schema';
 const VENDOR = 'sendgrid';
 const API_URL = 'https://api.sendgrid.com/v3/mail/send';
 
+export interface SendGridAttachment {
+  content: string;
+  type: string;
+  filename: string;
+  disposition?: string;
+}
+
 export interface SendEmailParams {
   to: string | string[];
   cc?: string | string[];
   subject: string;
   html: string;
   from?: string;
+  attachments?: SendGridAttachment[];
 }
 
 interface SendEmailResult {
@@ -82,12 +90,21 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
     ...(ccList.length > 0 ? { cc: ccList.map((email) => ({ email })) } : {}),
   }];
 
-  const body = {
+  const body: Record<string, unknown> = {
     personalizations,
     from: { email: from },
     subject: params.subject,
     content: [{ type: 'text/html', value: params.html }],
   };
+
+  if (params.attachments && params.attachments.length > 0) {
+    body.attachments = params.attachments.map((a) => ({
+      content: a.content,
+      type: a.type,
+      filename: a.filename,
+      disposition: a.disposition ?? 'attachment',
+    }));
+  }
 
   try {
     const response = await fetch(API_URL, {

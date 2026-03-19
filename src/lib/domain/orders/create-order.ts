@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderParties, orderStatusHistory } from '@/lib/db/schema';
+import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox } from '@/lib/db/schema';
 import { createOrder as softproCreateOrder } from '@/lib/integrations/softpro';
 import { propertyLookup } from '@/lib/integrations/sitex/client';
 import type { SiteXPropertyData } from '@/lib/integrations/sitex/types';
 import { autoTriggerTitlePoint } from '@/lib/domain/titlepoint/auto-trigger';
+import { getSetting } from '@/lib/domain/settings/service';
+import { buildSoftProPayload } from './softpro-payload';
 
 // ─── Zod Schema ─────────────────────────────────────────────────────────────
 
@@ -116,7 +118,7 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
 
   if (input.property.address && input.property.state && county) {
     try {
-      await autoTriggerTitlePoint(orderId, {
+      const tpResult = await autoTriggerTitlePoint(orderId, {
         address: input.property.address,
         city: input.property.city,
         state: input.property.state,
@@ -124,100 +126,23 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
         apn: apn || null,
         fips: null,
       });
+
+      if (tpResult.skipped) {
+        try {
+          const emailEnabled = await getSetting('open_order_confirmation_enabled');
+          if (emailEnabled !== 'false') {
+            await db.insert(eventOutbox).values({
+              eventType: 'order.confirmation',
+              orderId,
+              payload: { noDocuments: true } as Record<string, unknown>,
+            });
+          }
+        } catch { /* outbox insert failure never blocks order creation */ }
+      }
     } catch { /* TitlePoint failures never block order creation */ }
   }
 
   return { success: true, orderId, fileNumber };
-}
-
-// ─── Build SoftPro Payload ──────────────────────────────────────────────────
-
-function buildSoftProPayload(
-  input: CreateOrderInput,
-  enriched: { apn: string; legal: string; county: string }
-): Record<string, unknown> {
-  const ec = input.contacts?.escrowCompany;
-
-  return {
-    baseDetails: {
-      OrderType: input.orderType,
-      ProjectName: 'PCT',
-      IsRushOrder: input.isRushOrder,
-    },
-    personalDetails: {
-      CompanyLookupCode: ec?.companyLookupCode ?? '',
-      ClientLookupCode: ec?.clientLookupCode ?? '',
-      UserType: 'EscrowCompany',
-      CompanyName: ec?.companyName ?? '',
-      Email: ec?.email ?? '',
-      FirstName: ec?.name?.split(' ')[0] ?? '',
-      LastName: ec?.name?.split(' ').slice(1).join(' ') ?? '',
-      Telephone: ec?.phone ?? '',
-      Address: '', City: '', ZipCode: '', State: '',
-      EmailNotifications: true,
-      SalesRep: input.transaction.titleOfficer ?? '',
-    },
-    propertyDetails: [{
-      Address1: input.property.address,
-      Address2: input.property.unitNumber ?? '',
-      APNNumberParcelID: enriched.apn,
-      Country: enriched.county,
-      Description: enriched.legal,
-      IsPrimaryResidence: true,
-      City: input.property.city,
-      Zip: input.property.zip.slice(0, 5),
-      State: input.property.state,
-      EscrowBriefLegalLookupCode: null,
-      EscrowBriefLegal: enriched.legal,
-    }],
-    sellerDetails: {
-      PrimaryOwnerFirstName: input.seller.firstName,
-      PrimaryOwnerMiddleName: input.seller.middleName ?? '',
-      PrimaryOwnerLastName: input.seller.lastName,
-      SecondaryOwnerFirstName: input.seller.secondaryFirstName ?? '',
-      SecondaryOwnerMiddleName: input.seller.secondaryMiddleName ?? '',
-      SecondaryOwnerLastName: input.seller.secondaryLastName ?? '',
-      OrganizationType: '',
-      IsOrganization: String(input.seller.isOrganization),
-    },
-    transactionDetails: {
-      LookUpCodeTitleOffice: input.transaction.branchCode,
-      TitleOffice: input.transaction.titleOfficer ?? '',
-      Product: input.transaction.product,
-      EscrowNumber: input.transaction.escrowNumber ?? '',
-      SalesAmount: input.transaction.salesAmount,
-      TransactionType: input.transaction.type,
-      LoanNumber: input.transaction.loanNumber ?? '',
-      LoanAmount: input.transaction.loanAmount,
-      UnderwriterLookUpCode: input.transaction.underwriterCode ?? '',
-      CoverageAmount: input.transaction.coverageAmount,
-      PrimaryBorrowerFirstName: input.buyer.firstName,
-      PrimaryBorrowerMiddleName: input.buyer.middleName ?? '',
-      PrimaryBorrowerLastName: input.buyer.lastName,
-      SecondaryBorrowerFirstName: input.buyer.secondaryFirstName ?? '',
-      SecondaryBorrowerMiddleName: input.buyer.secondaryMiddleName ?? '',
-      SecondaryBorrowerLastName: input.buyer.secondaryLastName ?? '',
-      IsOrganization: input.buyer.isOrganization,
-      OrganizationType: input.buyer.organizationType ?? '',
-    },
-    buyersAgentDetails: mapContactSection(input.contacts?.buyerAgent),
-    listingAgentDetails: mapContactSection(input.contacts?.listingAgent),
-    escrowDetails: mapContactSection(input.contacts?.escrowCompany),
-    lenderDetails: mapContactSection(input.contacts?.lender),
-    mortgageDetails: mapContactSection(input.contacts?.mortgageBroker),
-  };
-}
-
-function mapContactSection(c?: z.infer<typeof contactSchema>) {
-  if (!c) return {};
-  return {
-    CompanyLookUpCode: c.companyLookupCode ?? '',
-    ClientLookUpCode: c.clientLookupCode ?? '',
-    Name: c.name ?? '',
-    Email: c.email ?? '',
-    Telephone: c.phone ?? '',
-    CompanyName: c.companyName ?? '',
-  };
 }
 
 // ─── Local Record Creation ──────────────────────────────────────────────────
@@ -289,20 +214,19 @@ function validTxType(v: string) {
 
 type PartyInsert = typeof orderParties.$inferInsert;
 
+function contactParty(orderId: number, role: PartyInsert['role'], c: z.infer<typeof contactSchema>): PartyInsert {
+  return { orderId, role, externalName: c.name ?? null, externalCompany: c.companyName ?? null, externalEmail: c.email ?? null, externalPhone: c.phone ?? null };
+}
+
 function buildPartyInserts(orderId: number, input: CreateOrderInput): PartyInsert[] {
-  const parties: PartyInsert[] = [];
-  parties.push({
-    orderId, role: 'seller', isPrimary: true,
-    externalName: [input.seller.firstName, input.seller.lastName].join(' '),
-  });
-  parties.push({
-    orderId, role: 'buyer', isPrimary: true,
-    externalName: [input.buyer.firstName, input.buyer.lastName].join(' '),
-  });
+  const p: PartyInsert[] = [
+    { orderId, role: 'seller', isPrimary: true, externalName: [input.seller.firstName, input.seller.lastName].join(' ') },
+    { orderId, role: 'buyer', isPrimary: true, externalName: [input.buyer.firstName, input.buyer.lastName].join(' ') },
+  ];
   const c = input.contacts;
-  if (c?.escrowCompany) parties.push({ orderId, role: 'escrow_company', externalName: c.escrowCompany.name ?? null, externalCompany: c.escrowCompany.companyName ?? null, externalEmail: c.escrowCompany.email ?? null, externalPhone: c.escrowCompany.phone ?? null });
-  if (c?.lender) parties.push({ orderId, role: 'lender', externalName: c.lender.name ?? null, externalCompany: c.lender.companyName ?? null, externalEmail: c.lender.email ?? null, externalPhone: c.lender.phone ?? null });
-  if (c?.buyerAgent) parties.push({ orderId, role: 'buyer_agent', externalName: c.buyerAgent.name ?? null, externalCompany: c.buyerAgent.companyName ?? null, externalEmail: c.buyerAgent.email ?? null, externalPhone: c.buyerAgent.phone ?? null });
-  if (c?.listingAgent) parties.push({ orderId, role: 'listing_agent', externalName: c.listingAgent.name ?? null, externalCompany: c.listingAgent.companyName ?? null, externalEmail: c.listingAgent.email ?? null, externalPhone: c.listingAgent.phone ?? null });
-  return parties;
+  if (c?.escrowCompany) p.push(contactParty(orderId, 'escrow_company', c.escrowCompany));
+  if (c?.lender) p.push(contactParty(orderId, 'lender', c.lender));
+  if (c?.buyerAgent) p.push(contactParty(orderId, 'buyer_agent', c.buyerAgent));
+  if (c?.listingAgent) p.push(contactParty(orderId, 'listing_agent', c.listingAgent));
+  return p;
 }

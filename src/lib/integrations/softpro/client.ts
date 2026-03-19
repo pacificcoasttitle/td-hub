@@ -2,6 +2,7 @@ import { VendorResult, VendorHealthResult, vendorSuccess, vendorError } from '..
 import {
   SoftProResponse,
   SoftProOrderItem,
+  SoftProOrderDetailItem,
   SoftProLookupItem,
   SoftProOrderContactsData,
   SoftProAttachedDocument,
@@ -197,6 +198,17 @@ export async function getOrders(params: {
   });
 }
 
+export async function getOrderDetails(params: {
+  dateFrom: string;
+  dateTo: string;
+}): Promise<VendorResult<SoftProOrderDetailItem[]>> {
+  return makeRequest<SoftProOrderDetailItem[]>('GET', SOFTPRO_ENDPOINTS.getOrderDetails, {
+    queryParams: { DateFrom: params.dateFrom, DateTo: params.dateTo },
+    operation: 'get_order_details',
+    timeoutMs: 120_000,
+  });
+}
+
 export async function getOrderContacts(
   orderNumber: string
 ): Promise<VendorResult<SoftProOrderContactsData>> {
@@ -308,6 +320,12 @@ export async function updateCompany(
   return makeRequest<Record<string, unknown>>('POST', SOFTPRO_ENDPOINTS.updateCompany, {
     body: payload,
     operation: 'update_company',
+  });
+}
+
+export async function getOrderStatusList(): Promise<VendorResult<string[]>> {
+  return makeRequest<string[]>('GET', SOFTPRO_ENDPOINTS.getOrderStatus, {
+    operation: 'get_order_status',
   });
 }
 

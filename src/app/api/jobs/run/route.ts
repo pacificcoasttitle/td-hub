@@ -9,12 +9,20 @@ import { handleSyncContacts } from '@/lib/jobs/handlers/sync-contacts';
 import type { SyncContactsPayload } from '@/lib/jobs/handlers/sync-contacts';
 import { handleTitlePointPoll } from '@/lib/jobs/handlers/titlepoint-poll';
 import { handleEnrichOrders } from '@/lib/jobs/handlers/enrich-orders';
+import { importOrdersFromSoftPro } from '@/lib/jobs/handlers/import-orders';
 import { handleResolveOfficers } from '@/lib/jobs/handlers/resolve-order-officers';
 import { handleFetchPrelims } from '@/lib/jobs/handlers/fetch-prelims';
 import { handleVerifyOrderSync } from '@/lib/jobs/handlers/verify-order-sync';
 import { handleSyncNewUsers } from '@/lib/jobs/handlers/sync-new-users';
 import { handleSyncAllContacts } from '@/lib/jobs/handlers/sync-all-contacts';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
+
+function formatTodayForImport(): string {
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${month}-${day}-${d.getFullYear()}`;
+}
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -49,6 +57,11 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleSyncNewUsers(),
   'softpro.sync_all_contacts': () =>
     handleSyncAllContacts(),
+  'import-orders': (payload) => {
+    const dateFrom = typeof payload.dateFrom === 'string' ? payload.dateFrom : formatTodayForImport();
+    const dateTo = typeof payload.dateTo === 'string' ? payload.dateTo : formatTodayForImport();
+    return importOrdersFromSoftPro({ dateFrom, dateTo });
+  },
   'notifications.process_outbox': () =>
     processOutboxEvents(),
 };

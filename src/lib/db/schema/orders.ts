@@ -62,6 +62,7 @@ export const orders = pgTable('orders', {
   salesPrice: decimal('sales_price', { precision: 12, scale: 2 }),
   loanAmount: decimal('loan_amount', { precision: 12, scale: 2 }),
 
+  marketingSource: varchar('marketing_source', { length: 200 }),
   softproLastSyncedAt: timestamp('softpro_last_synced_at'),
   isImported: boolean('is_imported').notNull().default(false),
 

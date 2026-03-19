@@ -13,13 +13,36 @@ export interface SoftProResponse<T = unknown> {
 }
 
 // ─── Order Item (from GetOrders) ─────────────────────────────────────────────
-// GetOrders returns only these four fields. GetOrderDetails returns 404.
+// GetOrders returns only these four fields — lightweight status polling.
 
 export interface SoftProOrderItem {
   OrderNumber: string;
   OrderStatus: string;
   LastModifiedOn: string;
   CompletedDate: string;
+}
+
+// ─── Order Detail Item (from GetOrderDetails) ───────────────────────────────
+// GetOrderDetails returns the full order payload including address, pricing,
+// transaction type, and officer assignments.
+
+export interface SoftProOrderDetailItem {
+  OrderNumber: string;
+  OrderStatus: string;
+  MarketingSource: string;
+  OrderType: string;
+  Address: string;
+  City: string;
+  State: string;
+  Country: string;
+  TitleOfficer: string;
+  SalesPrice: string;
+  TransactionType: string;
+  ProductType: string;
+  ReceivedDate: string;
+  CompletedDate: string;
+  ModifiedDate: string;
+  MarketingRep: string;
 }
 
 // ─── Order Contacts (from GetOrderContacts) ──────────────────────────────────
@@ -106,6 +129,7 @@ export const SOFTPRO_ENDPOINTS = {
   getLookupTable: 'lookup/GetLookuptable',
   getSalesReps: 'ordercreation/GetOrderMarketingRep',
   getOrders: 'ordercreation/GetOrders',
+  getOrderDetails: 'ordercreation/GetOrderDetails',
   createUser: 'ordercreation/CreateUser',
   updateUser: 'ordercreation/UpdateUser',
   addNote: 'ordercreation/AddNotes',
@@ -114,6 +138,7 @@ export const SOFTPRO_ENDPOINTS = {
   getAttachedDocuments: 'ordercreation/GetAttachedDocuments',
   getFees: 'ordercreation/GetFees',
   updateTask: 'ordercreation/AddTask',
+  getOrderStatus: 'ordercreation/GetOrderStatus',
 } as const;
 
 // ─── Date Parsing ────────────────────────────────────────────────────────────

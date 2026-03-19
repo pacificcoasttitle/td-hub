@@ -7,6 +7,55 @@ import { OrderFilters } from '@/components/admin/order-filters';
 import { OrderTable, PAGE_SIZE } from '@/components/admin/order-table';
 import type { OrderListResponse } from '@/components/admin/order-table';
 
+function ImportButton() {
+  const [importing, setImporting] = useState(false);
+  const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function run() {
+    setImporting(true);
+    setToast(null);
+    try {
+      const now = new Date();
+      const dateTo = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}-${now.getFullYear()}`;
+      const past = new Date(now);
+      past.setFullYear(past.getFullYear() - 1);
+      const dateFrom = `${String(past.getMonth() + 1).padStart(2, '0')}-${String(past.getDate()).padStart(2, '0')}-${past.getFullYear()}`;
+
+      const res = await fetch('/api/orders/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dateFrom, dateTo }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error ?? `Failed (${res.status})`);
+      const msg = `Imported ${body?.imported ?? 0}, updated ${body?.updated ?? 0} of ${body?.total ?? 0} (${body?.errors?.length ?? 0} errors)`;
+      setToast({ ok: true, msg });
+    } catch (e) {
+      setToast({ ok: false, msg: e instanceof Error ? e.message : 'Import failed' });
+    } finally {
+      setImporting(false);
+      setTimeout(() => setToast(null), 8000);
+    }
+  }
+
+  return (
+    <div className="inline-flex items-center gap-2">
+      <button onClick={run} disabled={importing}
+        className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium border border-gray-200 rounded-lg text-[#1B2A4A] bg-white hover:bg-gray-50 disabled:opacity-50 transition-colors">
+        <svg className={`h-4 w-4 ${importing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+        </svg>
+        {importing ? 'Importing...' : 'Import Orders'}
+      </button>
+      {toast && (
+        <span className={`text-xs font-medium px-3 py-1.5 rounded-lg ${toast.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+          {toast.msg}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function EnrichButton() {
   const [enriching, setEnriching] = useState(false);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -108,6 +157,7 @@ export default function OrdersPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <ImportButton />
           <EnrichButton />
           <Link
             href="/orders/new"

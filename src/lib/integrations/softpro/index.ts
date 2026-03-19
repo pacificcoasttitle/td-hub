@@ -24,6 +24,16 @@ export async function getOrders(params: Parameters<typeof import('./client').get
   return client.getOrders(params);
 }
 
+export async function getOrderDetails(params: Parameters<typeof import('./client').getOrderDetails>[0]) {
+  if (useMock) {
+    const { vendorSuccess } = await import('../types');
+    type Detail = import('./types').SoftProOrderDetailItem;
+    return vendorSuccess([] as Detail[], { requestId: 'mock-' + crypto.randomUUID(), durationMs: 0 });
+  }
+  const client = await import('./client');
+  return client.getOrderDetails(params);
+}
+
 export async function getOrderContacts(orderNumber: string) {
   if (useMock) {
     const mock = await import('./mock');
@@ -120,6 +130,15 @@ export async function updateCompany(payload: Record<string, unknown>) {
   }
   const client = await import('./client');
   return client.updateCompany(payload);
+}
+
+export async function getOrderStatusList() {
+  if (useMock) {
+    const { vendorSuccess } = await import('../types');
+    return vendorSuccess(['Open', 'Closed', 'Cancelled'] as string[], { requestId: 'mock-' + crypto.randomUUID(), durationMs: 0 });
+  }
+  const client = await import('./client');
+  return client.getOrderStatusList();
 }
 
 export async function healthCheck() {

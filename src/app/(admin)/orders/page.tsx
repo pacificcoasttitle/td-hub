@@ -7,6 +7,45 @@ import { OrderFilters } from '@/components/admin/order-filters';
 import { OrderTable, PAGE_SIZE } from '@/components/admin/order-table';
 import type { OrderListResponse } from '@/components/admin/order-table';
 
+function EnrichButton() {
+  const [enriching, setEnriching] = useState(false);
+  const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function run() {
+    setEnriching(true);
+    setToast(null);
+    try {
+      const res = await fetch('/api/orders/enrich', { method: 'POST' });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error ?? `Failed (${res.status})`);
+      const msg = `Enriched ${body?.enriched ?? 0} orders (${body?.skipped ?? 0} skipped, ${body?.errors?.length ?? 0} errors)`;
+      setToast({ ok: true, msg });
+    } catch (e) {
+      setToast({ ok: false, msg: e instanceof Error ? e.message : 'Enrichment failed' });
+    } finally {
+      setEnriching(false);
+      setTimeout(() => setToast(null), 8000);
+    }
+  }
+
+  return (
+    <div className="inline-flex items-center gap-2">
+      <button onClick={run} disabled={enriching}
+        className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium border border-gray-200 rounded-lg text-[#1B2A4A] bg-white hover:bg-gray-50 disabled:opacity-50 transition-colors">
+        <svg className={`h-4 w-4 ${enriching ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        {enriching ? 'Enriching...' : 'Enrich Orders'}
+      </button>
+      {toast && (
+        <span className={`text-xs font-medium px-3 py-1.5 rounded-lg ${toast.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+          {toast.msg}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function OrdersPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -68,15 +107,18 @@ export default function OrdersPage() {
             <p className="text-sm text-[#6B7280] mt-1">{data.total} order{data.total !== 1 ? 's' : ''}</p>
           )}
         </div>
-        <Link
-          href="/orders/new"
-          className="px-4 py-2 text-sm font-medium bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] transition-colors inline-flex items-center gap-2"
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          New Order
-        </Link>
+        <div className="flex items-center gap-2">
+          <EnrichButton />
+          <Link
+            href="/orders/new"
+            className="px-4 py-2 text-sm font-medium bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] transition-colors inline-flex items-center gap-2"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            New Order
+          </Link>
+        </div>
       </div>
 
       <OrderFilters

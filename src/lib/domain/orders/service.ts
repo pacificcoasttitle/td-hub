@@ -45,6 +45,16 @@ export interface OrderListResult {
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
+function contactName(c: { fullName: string | null; officerName: string | null; firstName: string | null; lastName: string | null; companyName: string | null } | null): string | null {
+  if (!c) return null;
+  if (c.fullName) return c.fullName;
+  if (c.officerName) return c.officerName;
+  const parts = [c.firstName, c.lastName].filter(Boolean);
+  if (parts.length > 0) return parts.join(' ');
+  if (c.companyName) return c.companyName;
+  return null;
+}
+
 const SORT_COLUMNS = {
   openedAt: orders.openedAt,
   fileNumber: orders.fileNumber,
@@ -118,11 +128,11 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
   const mapped = orderRows.map((row) => ({
     ...row.orders,
     property: row.order_properties,
-    salesRepName: row.sales_rep?.fullName ?? null,
-    titleOfficerName: row.title_officer?.fullName ?? row.title_officer?.officerName ?? null,
-    escrowOfficerName: row.escrow_officer?.fullName ?? row.escrow_officer?.officerName ?? null,
-    lenderName: row.lender_contact?.fullName ?? row.lender_contact?.companyName ?? null,
-    listingAgentName: row.listing_agent?.fullName ?? row.listing_agent?.companyName ?? null,
+    salesRepName: contactName(row.sales_rep),
+    titleOfficerName: contactName(row.title_officer),
+    escrowOfficerName: contactName(row.escrow_officer),
+    lenderName: contactName(row.lender_contact),
+    listingAgentName: contactName(row.listing_agent),
     titleCompanyName: row.title_company?.name ?? null,
     underwriterName: row.underwriter_company?.name ?? null,
     createdByName: row.created_by_profile?.displayName ?? null,

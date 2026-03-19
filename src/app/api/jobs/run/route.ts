@@ -35,6 +35,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleSyncContacts(payload as unknown as SyncContactsPayload),
   'softpro.enrich_orders': () =>
     handleEnrichOrders(),
+  'enrich-orders': () =>
+    handleEnrichOrders(),
   'resolve_officers': () =>
     handleResolveOfficers(),
   'titlepoint.poll': (payload) =>

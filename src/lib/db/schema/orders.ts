@@ -3,7 +3,7 @@ import {
   timestamp, boolean, jsonb, uniqueIndex, index,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { branches, contacts, profiles } from './contacts';
+import { branches, contacts, companies, profiles } from './contacts';
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -50,6 +50,10 @@ export const orders = pgTable('orders', {
   salesRepId: integer('sales_rep_id').references(() => contacts.id),
   titleOfficerId: integer('title_officer_id').references(() => contacts.id),
   escrowOfficerId: integer('escrow_officer_id').references(() => contacts.id),
+  lenderId: integer('lender_id').references(() => contacts.id),
+  listingAgentId: integer('listing_agent_id').references(() => contacts.id),
+  titleCompanyId: integer('title_company_id').references(() => companies.id),
+  underwriterId: integer('underwriter_id').references(() => companies.id),
 
   openedAt: timestamp('opened_at').notNull().defaultNow(),
   completedAt: timestamp('completed_at'),
@@ -159,6 +163,10 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   salesRep: one(contacts, { fields: [orders.salesRepId], references: [contacts.id], relationName: 'salesRep' }),
   titleOfficer: one(contacts, { fields: [orders.titleOfficerId], references: [contacts.id], relationName: 'titleOfficer' }),
   escrowOfficer: one(contacts, { fields: [orders.escrowOfficerId], references: [contacts.id], relationName: 'escrowOfficer' }),
+  lender: one(contacts, { fields: [orders.lenderId], references: [contacts.id], relationName: 'lender' }),
+  listingAgent: one(contacts, { fields: [orders.listingAgentId], references: [contacts.id], relationName: 'listingAgent' }),
+  titleCompany: one(companies, { fields: [orders.titleCompanyId], references: [companies.id], relationName: 'titleCompany' }),
+  underwriter: one(companies, { fields: [orders.underwriterId], references: [companies.id], relationName: 'underwriter' }),
   property: one(orderProperties, { fields: [orders.id], references: [orderProperties.orderId] }),
   parties: many(orderParties),
   statusHistory: many(orderStatusHistory),

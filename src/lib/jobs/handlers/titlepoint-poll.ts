@@ -5,7 +5,9 @@ import {
   pollSearch,
   fetchResult,
   fetchImage,
+  getTitlePointRecord,
 } from '@/lib/domain/titlepoint/service';
+import { fetchGrantDeed } from '@/lib/domain/titlepoint/grant-deed';
 
 // ─── Payload ────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,16 @@ export async function handleTitlePointPoll(
   const imageOutcome = await fetchImage(titlePointDataId);
   if (!imageOutcome.success) {
     return { status: 'failed', error: imageOutcome.error };
+  }
+
+  // After LV image is fetched, trigger Grant Deed extraction
+  const record = await getTitlePointRecord(titlePointDataId);
+  if (record?.searchType === 'legal_vesting') {
+    try {
+      await fetchGrantDeed(titlePointDataId);
+    } catch {
+      // Grant deed failure must not fail the LV completion
+    }
   }
 
   return { status: 'completed', documentId: imageOutcome.documentId };

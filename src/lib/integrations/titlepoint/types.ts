@@ -29,6 +29,11 @@ export interface TitlePointImageResponse {
   returnStatus: string;
 }
 
+export interface TitlePointDocumentResponse {
+  base64Data: string;
+  returnStatus: string;
+}
+
 // ─── Create Service Input ───────────────────────────────────────────────────
 
 export interface TitlePointCreateInput {

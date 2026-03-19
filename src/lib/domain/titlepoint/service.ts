@@ -3,13 +3,8 @@ import { titlePointData, orderProperties } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { getOrderByIdSimple } from '@/lib/domain/orders/service';
 import { uploadDocument } from '@/lib/domain/documents/service';
-import {
-  createService,
-  getRequestSummaries,
-  getResult,
-  requestImage,
-  getImage,
-} from '@/lib/integrations/titlepoint/client';
+import { createService, getRequestSummaries, getResult } from '@/lib/integrations/titlepoint/client';
+import { requestImage, getImage } from '@/lib/integrations/titlepoint/client-image';
 import type { TitlePointSearchType } from '@/lib/integrations/titlepoint/types';
 
 // ─── Search-type to document category mapping ───────────────────────────────

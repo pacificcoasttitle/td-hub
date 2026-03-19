@@ -4,15 +4,11 @@ import type { VendorResult } from '@/lib/integrations/types';
 import type {
   TitlePointCreateInput, TitlePointCreateResponse,
   TitlePointSummaryResponse, TitlePointResultResponse,
-  TitlePointImageResponse,
 } from './types';
 import { VENDOR, logRequest } from './logging';
 import { rawPost, buildRawBody, dig, extractXmlResult } from './http';
 import { SERVICE_TYPE_MAP, buildParameters } from './params';
-import {
-  mockCreateService, mockGetRequestSummaries, mockGetResult,
-  mockRequestImage, mockGetImage,
-} from './mocks';
+import { mockCreateService, mockGetRequestSummaries, mockGetResult } from './mocks';
 
 // ─── Endpoint Paths ──────────────────────────────────────────────────────────
 
@@ -204,105 +200,4 @@ export async function getResult(
   }
 }
 
-// ─── Image Request ──────────────────────────────────────────────────────────
-
-export async function requestImage(
-  serviceId: string,
-  orderId?: number
-): Promise<VendorResult<{ requestId: string; orderId: string }>> {
-  const cfg = getConfig();
-  const requestId = `tp-${crypto.randomUUID()}`;
-  const startedAt = new Date();
-
-  if (!cfg) return mockRequestImage(serviceId, orderId, requestId, startedAt);
-
-  try {
-    const url = `${cfg.baseUrl}${TP_ENDPOINTS.createRequest3}?`;
-    const { status: httpStatus, body: xml } = await rawPost(url, buildRawBody({
-      username: cfg.userID, password: cfg.password,
-      serviceId1: serviceId, fileType: 'pdf', source: '', clientKey1: '', clientKey2: '',
-      sortOrder: '', serviceId2: '', serviceId3: '', serviceId4: '', serviceId5: '',
-    }));
-    const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
-    const result = extractXmlResult(parsed, 'CreateAsynchServicesReturn', 'CreateRequest3Return') as Record<string, unknown>;
-
-    const returnStatus = String(result.ReturnStatus ?? '');
-    const imgRequestId = String(result.RequestID ?? '');
-    const imgOrderId = String(result.OrderID ?? '');
-
-    if (returnStatus !== 'Success' || !imgRequestId) {
-      const msg = String(dig(result, 'ReturnErrors', 'ReturnError', 'ErrorDescription') ?? 'Image request failed');
-      await logRequest({ operation: 'request_image', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'TP_IMAGE_ERROR', requestMeta: { serviceId } });
-      return vendorError(VENDOR, 'IMAGE_REQUEST_FAILED', msg, { requestId, durationMs: Date.now() - startedAt.getTime() });
-    }
-
-    await logRequest({ operation: 'request_image', orderId, requestId, startedAt, success: true, httpStatus, requestMeta: { serviceId }, responseMeta: { imgRequestId } });
-    return vendorSuccess({ requestId: imgRequestId, orderId: imgOrderId }, { requestId, durationMs: Date.now() - startedAt.getTime() });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    await logRequest({ operation: 'request_image', orderId, requestId, startedAt, success: false, errorCategory: 'image_request_failed' });
-    return vendorError(VENDOR, 'IMAGE_REQUEST_FAILED', msg, { requestId, durationMs: Date.now() - startedAt.getTime() });
-  }
-}
-
-// ─── Image Retrieval ────────────────────────────────────────────────────────
-
-export async function getImage(
-  imgRequestId: string,
-  orderId?: number
-): Promise<VendorResult<TitlePointImageResponse>> {
-  const cfg = getConfig();
-  const requestId = `tp-${crypto.randomUUID()}`;
-  const startedAt = new Date();
-
-  if (!cfg) return mockGetImage(imgRequestId, orderId, requestId, startedAt);
-
-  const MAX_POLLS = 10;
-  const POLL_INTERVAL_MS = 5_000;
-
-  try {
-    const url = `${cfg.baseUrl}${TP_ENDPOINTS.getGeneratedImage}?`;
-    const body = buildRawBody({ username: cfg.userID, password: cfg.password, requestID: imgRequestId });
-
-    for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
-      const { status: httpStatus, body: xml } = await rawPost(url, body);
-      const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
-      const result = extractXmlResult(parsed, 'GenerateImageData', 'GetGeneratedImageReturn') as Record<string, unknown>;
-
-      const returnStatus = String(result.ReturnStatus ?? '');
-      const imgStatus = String(result.Status ?? returnStatus).toLowerCase();
-
-      if (imgStatus === 'processing' || imgStatus === 'pending') {
-        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-        continue;
-      }
-
-      if (returnStatus !== 'Success') {
-        const msg = String(dig(result, 'ReturnErrors', 'ReturnError', 'ErrorDescription') ?? `Image generation returned ${returnStatus}`);
-        await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'TP_IMAGE_ERROR', requestMeta: { imgRequestId } });
-        return vendorError(VENDOR, 'IMAGE_FETCH_FAILED', msg, { requestId, durationMs: Date.now() - startedAt.getTime() });
-      }
-
-      const docs = dig(result, 'Documents', 'DocumentResponse', 'Document');
-      const docNode = Array.isArray(docs) ? docs[0] : docs;
-      const base64Data = String(dig(docNode, 'Body', 'Data') ?? dig(docNode, 'Body', 'Body') ?? result.Data ?? result.Base64Data ?? result.ImageData ?? '');
-
-      if (!base64Data) {
-        await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'TP_NO_IMAGE', requestMeta: { imgRequestId } });
-        return vendorError(VENDOR, 'IMAGE_FETCH_FAILED', 'No image data in response', { requestId, durationMs: Date.now() - startedAt.getTime() });
-      }
-
-      const response: TitlePointImageResponse = { base64Data, status: imgStatus, returnStatus };
-      await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: true, httpStatus, requestMeta: { imgRequestId }, responseMeta: { size: base64Data.length } });
-      return vendorSuccess(response, { requestId, durationMs: Date.now() - startedAt.getTime() });
-    }
-
-    await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: false, errorCategory: 'TP_IMAGE_TIMEOUT', requestMeta: { imgRequestId } });
-    return vendorError(VENDOR, 'IMAGE_FETCH_FAILED', `Image generation timed out after ${MAX_POLLS} polls`, { requestId, durationMs: Date.now() - startedAt.getTime() });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: false, errorCategory: 'image_fetch_failed' });
-    return vendorError(VENDOR, 'IMAGE_FETCH_FAILED', msg, { requestId, durationMs: Date.now() - startedAt.getTime() });
-  }
-}
 

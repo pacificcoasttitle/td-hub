@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+function toInternalValue(label: string): string {
+  return label.toLowerCase().trim().replace(/\s+/g, '_');
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface Order {
@@ -39,16 +43,37 @@ export default function ClientOrdersPage() {
 
   const page = parseInt(searchParams.get('page') ?? '1', 10);
   const search = searchParams.get('search') ?? '';
+  const currentStatus = searchParams.get('status') ?? '';
 
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [statusOptions, setStatusOptions] = useState<{ value: string; label: string }[]>([
+    { value: '', label: 'All Statuses' },
+    { value: 'open', label: 'Open' },
+    { value: 'closed', label: 'Closed' },
+    { value: 'canceled', label: 'Cancelled' },
+  ]);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const fetchOrders = useCallback((p: number, s: string, signal?: AbortSignal) => {
+  useEffect(() => {
+    fetch('/api/orders/statuses')
+      .then((r) => r.ok ? r.json() : null)
+      .then((body) => {
+        if (body?.statuses?.length) {
+          setStatusOptions([
+            { value: '', label: 'All Statuses' },
+            ...body.statuses.map((s: string) => ({ value: toInternalValue(s), label: s })),
+          ]);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const fetchOrders = useCallback((p: number, s: string, st: string, signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
-    const url = buildUrl(p, s);
+    const url = buildUrl(p, s, st);
     fetch(url, { signal })
       .then((r) => r.ok ? r.json() : Promise.reject('Failed to load orders'))
       .then((d) => setData(d))
@@ -58,13 +83,15 @@ export default function ClientOrdersPage() {
 
   useEffect(() => {
     const ac = new AbortController();
-    fetchOrders(page, search, ac.signal);
+    fetchOrders(page, search, currentStatus, ac.signal);
     return () => ac.abort();
-  }, [fetchOrders, page, search]);
+  }, [fetchOrders, page, search, currentStatus]);
 
-  function pushParams(newPage: number, newSearch: string) {
+  function pushParams(newPage: number, newSearch: string, newStatus?: string) {
     const params = new URLSearchParams();
     if (newSearch) params.set('search', newSearch);
+    const st = newStatus ?? currentStatus;
+    if (st) params.set('status', st);
     if (newPage > 1) params.set('page', String(newPage));
     const qs = params.toString();
     router.push(`/client/orders${qs ? `?${qs}` : ''}`);
@@ -86,9 +113,9 @@ export default function ClientOrdersPage() {
         </p>
       </div>
 
-      {/* Search */}
-      <div className="mb-5">
-        <div className="relative max-w-md">
+      {/* Search & Status Filter */}
+      <div className="flex items-center gap-3 mb-5">
+        <div className="relative flex-1 max-w-md">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6B7280]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
@@ -100,6 +127,15 @@ export default function ClientOrdersPage() {
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm text-[#1A1A2E] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A]/40"
           />
         </div>
+        <select
+          value={currentStatus}
+          onChange={(e) => pushParams(1, search, e.target.value)}
+          className="px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-sm text-[#1A1A2E] focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A]/40"
+        >
+          {statusOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
       </div>
 
       {/* Error */}
@@ -215,11 +251,12 @@ function formatDate(d: string | null) {
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function buildUrl(page: number, search: string) {
+function buildUrl(page: number, search: string, status?: string) {
   const params = new URLSearchParams();
   params.set('page', String(page));
   params.set('pageSize', '25');
   if (search) params.set('search', search);
+  if (status) params.set('status', status);
   return `/api/client/orders?${params}`;
 }
 

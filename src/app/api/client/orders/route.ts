@@ -9,6 +9,7 @@ const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
   pageSize: z.coerce.number().min(1).max(100).default(25),
   search: z.string().optional(),
+  status: z.string().optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -27,6 +28,10 @@ export async function GET(req: NextRequest) {
     // TODO: Builder agent — scope to orders this client has access to
     // For now, all authenticated users see all orders. Once party-based
     // scoping is implemented, filter by orders where user is a linked party.
+
+    if (params.status) {
+      conditions.push(eq(orders.operationalStatus, params.status as typeof orders.operationalStatus.enumValues[number]));
+    }
 
     if (params.search) {
       const term = `%${params.search}%`;

@@ -1,6 +1,12 @@
 'use client';
 
-const STATUS_OPTIONS = [
+import { useEffect, useState } from 'react';
+
+function toInternalValue(label: string): string {
+  return label.toLowerCase().trim().replace(/\s+/g, '_');
+}
+
+const FALLBACK_OPTIONS = [
   { value: '', label: 'All Statuses' },
   { value: 'open', label: 'Open' },
   { value: 'in_process', label: 'In Process' },
@@ -18,6 +24,23 @@ export function OrderFilters({
   currentStatus: string;
   onStatusChange: (status: string) => void;
 }) {
+  const [options, setOptions] = useState(FALLBACK_OPTIONS);
+
+  useEffect(() => {
+    fetch('/api/orders/statuses')
+      .then((r) => r.ok ? r.json() : null)
+      .then((body) => {
+        if (body?.statuses?.length) {
+          const live = [
+            { value: '', label: 'All Statuses' },
+            ...body.statuses.map((s: string) => ({ value: toInternalValue(s), label: s })),
+          ];
+          setOptions(live);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="flex items-center gap-3 mb-4">
       <div className="relative flex-1 max-w-sm">
@@ -37,7 +60,7 @@ export function OrderFilters({
         onChange={(e) => onStatusChange(e.target.value)}
         className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] bg-white focus:outline-none focus:ring-2 focus:ring-[#C5A55A]/40 focus:border-[#C5A55A]"
       >
-        {STATUS_OPTIONS.map((opt) => (
+        {options.map((opt) => (
           <option key={opt.value} value={opt.value}>{opt.label}</option>
         ))}
       </select>

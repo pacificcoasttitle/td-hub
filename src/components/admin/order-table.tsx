@@ -18,6 +18,11 @@ export interface Order {
   productType?: string | null;
   salesRepId: number | null;
   salesRepName?: string | null;
+  escrowOfficerName?: string | null;
+  lenderName?: string | null;
+  listingAgentName?: string | null;
+  titleCompanyName?: string | null;
+  underwriterName?: string | null;
   createdByName?: string | null;
   emailStatus?: string | null;
   dupOverride?: boolean | null;
@@ -80,6 +85,11 @@ export function OrderTable({
                 <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Type</th>
                 <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Product</th>
                 <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Sales Rep</th>
+                <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Escrow Officer</th>
+                <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Lender</th>
+                <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Listing Agent</th>
+                <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Title Company</th>
+                <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Underwriter</th>
                 <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Created By</th>
                 <th className="text-left px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Email</th>
                 <th className="text-center px-4 py-3 font-medium text-[#6B7280] whitespace-nowrap">Dup Override</th>
@@ -159,6 +169,11 @@ function OrderRow({ order, onClick }: { order: Order; onClick: () => void }) {
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.transactionType ?? '—'}</td>
       <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap text-xs">{order.productType ?? '—'}</td>
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.salesRepName ?? '—'}</td>
+      <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.escrowOfficerName ?? '—'}</td>
+      <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.lenderName ?? '—'}</td>
+      <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.listingAgentName ?? '—'}</td>
+      <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.titleCompanyName ?? '—'}</td>
+      <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.underwriterName ?? '—'}</td>
       <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap text-xs">{order.createdByName ?? '—'}</td>
       <td className="px-4 py-3 whitespace-nowrap">
         <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${emailColor}`}>
@@ -184,7 +199,7 @@ function StatusBadge({ status }: { status: string }) {
 function SkeletonRow() {
   return (
     <tr>
-      {Array.from({ length: 10 }).map((_, i) => (
+      {Array.from({ length: 15 }).map((_, i) => (
         <td key={i} className="px-4 py-3"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" /></td>
       ))}
     </tr>

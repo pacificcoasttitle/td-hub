@@ -1,11 +1,16 @@
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderParties, orderStatusHistory, contacts, profiles } from '@/lib/db/schema';
+import { orders, orderProperties, orderParties, orderStatusHistory, contacts, companies, profiles } from '@/lib/db/schema';
 import { eq, desc, sql, ilike, or, and, gte, SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { MappedOrderData } from '@/lib/integrations/softpro';
 
 const salesRepContact = alias(contacts, 'sales_rep');
 const titleOfficerContact = alias(contacts, 'title_officer');
+const escrowOfficerContact = alias(contacts, 'escrow_officer');
+const lenderContact = alias(contacts, 'lender_contact');
+const listingAgentContact = alias(contacts, 'listing_agent');
+const titleCompanyAlias = alias(companies, 'title_company');
+const underwriterCompanyAlias = alias(companies, 'underwriter_company');
 const createdByProfile = alias(profiles, 'created_by_profile');
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -25,6 +30,11 @@ export interface OrderListResult {
     property: typeof orderProperties.$inferSelect | null;
     salesRepName: string | null;
     titleOfficerName: string | null;
+    escrowOfficerName: string | null;
+    lenderName: string | null;
+    listingAgentName: string | null;
+    titleCompanyName: string | null;
+    underwriterName: string | null;
     createdByName: string | null;
     openedBy: string | null;
   }>;
@@ -87,6 +97,11 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
       .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
       .leftJoin(salesRepContact, eq(orders.salesRepId, salesRepContact.id))
       .leftJoin(titleOfficerContact, eq(orders.titleOfficerId, titleOfficerContact.id))
+      .leftJoin(escrowOfficerContact, eq(orders.escrowOfficerId, escrowOfficerContact.id))
+      .leftJoin(lenderContact, eq(orders.lenderId, lenderContact.id))
+      .leftJoin(listingAgentContact, eq(orders.listingAgentId, listingAgentContact.id))
+      .leftJoin(titleCompanyAlias, eq(orders.titleCompanyId, titleCompanyAlias.id))
+      .leftJoin(underwriterCompanyAlias, eq(orders.underwriterId, underwriterCompanyAlias.id))
       .leftJoin(createdByProfile, eq(orders.createdBy, createdByProfile.id))
       .leftJoin(openedBySubquery, eq(orders.id, openedBySubquery.orderId))
       .where(where)
@@ -104,7 +119,12 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
     ...row.orders,
     property: row.order_properties,
     salesRepName: row.sales_rep?.fullName ?? null,
-    titleOfficerName: row.title_officer?.fullName ?? null,
+    titleOfficerName: row.title_officer?.fullName ?? row.title_officer?.officerName ?? null,
+    escrowOfficerName: row.escrow_officer?.fullName ?? row.escrow_officer?.officerName ?? null,
+    lenderName: row.lender_contact?.fullName ?? row.lender_contact?.companyName ?? null,
+    listingAgentName: row.listing_agent?.fullName ?? row.listing_agent?.companyName ?? null,
+    titleCompanyName: row.title_company?.name ?? null,
+    underwriterName: row.underwriter_company?.name ?? null,
     createdByName: row.created_by_profile?.displayName ?? null,
     openedBy: row.opened_by?.name ?? null,
   }));

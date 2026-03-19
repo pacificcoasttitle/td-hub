@@ -215,7 +215,7 @@ export const BASE_ORDER_COLUMNS = [
 
 // ─── Formatters ─────────────────────────────────────────────────────────────
 
-export function formatAddress(property: { address: string | null; city: string | null; state: string | null } | null): string {
+export function formatAddress(property: { address: string | null; city: string | null; state: string | null } | null | undefined): string {
   if (!property) return '—';
   const parts = [property.address, property.city, property.state].filter(Boolean);
   return parts.length > 0 ? parts.join(', ') : '—';

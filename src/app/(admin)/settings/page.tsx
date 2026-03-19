@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { SettingsPanel } from '@/components/admin/SettingsPanel';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -41,7 +42,7 @@ export default function SettingsPage() {
     <div className="p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-[#1A1A2E]">Settings</h1>
-        <p className="text-sm text-[#6B7280] mt-1">Branches, notification templates, and system configuration</p>
+        <p className="text-sm text-[#6B7280] mt-1">System configuration and feature flags</p>
       </div>
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-6">
@@ -274,20 +275,7 @@ function TemplatePreviewModal({ template, onClose }: { template: NotificationTem
 /* ── System Settings Tab ──────────────────────────────────────────────────── */
 
 function SystemSettingsTab() {
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-      <div className="p-12 text-center">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-4">
-          <svg className="h-6 w-6 text-[#6B7280]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-        </div>
-        <p className="text-[#1A1A2E] font-medium">Feature Flags &amp; Configuration</p>
-        <p className="text-sm text-[#6B7280] mt-1">Coming soon — toggle features and manage system settings.</p>
-      </div>
-    </div>
-  );
+  return <SettingsPanel />;
 }
 
 /* ── Shared ────────────────────────────────────────────────────────────────── */

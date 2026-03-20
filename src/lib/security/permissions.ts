@@ -10,7 +10,6 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { label: 'Open Order (On Behalf)', href: '/orders/new-on-behalf', icon: '✦' },
   { label: 'Contacts & Companies', href: '/contacts', icon: '⊞' },
   { label: 'Documents', href: '/documents', icon: '⎘' },
-  { label: 'Vendor Actions', href: '/vendor-actions', icon: '⚡' },
   { label: 'Jobs & Logs', href: '/jobs', icon: '⏱' },
   { label: 'Settings', href: '/settings', icon: '⚙' },
   { label: 'Users & Roles', href: '/users', icon: '⊕' },
@@ -21,8 +20,8 @@ const NAV_LABELS_BY_ROLE: Record<string, string[]> = {
   admin: ALL_NAV_ITEMS.map((n) => n.label),
   cs_admin: ALL_NAV_ITEMS.filter((n) => n.label !== 'Settings').map((n) => n.label),
   sales_rep: ['Dashboard', 'Orders', 'Contacts & Companies'],
-  title_officer: ['Dashboard', 'Orders', 'Documents', 'Vendor Actions'],
-  escrow_officer: ['Dashboard', 'Orders', 'Documents', 'Vendor Actions'],
+  title_officer: ['Dashboard', 'Orders', 'Documents'],
+  escrow_officer: ['Dashboard', 'Orders', 'Documents'],
   open_order_team: ['Dashboard', 'Orders', 'Open Order (On Behalf)', 'Contacts & Companies'],
 };
 
@@ -34,15 +33,15 @@ export function getNavItemsForRole(role: string): NavItem[] {
 
 // ─── Feature Access ─────────────────────────────────────────────────────────
 
-type Feature = 'orders' | 'contacts' | 'documents' | 'vendor_actions' | 'jobs' | 'settings' | 'users' | 'dashboard';
+type Feature = 'orders' | 'contacts' | 'documents' | 'jobs' | 'settings' | 'users' | 'dashboard';
 
 const FEATURES_BY_ROLE: Record<string, Feature[]> = {
-  super_admin: ['orders', 'contacts', 'documents', 'vendor_actions', 'jobs', 'settings', 'users', 'dashboard'],
-  admin: ['orders', 'contacts', 'documents', 'vendor_actions', 'jobs', 'settings', 'users', 'dashboard'],
-  cs_admin: ['orders', 'contacts', 'documents', 'vendor_actions', 'jobs', 'users', 'dashboard'],
+  super_admin: ['orders', 'contacts', 'documents', 'jobs', 'settings', 'users', 'dashboard'],
+  admin: ['orders', 'contacts', 'documents', 'jobs', 'settings', 'users', 'dashboard'],
+  cs_admin: ['orders', 'contacts', 'documents', 'jobs', 'users', 'dashboard'],
   sales_rep: ['orders', 'contacts', 'dashboard'],
-  title_officer: ['orders', 'documents', 'vendor_actions', 'dashboard'],
-  escrow_officer: ['orders', 'documents', 'vendor_actions', 'dashboard'],
+  title_officer: ['orders', 'documents', 'dashboard'],
+  escrow_officer: ['orders', 'documents', 'dashboard'],
   open_order_team: ['orders', 'contacts', 'dashboard'],
 };
 

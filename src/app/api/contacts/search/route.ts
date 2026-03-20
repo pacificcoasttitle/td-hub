@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { contacts, companies } from '@/lib/db/schema';
 import { sql } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
 
@@ -64,14 +63,14 @@ export async function GET(req: NextRequest) {
     const pattern = `%${q}%`;
 
     const searchCondition = isEmailSearch
-      ? sql`${contacts.email} ILIKE ${pattern}`
+      ? sql`c.email ILIKE ${pattern}`
       : sql`(
-          ${contacts.email} ILIKE ${pattern}
-          OR ${contacts.firstName} ILIKE ${pattern}
-          OR ${contacts.lastName} ILIKE ${pattern}
-          OR ${contacts.fullName} ILIKE ${pattern}
-          OR ${contacts.companyName} ILIKE ${pattern}
-          OR ${contacts.lookupCode} ILIKE ${pattern}
+          c.email ILIKE ${pattern}
+          OR c.first_name ILIKE ${pattern}
+          OR c.last_name ILIKE ${pattern}
+          OR c.full_name ILIKE ${pattern}
+          OR c.company_name ILIKE ${pattern}
+          OR c.lookup_code ILIKE ${pattern}
           OR co.name ILIKE ${pattern}
         )`;
 

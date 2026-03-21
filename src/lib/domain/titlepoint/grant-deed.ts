@@ -77,7 +77,9 @@ export async function fetchGrantDeed(
     .limit(1);
 
   if (!lvRecord) return { success: false, error: 'LV record not found' };
+  if (!lvRecord.orderId) return { success: false, error: 'LV record has no orderId — cannot fetch grant deed yet' };
 
+  const oid = lvRecord.orderId;
   const meta = (lvRecord.metadata as Record<string, unknown>) ?? {};
   const resultData = (meta.resultData as Record<string, unknown>) ?? {};
   const fips = lvRecord.fips ?? (resultData.fips as string) ?? '';
@@ -106,8 +108,8 @@ export async function fetchGrantDeed(
   const [gdRecord] = await db
     .insert(titlePointData)
     .values({
-      orderId: lvRecord.orderId,
-      fileNumber: lvRecord.fileNumber,
+      orderId: oid,
+      fileNumber: lvRecord.fileNumber ?? null,
       searchType: 'grant_deed',
       status: 'pending',
       fips,
@@ -126,7 +128,7 @@ export async function fetchGrantDeed(
 
   const docResult = await getDocumentsByParameters3(
     { fips, year, instrumentDocId: docId },
-    lvRecord.orderId
+    oid
   );
 
   if (!docResult.success) {
@@ -140,16 +142,16 @@ export async function fetchGrantDeed(
   }
 
   const pdfBuffer = Buffer.from(docResult.data!.base64Data, 'base64');
-  const filename = `tp_${lvRecord.fileNumber}_grant_deed_${Date.now()}.pdf`;
+  const filename = `tp_${lvRecord.fileNumber ?? 'pre'}_grant_deed_${Date.now()}.pdf`;
 
   try {
     const uploadResult = await uploadDocument({
-      orderId: lvRecord.orderId,
+      orderId: oid,
       file: pdfBuffer,
       filename,
       contentType: 'application/pdf',
       category: 'grant_deed',
-      description: `TitlePoint Grant Deed - ${lvRecord.fileNumber} (Inst: ${deed.instrumentNumber})`,
+      description: `TitlePoint Grant Deed - ${lvRecord.fileNumber ?? 'pre-order'} (Inst: ${deed.instrumentNumber})`,
       userId,
     });
 

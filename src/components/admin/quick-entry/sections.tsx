@@ -3,8 +3,9 @@
 import { AddressAutocomplete } from '@/components/ui/address-autocomplete';
 import { SECTION, SH, FL, IN, SEL, ORG_TYPES, TX_TYPES, EP } from './types';
 import { PersonFields } from './person-fields';
-import { ContactFields } from './contact-fields';
 import type { QuickEntryState } from './use-quick-entry';
+
+export { PartiesSection } from './parties-section';
 
 // ─── Property ───────────────────────────────────────────────────────────────
 
@@ -19,44 +20,54 @@ export function PropertySection({ s }: { s: QuickEntryState }) {
         <button onClick={() => s.setSearchMode('address')} className={`px-3 py-1.5 text-xs font-medium rounded-lg ${s.searchMode === 'address' ? 'bg-[#1B2A4A] text-white' : 'bg-gray-100 text-[#4B5563]'}`}>Address</button>
         <button onClick={() => s.setSearchMode('apn')} className={`px-3 py-1.5 text-xs font-medium rounded-lg ${s.searchMode === 'apn' ? 'bg-[#1B2A4A] text-white' : 'bg-gray-100 text-[#4B5563]'}`}>APN</button>
       </div>
+      {/* Search input */}
       {s.searchMode === 'address' ? (
-        <>
-          <div className="flex gap-2 mb-3">
-            <div className="flex-1">
-              <label className={FL}>Address</label>
-              <AddressAutocomplete value={s.street} onChange={s.setStreet} onSelect={s.handleAddressSelect} placeholder="Start typing…" />
-            </div>
-            <button onClick={s.handleSearchClick} disabled={!s.street || !s.city} className="self-end px-4 h-11 text-sm font-medium bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors">Search</button>
+        <div className="flex gap-2 mb-4">
+          <div className="flex-1">
+            <label className={FL}>Address</label>
+            <AddressAutocomplete value={s.street} onChange={s.setStreet} onSelect={s.handleAddressSelect} placeholder="Start typing…" />
           </div>
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <div><label className={FL}>City</label><input className={IN} value={s.city} onChange={(e) => s.setCity(e.target.value)} /></div>
-            <div><label className={FL}>State</label><input className={IN} value={s.state} onChange={(e) => s.setState(e.target.value)} /></div>
-            <div><label className={FL}>ZIP</label><input className={IN} value={s.zip} onChange={(e) => s.setZip(e.target.value)} /></div>
-          </div>
-        </>
+          <button
+            onClick={s.handleSearchClick}
+            disabled={s.street.length <= 5}
+            className={`self-end h-11 px-4 text-sm font-medium rounded-lg inline-flex items-center gap-2 transition-colors ${
+              s.street.length > 5
+                ? 'bg-[#F26B2B] text-white hover:bg-[#D85A1F]'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+            Search Property
+          </button>
+        </div>
       ) : (
-        <div className="flex gap-3 items-end mb-3">
+        <div className="flex gap-3 items-end mb-4">
           <div className="flex-1"><label className={FL}>APN</label><input className={IN} value={s.apn} onChange={(e) => s.setApn(e.target.value)} placeholder="1234-567-890" /></div>
           <div className="flex-1"><label className={FL}>County</label><input className={IN} value={s.county} onChange={(e) => s.setCounty(e.target.value)} placeholder="Los Angeles" /></div>
           <button onClick={s.handleApnSearch} disabled={!s.apn || !s.county || s.apnSearching} className="px-4 h-11 text-sm font-medium bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors">{s.apnSearching ? 'Searching…' : 'Search'}</button>
         </div>
       )}
       {s.noMatchMsg && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg mb-3">
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg mb-4">
           <p className="text-xs text-amber-700">{s.noMatchMsg}</p>
         </div>
       )}
       {s.siteXFilled && (
-        <div className="flex items-center gap-1 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg mb-3">
+        <div className="flex items-center gap-1 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg mb-4">
           <svg className="h-3.5 w-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
           <p className="text-xs text-green-700 font-medium">Property details auto-filled</p>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-3 mb-3">
+      {/* 2x2 detail grid */}
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <div><label className={FL}>City</label><input className={IN} value={s.city} onChange={(e) => s.setCity(e.target.value)} /></div>
+        <div><label className={FL}>State</label><input className={IN} value={s.state} onChange={(e) => s.setState(e.target.value)} /></div>
+        <div><label className={FL}>ZIP</label><input className={IN} value={s.zip} onChange={(e) => s.setZip(e.target.value)} /></div>
         <div><label className={FL}>County</label><input className={IN} value={s.county} onChange={(e) => s.setCounty(e.target.value)} /></div>
-        <div><label className={FL}>APN</label><input className={IN} value={s.apn} onChange={(e) => s.setApn(e.target.value)} /></div>
         <div><label className={FL}>Property Type</label><input className={IN} value={s.propType} onChange={(e) => s.setPropType(e.target.value)} /></div>
+        <div><label className={FL}>APN</label><input className={IN} value={s.apn} onChange={(e) => s.setApn(e.target.value)} /></div>
       </div>
+      {/* Legal Description — full width */}
       <div><label className={FL}>Legal Description</label><textarea className={`${IN} resize-none`} rows={2} value={s.legalDesc} onChange={(e) => s.setLegalDesc(e.target.value)} /></div>
     </div>
   );
@@ -210,44 +221,3 @@ export function TransactionSection({ s }: { s: QuickEntryState }) {
   );
 }
 
-// ─── Parties ────────────────────────────────────────────────────────────────
-
-export function PartiesSection({ s }: { s: QuickEntryState }) {
-  return (
-    <div className={SECTION}>
-      <p className={SH}>
-        <svg className="h-5 w-5 text-[#F26B2B]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-        Parties
-      </p>
-      <ContactFields contact={s.buyerAgent} onChange={s.setBuyerAgent} label="Buyer's Agent" searchRole="buyer_agent" />
-      <ContactFields contact={s.listingAgent} onChange={s.setListingAgent} label="Listing Agent" searchRole="listing_agent" />
-      <ContactFields contact={s.lender} onChange={s.setLender} label="Lender" searchRole="lender" companyFirst />
-      <ContactFields contact={s.escrow} onChange={s.setEscrow} label="Escrow Company" searchRole="escrow_officer" companyFirst />
-      <div className="mb-4">
-        <label className={FL}>Escrow Officer</label>
-        {s.formOpts?.escrowOfficers?.length ? (
-          <select value={s.escrowOfficer} onChange={(e) => s.setEscrowOfficer(e.target.value)} className={SEL}>
-            <option value="">Select…</option>
-            {s.formOpts.escrowOfficers.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        ) : (
-          <input className={IN} value={s.escrowOfficer} onChange={(e) => s.setEscrowOfficer(e.target.value)} placeholder="Escrow officer name" />
-        )}
-      </div>
-      <div className="border-t border-gray-100 pt-4">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Deliverable Emails</p>
-          {s.deliverableEmails.length < 5 && (
-            <button onClick={() => s.setDeliverableEmails([...s.deliverableEmails, ''])} className="text-xs font-medium text-[#F26B2B] hover:text-[#E05A1A] min-h-[36px]">+ Add</button>
-          )}
-        </div>
-        {s.deliverableEmails.map((em, i) => (
-          <div key={i} className="flex gap-2 mb-2">
-            <input className={IN} type="email" value={em} onChange={(e) => { const arr = [...s.deliverableEmails]; arr[i] = e.target.value; s.setDeliverableEmails(arr); }} placeholder="email@example.com" />
-            <button onClick={() => s.setDeliverableEmails(s.deliverableEmails.filter((_, j) => j !== i))} className="text-red-500 px-2 min-h-[36px]">×</button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}

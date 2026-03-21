@@ -54,10 +54,17 @@ export async function handleTitlePointPoll(
     return { status: 'failed', error: pollResult.error };
   }
 
-  // success — fetch result data, then image
+  // success — fetch result data
   const resultOutcome = await fetchResult(titlePointDataId);
   if (!resultOutcome.success) {
     return { status: 'failed', error: resultOutcome.error };
+  }
+
+  const record = await getTitlePointRecord(titlePointDataId);
+
+  // Pre-order phase: no orderId yet — park at result_ready for later linking
+  if (!record?.orderId) {
+    return { status: 'completed' };
   }
 
   const imageOutcome = await fetchImage(titlePointDataId);
@@ -65,10 +72,8 @@ export async function handleTitlePointPoll(
     return { status: 'failed', error: imageOutcome.error };
   }
 
-  const record = await getTitlePointRecord(titlePointDataId);
-
   // After LV image is fetched, trigger Grant Deed extraction
-  if (record?.searchType === 'legal_vesting') {
+  if (record.searchType === 'legal_vesting') {
     try {
       await fetchGrantDeed(titlePointDataId);
     } catch {
@@ -77,12 +82,10 @@ export async function handleTitlePointPoll(
   }
 
   // After any search completes, check if all three docs are ready
-  if (record?.orderId) {
-    try {
-      await maybeEnqueueConfirmation(record.orderId);
-    } catch {
-      // Completion check failure must not block poll handler
-    }
+  try {
+    await maybeEnqueueConfirmation(record.orderId);
+  } catch {
+    // Completion check failure must not block poll handler
   }
 
   return { status: 'completed', documentId: imageOutcome.documentId };

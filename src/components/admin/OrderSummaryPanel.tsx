@@ -1,0 +1,157 @@
+'use client';
+
+import type { QuickEntryState } from '@/components/admin/quick-entry/use-quick-entry';
+
+/* ── Helpers ────────────────────────────────────────────────────────────────── */
+
+function personName(p: { firstName: string; lastName: string }): string {
+  return [p.firstName, p.lastName].filter(Boolean).join(' ');
+}
+
+function fmtCurrency(raw: string): string {
+  const n = parseFloat(raw.replace(/[^0-9.]/g, ''));
+  if (isNaN(n) || n === 0) return '';
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n);
+}
+
+function hasContact(c: { name: string; company: string }): boolean {
+  return !!(c.name || c.company);
+}
+
+/* ── Component ─────────────────────────────────────────────────────────────── */
+
+export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
+  const hasClient = !!s.client;
+  const hasProperty = !!(s.street || s.apn || s.county);
+  const sellerName = personName(s.sellerPrimary);
+  const hasSeller = !!sellerName;
+  const hasTx = !!(s.txType || s.productType || s.salesAmount);
+  const parties = buildParties(s);
+  const hasParties = parties.length > 0;
+  const emails = s.deliverableEmails.filter(Boolean);
+  const hasEmails = emails.length > 0;
+
+  return (
+    <div className="bg-white border border-gray-200 shadow-sm rounded-lg p-5 xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
+      <h3 className="text-lg font-semibold text-[#1A1A2E] mb-4">Order Summary</h3>
+
+      <div className="space-y-4">
+        {/* Client */}
+        <Section filled={hasClient} label="Client" placeholder="Client details will appear here">
+          {hasClient && s.client && (
+            <>
+              <Field label="Name" value={s.client.fullName ?? s.client.companyName ?? '—'} />
+              {s.client.companyName && s.client.fullName && <Field label="Company" value={s.client.companyName} />}
+              {s.client.email && <Field label="Email" value={s.client.email} />}
+              {s.client.phone && <Field label="Phone" value={s.client.phone} />}
+              {s.client.contactType && (
+                <div className="mt-1">
+                  <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-[#F26B2B]/10 text-[#F26B2B] capitalize">
+                    {s.client.contactType.replace(/_/g, ' ')}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </Section>
+
+        {/* Property */}
+        <Section filled={hasProperty} label="Property" placeholder="Property details will appear here">
+          {hasProperty && (
+            <>
+              <Field label="Address" value={[s.street, s.city, s.state, s.zip].filter(Boolean).join(', ')} />
+              {s.county && <Field label="County" value={s.county} />}
+              {s.apn && <Field label="APN" value={s.apn} />}
+              {s.propType && <Field label="Type" value={s.propType} />}
+            </>
+          )}
+        </Section>
+
+        {/* Seller */}
+        <Section filled={hasSeller} label="Seller" placeholder="Seller details will appear here">
+          {hasSeller && (
+            <>
+              <Field label={s.sellerIsOrg ? 'Organization' : 'Name'} value={sellerName} />
+              {s.sellerIsOrg && s.sellerOrgType && (
+                <div className="mt-1">
+                  <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
+                    {s.sellerOrgType}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </Section>
+
+        {/* Transaction */}
+        <Section filled={hasTx} label="Transaction" placeholder="Transaction details will appear here">
+          {hasTx && (
+            <>
+              {s.txType && <Field label="Type" value={s.txType} />}
+              {s.productType && <Field label="Product" value={s.productType} />}
+              {s.salesAmount && fmtCurrency(s.salesAmount) && <Field label="Sales Price" value={fmtCurrency(s.salesAmount)} />}
+              {s.escrowNumber && <Field label="Escrow #" value={s.escrowNumber} />}
+            </>
+          )}
+        </Section>
+
+        {/* Parties */}
+        <Section filled={hasParties} label="Parties" placeholder="Party details will appear here">
+          {hasParties && (
+            <div className="space-y-1.5">
+              {parties.map(({ role, name }) => (
+                <div key={role}>
+                  <span className="text-xs text-gray-400">{role}</span>
+                  <p className="text-sm text-[#1A1A2E]">{name}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+
+        {/* Deliverable Emails */}
+        <Section filled={hasEmails} label="Deliverables" placeholder="Deliverable emails will appear here">
+          {hasEmails && (
+            <>
+              <p className="text-xs text-gray-400 mb-1">{emails.length} email{emails.length !== 1 ? 's' : ''}</p>
+              {emails.map((e, i) => <p key={i} className="text-sm text-[#1A1A2E] truncate">{e}</p>)}
+            </>
+          )}
+        </Section>
+      </div>
+    </div>
+  );
+}
+
+/* ── Sub-components ────────────────────────────────────────────────────────── */
+
+function Section({ filled, label, placeholder, children }: {
+  filled: boolean; label: string; placeholder: string; children: React.ReactNode;
+}) {
+  return (
+    <div className={filled ? 'border-l-2 border-[#F26B2B] pl-3' : ''}>
+      <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">{label}</h4>
+      {filled ? children : <p className="text-sm text-gray-300 italic">{placeholder}</p>}
+    </div>
+  );
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="text-xs text-gray-400">{label}</span>
+      <p className="text-sm text-[#1A1A2E]">{value}</p>
+    </div>
+  );
+}
+
+/* ── Party builder ─────────────────────────────────────────────────────────── */
+
+function buildParties(s: QuickEntryState): { role: string; name: string }[] {
+  const out: { role: string; name: string }[] = [];
+  if (hasContact(s.buyerAgent)) out.push({ role: 'Buyer Agent', name: s.buyerAgent.name || s.buyerAgent.company });
+  if (hasContact(s.listingAgent)) out.push({ role: 'Listing Agent', name: s.listingAgent.name || s.listingAgent.company });
+  if (hasContact(s.lender)) out.push({ role: 'Lender', name: s.lender.name || s.lender.company });
+  if (hasContact(s.escrow)) out.push({ role: 'Escrow', name: s.escrow.name || s.escrow.company });
+  return out;
+}

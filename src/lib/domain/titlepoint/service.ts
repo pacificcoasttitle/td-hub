@@ -90,7 +90,7 @@ export async function pollSearch(
   if (!record) return { status: 'failed', error: 'TitlePoint record not found' };
   if (!record.requestId) return { status: 'failed', error: 'No requestId to poll' };
 
-  const result = await getRequestSummaries(record.requestId, record.orderId);
+  const result = await getRequestSummaries(record.requestId, record.orderId ?? undefined);
 
   if (!result.success) {
     await db
@@ -162,7 +162,7 @@ export async function fetchResult(
   const resultId = (meta.resultId as string) ?? record.serviceId;
   if (!resultId) return { success: false, error: 'No resultId available' };
 
-  const result = await getResult(resultId, record.orderId);
+  const result = await getResult(resultId, record.orderId ?? undefined);
 
   if (!result.success) {
     await db
@@ -204,18 +204,20 @@ export async function fetchImage(
 
   if (!record) return { success: false, error: 'TitlePoint record not found' };
   if (!record.serviceId) return { success: false, error: 'No serviceId available' };
+  if (!record.orderId) return { success: false, error: 'No orderId — cannot upload document yet' };
 
   const meta = (record.metadata as Record<string, unknown>) ?? {};
   const userId = (meta.userId as string) ?? 'system';
+  const oid = record.orderId;
 
   // Step 1: Request image
-  const imgReqResult = await requestImage(record.serviceId, record.orderId);
+  const imgReqResult = await requestImage(record.serviceId, oid);
   if (!imgReqResult.success) {
     return { success: false, error: imgReqResult.error?.message ?? 'Image request failed' };
   }
 
   // Step 2: Get image data
-  const imgResult = await getImage(imgReqResult.data!.requestId, record.orderId);
+  const imgResult = await getImage(imgReqResult.data!.requestId, oid);
   if (!imgResult.success) {
     return { success: false, error: imgResult.error?.message ?? 'Image fetch failed' };
   }
@@ -224,16 +226,16 @@ export async function fetchImage(
   const pdfBuffer = Buffer.from(imgResult.data!.base64Data, 'base64');
   const searchType = (record.searchType ?? 'general') as TitlePointSearchType;
   const docCategory = SEARCH_TYPE_DOC_CATEGORY[searchType] ?? 'general';
-  const filename = `tp_${record.fileNumber}_${searchType}_${Date.now()}.pdf`;
+  const filename = `tp_${record.fileNumber ?? 'pre'}_${searchType}_${Date.now()}.pdf`;
 
   try {
     const uploadResult = await uploadDocument({
-      orderId: record.orderId,
+      orderId: oid,
       file: pdfBuffer,
       filename,
       contentType: 'application/pdf',
       category: docCategory as 'general' | 'legal_vesting' | 'grant_deed' | 'tax',
-      description: `TitlePoint ${searchType} - ${record.fileNumber}`,
+      description: `TitlePoint ${searchType} - ${record.fileNumber ?? 'pre-order'}`,
       userId,
     });
 

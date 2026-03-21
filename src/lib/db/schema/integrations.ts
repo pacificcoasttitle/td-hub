@@ -72,8 +72,9 @@ export const vendorTokens = pgTable('vendor_tokens', {
 
 export const titlePointData = pgTable('title_point_data', {
   id: serial('id').primaryKey(),
-  orderId: integer('order_id').notNull(),
-  fileNumber: varchar('file_number', { length: 50 }).notNull(),
+  orderId: integer('order_id'),
+  fileNumber: varchar('file_number', { length: 50 }),
+  sessionId: varchar('session_id', { length: 100 }),
   requestId: varchar('request_id', { length: 100 }),
   serviceId: varchar('service_id', { length: 100 }),
   searchType: varchar('search_type', { length: 50 }),
@@ -85,6 +86,7 @@ export const titlePointData = pgTable('title_point_data', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (table) => ({
   orderIdx: index('title_point_data_order_idx').on(table.orderId),
+  sessionIdx: index('title_point_data_session_idx').on(table.sessionId),
   createdAtIdx: index('title_point_data_created_at_idx').on(table.createdAt),
 }));
 

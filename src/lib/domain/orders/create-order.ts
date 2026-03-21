@@ -5,6 +5,7 @@ import { createOrder as softproCreateOrder } from '@/lib/integrations/softpro';
 import { propertyLookup } from '@/lib/integrations/sitex/client';
 import type { SiteXPropertyData } from '@/lib/integrations/sitex/types';
 import { autoTriggerTitlePoint } from '@/lib/domain/titlepoint/auto-trigger';
+import { linkSessionToOrder } from '@/lib/domain/titlepoint/pre-initiate';
 import { getSetting } from '@/lib/domain/settings/service';
 import { buildSoftProPayload } from './softpro-payload';
 
@@ -67,6 +68,7 @@ export const createOrderInputSchema = z.object({
   deliverableEmails: z.array(z.string().email()).optional(),
   clientType: z.string().optional(),
   onBehalfOfContactId: z.number().int().positive().optional(),
+  titlePointSessionId: z.string().optional(),
 });
 
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>;
@@ -116,7 +118,11 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
 
   const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county }, userId);
 
-  if (input.property.address && input.property.state && county) {
+  if (input.titlePointSessionId) {
+    try {
+      await linkSessionToOrder(input.titlePointSessionId, orderId, fileNumber);
+    } catch { /* link failure never blocks order creation */ }
+  } else if (input.property.address && input.property.state && county) {
     try {
       const tpResult = await autoTriggerTitlePoint(orderId, {
         address: input.property.address,

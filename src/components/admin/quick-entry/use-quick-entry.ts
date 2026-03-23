@@ -182,6 +182,7 @@ export function useQuickEntry() {
           secondaryMiddleName: hasSecondarySeller ? sellerSecondary.middleName || undefined : undefined,
           secondaryLastName: hasSecondarySeller ? sellerSecondary.lastName || undefined : undefined,
           isOrganization: sellerIsOrg,
+          organizationType: sellerIsOrg ? (sellerOrgType || undefined) : undefined,
         },
         buyer: {
           firstName: borrower.firstName || 'TBD',
@@ -202,6 +203,7 @@ export function useQuickEntry() {
           loanAmount: num(loanAmount),
           coverageAmount: num(coverageAmount),
           branchCode: 'PCT',
+          salesRep: salesRep || undefined,
           titleOfficer: titleOfficer || undefined,
           escrowOfficer: escrowOfficer || undefined,
         },

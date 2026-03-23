@@ -1,20 +1,60 @@
-import { z } from 'zod';
 import type { CreateOrderInput } from './create-order';
 
-const contactSchema = z.object({
-  companyLookupCode: z.string().optional(),
-  clientLookupCode: z.string().optional(),
-  name: z.string().optional(),
-  email: z.string().email().optional(),
-  phone: z.string().optional(),
-  companyName: z.string().optional(),
-});
+const SOFTPRO_USER_TYPE_MAP: Record<string, string> = {
+  escrow: 'EscrowCompany',
+  lender: 'Lender',
+  mortgage_broker: 'MortgageBroker',
+  realtor: 'ListingAgentBroker',
+  title_officer: 'TitleOfficer',
+  escrow_officer: 'EscrowOfficer',
+  sales_rep: 'SalesRep',
+};
+
+function mapClientTypeToSoftPro(clientType?: string | null): string {
+  if (!clientType) return 'EscrowCompany';
+  return SOFTPRO_USER_TYPE_MAP[clientType] ?? clientType;
+}
+
+export interface ResolvedContact {
+  id: number;
+  fullName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
+  companyName: string | null;
+  lookupCode: string | null;
+  flookupCode: string | null;
+  officeLookupCode: string | null;
+  officerName: string | null;
+  softproUserType: string | null;
+  userType: string | null;
+  address1: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+}
+
+export interface ResolvedContacts {
+  salesRep?: ResolvedContact;
+  titleOfficer?: ResolvedContact;
+  escrowOfficer?: ResolvedContact;
+  opener?: ResolvedContact;
+}
 
 export function buildSoftProPayload(
   input: CreateOrderInput,
   enriched: { apn: string; legal: string; county: string },
+  resolved: ResolvedContacts,
 ): Record<string, unknown> {
-  const ec = input.contacts?.escrowCompany;
+  const opener = resolved.opener;
+  const salesRep = resolved.salesRep;
+  const titleOfficer = resolved.titleOfficer;
+  const escrowOfficer = resolved.escrowOfficer;
+
+  const salesRepLookup = salesRep?.lookupCode ?? '';
+  const titleOfficeLookup = titleOfficer?.lookupCode ?? '';
+  const officeBranchCode = titleOfficer?.officeLookupCode ?? input.transaction.branchCode;
 
   return {
     baseDetails: {
@@ -23,17 +63,20 @@ export function buildSoftProPayload(
       IsRushOrder: input.isRushOrder,
     },
     personalDetails: {
-      CompanyLookupCode: ec?.companyLookupCode ?? '',
-      ClientLookupCode: ec?.clientLookupCode ?? '',
-      UserType: 'EscrowCompany',
-      CompanyName: ec?.companyName ?? '',
-      Email: ec?.email ?? '',
-      FirstName: ec?.name?.split(' ')[0] ?? '',
-      LastName: ec?.name?.split(' ').slice(1).join(' ') ?? '',
-      Telephone: ec?.phone ?? '',
-      Address: '', City: '', ZipCode: '', State: '',
+      CompanyLookupCode: opener?.flookupCode ?? '',
+      ClientLookupCode: opener?.lookupCode ?? '',
+      UserType: mapClientTypeToSoftPro(input.clientType ?? opener?.softproUserType),
+      CompanyName: opener?.companyName ?? '',
+      Email: opener?.email ?? '',
+      FirstName: opener?.firstName ?? '',
+      LastName: opener?.lastName ?? '',
+      Telephone: opener?.phone ?? '',
+      Address: opener?.address1 ?? '',
+      City: opener?.city ?? '',
+      ZipCode: opener?.zip ?? '',
+      State: opener?.state ?? '',
       EmailNotifications: true,
-      SalesRep: input.transaction.titleOfficer ?? '',
+      SalesRep: salesRepLookup,
     },
     propertyDetails: [{
       Address1: input.property.address,
@@ -55,12 +98,12 @@ export function buildSoftProPayload(
       SecondaryOwnerFirstName: input.seller.secondaryFirstName ?? '',
       SecondaryOwnerMiddleName: input.seller.secondaryMiddleName ?? '',
       SecondaryOwnerLastName: input.seller.secondaryLastName ?? '',
-      OrganizationType: '',
+      OrganizationType: input.seller.isOrganization ? (input.seller.organizationType ?? '') : '',
       IsOrganization: String(input.seller.isOrganization),
     },
     transactionDetails: {
-      LookUpCodeTitleOffice: input.transaction.branchCode,
-      TitleOffice: input.transaction.titleOfficer ?? '',
+      LookUpCodeTitleOffice: officeBranchCode,
+      TitleOffice: titleOfficeLookup,
       Product: input.transaction.product,
       EscrowNumber: input.transaction.escrowNumber ?? '',
       SalesAmount: input.transaction.salesAmount,
@@ -77,6 +120,8 @@ export function buildSoftProPayload(
       SecondaryBorrowerLastName: input.buyer.secondaryLastName ?? '',
       IsOrganization: input.buyer.isOrganization,
       OrganizationType: input.buyer.organizationType ?? '',
+      LookUpCodeEscrowOfficer: escrowOfficer?.lookupCode ?? null,
+      EscrowOfficerName: escrowOfficer?.officerName ?? escrowOfficer?.fullName ?? null,
     },
     buyersAgentDetails: mapContactSection(input.contacts?.buyerAgent),
     listingAgentDetails: mapContactSection(input.contacts?.listingAgent),
@@ -86,14 +131,20 @@ export function buildSoftProPayload(
   };
 }
 
-function mapContactSection(c?: z.infer<typeof contactSchema>) {
-  if (!c) return {};
+function mapContactSection(c?: {
+  companyLookupCode?: string;
+  clientLookupCode?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  companyName?: string;
+}): Record<string, string> {
   return {
-    CompanyLookUpCode: c.companyLookupCode ?? '',
-    ClientLookUpCode: c.clientLookupCode ?? '',
-    Name: c.name ?? '',
-    Email: c.email ?? '',
-    Telephone: c.phone ?? '',
-    CompanyName: c.companyName ?? '',
+    CompanyLookUpCode: c?.companyLookupCode ?? '',
+    ClientLookUpCode: c?.clientLookupCode ?? '',
+    Name: c?.name ?? '',
+    Email: c?.email ?? '',
+    Telephone: c?.phone ?? '',
+    CompanyName: c?.companyName ?? '',
   };
 }

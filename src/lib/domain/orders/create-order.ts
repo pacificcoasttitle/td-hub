@@ -1,14 +1,14 @@
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts } from '@/lib/db/schema';
+import { eq, and, inArray } from 'drizzle-orm';
 import { createOrder as softproCreateOrder } from '@/lib/integrations/softpro';
 import { propertyLookup } from '@/lib/integrations/sitex/client';
 import type { SiteXPropertyData } from '@/lib/integrations/sitex/types';
 import { autoTriggerTitlePoint } from '@/lib/domain/titlepoint/auto-trigger';
 import { linkSessionToOrder } from '@/lib/domain/titlepoint/pre-initiate';
 import { getSetting } from '@/lib/domain/settings/service';
-import { buildSoftProPayload } from './softpro-payload';
+import { buildSoftProPayload, type ResolvedContacts } from './softpro-payload';
 
 // ─── Zod Schema ─────────────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ export const createOrderInputSchema = z.object({
   seller: z.object({
     firstName: z.string().default('TBD'), middleName: z.string().optional(), lastName: z.string().default('TBD'),
     secondaryFirstName: z.string().optional(), secondaryMiddleName: z.string().optional(), secondaryLastName: z.string().optional(),
-    isOrganization: z.boolean().default(false),
+    isOrganization: z.boolean().default(false), organizationType: z.string().optional(),
   }).default({ firstName: 'TBD', lastName: 'TBD', isOrganization: false }),
   buyer: z.object({
     firstName: z.string().default('TBD'), middleName: z.string().optional(), lastName: z.string().default('TBD'),
@@ -55,6 +55,7 @@ export const createOrderInputSchema = z.object({
     loanAmount: z.number().default(0),
     coverageAmount: z.number().default(0),
     branchCode: z.string().default('PCT'),
+    salesRep: z.string().optional(),
     titleOfficer: z.string().optional(),
     escrowOfficer: z.string().optional(),
     underwriterCode: z.string().optional(),
@@ -119,7 +120,8 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
     if (uw) underwriterId = uw.id;
   } catch { /* underwriter lookup failure never blocks order creation */ }
 
-  const softProPayload = buildSoftProPayload(input, { apn, legal, county });
+  const resolved = await resolveContactIds(input);
+  const softProPayload = buildSoftProPayload(input, { apn, legal, county }, resolved);
 
   const spResult = await softproCreateOrder(softProPayload);
   if (!spResult.success || !spResult.data) {
@@ -254,3 +256,38 @@ function buildPartyInserts(orderId: number, input: CreateOrderInput): PartyInser
 function resolveUnderwriterCode(productType: string): string {
   return productType.toLowerCase().trim() === 'full alta' ? 'CW' : 'WC';
 }
+
+// ─── Contact Resolution ────────────────────────────────────────────────────
+
+type ContactRow = typeof contacts.$inferSelect;
+
+async function resolveContactIds(input: CreateOrderInput): Promise<ResolvedContacts> {
+  const ids: number[] = [];
+  const push = (v?: string | number) => {
+    const n = Number(v);
+    if (v && !isNaN(n)) ids.push(n);
+  };
+  push(input.transaction.salesRep);
+  push(input.transaction.titleOfficer);
+  push(input.transaction.escrowOfficer);
+  push(input.onBehalfOfContactId);
+
+  if (ids.length === 0) return {};
+
+  const rows = await db.select().from(contacts).where(inArray(contacts.id, ids));
+  const byId = new Map<number, ContactRow>();
+  for (const r of rows) byId.set(r.id, r);
+
+  const get = (v?: string | number) => {
+    const n = Number(v);
+    return (!v || isNaN(n)) ? undefined : byId.get(n);
+  };
+
+  return {
+    salesRep: get(input.transaction.salesRep),
+    titleOfficer: get(input.transaction.titleOfficer),
+    escrowOfficer: get(input.transaction.escrowOfficer),
+    opener: get(input.onBehalfOfContactId),
+  };
+}
+

@@ -5,6 +5,14 @@ import { VENDOR, TIMEOUT_MS, getConfig, getAccessToken, logRequest } from './aut
 import { truncateZip, mapProfile, emptyResult, MOCK_PROPERTY } from './parsers';
 import type { PropertySearchResult } from './parsers';
 
+function inferMatchCode(raw: SiteXSearchResponse): string {
+  if (raw.MatchCode) return raw.MatchCode.toUpperCase();
+  if (raw.Feed?.PropertyProfile) return 'S';
+  if (raw.Locations && raw.Locations.length > 1) return 'M';
+  if (raw.Locations && raw.Locations.length === 1) return 'S';
+  return 'N';
+}
+
 export async function propertySearch(
   params: PropertyLookupParams
 ): Promise<VendorResult<PropertySearchResult>> {
@@ -36,7 +44,7 @@ export async function propertySearch(
     }
 
     const raw = (await response.json()) as SiteXSearchResponse;
-    const matchCode = (raw.MatchCode ?? 'N').toUpperCase();
+    const matchCode = inferMatchCode(raw);
 
     let result: PropertySearchResult;
     if (matchCode === 'S' && raw.Feed?.PropertyProfile) {
@@ -88,7 +96,7 @@ export async function propertyLookup(
     }
 
     const raw = (await response.json()) as SiteXSearchResponse;
-    const matchCode = (raw.MatchCode ?? 'N').toUpperCase();
+    const matchCode = inferMatchCode(raw);
     let result: SiteXPropertyData;
     if (matchCode === 'S' && raw.Feed?.PropertyProfile) { result = { matchCode: 'S', ...mapProfile(raw.Feed.PropertyProfile) }; }
     else if (matchCode === 'M') { result = emptyResult('M'); }
@@ -134,7 +142,7 @@ export async function apnLookup(
     }
 
     const raw = (await response.json()) as SiteXSearchResponse;
-    const matchCode = (raw.MatchCode ?? 'N').toUpperCase();
+    const matchCode = inferMatchCode(raw);
     let result: SiteXPropertyData;
     if (matchCode === 'S' && raw.Feed?.PropertyProfile) { result = { matchCode: 'S', ...mapProfile(raw.Feed.PropertyProfile) }; }
     else if (matchCode === 'M') { result = emptyResult('M'); }

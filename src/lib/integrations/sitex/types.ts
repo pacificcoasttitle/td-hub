@@ -42,25 +42,54 @@ export interface SiteXSearchResponse {
 
 export interface SiteXRawPropertyProfile {
   APN?: string;
-  LegalBriefDescription?: string;
-  County?: string;
-  PropertyType?: string;
-  OwnerName1?: string;
-  OwnerName2?: string;
-  FullAddress?: string;
-  Address?: string;
-  City?: string;
-  State?: string;
-  Zip?: string;
-  UnitNumber?: string;
-  Bedrooms?: string | number;
-  Bathrooms?: string | number;
-  SquareFootage?: string | number;
-  LotSize?: string | number;
-  YearBuilt?: string | number;
-  AssessedValue?: string | number;
-  LastSaleDate?: string;
-  LastSalePrice?: string | number;
+  PrimaryOwnerName?: string;
+  CountyName?: string;
+  FIPS?: string;
+
+  SiteAddress?: string;
+  SiteCity?: string;
+  SiteState?: string;
+  SiteZip?: string;
+  SiteZip4?: string;
+  SiteUnit?: string;
+  SiteUnitType?: string;
+  SiteAddressCityState?: string;
+
+  LegalDescriptionInfo?: {
+    LegalBriefDescription?: string;
+    TractNumber?: string;
+    LotNumber?: string;
+    [key: string]: unknown;
+  };
+
+  PropertyCharacteristics?: {
+    Bedrooms?: string | number;
+    Baths?: string | number;
+    BuildingArea?: string | number;
+    LotSize?: string | number;
+    LotSizeUnits?: string;
+    YearBuilt?: string | number;
+    UseCode?: string;
+    UseCodeDescription?: string;
+    [key: string]: unknown;
+  };
+
+  AssessmentTaxInfo?: {
+    AssessedValue?: string | number;
+    LandValue?: string | number;
+    ImprovementValue?: string | number;
+    TaxAmount?: string;
+    [key: string]: unknown;
+  };
+
+  SaleLoanInfo?: {
+    TransferDate?: string;
+    SalesPrice?: string | number;
+    SellerName?: string;
+    LenderName?: string;
+    [key: string]: unknown;
+  };
+
   [key: string]: unknown;
 }
 

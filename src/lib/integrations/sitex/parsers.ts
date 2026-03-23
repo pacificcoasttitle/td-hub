@@ -12,27 +12,35 @@ export function truncateZip(zip: string | undefined): string {
 }
 
 export function mapProfile(profile: SiteXRawPropertyProfile): Omit<SiteXPropertyData, 'matchCode'> {
+  const owners = splitOwners(profile.PrimaryOwnerName);
+
   return {
     apn: profile.APN ?? null,
-    legalDescription: profile.LegalBriefDescription ?? null,
-    county: profile.County ?? null,
-    propertyType: profile.PropertyType ?? null,
-    primaryOwner: profile.OwnerName1 ?? null,
-    secondaryOwner: profile.OwnerName2 ?? null,
-    fullAddress: profile.FullAddress ?? profile.Address ?? null,
-    city: profile.City ?? null,
-    state: profile.State ?? null,
-    zip: profile.Zip ?? null,
-    unitNumber: profile.UnitNumber ?? null,
-    beds: toNum(profile.Bedrooms),
-    baths: toNum(profile.Bathrooms),
-    sqft: toNum(profile.SquareFootage),
-    lotSize: toNum(profile.LotSize),
-    yearBuilt: toNum(profile.YearBuilt),
-    assessedValue: toNum(profile.AssessedValue),
-    lastSaleDate: profile.LastSaleDate ?? null,
-    lastSalePrice: toNum(profile.LastSalePrice),
+    legalDescription: profile.LegalDescriptionInfo?.LegalBriefDescription ?? null,
+    county: profile.CountyName ?? null,
+    propertyType: profile.PropertyCharacteristics?.UseCodeDescription ?? null,
+    primaryOwner: owners.primary,
+    secondaryOwner: owners.secondary,
+    fullAddress: profile.SiteAddress ?? null,
+    city: profile.SiteCity ?? null,
+    state: profile.SiteState ?? null,
+    zip: profile.SiteZip ?? null,
+    unitNumber: profile.SiteUnit ?? null,
+    beds: toNum(profile.PropertyCharacteristics?.Bedrooms),
+    baths: toNum(profile.PropertyCharacteristics?.Baths),
+    sqft: toNum(profile.PropertyCharacteristics?.BuildingArea),
+    lotSize: toNum(profile.PropertyCharacteristics?.LotSize),
+    yearBuilt: toNum(profile.PropertyCharacteristics?.YearBuilt),
+    assessedValue: toNum(profile.AssessmentTaxInfo?.AssessedValue),
+    lastSaleDate: profile.SaleLoanInfo?.TransferDate ?? null,
+    lastSalePrice: toNum(profile.SaleLoanInfo?.SalesPrice),
   };
+}
+
+function splitOwners(raw: string | undefined): { primary: string | null; secondary: string | null } {
+  if (!raw) return { primary: null, secondary: null };
+  const parts = raw.split(';').map(s => s.trim()).filter(Boolean);
+  return { primary: parts[0] ?? null, secondary: parts[1] ?? null };
 }
 
 export function emptyResult(matchCode: 'M' | 'N'): SiteXPropertyData {

@@ -195,7 +195,7 @@ export function useQuickEntry() {
         },
         transaction: {
           type: txType || 'Purchase',
-          product: productType || 'residential_resale',
+          product: productType || 'Residential Resale',
           escrowNumber: escrowNumber || undefined,
           salesAmount: num(salesAmount),
           loanNumber: loanNumber || undefined,

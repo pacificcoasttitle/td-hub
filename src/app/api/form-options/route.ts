@@ -5,15 +5,15 @@ import { contacts } from '@/lib/db/schema';
 import { sql } from 'drizzle-orm';
 
 const PRODUCT_TYPES = [
-  { value: 'residential_resale', label: 'Residential Resale' },
-  { value: 'full_alta', label: 'Full ALTA' },
-  { value: 'short_form', label: 'Short Form' },
-  { value: 'junior_loan', label: 'Junior Loan' },
-  { value: 'prelim', label: 'Prelim' },
-  { value: 'hard_money', label: 'Hard Money' },
-  { value: 'shortsale', label: 'Shortsale' },
-  { value: 'mobile_home', label: 'Mobile Home' },
-  { value: 'title_report', label: 'Title Report' },
+  { value: 'Residential Resale', label: 'Residential Resale' },
+  { value: 'Full ALTA', label: 'Full ALTA' },
+  { value: 'Short Form', label: 'Short Form' },
+  { value: 'Junior Loan', label: 'Junior Loan' },
+  { value: 'Prelim', label: 'Prelim' },
+  { value: 'Hard Money', label: 'Hard Money' },
+  { value: 'Shortsale', label: 'Shortsale' },
+  { value: 'Mobile Home', label: 'Mobile Home' },
+  { value: 'Title Report', label: 'Title Report' },
 ];
 
 const ORDER_TYPES = [

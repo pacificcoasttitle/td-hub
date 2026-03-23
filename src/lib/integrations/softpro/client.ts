@@ -161,8 +161,10 @@ export async function createOrder(
       operation: 'create_order', requestId, startedAt,
       success: raw.Status === 200,
       httpStatus: response.status,
-      requestMeta: { url, method: 'POST' },
-      responseMeta: { status: raw.Status, message: raw.Message, orderNumber: raw.OrderNumber },
+      requestMeta: { url, method: 'POST', payload },
+      responseMeta: raw.Status === 200
+        ? { status: raw.Status, message: raw.Message, orderNumber: raw.OrderNumber }
+        : { status: raw.Status, message: raw.Message, rawBody: raw },
     });
 
     if (raw.Status === 200 && raw.OrderNumber) {

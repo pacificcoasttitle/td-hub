@@ -252,5 +252,5 @@ function buildPartyInserts(orderId: number, input: CreateOrderInput): PartyInser
 }
 
 function resolveUnderwriterCode(productType: string): string {
-  return productType.toLowerCase().trim() === 'full alta' ? 'FNF' : 'WC';
+  return productType.toLowerCase().trim() === 'full alta' ? 'CW' : 'WC';
 }

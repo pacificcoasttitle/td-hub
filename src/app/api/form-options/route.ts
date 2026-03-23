@@ -33,8 +33,7 @@ const TRANSACTION_TYPES = [
 
 const UNDERWRITERS = [
   { code: 'WC', name: 'Westcor' },
-  { code: 'FNF', name: 'FNF / Commonwealth' },
-  { code: 'NATIC', name: 'NATIC' },
+  { code: 'CW', name: 'Commonwealth' },
 ];
 
 function dedupeByName<T extends { id: number; name: string | null }>(items: T[]): T[] {

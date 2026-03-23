@@ -14,30 +14,14 @@ export default function HubNewOrderPage() {
   const s = useQuickEntry();
   const router = useRouter();
 
-  if (s.result?.type === 'success' && s.result.orderId) {
-    return (
-      <div className="max-w-2xl mx-auto p-8">
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <div className="bg-[#1B2A4A] px-6 py-5 flex items-center gap-3">
-            <svg className="h-6 w-6 text-[#F26B2B]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            <div>
-              <p className="text-white font-semibold">Order Created</p>
-              <p className="text-white/60 text-sm">{s.result.message}</p>
-            </div>
-          </div>
-          <div className="p-6 flex gap-3">
-            <button onClick={() => router.push('/hub')}
-              className="flex-1 inline-flex items-center justify-center px-5 py-3 text-sm font-semibold bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] transition-colors h-11">
-              Back to Hub
-            </button>
-            <button onClick={() => { s.setResult(null); window.scrollTo(0, 0); }}
-              className="flex-1 inline-flex items-center justify-center px-5 py-3 text-sm font-medium border border-gray-200 text-[#4B5563] rounded-lg hover:bg-gray-50 transition-colors h-11">
-              Create Another
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+  if (s.result?.type === 'success') {
+    const fn = s.result.fileNumber;
+    if (fn) {
+      router.replace(`/hub/order-confirm/${encodeURIComponent(fn)}`);
+      return <div className="flex items-center justify-center py-20"><p className="text-sm text-[#6B7280]">Redirecting to confirmation…</p></div>;
+    }
+    router.replace('/hub');
+    return null;
   }
 
   return (

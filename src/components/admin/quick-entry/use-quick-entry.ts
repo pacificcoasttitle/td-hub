@@ -57,7 +57,7 @@ export function useQuickEntry() {
   const [formOpts, setFormOpts] = useState<FormOptions | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ type: 'success' | 'error'; message: string; orderId?: number } | null>(null);
+  const [result, setResult] = useState<{ type: 'success' | 'error'; message: string; orderId?: number; fileNumber?: string } | null>(null);
 
   useEffect(() => {
     fetch('/api/form-options')
@@ -222,7 +222,7 @@ export function useQuickEntry() {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? `Creation failed (${res.status})`);
-      setResult({ type: 'success', message: `Order ${body.fileNumber ?? body.orderId ?? ''} created.`, orderId: body.orderId ?? body.id });
+      setResult({ type: 'success', message: `Order ${body.fileNumber ?? body.orderId ?? ''} created.`, orderId: body.orderId ?? body.id, fileNumber: body.fileNumber ?? undefined });
     } catch (err) {
       setResult({ type: 'error', message: err instanceof Error ? err.message : 'Order creation failed' });
     } finally {

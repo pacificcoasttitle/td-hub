@@ -154,72 +154,9 @@ export function milestoneDisbursementTemplate(data: OrderEmailData): EmailTempla
   };
 }
 
-// ─── Order Confirmation ─────────────────────────────────────────────────────
-
-export interface OrderConfirmationData {
-  fileNumber: string;
-  address?: string | null;
-  transactionType?: string | null;
-  productType?: string | null;
-  buyerName?: string | null;
-  sellerName?: string | null;
-  escrowOfficer?: string | null;
-  lenderName?: string | null;
-  listingAgent?: string | null;
-  titleOfficer?: string | null;
-  hasDocuments: boolean;
-}
-
-export function orderConfirmationTemplate(data: OrderConfirmationData): EmailTemplate {
-  let detailRows = orderDetailRow('File Number', data.fileNumber);
-  if (data.address) detailRows += orderDetailRow('Property', data.address);
-  if (data.transactionType) detailRows += orderDetailRow('Transaction Type', data.transactionType);
-  if (data.productType) detailRows += orderDetailRow('Product Type', data.productType);
-
-  let partiesHtml = '';
-  const partyList: Array<[string, string | null | undefined]> = [
-    ['Buyer', data.buyerName],
-    ['Seller', data.sellerName],
-    ['Escrow Officer', data.escrowOfficer],
-    ['Lender', data.lenderName],
-    ['Listing Agent', data.listingAgent],
-    ['Title Officer', data.titleOfficer],
-  ];
-  const hasParties = partyList.some(([, v]) => v);
-  if (hasParties) {
-    const rows = partyList
-      .filter(([, v]) => v)
-      .map(([label, val]) => orderDetailRow(label, val!))
-      .join('');
-    partiesHtml = `
-      <h3 style="color:${PCT_NAVY};margin:24px 0 8px;font-size:16px;">Parties</h3>
-      <table width="100%" cellpadding="0" cellspacing="0" style="background:#f7fafc;border-radius:6px;border:1px solid ${BORDER_GRAY};">
-        ${rows}
-      </table>`;
-  }
-
-  const docNote = data.hasDocuments
-    ? `<p style="margin:16px 0 0;"><strong>Documents attached:</strong> Legal Vesting, Tax, Grant Deed</p>`
-    : `<p style="margin:16px 0 0;color:#718096;">Title documents will be available shortly and will be sent in a follow-up email.</p>`;
-
-  const body = `
-    <h2 style="color:${PCT_NAVY};margin:0 0 8px;font-size:22px;">Open Order Confirmation</h2>
-    <p style="margin:0 0 16px;">
-      A new order has been <span style="color:${PCT_GOLD};font-weight:600;">opened</span> and is being processed.
-    </p>
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f7fafc;border-radius:6px;margin:16px 0 0;border:1px solid ${BORDER_GRAY};">
-      ${detailRows}
-    </table>
-    ${partiesHtml}
-    ${docNote}
-    ${portalButton('View Order in Portal')}
-  `;
-
-  return {
-    subject: `Open Order Confirmation - ${data.fileNumber}`,
-    html: layout('Order Confirmation', body),
-  };
-}
+// ─── Order Confirmation (extracted to confirmation-template.ts) ─────────────
+export { orderConfirmationTemplate } from './confirmation-template';
+export type { FullConfirmationData as OrderConfirmationData } from './confirmation-template';
 
 // ─── Document Received ──────────────────────────────────────────────────────
 

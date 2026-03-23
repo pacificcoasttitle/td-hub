@@ -77,15 +77,24 @@ export function useQuickEntry() {
       .catch(() => {});
   }, []);
 
+  function parseOwnerName(raw: string): Person {
+    const parts = raw.split(' ').filter(Boolean);
+    if (parts.length === 0) return { firstName: '', middleName: '', lastName: '' };
+    if (parts.length === 1) return { firstName: parts[0], middleName: '', lastName: '' };
+    return {
+      firstName: parts[1],
+      middleName: parts.length > 2 ? parts.slice(2).join(' ') : '',
+      lastName: parts[0],
+    };
+  }
+
   function fillOwners(p: SiteXPropertyResult) {
     if (p.primaryOwner) {
-      const parts = p.primaryOwner.split(' ');
-      setSellerPrimary({ firstName: parts[0] ?? '', middleName: parts.length > 2 ? parts.slice(1, -1).join(' ') : '', lastName: parts.length > 1 ? parts[parts.length - 1] : '' });
+      setSellerPrimary(parseOwnerName(p.primaryOwner));
       setSellerSiteX(true);
     }
     if (p.secondaryOwner) {
-      const parts = p.secondaryOwner.split(' ');
-      setSellerSecondary({ firstName: parts[0] ?? '', middleName: parts.length > 2 ? parts.slice(1, -1).join(' ') : '', lastName: parts.length > 1 ? parts[parts.length - 1] : '' });
+      setSellerSecondary(parseOwnerName(p.secondaryOwner));
       setHasSecondarySeller(true);
       setSellerSiteX(true);
     }

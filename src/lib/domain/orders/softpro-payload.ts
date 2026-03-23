@@ -2,17 +2,17 @@ import type { CreateOrderInput } from './create-order';
 
 const SOFTPRO_USER_TYPE_MAP: Record<string, string> = {
   escrow: 'EscrowCompany',
+  escrow_company: 'EscrowCompany',
   lender: 'Lender',
   mortgage_broker: 'MortgageBroker',
   realtor: 'ListingAgentBroker',
-  title_officer: 'TitleOfficer',
-  escrow_officer: 'EscrowOfficer',
-  sales_rep: 'SalesRep',
+  listing_agent: 'ListingAgentBroker',
+  agent: 'ListingAgentBroker',
 };
 
 function mapClientTypeToSoftPro(clientType?: string | null): string {
   if (!clientType) return 'EscrowCompany';
-  return SOFTPRO_USER_TYPE_MAP[clientType] ?? clientType;
+  return SOFTPRO_USER_TYPE_MAP[clientType.toLowerCase()] ?? 'EscrowCompany';
 }
 
 export interface ResolvedContact {

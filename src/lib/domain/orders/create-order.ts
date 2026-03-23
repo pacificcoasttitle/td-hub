@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox } from '@/lib/db/schema';
+import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
 import { createOrder as softproCreateOrder } from '@/lib/integrations/softpro';
 import { propertyLookup } from '@/lib/integrations/sitex/client';
 import type { SiteXPropertyData } from '@/lib/integrations/sitex/types';
@@ -21,7 +22,7 @@ const contactSchema = z.object({
 });
 
 export const createOrderInputSchema = z.object({
-  orderType: z.enum(['Title only', 'Title & Escrow', 'Escrow only']),
+  orderType: z.enum(['Title only', 'Title & Escrow', 'Escrow only', 'Sub Escrow', 'Title Search']),
   isRushOrder: z.boolean().default(false),
   property: z.object({
     address: z.string().min(1),
@@ -107,6 +108,17 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
   const legal = input.property.legalDescription ?? sitexData?.legalDescription ?? '';
   const county = input.property.county ?? sitexData?.county ?? '';
 
+  const uwCode = resolveUnderwriterCode(input.transaction.product);
+  input.transaction.underwriterCode = uwCode;
+
+  let underwriterId: number | null = null;
+  try {
+    const [uw] = await db.select({ id: companies.id }).from(companies)
+      .where(and(eq(companies.lookupCode, uwCode), eq(companies.isUnderwriter, true)))
+      .limit(1);
+    if (uw) underwriterId = uw.id;
+  } catch { /* underwriter lookup failure never blocks order creation */ }
+
   const softProPayload = buildSoftProPayload(input, { apn, legal, county });
 
   const spResult = await softproCreateOrder(softProPayload);
@@ -116,7 +128,7 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
 
   const fileNumber = spResult.data.orderNumber;
 
-  const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county }, userId);
+  const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county }, userId, underwriterId);
 
   if (input.titlePointSessionId) {
     try {
@@ -159,6 +171,7 @@ async function createLocalRecords(
   sitex: SiteXPropertyData | null,
   enriched: { apn: string; legal: string; county: string },
   userId?: string,
+  underwriterId?: number | null,
 ): Promise<{ orderId: number }> {
   const [newOrder] = await db.insert(orders).values({
     fileNumber,
@@ -173,6 +186,7 @@ async function createLocalRecords(
     isImported: false,
     softproLastSyncedAt: new Date(),
     createdBy: userId ?? null,
+    underwriterId: underwriterId ?? null,
   }).returning({ id: orders.id });
 
   const orderId = newOrder!.id;
@@ -235,4 +249,8 @@ function buildPartyInserts(orderId: number, input: CreateOrderInput): PartyInser
   if (c?.buyerAgent) p.push(contactParty(orderId, 'buyer_agent', c.buyerAgent));
   if (c?.listingAgent) p.push(contactParty(orderId, 'listing_agent', c.listingAgent));
   return p;
+}
+
+function resolveUnderwriterCode(productType: string): string {
+  return productType.toLowerCase().trim() === 'full alta' ? 'FNF' : 'WC';
 }

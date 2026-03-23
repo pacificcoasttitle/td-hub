@@ -117,7 +117,30 @@ export function SellerSection({ s }: { s: QuickEntryState }) {
 
 // ─── Transaction ────────────────────────────────────────────────────────────
 
+function CurrencyInput({ value, onChange, placeholder = '0.00' }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#9CA3AF]">$</span>
+      <input className={`${IN} pl-7`} value={value} onChange={(e) => onChange(e.target.value.replace(/[^0-9.,]/g, ''))} placeholder={placeholder} />
+    </div>
+  );
+}
+
 export function TransactionSection({ s }: { s: QuickEntryState }) {
+  const isPurchase = s.txType === 'Purchase';
+  const isRefi = s.txType === 'Refinance';
+  const showFinancials = isPurchase || isRefi;
+
+  function handleLoanAmountChange(raw: string) {
+    const cleaned = raw.replace(/[^0-9.,]/g, '');
+    s.setLoanAmount(cleaned);
+    const num = parseFloat(cleaned.replace(/,/g, ''));
+    if (!isNaN(num) && num > 0) {
+      const multiplier = s.productType.toLowerCase().includes('full alta') ? 1.25 : 1;
+      s.setCoverageAmount((num * multiplier).toFixed(2));
+    }
+  }
+
   return (
     <div className={SECTION}>
       <p className={SH}>
@@ -181,26 +204,40 @@ export function TransactionSection({ s }: { s: QuickEntryState }) {
           )}
         </div>
       </div>
-      {s.txType === 'Purchase' && (
-        <div className="mb-3">
-          <label className={FL}>Sales Amount</label>
-          <div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#9CA3AF]">$</span><input className={`${IN} pl-7`} value={s.salesAmount} onChange={(e) => s.setSalesAmount(e.target.value.replace(/[^0-9.,]/g, ''))} placeholder="0.00" /></div>
+
+      {/* Purchase: Sales Amount + Loan Amount */}
+      {isPurchase && (
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div><label className={FL}>Sales Amount</label><CurrencyInput value={s.salesAmount} onChange={(v) => s.setSalesAmount(v)} /></div>
+          <div><label className={FL}>Loan Amount</label><CurrencyInput value={s.loanAmount} onChange={handleLoanAmountChange} /></div>
         </div>
       )}
-      {s.txType === 'Refinance' && (
+
+      {/* Refinance: Loan Number + Loan Amount */}
+      {isRefi && (
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div><label className={FL}>Loan Number</label><input className={IN} value={s.loanNumber} onChange={(e) => s.setLoanNumber(e.target.value)} /></div>
-          <div><label className={FL}>Loan Amount</label><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#9CA3AF]">$</span><input className={`${IN} pl-7`} value={s.loanAmount} onChange={(e) => s.setLoanAmount(e.target.value.replace(/[^0-9.,]/g, ''))} placeholder="0.00" /></div></div>
+          <div><label className={FL}>Loan Amount</label><CurrencyInput value={s.loanAmount} onChange={handleLoanAmountChange} /></div>
         </div>
       )}
-      <div className="mb-3"><label className={FL}>Coverage Amount</label><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#9CA3AF]">$</span><input className={`${IN} pl-7`} value={s.coverageAmount} onChange={(e) => s.setCoverageAmount(e.target.value.replace(/[^0-9.,]/g, ''))} placeholder="0.00" /></div></div>
-      {(s.txType === 'Purchase' || s.txType === 'Refinance') && (
+
+      {/* Equity / Other: Loan Number only */}
+      {!isPurchase && !isRefi && s.txType !== '' && (
+        <div className="mb-3"><label className={FL}>Loan Number</label><input className={IN} value={s.loanNumber} onChange={(e) => s.setLoanNumber(e.target.value)} /></div>
+      )}
+
+      {/* Coverage Amount: Purchase + Refinance only */}
+      {showFinancials && (
+        <div className="mb-3"><label className={FL}>Coverage Amount</label><CurrencyInput value={s.coverageAmount} onChange={(v) => s.setCoverageAmount(v)} /></div>
+      )}
+
+      {/* Borrower fields: Purchase only */}
+      {isPurchase && (
         <div className="border-t border-gray-100 pt-3">
           <PersonFields person={s.borrower} onChange={s.setBorrower} label="Primary Borrower" />
-          {s.txType === 'Purchase' && !s.hasSecBorrower && (
+          {!s.hasSecBorrower ? (
             <button onClick={() => s.setHasSecBorrower(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary borrower</button>
-          )}
-          {s.txType === 'Purchase' && s.hasSecBorrower && (
+          ) : (
             <>
               <div className="flex items-center justify-between"><span className="text-xs text-[#6B7280]">Secondary Borrower</span><button onClick={() => { s.setHasSecBorrower(false); s.setSecBorrower({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button></div>
               <PersonFields person={s.secBorrower} onChange={s.setSecBorrower} label="" />

@@ -8,34 +8,40 @@ function hasContactData(c: { name: string; company: string }): boolean {
   return !!(c.name || c.company);
 }
 
-const ESCROW_TYPES = ['escrow company', 'escrow officer'];
-const LENDER_TYPES = ['lender'];
+const ESCROW_CLIENT_TYPES = ['escrow company', 'escrow officer'];
+const LENDER_CLIENT_TYPES = ['lender'];
+const ESCROW_ORDER_TYPES = ['title & escrow', 'escrow only'];
 
-function partyVisibility(ct: string | null | undefined) {
-  const t = (ct ?? '').toLowerCase().trim();
+function partyVisibility(ct: string | null | undefined, ot: string) {
+  const clientLower = (ct ?? '').toLowerCase().trim();
+  const orderLower = ot.toLowerCase().trim();
+  const escrowByOrder = !orderLower || ESCROW_ORDER_TYPES.includes(orderLower);
   return {
     buyer: true,
-    lender: !ESCROW_TYPES.includes(t),
-    escrow: !LENDER_TYPES.includes(t),
+    lender: !ESCROW_CLIENT_TYPES.includes(clientLower),
+    escrow: !LENDER_CLIENT_TYPES.includes(clientLower) && escrowByOrder,
   };
 }
 
 export function PartiesSection({ s }: { s: QuickEntryState }) {
   const clientType = s.client?.contactType ?? null;
-  const vis = partyVisibility(clientType);
+  const orderType = s.orderType ?? '';
+  const vis = partyVisibility(clientType, orderType);
 
   const [showBuyer, setShowBuyer] = useState(() => hasContactData(s.buyerAgent));
   const [showLender, setShowLender] = useState(() => hasContactData(s.lender));
   const [showEscrow, setShowEscrow] = useState(() => !!(hasContactData(s.escrow) || s.escrowOfficer));
 
-  const prevType = useRef(clientType);
+  const prevClient = useRef(clientType);
+  const prevOrder = useRef(orderType);
   useEffect(() => {
-    if (prevType.current === clientType) return;
-    prevType.current = clientType;
-    const v = partyVisibility(clientType);
+    if (prevClient.current === clientType && prevOrder.current === orderType) return;
+    prevClient.current = clientType;
+    prevOrder.current = orderType;
+    const v = partyVisibility(clientType, orderType);
     if (!v.lender && showLender) { setShowLender(false); s.setLender({ ...EC }); }
     if (!v.escrow && showEscrow) { setShowEscrow(false); s.setEscrow({ ...EC }); s.setEscrowOfficer(''); }
-  }, [clientType, showLender, showEscrow, s]);
+  }, [clientType, orderType, showLender, showEscrow, s]);
 
   const toggleBuyer = useCallback((on: boolean) => {
     setShowBuyer(on);

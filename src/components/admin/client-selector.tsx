@@ -18,9 +18,22 @@ interface ClientSelectorProps {
   selected: ClientContact | null;
   onSelect: (client: ClientContact) => void;
   onClear: () => void;
+  orderType?: string;
 }
 
-export function ClientSelector({ selected, onSelect, onClear }: ClientSelectorProps) {
+const ESCROW_RESTRICTED_ORDERS = ['title & escrow', 'escrow only'];
+const ESCROW_CONTACT_TYPES = ['escrow', 'escrow_company', 'escrow company', 'escrow officer'];
+
+function isEscrowClient(c: ClientContact): boolean {
+  const ct = (c.contactType ?? c.role ?? '').toLowerCase().trim();
+  return ESCROW_CONTACT_TYPES.includes(ct);
+}
+
+function isEscrowRestricted(orderType?: string): boolean {
+  return ESCROW_RESTRICTED_ORDERS.includes((orderType ?? '').toLowerCase().trim());
+}
+
+export function ClientSelector({ selected, onSelect, onClear, orderType }: ClientSelectorProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ClientContact[]>([]);
   const [searching, setSearching] = useState(false);
@@ -51,6 +64,18 @@ export function ClientSelector({ selected, onSelect, onClear }: ClientSelectorPr
     setResults([]);
     setOpen(false);
   }
+
+  const restricted = isEscrowRestricted(orderType);
+  const [clearedMsg, setClearedMsg] = useState('');
+
+  useEffect(() => {
+    if (restricted && selected && isEscrowClient(selected)) {
+      onClear();
+      setClearedMsg('Escrow companies cannot be the opening party on Title & Escrow orders.');
+      const t = setTimeout(() => setClearedMsg(''), 6000);
+      return () => clearTimeout(t);
+    }
+  }, [restricted, selected, onClear]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -113,7 +138,13 @@ export function ClientSelector({ selected, onSelect, onClear }: ClientSelectorPr
         />
       </div>
 
-      {!open && query.length < 2 && (
+      {clearedMsg && (
+        <div className="mt-1.5 flex items-center gap-1.5 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+          <svg className="h-3.5 w-3.5 text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+          <p className="text-xs text-amber-700">{clearedMsg}</p>
+        </div>
+      )}
+      {!open && query.length < 2 && !clearedMsg && (
         <p className="mt-1.5 text-xs text-[#9CA3AF]">Search by name or email to find a client</p>
       )}
 
@@ -122,36 +153,40 @@ export function ClientSelector({ selected, onSelect, onClear }: ClientSelectorPr
           {searching ? (
             <div className="px-4 py-4 text-sm text-[#6B7280] text-center">Searching…</div>
           ) : results.length > 0 ? (
-            results.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => handleSelect(c)}
-                className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-full bg-[#1B2A4A]/10 flex items-center justify-center flex-shrink-0">
-                    <span className="text-[#1B2A4A] text-xs font-bold">
-                      {(c.fullName ?? c.companyName ?? '?').charAt(0).toUpperCase()}
-                    </span>
+            results.map((c) => {
+              const disabled = restricted && isEscrowClient(c);
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => !disabled && handleSelect(c)}
+                  disabled={disabled}
+                  className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-0 transition-colors ${disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'hover:bg-gray-50'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 ${disabled ? 'bg-gray-200' : 'bg-[#1B2A4A]/10'}`}>
+                      <span className={`text-xs font-bold ${disabled ? 'text-gray-400' : 'text-[#1B2A4A]'}`}>
+                        {(c.fullName ?? c.companyName ?? '?').charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-sm font-medium truncate ${disabled ? 'text-gray-400' : 'text-[#1A1A2E]'}`}>
+                        {c.fullName ?? c.companyName ?? 'Unknown'}
+                      </p>
+                      <p className="text-xs text-[#6B7280] truncate">
+                        {disabled
+                          ? `Not available for ${orderType} orders`
+                          : [c.email, c.phone, c.companyName && c.fullName ? c.companyName : null].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                    {c.role && (
+                      <span className={`flex-shrink-0 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded ${disabled ? 'bg-red-50 text-red-400' : 'bg-gray-100 text-[#6B7280]'}`}>
+                        {c.role.replace(/_/g, ' ')}
+                      </span>
+                    )}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-[#1A1A2E] truncate">
-                      {c.fullName ?? c.companyName ?? 'Unknown'}
-                    </p>
-                    <p className="text-xs text-[#6B7280] truncate">
-                      {[c.email, c.phone, c.companyName && c.fullName ? c.companyName : null]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </p>
-                  </div>
-                  {c.role && (
-                    <span className="flex-shrink-0 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider bg-gray-100 text-[#6B7280] rounded">
-                      {c.role.replace(/_/g, ' ')}
-                    </span>
-                  )}
-                </div>
-              </button>
-            ))
+                </button>
+              );
+            })
           ) : (
             <div className="px-4 py-4 text-sm text-[#6B7280] text-center">
               No clients found for &ldquo;{query}&rdquo;

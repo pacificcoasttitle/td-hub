@@ -4,101 +4,114 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import type { PartiesData, PartyContact, FormOption } from './types';
 import { IN, EMPTY_PARTY } from './types';
 import { SH, FL, Nav } from './shared';
+import { partyVisibility } from '@/components/admin/quick-entry/parties-section';
 
-export function StepAddParties({ data, onChange, orderTypeValue, onNext, onPrev }: {
+export function StepAddParties({ data, onChange, orderTypeValue, clientType, transactionType, onNext, onPrev }: {
   data: PartiesData;
   onChange: (d: PartiesData) => void;
   orderTypeValue: string;
+  clientType: string;
+  transactionType: string;
   onNext: () => void;
   onPrev: () => void;
 }) {
   const [escrowOfficers, setEscrowOfficers] = useState<FormOption[]>([]);
-  const showEscrowOfficerOption = orderTypeValue === 'title_escrow' || orderTypeValue === 'escrow_only';
+  const vis = partyVisibility(clientType, orderTypeValue, transactionType);
+  const showAgentSection = vis.buyerAgent || vis.listingAgent;
 
   useEffect(() => {
     fetch('/api/form-options')
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
         if (!d?.escrowOfficers) return;
+        const seen = new Set<string>();
         setEscrowOfficers(
           (d.escrowOfficers as Array<{ id?: number; name?: string; value?: string; label?: string; email?: string }>)
             .map((r) => ({ value: r.value ?? String(r.id ?? ''), label: r.label ?? r.name ?? r.email ?? '' }))
+            .filter((o) => { const k = o.label.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
         );
       })
       .catch(() => {});
   }, []);
+
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const prevRef = useRef({ ct: clientType, ot: orderTypeValue, tt: transactionType });
+  useEffect(() => {
+    const prev = prevRef.current;
+    if (prev.ct === clientType && prev.ot === orderTypeValue && prev.tt === transactionType) return;
+    const pv = partyVisibility(prev.ct, prev.ot, prev.tt);
+    prevRef.current = { ct: clientType, ot: orderTypeValue, tt: transactionType };
+    const nv = partyVisibility(clientType, orderTypeValue, transactionType);
+    const d = dataRef.current;
+    let u = { ...d };
+    let changed = false;
+    const newAgents = nv.buyerAgent || nv.listingAgent;
+    const oldAgents = pv.buyerAgent || pv.listingAgent;
+    if (oldAgents && !newAgents && d.showAgents) { u = { ...u, showAgents: false, buyerAgent: { ...EMPTY_PARTY }, listingAgent: { ...EMPTY_PARTY } }; changed = true; }
+    if (pv.lender && !nv.lender && d.showLender) { u = { ...u, showLender: false, lender: { ...EMPTY_PARTY } }; changed = true; }
+    if (pv.escrowCompany && !nv.escrowCompany && d.showEscrow) { u = { ...u, showEscrow: false, escrow: { ...EMPTY_PARTY } }; changed = true; }
+    if (pv.escrowOfficer && !nv.escrowOfficer && d.showEscrowOfficer) { u = { ...u, showEscrowOfficer: false, escrowOfficer: '' }; changed = true; }
+    if (changed) onChange(u);
+  }, [clientType, orderTypeValue, transactionType, onChange]);
 
   function upParty(key: 'buyerAgent' | 'listingAgent' | 'lender' | 'escrow', field: keyof PartyContact, value: string) {
     onChange({ ...data, [key]: { ...data[key], [field]: value } });
   }
 
   function addEmail() {
-    if (data.deliverableEmails.length < 5) {
-      onChange({ ...data, deliverableEmails: [...data.deliverableEmails, ''] });
-    }
+    if (data.deliverableEmails.length < 5) onChange({ ...data, deliverableEmails: [...data.deliverableEmails, ''] });
   }
-
-  function updateEmail(index: number, value: string) {
-    const emails = [...data.deliverableEmails];
-    emails[index] = value;
-    onChange({ ...data, deliverableEmails: emails });
-  }
-
-  function removeEmail(index: number) {
-    onChange({ ...data, deliverableEmails: data.deliverableEmails.filter((_, i) => i !== index) });
-  }
+  function updateEmail(i: number, v: string) { const arr = [...data.deliverableEmails]; arr[i] = v; onChange({ ...data, deliverableEmails: arr }); }
+  function removeEmail(i: number) { onChange({ ...data, deliverableEmails: data.deliverableEmails.filter((_, j) => j !== i) }); }
 
   return (
     <div className="p-5 sm:p-6">
       <SH title="Add Parties" sub="Add agents, lender, and escrow contacts to this order." />
 
       <div className="space-y-4">
-        <ToggleSection
-          label="Add Agent Details"
-          open={data.showAgents}
-          onToggle={(v) => onChange({
-            ...data, showAgents: v,
-            ...(!v && { buyerAgent: { ...EMPTY_PARTY }, listingAgent: { ...EMPTY_PARTY } }),
-          })}
-        >
-          <div className="space-y-4">
-            <PartyFields label="Buyer's Agent" contact={data.buyerAgent} onChange={(f, v) => upParty('buyerAgent', f, v)} searchRole="buyer_agent" />
-            <div className="border-t border-gray-100 pt-4">
-              <PartyFields label="Listing Agent" contact={data.listingAgent} onChange={(f, v) => upParty('listingAgent', f, v)} searchRole="listing_agent" />
+        {showAgentSection && (
+          <ToggleSection
+            label="Add Agent Details"
+            open={data.showAgents}
+            onToggle={(v) => onChange({ ...data, showAgents: v, ...(!v && { buyerAgent: { ...EMPTY_PARTY }, listingAgent: { ...EMPTY_PARTY } }) })}
+          >
+            <div className="space-y-4">
+              {vis.buyerAgent && <PartyFields label="Buyer's Agent" contact={data.buyerAgent} onChange={(f, v) => upParty('buyerAgent', f, v)} searchRole="buyer_agent" />}
+              {vis.listingAgent && (
+                <div className={vis.buyerAgent ? 'border-t border-gray-100 pt-4' : ''}>
+                  <PartyFields label="Listing Agent" contact={data.listingAgent} onChange={(f, v) => upParty('listingAgent', f, v)} searchRole="listing_agent" />
+                </div>
+              )}
             </div>
-          </div>
-        </ToggleSection>
+          </ToggleSection>
+        )}
 
-        <ToggleSection
-          label="Add Lender"
-          open={data.showLender}
-          onToggle={(v) => onChange({
-            ...data, showLender: v,
-            ...(!v && { lender: { ...EMPTY_PARTY } }),
-          })}
-        >
-          <PartyFields label="Lender" contact={data.lender} onChange={(f, v) => upParty('lender', f, v)} searchRole="lender" companyFirst />
-        </ToggleSection>
+        {vis.lender && (
+          <ToggleSection
+            label="Add Lender"
+            open={data.showLender}
+            onToggle={(v) => onChange({ ...data, showLender: v, ...(!v && { lender: { ...EMPTY_PARTY } }) })}
+          >
+            <PartyFields label="Lender" contact={data.lender} onChange={(f, v) => upParty('lender', f, v)} searchRole="lender" companyFirst />
+          </ToggleSection>
+        )}
 
-        <ToggleSection
-          label="Add Escrow"
-          open={data.showEscrow}
-          onToggle={(v) => onChange({
-            ...data, showEscrow: v,
-            ...(!v && { escrow: { ...EMPTY_PARTY } }),
-          })}
-        >
-          <PartyFields label="Escrow Company" contact={data.escrow} onChange={(f, v) => upParty('escrow', f, v)} searchRole="escrow_officer" companyFirst />
-        </ToggleSection>
+        {vis.escrowCompany && (
+          <ToggleSection
+            label="Add Escrow Company"
+            open={data.showEscrow}
+            onToggle={(v) => onChange({ ...data, showEscrow: v, ...(!v && { escrow: { ...EMPTY_PARTY } }) })}
+          >
+            <PartyFields label="Escrow Company" contact={data.escrow} onChange={(f, v) => upParty('escrow', f, v)} searchRole="escrow_officer" companyFirst />
+          </ToggleSection>
+        )}
 
-        {showEscrowOfficerOption && (
+        {vis.escrowOfficer && (
           <ToggleSection
             label="Add Escrow Officer"
             open={data.showEscrowOfficer}
-            onToggle={(v) => onChange({
-              ...data, showEscrowOfficer: v,
-              ...(!v && { escrowOfficer: '' }),
-            })}
+            onToggle={(v) => onChange({ ...data, showEscrowOfficer: v, ...(!v && { escrowOfficer: '' }) })}
           >
             <div>
               <FL>Escrow Officer</FL>
@@ -144,17 +157,11 @@ export function StepAddParties({ data, onChange, orderTypeValue, onNext, onPrev 
 }
 
 function ToggleSection({ label, open, onToggle, children }: {
-  label: string;
-  open: boolean;
-  onToggle: (v: boolean) => void;
-  children: React.ReactNode;
+  label: string; open: boolean; onToggle: (v: boolean) => void; children: React.ReactNode;
 }) {
   return (
     <div className={`border rounded-xl transition-colors ${open ? 'border-[#F26B2B]/30 bg-[#F26B2B]/[0.02]' : 'border-[#E5E7EB]'}`}>
-      <button
-        onClick={() => onToggle(!open)}
-        className="w-full flex items-center justify-between px-4 py-3 min-h-[48px]"
-      >
+      <button onClick={() => onToggle(!open)} className="w-full flex items-center justify-between px-4 py-3 min-h-[48px]">
         <span className="text-sm font-medium text-[#1B2A4A]">{label}</span>
         <div className={`w-10 h-6 rounded-full transition-colors relative ${open ? 'bg-[#F26B2B]' : 'bg-[#E5E7EB]'}`}>
           <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${open ? 'left-5' : 'left-1'}`} />
@@ -166,11 +173,8 @@ function ToggleSection({ label, open, onToggle, children }: {
 }
 
 function PartyFields({ label, contact, onChange, searchRole, companyFirst }: {
-  label: string;
-  contact: PartyContact;
-  onChange: (field: keyof PartyContact, value: string) => void;
-  searchRole: string;
-  companyFirst?: boolean;
+  label: string; contact: PartyContact; onChange: (field: keyof PartyContact, value: string) => void;
+  searchRole: string; companyFirst?: boolean;
 }) {
   const [suggestions, setSuggestions] = useState<Array<{ id: number; fullName: string | null; companyName: string | null; email: string | null; phone: string | null }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -183,33 +187,19 @@ function PartyFields({ label, contact, onChange, searchRole, companyFirst }: {
   const doSearch = useCallback((q: string) => {
     if (q.length < 2) { setSuggestions([]); return; }
     const enc = encodeURIComponent(q);
-
     const contactsP = fetch(`/api/contacts?search=${enc}&pageSize=6`)
       .then((r) => r.ok ? r.json() : { contacts: [] })
       .then((d: { contacts?: Array<{ id: number; fullName: string | null; companyName: string | null; email: string | null; phone: string | null }> }) =>
-        (d.contacts ?? []).map((c) => ({ ...c, id: c.id }))
-      );
+        (d.contacts ?? []).map((c) => ({ ...c, id: c.id })));
 
     if (companyFirst) {
       const companiesP = fetch(`/api/companies?search=${enc}&pageSize=6`)
         .then((r) => r.ok ? r.json() : { companies: [] })
         .then((d: { companies?: Array<{ id: number; name: string; email: string | null; phone: string | null }> }) =>
-          (d.companies ?? []).map((c) => ({
-            id: -(c.id + 1),
-            fullName: null as string | null,
-            companyName: c.name,
-            email: c.email,
-            phone: c.phone,
-          }))
-        );
-
-      Promise.all([companiesP, contactsP])
-        .then(([co, ct]) => setSuggestions([...co, ...ct].slice(0, 8)))
-        .catch(() => setSuggestions([]));
+          (d.companies ?? []).map((c) => ({ id: -(c.id + 1), fullName: null as string | null, companyName: c.name, email: c.email, phone: c.phone })));
+      Promise.all([companiesP, contactsP]).then(([co, ct]) => setSuggestions([...co, ...ct].slice(0, 8))).catch(() => setSuggestions([]));
     } else {
-      contactsP
-        .then((ct) => setSuggestions(ct))
-        .catch(() => setSuggestions([]));
+      contactsP.then((ct) => setSuggestions(ct)).catch(() => setSuggestions([]));
     }
   }, [companyFirst]);
 
@@ -247,13 +237,8 @@ function PartyFields({ label, contact, onChange, searchRole, companyFirst }: {
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6B7280]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            <input
-              className={`${IN} pl-10`}
-              value={searchValue}
-              onChange={(e) => handleSearchInput(e.target.value)}
-              onFocus={() => { if (searchValue.length >= 2) setShowSuggestions(true); }}
-              placeholder={`Search ${label.toLowerCase()}…`}
-            />
+            <input className={`${IN} pl-10`} value={searchValue} onChange={(e) => handleSearchInput(e.target.value)}
+              onFocus={() => { if (searchValue.length >= 2) setShowSuggestions(true); }} placeholder={`Search ${label.toLowerCase()}…`} />
           </div>
           {showSuggestions && searchValue.length >= 2 && suggestions.length > 0 && (
             <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
@@ -266,10 +251,7 @@ function PartyFields({ label, contact, onChange, searchRole, companyFirst }: {
             </div>
           )}
         </div>
-        <div>
-          <FL>{companyFirst ? 'Contact Name' : 'Company'}</FL>
-          <input className={IN} value={companyFirst ? contact.name : contact.company} onChange={(e) => onChange(companyFirst ? 'name' : 'company', e.target.value)} />
-        </div>
+        <div><FL>{companyFirst ? 'Contact Name' : 'Company'}</FL><input className={IN} value={companyFirst ? contact.name : contact.company} onChange={(e) => onChange(companyFirst ? 'name' : 'company', e.target.value)} /></div>
         <div><FL>Email</FL><input className={IN} type="email" value={contact.email} onChange={(e) => onChange('email', e.target.value)} placeholder="email@example.com" /></div>
         <div><FL>Phone</FL><input className={IN} type="tel" value={contact.phone} onChange={(e) => onChange('phone', e.target.value)} placeholder="(555) 123-4567" /></div>
       </div>

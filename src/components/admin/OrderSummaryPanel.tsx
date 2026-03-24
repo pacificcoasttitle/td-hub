@@ -36,6 +36,18 @@ export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
       <h3 className="text-lg font-semibold text-[#1A1A2E] mb-4">Order Summary</h3>
 
       <div className="space-y-4">
+        {/* Transaction */}
+        <Section filled={hasTx} label="Transaction" placeholder="Transaction details will appear here">
+          {hasTx && (
+            <>
+              {s.txType && <Field label="Type" value={s.txType} />}
+              {s.productType && <Field label="Product" value={s.productType} />}
+              {s.salesAmount && fmtCurrency(s.salesAmount) && <Field label="Sales Price" value={fmtCurrency(s.salesAmount)} />}
+              {s.escrowNumber && <Field label="Escrow #" value={s.escrowNumber} />}
+            </>
+          )}
+        </Section>
+
         {/* Client */}
         <Section filled={hasClient} label="Client" placeholder="Client details will appear here">
           {hasClient && s.client && (
@@ -79,18 +91,6 @@ export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
                   </span>
                 </div>
               )}
-            </>
-          )}
-        </Section>
-
-        {/* Transaction */}
-        <Section filled={hasTx} label="Transaction" placeholder="Transaction details will appear here">
-          {hasTx && (
-            <>
-              {s.txType && <Field label="Type" value={s.txType} />}
-              {s.productType && <Field label="Product" value={s.productType} />}
-              {s.salesAmount && fmtCurrency(s.salesAmount) && <Field label="Sales Price" value={fmtCurrency(s.salesAmount)} />}
-              {s.escrowNumber && <Field label="Escrow #" value={s.escrowNumber} />}
             </>
           )}
         </Section>

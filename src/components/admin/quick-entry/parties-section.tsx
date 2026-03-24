@@ -1,60 +1,130 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { SECTION, SH, FL, IN, SEL, EC } from './types';
+import { useState, useEffect, useRef } from 'react';
+import { SECTION, SH, FL, IN, SEL, EC, type PartyContact } from './types';
 import type { QuickEntryState } from './use-quick-entry';
 
-function hasContactData(c: { name: string; company: string }): boolean {
-  return !!(c.name || c.company);
+// ─── Visibility Logic (exported for other sections to consume) ──────────────
+
+export interface PartyVis {
+  buyerAgent: boolean; listingAgent: boolean; lender: boolean;
+  mortgageBroker: boolean; escrowCompany: boolean; escrowOfficer: boolean;
+  seller: boolean; borrower: boolean;
 }
 
-const ESCROW_CLIENT_TYPES = ['escrow company', 'escrow officer'];
-const LENDER_CLIENT_TYPES = ['lender'];
-const ESCROW_ORDER_TYPES = ['title & escrow', 'escrow only'];
+export function partyVisibility(ct: string | null | undefined, ot: string, tt: string): PartyVis {
+  const c = (ct ?? '').toLowerCase().trim().replace(/_/g, ' ');
+  const o = ot.toLowerCase().trim();
+  const t = tt.toLowerCase().trim();
 
-function partyVisibility(ct: string | null | undefined, ot: string) {
-  const clientLower = (ct ?? '').toLowerCase().trim();
-  const orderLower = ot.toLowerCase().trim();
-  const escrowByOrder = !orderLower || ESCROW_ORDER_TYPES.includes(orderLower);
+  const isListingSelling = ['listing agent', 'selling agent'].includes(c);
+  const isEscrowClient = ['escrow company', 'escrow officer', 'escrow'].includes(c);
+
+  const extEscrow = ['title only', 'title_only', 'sub escrow', 'sub_escrow', ''].includes(o);
+  const intEscrow = ['title & escrow', 'title_escrow', 'escrow only', 'escrow_only'].includes(o);
+
   return {
-    buyer: true,
-    lender: !ESCROW_CLIENT_TYPES.includes(clientLower),
-    escrow: !LENDER_CLIENT_TYPES.includes(clientLower) && escrowByOrder,
+    buyerAgent: !['agent', 'listing agent', 'selling agent'].includes(c),
+    listingAgent: !isListingSelling,
+    lender: c !== 'lender',
+    mortgageBroker: c !== 'mortgage broker',
+    escrowCompany: extEscrow && !isEscrowClient,
+    escrowOfficer: intEscrow,
+    seller: t === 'purchase' || t === 'other' || !t,
+    borrower: t === 'purchase' || t === 'refinance' || t === 'equity' || t === 'other' || !t,
   };
 }
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function hasData(c: PartyContact): boolean { return !!(c.name || c.company); }
+
+function dedup(opts: { value: string; label: string }[]) {
+  const seen = new Set<string>();
+  return opts.filter(o => { const k = o.label.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
+type ShowState = Record<'buyerAgent' | 'listingAgent' | 'lender' | 'mortgageBroker' | 'escrowCompany' | 'escrowOfficer', boolean>;
+type PK = keyof ShowState;
+
+// ─── Reusable Contact Fields ────────────────────────────────────────────────
+
+function ContactFields({ c, set, companyFirst }: { c: PartyContact; set: (v: PartyContact) => void; companyFirst?: boolean }) {
+  const f1 = companyFirst ? 'company' : 'name';
+  const f2 = companyFirst ? 'name' : 'company';
+  return (
+    <>
+      <div className="mb-3"><label className={FL}>{companyFirst ? 'Company Name' : 'Name'}</label><input className={IN} value={c[f1]} onChange={e => set({ ...c, [f1]: e.target.value })} /></div>
+      {companyFirst && <div className="mb-3"><label className={FL}>Contact Name</label><input className={IN} value={c.name} onChange={e => set({ ...c, name: e.target.value })} /></div>}
+      <div className="grid grid-cols-2 gap-4 mb-3">
+        <div><label className={FL}>Email</label><input className={IN} type="email" value={c.email} onChange={e => set({ ...c, email: e.target.value })} /></div>
+        <div><label className={FL}>Phone</label><input className={IN} type="tel" value={c.phone} onChange={e => set({ ...c, phone: e.target.value })} /></div>
+      </div>
+      {!companyFirst && <div className="mb-3"><label className={FL}>Company</label><input className={IN} value={c[f2]} onChange={e => set({ ...c, [f2]: e.target.value })} /></div>}
+    </>
+  );
+}
+
+// ─── Main Component ─────────────────────────────────────────────────────────
+
 export function PartiesSection({ s }: { s: QuickEntryState }) {
-  const clientType = s.client?.contactType ?? null;
-  const orderType = s.orderType ?? '';
-  const vis = partyVisibility(clientType, orderType);
+  const ct = s.client?.contactType ?? null;
+  const ot = s.orderType ?? '';
+  const tt = s.txType ?? '';
+  const vis = partyVisibility(ct, ot, tt);
 
-  const [showBuyer, setShowBuyer] = useState(() => hasContactData(s.buyerAgent));
-  const [showLender, setShowLender] = useState(() => hasContactData(s.lender));
-  const [showEscrow, setShowEscrow] = useState(() => !!(hasContactData(s.escrow) || s.escrowOfficer));
+  const [show, setShow] = useState<ShowState>(() => ({
+    buyerAgent: hasData(s.buyerAgent),
+    listingAgent: hasData(s.listingAgent),
+    lender: hasData(s.lender),
+    mortgageBroker: false,
+    escrowCompany: hasData(s.escrow),
+    escrowOfficer: !!s.escrowOfficer,
+  }));
 
-  const prevClient = useRef(clientType);
-  const prevOrder = useRef(orderType);
+  const [broker, setBroker] = useState<PartyContact>({ ...EC });
+
+  const prevRef = useRef({ ct, ot, tt });
   useEffect(() => {
-    if (prevClient.current === clientType && prevOrder.current === orderType) return;
-    prevClient.current = clientType;
-    prevOrder.current = orderType;
-    const v = partyVisibility(clientType, orderType);
-    if (!v.lender && showLender) { setShowLender(false); s.setLender({ ...EC }); }
-    if (!v.escrow && showEscrow) { setShowEscrow(false); s.setEscrow({ ...EC }); s.setEscrowOfficer(''); }
-  }, [clientType, orderType, showLender, showEscrow, s]);
+    const prev = prevRef.current;
+    if (prev.ct === ct && prev.ot === ot && prev.tt === tt) return;
+    const pv = partyVisibility(prev.ct, prev.ot, prev.tt);
+    prevRef.current = { ct, ot, tt };
+    const nv = partyVisibility(ct, ot, tt);
 
-  const toggleBuyer = useCallback((on: boolean) => {
-    setShowBuyer(on);
-    if (!on) s.setBuyerAgent({ ...EC });
-  }, [s]);
-  const toggleLender = useCallback((on: boolean) => {
-    setShowLender(on);
-    if (!on) s.setLender({ ...EC });
-  }, [s]);
-  const toggleEscrow = useCallback((on: boolean) => {
-    setShowEscrow(on);
-    if (!on) { s.setEscrow({ ...EC }); s.setEscrowOfficer(''); }
-  }, [s]);
+    if (pv.buyerAgent && !nv.buyerAgent) s.setBuyerAgent({ ...EC });
+    if (pv.listingAgent && !nv.listingAgent) s.setListingAgent({ ...EC });
+    if (pv.lender && !nv.lender) s.setLender({ ...EC });
+    if (pv.mortgageBroker && !nv.mortgageBroker) setBroker({ ...EC });
+    if (pv.escrowCompany && !nv.escrowCompany) s.setEscrow({ ...EC });
+    if (pv.escrowOfficer && !nv.escrowOfficer) s.setEscrowOfficer('');
+
+    setShow(p => ({
+      buyerAgent: nv.buyerAgent ? p.buyerAgent : false,
+      listingAgent: nv.listingAgent ? p.listingAgent : false,
+      lender: nv.lender ? p.lender : false,
+      mortgageBroker: nv.mortgageBroker ? p.mortgageBroker : false,
+      escrowCompany: nv.escrowCompany ? p.escrowCompany : false,
+      escrowOfficer: nv.escrowOfficer ? p.escrowOfficer : false,
+    }));
+  }, [ct, ot, tt, s]);
+
+  function toggle(key: PK, on: boolean) {
+    setShow(p => ({ ...p, [key]: on }));
+    if (!on) {
+      const clears: Record<PK, () => void> = {
+        buyerAgent: () => s.setBuyerAgent({ ...EC }),
+        listingAgent: () => s.setListingAgent({ ...EC }),
+        lender: () => s.setLender({ ...EC }),
+        mortgageBroker: () => setBroker({ ...EC }),
+        escrowCompany: () => s.setEscrow({ ...EC }),
+        escrowOfficer: () => s.setEscrowOfficer(''),
+      };
+      clears[key]();
+    }
+  }
+
+  const officers = dedup(s.formOpts?.escrowOfficers ?? []);
 
   return (
     <div className={SECTION}>
@@ -63,54 +133,54 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
         Parties
       </p>
 
-      {/* Checkboxes — visibility driven by client type */}
-      <div className="flex items-center gap-6 mb-4">
-        {vis.buyer && <Toggle label="Buyer / Borrower" checked={showBuyer} onChange={toggleBuyer} />}
-        {vis.lender && <Toggle label="Lender" checked={showLender} onChange={toggleLender} />}
-        {vis.escrow && <Toggle label="Escrow Officer" checked={showEscrow} onChange={toggleEscrow} />}
+      {/* Checkboxes — driven by client type + order type */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-4">
+        {vis.buyerAgent && <Chk label="Buyer's Agent" checked={show.buyerAgent} onChange={v => toggle('buyerAgent', v)} />}
+        {vis.listingAgent && <Chk label="Listing Agent" checked={show.listingAgent} onChange={v => toggle('listingAgent', v)} />}
+        {vis.lender && <Chk label="Lender" checked={show.lender} onChange={v => toggle('lender', v)} />}
+        {vis.mortgageBroker && <Chk label="Mortgage Broker" checked={show.mortgageBroker} onChange={v => toggle('mortgageBroker', v)} />}
+        {vis.escrowCompany && <Chk label="Escrow Company" checked={show.escrowCompany} onChange={v => toggle('escrowCompany', v)} />}
+        {vis.escrowOfficer && <Chk label="Escrow Officer" checked={show.escrowOfficer} onChange={v => toggle('escrowOfficer', v)} />}
       </div>
 
-      {/* Buyer / Borrower */}
-      <Expand open={showBuyer}>
-        <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2">Buyer / Borrower</p>
-        <div className="mb-3"><label className={FL}>Name</label><input className={IN} value={s.buyerAgent.name} onChange={(e) => s.setBuyerAgent({ ...s.buyerAgent, name: e.target.value })} placeholder="Full name" /></div>
-        <div className="grid grid-cols-2 gap-4 mb-3">
-          <div><label className={FL}>Email</label><input className={IN} type="email" value={s.buyerAgent.email} onChange={(e) => s.setBuyerAgent({ ...s.buyerAgent, email: e.target.value })} /></div>
-          <div><label className={FL}>Phone</label><input className={IN} type="tel" value={s.buyerAgent.phone} onChange={(e) => s.setBuyerAgent({ ...s.buyerAgent, phone: e.target.value })} /></div>
-        </div>
-        <div className="mb-3"><label className={FL}>Company</label><input className={IN} value={s.buyerAgent.company} onChange={(e) => s.setBuyerAgent({ ...s.buyerAgent, company: e.target.value })} /></div>
+      {/* Buyer's Agent */}
+      <Expand open={show.buyerAgent && vis.buyerAgent}>
+        <ContactFields c={s.buyerAgent} set={s.setBuyerAgent} />
+      </Expand>
+
+      {/* Listing Agent */}
+      <Expand open={show.listingAgent && vis.listingAgent}>
+        <ContactFields c={s.listingAgent} set={s.setListingAgent} />
       </Expand>
 
       {/* Lender */}
-      <Expand open={showLender}>
-        <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2">Lender</p>
-        <div className="mb-3"><label className={FL}>Company Name</label><input className={IN} value={s.lender.company} onChange={(e) => s.setLender({ ...s.lender, company: e.target.value })} /></div>
-        <div className="mb-3"><label className={FL}>Contact Name</label><input className={IN} value={s.lender.name} onChange={(e) => s.setLender({ ...s.lender, name: e.target.value })} /></div>
-        <div className="grid grid-cols-2 gap-4 mb-3">
-          <div><label className={FL}>Email</label><input className={IN} type="email" value={s.lender.email} onChange={(e) => s.setLender({ ...s.lender, email: e.target.value })} /></div>
-          <div><label className={FL}>Phone</label><input className={IN} type="tel" value={s.lender.phone} onChange={(e) => s.setLender({ ...s.lender, phone: e.target.value })} /></div>
-        </div>
+      <Expand open={show.lender && vis.lender}>
+        <ContactFields c={s.lender} set={s.setLender} companyFirst />
       </Expand>
 
-      {/* Escrow Officer */}
-      <Expand open={showEscrow}>
-        <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2">Escrow Officer</p>
+      {/* Mortgage Broker (local state — Builder gap: add to hook + submission) */}
+      <Expand open={show.mortgageBroker && vis.mortgageBroker}>
+        <ContactFields c={broker} set={setBroker} />
+      </Expand>
+
+      {/* Escrow Company (external — Title Only / Sub Escrow) */}
+      <Expand open={show.escrowCompany && vis.escrowCompany}>
+        <ContactFields c={s.escrow} set={s.setEscrow} companyFirst />
+      </Expand>
+
+      {/* Escrow Officer (internal PCT — Title & Escrow / Escrow Only) */}
+      <Expand open={show.escrowOfficer && vis.escrowOfficer}>
         <div className="mb-3">
-          <label className={FL}>Name</label>
-          {s.formOpts?.escrowOfficers?.length ? (
-            <select value={s.escrowOfficer} onChange={(e) => s.setEscrowOfficer(e.target.value)} className={SEL}>
+          <label className={FL}>Escrow Officer</label>
+          {officers.length ? (
+            <select value={s.escrowOfficer} onChange={e => s.setEscrowOfficer(e.target.value)} className={SEL}>
               <option value="">Select…</option>
-              {s.formOpts.escrowOfficers.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {officers.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           ) : (
-            <input className={IN} value={s.escrow.name} onChange={(e) => s.setEscrow({ ...s.escrow, name: e.target.value })} placeholder="Escrow officer name" />
+            <input className={IN} value={s.escrowOfficer} onChange={e => s.setEscrowOfficer(e.target.value)} placeholder="Officer name" />
           )}
         </div>
-        <div className="grid grid-cols-2 gap-4 mb-3">
-          <div><label className={FL}>Email</label><input className={IN} type="email" value={s.escrow.email} onChange={(e) => s.setEscrow({ ...s.escrow, email: e.target.value })} /></div>
-          <div><label className={FL}>Phone</label><input className={IN} type="tel" value={s.escrow.phone} onChange={(e) => s.setEscrow({ ...s.escrow, phone: e.target.value })} /></div>
-        </div>
-        <div className="mb-3"><label className={FL}>Company</label><input className={IN} value={s.escrow.company} onChange={(e) => s.setEscrow({ ...s.escrow, company: e.target.value })} /></div>
       </Expand>
 
       {/* Deliverable Emails — always visible */}
@@ -123,7 +193,7 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
         </div>
         {s.deliverableEmails.map((em, i) => (
           <div key={i} className="flex gap-2 mb-2">
-            <input className={IN} type="email" value={em} onChange={(e) => { const arr = [...s.deliverableEmails]; arr[i] = e.target.value; s.setDeliverableEmails(arr); }} placeholder="email@example.com" />
+            <input className={IN} type="email" value={em} onChange={e => { const arr = [...s.deliverableEmails]; arr[i] = e.target.value; s.setDeliverableEmails(arr); }} placeholder="email@example.com" />
             <button onClick={() => s.setDeliverableEmails(s.deliverableEmails.filter((_, j) => j !== i))} className="text-red-500 px-2 min-h-[36px]">×</button>
           </div>
         ))}
@@ -132,10 +202,12 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
   );
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+// ─── UI Primitives ──────────────────────────────────────────────────────────
+
+function Chk({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="flex items-center gap-2 cursor-pointer select-none">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)}
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
         className="w-4 h-4 rounded border-gray-300 text-[#F26B2B] focus:ring-[#F26B2B]/30" />
       <span className="text-sm font-medium text-[#1A1A2E]">{label}</span>
     </label>
@@ -145,9 +217,7 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 function Expand({ open, children }: { open: boolean; children: React.ReactNode }) {
   return (
     <div className={`transition-all duration-200 ease-in-out overflow-hidden ${open ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
-      <div className="pl-6 border-l-2 border-gray-200 mt-2 mb-4">
-        {children}
-      </div>
+      <div className="pl-6 border-l-2 border-gray-200 mt-2 mb-4">{children}</div>
     </div>
   );
 }

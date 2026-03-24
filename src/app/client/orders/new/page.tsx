@@ -233,7 +233,7 @@ export default function ClientNewOrderPage() {
               onPrev={prev}
             />
           )}
-          {step === 4 && <StepAddParties data={parties} onChange={setParties} orderTypeValue={transaction.orderType} onNext={next} onPrev={prev} />}
+          {step === 4 && <StepAddParties data={parties} onChange={setParties} orderTypeValue={transaction.orderType} clientType={clientDetails.clientType} transactionType={transaction.transactionType} onNext={next} onPrev={prev} />}
           {step === 5 && (
             <StepReview
               clientDetails={clientDetails} property={property} seller={seller}

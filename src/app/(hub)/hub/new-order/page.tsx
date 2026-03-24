@@ -34,6 +34,8 @@ export default function HubNewOrderPage() {
       <div className="flex flex-col xl:flex-row gap-6">
         {/* Left: Form (70%) */}
         <div className="xl:w-[70%] min-w-0">
+          <TransactionSection s={s} />
+
           {/* Client Selector */}
           <div className={SECTION}>
             <p className={SH}>
@@ -44,6 +46,7 @@ export default function HubNewOrderPage() {
               selected={s.client}
               onSelect={s.setClient}
               onClear={() => s.setClient(null)}
+              orderType={s.orderType}
             />
             {s.client && (
               <div className="mt-3 px-4 py-3 bg-[#F26B2B]/10 border border-[#F26B2B]/20 rounded-lg">
@@ -54,7 +57,6 @@ export default function HubNewOrderPage() {
           </div>
 
           <PropertySection s={s} />
-          <TransactionSection s={s} />
           <PartiesSection s={s} />
         </div>
 

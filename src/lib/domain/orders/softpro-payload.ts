@@ -1,19 +1,16 @@
 import type { CreateOrderInput } from './create-order';
 
-const SOFTPRO_USER_TYPE_MAP: Record<string, string> = {
-  escrow: 'EscrowCompany',
+const VALID_USER_TYPES = ['EscrowCompany', 'Lender', 'ListingAgentBroker', 'MortgageBroker'] as const;
+
+const USER_TYPE_MAP: Record<string, string> = {
   escrow_company: 'EscrowCompany',
+  escrow: 'EscrowCompany',
   lender: 'Lender',
   mortgage_broker: 'MortgageBroker',
+  agent: 'ListingAgentBroker',
   realtor: 'ListingAgentBroker',
   listing_agent: 'ListingAgentBroker',
-  agent: 'ListingAgentBroker',
 };
-
-function mapClientTypeToSoftPro(clientType?: string | null): string {
-  if (!clientType) return 'EscrowCompany';
-  return SOFTPRO_USER_TYPE_MAP[clientType.toLowerCase()] ?? 'EscrowCompany';
-}
 
 export interface ResolvedContact {
   id: number;
@@ -35,11 +32,51 @@ export interface ResolvedContact {
   zip: string | null;
 }
 
+export interface OpenerCompany {
+  name: string;
+  lookupCode: string;
+  companyType: string | null;
+  isEscrowCompany: boolean;
+  isLender: boolean;
+  isMortgageBroker: boolean;
+  isSellingAgent: boolean;
+  branchCode: string | null;
+}
+
 export interface ResolvedContacts {
   salesRep?: ResolvedContact;
   titleOfficer?: ResolvedContact;
   escrowOfficer?: ResolvedContact;
   opener?: ResolvedContact;
+  openerCompany?: OpenerCompany;
+}
+
+function deriveUserType(
+  company?: OpenerCompany,
+  opener?: ResolvedContact,
+  clientType?: string | null,
+): string {
+  if (company?.isEscrowCompany) return 'EscrowCompany';
+  if (company?.isLender) return 'Lender';
+  if (company?.isSellingAgent) return 'ListingAgentBroker';
+  if (company?.isMortgageBroker) return 'MortgageBroker';
+
+  if (company?.companyType) {
+    const m = USER_TYPE_MAP[company.companyType.toLowerCase()];
+    if (m) return m;
+  }
+
+  if (opener?.softproUserType) {
+    const m = USER_TYPE_MAP[opener.softproUserType.toLowerCase()];
+    if (m) return m;
+  }
+
+  if (clientType) {
+    const m = USER_TYPE_MAP[clientType.toLowerCase()];
+    if (m) return m;
+  }
+
+  return 'EscrowCompany';
 }
 
 export function buildSoftProPayload(
@@ -48,13 +85,17 @@ export function buildSoftProPayload(
   resolved: ResolvedContacts,
 ): Record<string, unknown> {
   const opener = resolved.opener;
+  const company = resolved.openerCompany;
   const salesRep = resolved.salesRep;
   const titleOfficer = resolved.titleOfficer;
   const escrowOfficer = resolved.escrowOfficer;
 
   const salesRepLookup = salesRep?.lookupCode ?? '';
   const titleOfficeLookup = titleOfficer?.lookupCode ?? '';
-  const officeBranchCode = titleOfficer?.officeLookupCode ?? input.transaction.branchCode;
+  const officeBranchCode =
+    company?.branchCode ??
+    titleOfficer?.officeLookupCode ??
+    input.transaction.branchCode;
 
   return {
     baseDetails: {
@@ -65,8 +106,8 @@ export function buildSoftProPayload(
     personalDetails: {
       CompanyLookupCode: opener?.flookupCode ?? '',
       ClientLookupCode: opener?.lookupCode ?? '',
-      UserType: mapClientTypeToSoftPro(input.clientType ?? opener?.softproUserType),
-      CompanyName: opener?.companyName ?? '',
+      UserType: deriveUserType(company, opener, input.clientType),
+      CompanyName: company?.name ?? opener?.companyName ?? '',
       Email: opener?.email ?? '',
       FirstName: opener?.firstName ?? '',
       LastName: opener?.lastName ?? '',

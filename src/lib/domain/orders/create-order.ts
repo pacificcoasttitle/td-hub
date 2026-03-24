@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts } from '@/lib/db/schema';
+import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts, branches } from '@/lib/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { createOrder as softproCreateOrder } from '@/lib/integrations/softpro';
 import { propertyLookup } from '@/lib/integrations/sitex/client';
@@ -283,11 +283,50 @@ async function resolveContactIds(input: CreateOrderInput): Promise<ResolvedConta
     return (!v || isNaN(n)) ? undefined : byId.get(n);
   };
 
-  return {
+  const result: ResolvedContacts = {
     salesRep: get(input.transaction.salesRep),
     titleOfficer: get(input.transaction.titleOfficer),
     escrowOfficer: get(input.transaction.escrowOfficer),
     opener: get(input.onBehalfOfContactId),
   };
+
+  const openerRow = result.opener;
+  if (openerRow?.flookupCode) {
+    try {
+      const [co] = await db.select({
+        name: companies.name,
+        lookupCode: companies.lookupCode,
+        companyType: companies.companyType,
+        isEscrowCompany: companies.isEscrowCompany,
+        isLender: companies.isLender,
+        isMortgageBroker: companies.isMortgageBroker,
+        isSellingAgent: companies.isSellingAgent,
+        branchId: companies.branchId,
+      }).from(companies)
+        .where(eq(companies.lookupCode, openerRow.flookupCode))
+        .limit(1);
+
+      if (co) {
+        let branchCode: string | null = null;
+        if (co.branchId) {
+          const [b] = await db.select({ code: branches.code })
+            .from(branches).where(eq(branches.id, co.branchId)).limit(1);
+          branchCode = b?.code ?? null;
+        }
+        result.openerCompany = {
+          name: co.name,
+          lookupCode: co.lookupCode ?? '',
+          companyType: co.companyType,
+          isEscrowCompany: co.isEscrowCompany,
+          isLender: co.isLender ?? false,
+          isMortgageBroker: co.isMortgageBroker ?? false,
+          isSellingAgent: co.isSellingAgent ?? false,
+          branchCode,
+        };
+      }
+    } catch { /* company resolution failure never blocks order creation */ }
+  }
+
+  return result;
 }
 

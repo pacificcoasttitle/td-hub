@@ -23,9 +23,16 @@ function hasContact(c: { name: string; company: string }): boolean {
 export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
   const hasClient = !!s.client;
   const hasProperty = !!(s.street || s.apn || s.county);
-  const sellerName = personName(s.sellerPrimary);
-  const hasSeller = !!sellerName;
-  const hasTx = !!(s.txType || s.productType || s.salesAmount);
+  const isBorrowerFlow = s.txType === 'Refinance' || s.txType === 'Equity';
+  const primaryPartyName = personName(isBorrowerFlow ? s.borrower : s.sellerPrimary);
+  const secondaryPartyName = personName(isBorrowerFlow ? s.secBorrower : s.sellerSecondary);
+  const hasPrimaryParty = !!primaryPartyName;
+  const salesRepName = s.formOpts?.salesReps?.find((r) => r.value === s.salesRep)?.label ?? s.salesRep;
+  const titleOfficerName = s.formOpts?.titleOfficers?.find((o) => o.value === s.titleOfficer)?.label ?? s.titleOfficer;
+  const hasTx = !!(
+    s.txType || s.productType || s.orderType || s.salesAmount || s.loanAmount || s.loanNumber ||
+    s.coverageAmount || s.escrowNumber || salesRepName || titleOfficerName
+  );
   const parties = buildParties(s);
   const hasParties = parties.length > 0;
   const emails = s.deliverableEmails.filter(Boolean);
@@ -41,8 +48,14 @@ export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
           {hasTx && (
             <>
               {s.txType && <Field label="Type" value={s.txType} />}
+              {s.orderType && <Field label="Order Type" value={s.orderType} />}
               {s.productType && <Field label="Product" value={s.productType} />}
+              {salesRepName && <Field label="Sales Rep" value={salesRepName} />}
+              {titleOfficerName && <Field label="Title Officer" value={titleOfficerName} />}
               {s.salesAmount && fmtCurrency(s.salesAmount) && <Field label="Sales Price" value={fmtCurrency(s.salesAmount)} />}
+              {s.loanAmount && fmtCurrency(s.loanAmount) && <Field label="Loan Amount" value={fmtCurrency(s.loanAmount)} />}
+              {s.coverageAmount && fmtCurrency(s.coverageAmount) && <Field label="Coverage Amount" value={fmtCurrency(s.coverageAmount)} />}
+              {s.loanNumber && <Field label="Loan #" value={s.loanNumber} />}
               {s.escrowNumber && <Field label="Escrow #" value={s.escrowNumber} />}
             </>
           )}
@@ -79,15 +92,23 @@ export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
           )}
         </Section>
 
-        {/* Seller */}
-        <Section filled={hasSeller} label="Seller" placeholder="Seller details will appear here">
-          {hasSeller && (
+        {/* Seller / Borrower */}
+        <Section
+          filled={hasPrimaryParty}
+          label={isBorrowerFlow ? 'Borrower' : 'Seller'}
+          placeholder={`${isBorrowerFlow ? 'Borrower' : 'Seller'} details will appear here`}
+        >
+          {hasPrimaryParty && (
             <>
-              <Field label={s.sellerIsOrg ? 'Organization' : 'Name'} value={sellerName} />
-              {s.sellerIsOrg && s.sellerOrgType && (
+              <Field
+                label={(isBorrowerFlow ? s.borrowerIsOrg : s.sellerIsOrg) ? 'Organization' : 'Name'}
+                value={primaryPartyName}
+              />
+              {secondaryPartyName && <Field label="Secondary" value={secondaryPartyName} />}
+              {(isBorrowerFlow ? s.borrowerIsOrg : s.sellerIsOrg) && (isBorrowerFlow ? s.borrowerOrgType : s.sellerOrgType) && (
                 <div className="mt-1">
                   <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
-                    {s.sellerOrgType}
+                    {isBorrowerFlow ? s.borrowerOrgType : s.sellerOrgType}
                   </span>
                 </div>
               )}

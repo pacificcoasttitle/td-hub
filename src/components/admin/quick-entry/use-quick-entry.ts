@@ -30,6 +30,7 @@ export function useQuickEntry() {
   const [sellerIsOrg, setSellerIsOrg] = useState(false);
   const [sellerOrgType, setSellerOrgType] = useState('');
   const [sellerSiteX, setSellerSiteX] = useState(false);
+  const [borrowerSiteX, setBorrowerSiteX] = useState(false);
 
   const [txType, setTxType] = useState('');
   const [productType, setProductType] = useState('');
@@ -94,10 +95,12 @@ export function useQuickEntry() {
     if (isRefi) {
       if (p.primaryOwner) {
         setBorrower(parseOwnerName(p.primaryOwner));
+        setBorrowerSiteX(true);
       }
       if (p.secondaryOwner) {
         setSecBorrower(parseOwnerName(p.secondaryOwner));
         setHasSecBorrower(true);
+        setBorrowerSiteX(true);
       }
     } else {
       if (p.primaryOwner) {
@@ -264,6 +267,7 @@ export function useQuickEntry() {
     sellerPrimary, setSellerPrimary, sellerSecondary, setSellerSecondary,
     hasSecondarySeller, setHasSecondarySeller,
     sellerIsOrg, setSellerIsOrg, sellerOrgType, setSellerOrgType, sellerSiteX,
+    borrowerSiteX,
     txType, setTxType, productType, setProductType, orderType, setOrderType,
     salesRep, setSalesRep, titleOfficer, setTitleOfficer,
     escrowNumber, setEscrowNumber, salesAmount, setSalesAmount,

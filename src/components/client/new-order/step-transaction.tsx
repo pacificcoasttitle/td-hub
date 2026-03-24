@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { TransactionData, FormOption } from './types';
+import type { SellerData, TransactionData, FormOption } from './types';
 import { IN, SEL, EMPTY, ORG_TYPES, TRANSACTION_TYPES } from './types';
 import { SH, FL, Nav, CurrInput, PF } from './shared';
+import { SellerFieldsForm } from './step-seller';
 
 interface FetchedOptions {
   productTypes: FormOption[];
@@ -12,9 +13,11 @@ interface FetchedOptions {
   titleOfficers: FormOption[];
 }
 
-export function StepTransaction({ data, onChange, onNext, onPrev }: {
+export function StepTransaction({ data, onChange, seller, onSellerChange, onNext, onPrev }: {
   data: TransactionData;
   onChange: (d: TransactionData) => void;
+  seller: SellerData;
+  onSellerChange: (d: SellerData) => void;
   onNext: () => void;
   onPrev: () => void;
 }) {
@@ -39,10 +42,11 @@ export function StepTransaction({ data, onChange, onNext, onPrev }: {
 
   const isPurchase = data.transactionType === 'Purchase';
   const isRefi = data.transactionType === 'Refinance';
+  const isRefiLike = isRefi || data.transactionType === 'Equity';
 
   return (
     <div className="p-5 sm:p-6">
-      <SH title="Transaction Details" sub="Enter financial and transaction information." />
+      <SH title="Transaction Details" sub="Financials, transaction type, and — for purchase — sellers; for refinance or equity — borrowers (often pre-filled from property records)." />
 
       <div className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -117,39 +121,9 @@ export function StepTransaction({ data, onChange, onNext, onPrev }: {
         {isPurchase && (
           <>
             <div><FL>Sales Amount</FL><CurrInput value={data.salesAmount} onChange={(v) => onChange({ ...data, salesAmount: v })} /></div>
-            <div className="border-t border-gray-100 pt-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-3">Primary Borrower</p>
-              <PF person={data.primaryBorrower} onChange={(f, v) => onChange({ ...data, primaryBorrower: { ...data.primaryBorrower, [f]: v } })} />
-              {!data.hasSecondaryBorrower ? (
-                <button
-                  onClick={() => onChange({ ...data, hasSecondaryBorrower: true })}
-                  className="mt-2 text-sm font-medium text-[#1B2A4A] min-h-[44px] flex items-center gap-1"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                  Add secondary borrower
-                </button>
-              ) : (
-                <div className="mt-3 pl-3 border-l-2 border-gray-100">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs text-[#6B7280]">Secondary Borrower</p>
-                    <button onClick={() => onChange({ ...data, hasSecondaryBorrower: false, secondaryBorrower: { ...EMPTY } })} className="text-xs text-red-500 min-h-[44px]">Remove</button>
-                  </div>
-                  <PF person={data.secondaryBorrower} onChange={(f, v) => onChange({ ...data, secondaryBorrower: { ...data.secondaryBorrower, [f]: v } })} />
-                </div>
-              )}
-              <label className="flex items-center gap-2 mt-3 min-h-[44px]">
-                <input type="checkbox" checked={data.borrowerIsOrg} onChange={(e) => onChange({ ...data, borrowerIsOrg: e.target.checked })} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4 focus:ring-[#F26B2B]/40" />
-                <span className="text-xs text-[#6B7280]">Borrower is an organization</span>
-              </label>
-              {data.borrowerIsOrg && (
-                <div className="mt-2">
-                  <FL>Organization Type</FL>
-                  <select value={data.borrowerOrgType} onChange={(e) => onChange({ ...data, borrowerOrgType: e.target.value })} className={SEL}>
-                    <option value="">Select…</option>
-                    {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-              )}
+            <div className="border-t border-gray-100 pt-4 mt-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-3">Sellers (from property records)</p>
+              <SellerFieldsForm data={seller} onChange={onSellerChange} />
             </div>
           </>
         )}
@@ -161,14 +135,64 @@ export function StepTransaction({ data, onChange, onNext, onPrev }: {
               <div><FL>Loan Amount</FL><CurrInput value={data.loanAmount} onChange={(v) => onChange({ ...data, loanAmount: v })} /></div>
             </div>
             <div><FL>Coverage Amount</FL><CurrInput value={data.coverageAmount} onChange={(v) => onChange({ ...data, coverageAmount: v })} /></div>
-            <div className="border-t border-gray-100 pt-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-3">Primary Borrower</p>
-              <PF person={data.primaryBorrower} onChange={(f, v) => onChange({ ...data, primaryBorrower: { ...data.primaryBorrower, [f]: v } })} />
-            </div>
           </>
         )}
 
-        {!isPurchase && !isRefi && data.transactionType && (
+        {data.transactionType === 'Equity' && (
+          <>
+            <div><FL>Loan Number</FL><input className={IN} value={data.loanNumber} onChange={(e) => onChange({ ...data, loanNumber: e.target.value })} /></div>
+            <div><FL>Coverage Amount</FL><CurrInput value={data.coverageAmount} onChange={(v) => onChange({ ...data, coverageAmount: v })} /></div>
+          </>
+        )}
+
+        {isRefiLike && (
+          <div className="border-t border-gray-100 pt-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-3">Borrowers (from property records)</p>
+            {seller.siteXFilled && (
+              <div className="flex items-center gap-2 px-4 py-2.5 bg-green-50 border border-green-200 rounded-lg mb-4">
+                <svg className="h-4 w-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+                <p className="text-sm text-green-700 font-medium">Auto-filled from property records</p>
+              </div>
+            )}
+            <p className="text-xs text-[#6B7280] mb-2">Primary borrower</p>
+            <PF person={data.primaryBorrower} onChange={(f, v) => onChange({ ...data, primaryBorrower: { ...data.primaryBorrower, [f]: v } })} />
+            {!data.hasSecondaryBorrower ? (
+              <button
+                type="button"
+                onClick={() => onChange({ ...data, hasSecondaryBorrower: true })}
+                className="mt-2 text-sm font-medium text-[#1B2A4A] min-h-[44px] flex items-center gap-1"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                Add secondary borrower
+              </button>
+            ) : (
+              <div className="mt-3 pl-3 border-l-2 border-gray-100">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-[#6B7280]">Secondary borrower</p>
+                  <button type="button" onClick={() => onChange({ ...data, hasSecondaryBorrower: false, secondaryBorrower: { ...EMPTY } })} className="text-xs text-red-500 min-h-[44px]">Remove</button>
+                </div>
+                <PF person={data.secondaryBorrower} onChange={(f, v) => onChange({ ...data, secondaryBorrower: { ...data.secondaryBorrower, [f]: v } })} />
+              </div>
+            )}
+            <label className="flex items-center gap-2 mt-3 min-h-[44px]">
+              <input type="checkbox" checked={data.borrowerIsOrg} onChange={(e) => onChange({ ...data, borrowerIsOrg: e.target.checked })} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4 focus:ring-[#F26B2B]/40" />
+              <span className="text-xs text-[#6B7280]">Borrower is an organization</span>
+            </label>
+            {data.borrowerIsOrg && (
+              <div className="mt-2">
+                <FL>Organization Type</FL>
+                <select value={data.borrowerOrgType} onChange={(e) => onChange({ ...data, borrowerOrgType: e.target.value })} className={SEL}>
+                  <option value="">Select…</option>
+                  {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!isPurchase && !isRefiLike && data.transactionType === 'Other' && (
           <div><FL>Coverage Amount</FL><CurrInput value={data.coverageAmount} onChange={(v) => onChange({ ...data, coverageAmount: v })} /></div>
         )}
       </div>

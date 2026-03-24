@@ -27,6 +27,8 @@ export function StepReview({ clientDetails, property, seller, transaction, parti
   const pc = (c: PartyContact) => c.name || c.company || '—';
   const ctLabel = CLIENT_TYPES.find((ct) => ct.value === clientDetails.clientType)?.label ?? clientDetails.clientType;
   const ttLabel = TRANSACTION_TYPES.find((t) => t.value === transaction.transactionType)?.label ?? transaction.transactionType;
+  const isPurchase = transaction.transactionType === 'Purchase';
+  const isRefiLike = transaction.transactionType === 'Refinance' || transaction.transactionType === 'Equity';
 
   function handleFiles(newFiles: FileList | null) {
     if (!newFiles) return;
@@ -102,20 +104,29 @@ export function StepReview({ clientDetails, property, seller, transaction, parti
           <RF l="APN" v={property.apn || '—'} />
         </RS>
 
-        <RS title="Seller" onEdit={() => onGoTo(3)}>
-          <RF l="Primary" v={fp(seller.primary)} />
-          {seller.hasSecondary && <RF l="Secondary" v={fp(seller.secondary)} />}
-        </RS>
-
-        <RS title="Transaction" onEdit={() => onGoTo(4)}>
+        <RS title="Transaction" onEdit={() => onGoTo(3)}>
           <RF l="Type" v={ttLabel || '—'} />
           {transaction.salesAmount && <RF l="Sales Amount" v={`$${transaction.salesAmount}`} />}
           {transaction.loanAmount && <RF l="Loan Amount" v={`$${transaction.loanAmount}`} />}
+          {transaction.coverageAmount && <RF l="Coverage Amount" v={`$${transaction.coverageAmount}`} />}
+          {transaction.loanNumber && <RF l="Loan Number" v={transaction.loanNumber} />}
           {transaction.salesRep && <RF l="Sales Rep" v={transaction.salesRep} />}
           {transaction.titleOfficer && <RF l="Title Officer" v={transaction.titleOfficer} />}
+          {isPurchase && (
+            <>
+              <RF l="Primary seller" v={fp(seller.primary)} />
+              {seller.hasSecondary && <RF l="Secondary seller" v={fp(seller.secondary)} />}
+            </>
+          )}
+          {isRefiLike && (
+            <>
+              <RF l="Primary borrower" v={fp(transaction.primaryBorrower)} />
+              {transaction.hasSecondaryBorrower && <RF l="Secondary borrower" v={fp(transaction.secondaryBorrower)} />}
+            </>
+          )}
         </RS>
 
-        <RS title="Parties" onEdit={() => onGoTo(5)}>
+        <RS title="Parties" onEdit={() => onGoTo(4)}>
           {parties.showAgents && <RF l="Buyer Agent" v={pc(parties.buyerAgent)} />}
           {parties.showAgents && <RF l="Listing Agent" v={pc(parties.listingAgent)} />}
           {parties.showLender && <RF l="Lender" v={pc(parties.lender)} />}

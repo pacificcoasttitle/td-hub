@@ -1,10 +1,13 @@
 export const CARD = 'bg-white border border-gray-200 rounded-xl shadow-sm';
 
-export const STEPS = ['client', 'property', 'seller', 'transaction', 'parties', 'submit'] as const;
+export const STEPS = ['client', 'property', 'transaction', 'parties', 'submit'] as const;
 export type Step = (typeof STEPS)[number];
 export const STEP_LABELS: Record<Step, string> = {
-  client: 'Client', property: 'Property', seller: 'Seller',
-  transaction: 'Transaction', parties: 'Parties & Deliverables', submit: 'Review & Submit',
+  client: 'Client',
+  property: 'Property',
+  transaction: 'Transaction',
+  parties: 'Parties & Deliverables',
+  submit: 'Review & Submit',
 };
 
 export const PARTY_MATRIX: Record<string, string[]> = {

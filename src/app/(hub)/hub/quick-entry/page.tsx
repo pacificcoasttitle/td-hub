@@ -5,9 +5,9 @@ import { useRouter } from 'next/navigation';
 import { PropertyConfirmModal } from '@/components/shared/property-confirm-modal';
 import { useQuickEntry } from '@/components/admin/quick-entry/use-quick-entry';
 import { STEPS, STEP_LABELS, CARD, PARTY_MATRIX, type UploadFile } from '@/components/hub/quick-entry/constants';
-import { Reveal, SectionShell, SkipLink, Spinner, PersonIcon, MapIcon, UsersIcon, CalcIcon, GroupIcon } from '@/components/hub/quick-entry/shared';
+import { Reveal, SectionShell, SkipLink, Spinner, PersonIcon, MapIcon, CalcIcon, GroupIcon } from '@/components/hub/quick-entry/shared';
 import { ClientSearch } from '@/components/hub/quick-entry/client-search';
-import { PropertySearch, SellerFields, TransactionFields } from '@/components/hub/quick-entry/form-sections';
+import { PropertySearch, TransactionFields } from '@/components/hub/quick-entry/form-sections';
 import { PartiesFields, DeliverableEmails, DocumentUpload } from '@/components/hub/quick-entry/parties-section';
 
 export default function QuickEntryPage() {
@@ -22,8 +22,7 @@ export default function QuickEntryPage() {
 
   useEffect(() => { if (s.client && revealed < 1) unlock(1); }, [s.client, revealed, unlock]);
   useEffect(() => { if (s.street && revealed < 2) unlock(2); }, [s.street, revealed, unlock]);
-  useEffect(() => { if ((s.sellerPrimary.firstName || s.sellerPrimary.lastName) && revealed < 3) unlock(3); }, [s.sellerPrimary, revealed, unlock]);
-  useEffect(() => { if (s.txType && revealed < 4) unlock(4); }, [s.txType, revealed, unlock]);
+  useEffect(() => { if (s.txType && revealed < 3) unlock(3); }, [s.txType, revealed, unlock]);
 
   useEffect(() => {
     if (!s.client?.contactType) return;
@@ -100,30 +99,24 @@ export default function QuickEntryPage() {
           </SectionShell>
         </Reveal>
 
-        <Reveal id="step-seller" open={revealed >= 2}>
-          <SectionShell icon={<UsersIcon />} title="Seller" step={3}>
-            <SellerFields s={s} />
-            <SkipLink show={revealed < 3 && !(s.sellerPrimary.firstName || s.sellerPrimary.lastName)} onClick={() => skip(3)} />
-          </SectionShell>
-        </Reveal>
-
-        <Reveal id="step-transaction" open={revealed >= 3}>
-          <SectionShell icon={<CalcIcon />} title="Transaction" step={4}>
+        <Reveal id="step-transaction" open={revealed >= 2}>
+          <SectionShell icon={<CalcIcon />} title="Transaction" step={3}>
+            <p className="text-xs text-[#6B7280] mb-3">Choose transaction type first — sellers (purchase) or borrowers (refinance / equity) appear below.</p>
             <TransactionFields s={s} />
-            <SkipLink show={revealed < 4 && !s.txType} onClick={() => skip(4)} />
+            <SkipLink show={revealed < 3 && !s.txType} onClick={() => skip(3)} />
           </SectionShell>
         </Reveal>
 
-        <Reveal id="step-parties" open={revealed >= 4}>
-          <SectionShell icon={<GroupIcon />} title="Parties & Deliverables" step={5}>
+        <Reveal id="step-parties" open={revealed >= 3}>
+          <SectionShell icon={<GroupIcon />} title="Parties & Deliverables" step={4}>
             <PartiesFields s={s} checks={partyChecks} setChecks={setPartyChecks} />
             <div className="border-t border-gray-100 pt-4 mt-4"><DeliverableEmails s={s} /></div>
             <div className="border-t border-gray-100 pt-4 mt-4"><DocumentUpload uploads={uploads} setUploads={setUploads} /></div>
-            <SkipLink show={revealed < 5} onClick={() => skip(5)} />
+            <SkipLink show={revealed < 4} onClick={() => skip(4)} />
           </SectionShell>
         </Reveal>
 
-        <Reveal id="step-submit" open={revealed >= 5}>
+        <Reveal id="step-submit" open={revealed >= 4}>
           <div className={`${CARD} p-6`}>
             {s.result?.type === 'error' && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{s.result.message}</div>}
             <button onClick={s.handleSubmit} disabled={s.submitting}

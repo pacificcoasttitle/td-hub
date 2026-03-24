@@ -4,11 +4,9 @@ import type { SellerData } from './types';
 import { EMPTY, ORG_TYPES, SEL } from './types';
 import { SH, FL, Nav, PF } from './shared';
 
-export function StepSeller({ data, onChange, onNext, onPrev }: {
+export function SellerFieldsForm({ data, onChange }: {
   data: SellerData;
   onChange: (d: SellerData) => void;
-  onNext: () => void;
-  onPrev: () => void;
 }) {
   const upPrimary = (f: string, v: string) =>
     onChange({ ...data, primary: { ...data.primary, [f]: v } });
@@ -16,9 +14,7 @@ export function StepSeller({ data, onChange, onNext, onPrev }: {
     onChange({ ...data, secondary: { ...data.secondary, [f]: v } });
 
   return (
-    <div className="p-5 sm:p-6">
-      <SH title="Seller Details" sub="Enter the property seller information." />
-
+    <>
       {data.siteXFilled && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-green-50 border border-green-200 rounded-lg mb-5">
           <svg className="h-4 w-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -59,6 +55,7 @@ export function StepSeller({ data, onChange, onNext, onPrev }: {
 
       {!data.hasSecondary ? (
         <button
+          type="button"
           onClick={() => onChange({ ...data, hasSecondary: true })}
           className="text-sm font-medium text-[#1B2A4A] min-h-[44px] flex items-center gap-1"
         >
@@ -72,6 +69,7 @@ export function StepSeller({ data, onChange, onNext, onPrev }: {
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Secondary Seller</p>
             <button
+              type="button"
               onClick={() => onChange({ ...data, hasSecondary: false, secondary: { ...EMPTY } })}
               className="text-xs text-red-500 min-h-[44px]"
             >
@@ -81,7 +79,20 @@ export function StepSeller({ data, onChange, onNext, onPrev }: {
           <PF person={data.secondary} onChange={upSecondary} />
         </div>
       )}
+    </>
+  );
+}
 
+export function StepSeller({ data, onChange, onNext, onPrev }: {
+  data: SellerData;
+  onChange: (d: SellerData) => void;
+  onNext: () => void;
+  onPrev: () => void;
+}) {
+  return (
+    <div className="p-5 sm:p-6">
+      <SH title="Seller Details" sub="Enter the property seller information." />
+      <SellerFieldsForm data={data} onChange={onChange} />
       <Nav onPrev={onPrev} onNext={onNext} />
     </div>
   );

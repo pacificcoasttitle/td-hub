@@ -1,12 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Step, ClientDetails, PropertyData, SellerData, TransactionData, PartiesData, Profile } from '@/components/client/new-order';
 import { EMPTY, STEPS, EMPTY_PARTY } from '@/components/client/new-order';
 import { StepDetails } from '@/components/client/new-order/step-details';
 import { StepProperty } from '@/components/client/new-order/step-property';
-import { StepSeller } from '@/components/client/new-order/step-seller';
 import { StepTransaction } from '@/components/client/new-order/step-transaction';
 import { StepAddParties } from '@/components/client/new-order/step-add-parties';
 import { StepReview } from '@/components/client/new-order/step-review';
@@ -45,13 +44,31 @@ export default function ClientNewOrderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ type: 'success' | 'error'; message: string; orderId?: number } | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const prevTxType = useRef<string>('');
 
   useEffect(() => {
     fetch('/api/client/profile').then((r) => r.ok ? r.json() : null).then((d) => setProfile(d)).catch(() => {});
   }, []);
 
-  function next() { if (step < 6) setStep((step + 1) as Step); }
+  function next() { if (step < 5) setStep((step + 1) as Step); }
   function prev() { if (step > 1) setStep((step - 1) as Step); }
+
+  useEffect(() => {
+    const now = transaction.transactionType;
+    const prev = prevTxType.current;
+    prevTxType.current = now;
+    const nowRefi = now === 'Refinance' || now === 'Equity';
+    const wasRefi = prev === 'Refinance' || prev === 'Equity';
+    if (!nowRefi || wasRefi || !seller.siteXFilled) return;
+    setTransaction((t) => ({
+      ...t,
+      primaryBorrower: { ...seller.primary },
+      secondaryBorrower: { ...seller.secondary },
+      hasSecondaryBorrower: seller.hasSecondary,
+      borrowerIsOrg: seller.isOrg,
+      borrowerOrgType: seller.orgType,
+    }));
+  }, [transaction.transactionType, seller.siteXFilled, seller.primary, seller.secondary, seller.hasSecondary, seller.isOrg, seller.orgType]);
 
   function handleSiteXResult(siteX: SiteXPropertyResult) {
     if (siteX.primaryOwner) {
@@ -206,10 +223,18 @@ export default function ClientNewOrderPage() {
         <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm">
           {step === 1 && <StepDetails profile={profile} data={clientDetails} onChange={setClientDetails} onNext={next} />}
           {step === 2 && <StepProperty data={property} onChange={setProperty} onSiteXResult={handleSiteXResult} onNext={next} onPrev={prev} />}
-          {step === 3 && <StepSeller data={seller} onChange={setSeller} onNext={next} onPrev={prev} />}
-          {step === 4 && <StepTransaction data={transaction} onChange={setTransaction} onNext={next} onPrev={prev} />}
-          {step === 5 && <StepAddParties data={parties} onChange={setParties} orderTypeValue={transaction.orderType} onNext={next} onPrev={prev} />}
-          {step === 6 && (
+          {step === 3 && (
+            <StepTransaction
+              data={transaction}
+              onChange={setTransaction}
+              seller={seller}
+              onSellerChange={setSeller}
+              onNext={next}
+              onPrev={prev}
+            />
+          )}
+          {step === 4 && <StepAddParties data={parties} onChange={setParties} orderTypeValue={transaction.orderType} onNext={next} onPrev={prev} />}
+          {step === 5 && (
             <StepReview
               clientDetails={clientDetails} property={property} seller={seller}
               transaction={transaction} parties={parties}

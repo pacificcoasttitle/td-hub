@@ -7,7 +7,7 @@ import { OrderSummaryPanel } from '@/components/admin/OrderSummaryPanel';
 import { SECTION, SH } from '@/components/admin/quick-entry/types';
 import { useQuickEntry } from '@/components/admin/quick-entry/use-quick-entry';
 import {
-  PropertySection, SellerSection, TransactionSection, PartiesSection,
+  PropertySection, TransactionSection, PartiesSection,
 } from '@/components/admin/quick-entry/sections';
 
 export default function HubNewOrderPage() {
@@ -54,7 +54,6 @@ export default function HubNewOrderPage() {
           </div>
 
           <PropertySection s={s} />
-          <SellerSection s={s} />
           <TransactionSection s={s} />
           <PartiesSection s={s} />
         </div>

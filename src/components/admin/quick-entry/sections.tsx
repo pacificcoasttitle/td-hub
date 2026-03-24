@@ -73,48 +73,6 @@ export function PropertySection({ s }: { s: QuickEntryState }) {
   );
 }
 
-// ─── Seller ─────────────────────────────────────────────────────────────────
-
-export function SellerSection({ s }: { s: QuickEntryState }) {
-  return (
-    <div className={SECTION}>
-      <p className={SH}>
-        <svg className="h-5 w-5 text-[#F26B2B]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-        Seller
-      </p>
-      {s.sellerSiteX && (
-        <div className="flex items-center gap-1 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg mb-3">
-          <svg className="h-3.5 w-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
-          <p className="text-xs text-green-700 font-medium">Auto-filled from property records</p>
-        </div>
-      )}
-      <div className="flex items-center gap-3 mb-3">
-        <label className="flex items-center gap-2 text-xs text-[#6B7280]">
-          <input type="checkbox" checked={s.sellerIsOrg} onChange={(e) => s.setSellerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4" /> Organization
-        </label>
-        {s.sellerIsOrg && (
-          <select value={s.sellerOrgType} onChange={(e) => s.setSellerOrgType(e.target.value)} className="h-9 px-2 border border-gray-200 rounded-lg text-xs">
-            <option value="">Type…</option>
-            {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-        )}
-      </div>
-      <PersonFields person={s.sellerPrimary} onChange={s.setSellerPrimary} label="Primary Seller" />
-      {!s.hasSecondarySeller ? (
-        <button onClick={() => s.setHasSecondarySeller(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary seller</button>
-      ) : (
-        <>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[#6B7280]">Secondary Seller</span>
-            <button onClick={() => { s.setHasSecondarySeller(false); s.setSellerSecondary({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button>
-          </div>
-          <PersonFields person={s.sellerSecondary} onChange={s.setSellerSecondary} label="" />
-        </>
-      )}
-    </div>
-  );
-}
-
 // ─── Transaction ────────────────────────────────────────────────────────────
 
 function CurrencyInput({ value, onChange, placeholder = '0.00' }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
@@ -129,6 +87,7 @@ function CurrencyInput({ value, onChange, placeholder = '0.00' }: { value: strin
 export function TransactionSection({ s }: { s: QuickEntryState }) {
   const isPurchase = s.txType === 'Purchase';
   const isRefi = s.txType === 'Refinance';
+  const isRefiLike = isRefi || s.txType === 'Equity';
   const showFinancials = isPurchase || isRefi;
 
   function handleLoanAmountChange(raw: string) {
@@ -231,15 +190,57 @@ export function TransactionSection({ s }: { s: QuickEntryState }) {
         <div className="mb-3"><label className={FL}>Coverage Amount</label><CurrencyInput value={s.coverageAmount} onChange={(v) => s.setCoverageAmount(v)} /></div>
       )}
 
-      {/* Borrower fields: Purchase only */}
+      {/* Owners / borrowers — same SiteX source; visibility follows transaction type */}
       {isPurchase && (
-        <div className="border-t border-gray-100 pt-3">
-          <PersonFields person={s.borrower} onChange={s.setBorrower} label="Primary Borrower" />
-          {!s.hasSecBorrower ? (
-            <button onClick={() => s.setHasSecBorrower(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary borrower</button>
+        <div className="border-t border-gray-200 pt-4 mt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-3">Sellers (from property records)</p>
+          {s.sellerSiteX && (
+            <div className="flex items-center gap-1 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg mb-3">
+              <svg className="h-3.5 w-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+              <p className="text-xs text-green-700 font-medium">Auto-filled from property records</p>
+            </div>
+          )}
+          <div className="flex items-center gap-3 mb-3">
+            <label className="flex items-center gap-2 text-xs text-[#6B7280]">
+              <input type="checkbox" checked={s.sellerIsOrg} onChange={(e) => s.setSellerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4" /> Organization
+            </label>
+            {s.sellerIsOrg && (
+              <select value={s.sellerOrgType} onChange={(e) => s.setSellerOrgType(e.target.value)} className="h-9 px-2 border border-gray-200 rounded-lg text-xs">
+                <option value="">Type…</option>
+                {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            )}
+          </div>
+          <PersonFields person={s.sellerPrimary} onChange={s.setSellerPrimary} label="Primary seller" />
+          {!s.hasSecondarySeller ? (
+            <button type="button" onClick={() => s.setHasSecondarySeller(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary seller</button>
           ) : (
             <>
-              <div className="flex items-center justify-between"><span className="text-xs text-[#6B7280]">Secondary Borrower</span><button onClick={() => { s.setHasSecBorrower(false); s.setSecBorrower({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button></div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-[#6B7280]">Secondary seller</span>
+                <button type="button" onClick={() => { s.setHasSecondarySeller(false); s.setSellerSecondary({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button>
+              </div>
+              <PersonFields person={s.sellerSecondary} onChange={s.setSellerSecondary} label="" />
+            </>
+          )}
+        </div>
+      )}
+
+      {isRefiLike && (
+        <div className="border-t border-gray-200 pt-4 mt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-3">Borrowers (from property records)</p>
+          {s.borrowerSiteX && (
+            <div className="flex items-center gap-1 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg mb-3">
+              <svg className="h-3.5 w-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+              <p className="text-xs text-green-700 font-medium">Auto-filled from property records</p>
+            </div>
+          )}
+          <PersonFields person={s.borrower} onChange={s.setBorrower} label="Primary borrower" />
+          {!s.hasSecBorrower ? (
+            <button type="button" onClick={() => s.setHasSecBorrower(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary borrower</button>
+          ) : (
+            <>
+              <div className="flex items-center justify-between"><span className="text-xs text-[#6B7280]">Secondary borrower</span><button type="button" onClick={() => { s.setHasSecBorrower(false); s.setSecBorrower({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button></div>
               <PersonFields person={s.secBorrower} onChange={s.setSecBorrower} label="" />
             </>
           )}

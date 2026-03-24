@@ -1,4 +1,4 @@
-export type Step = 1 | 2 | 3 | 4 | 5 | 6;
+export type Step = 1 | 2 | 3 | 4 | 5;
 
 export interface Person { firstName: string; middleName: string; lastName: string; }
 export interface Contact { id: number; fullName: string | null; companyName: string | null; email: string | null; phone: string | null; }
@@ -9,10 +9,9 @@ export const EMPTY: Person = { firstName: '', middleName: '', lastName: '' };
 export const STEPS = [
   { n: 1 as Step, label: 'Your Details' },
   { n: 2 as Step, label: 'Property' },
-  { n: 3 as Step, label: 'Seller' },
-  { n: 4 as Step, label: 'Transaction' },
-  { n: 5 as Step, label: 'Parties' },
-  { n: 6 as Step, label: 'Review' },
+  { n: 3 as Step, label: 'Transaction' },
+  { n: 4 as Step, label: 'Parties' },
+  { n: 5 as Step, label: 'Review' },
 ];
 
 export const ORDER_TYPES = [

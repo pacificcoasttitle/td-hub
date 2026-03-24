@@ -89,14 +89,26 @@ export function useQuickEntry() {
   }
 
   function fillOwners(p: SiteXPropertyResult) {
-    if (p.primaryOwner) {
-      setSellerPrimary(parseOwnerName(p.primaryOwner));
-      setSellerSiteX(true);
-    }
-    if (p.secondaryOwner) {
-      setSellerSecondary(parseOwnerName(p.secondaryOwner));
-      setHasSecondarySeller(true);
-      setSellerSiteX(true);
+    const isRefi = txType === 'Refinance' || txType === 'Equity';
+
+    if (isRefi) {
+      if (p.primaryOwner) {
+        setBorrower(parseOwnerName(p.primaryOwner));
+      }
+      if (p.secondaryOwner) {
+        setSecBorrower(parseOwnerName(p.secondaryOwner));
+        setHasSecBorrower(true);
+      }
+    } else {
+      if (p.primaryOwner) {
+        setSellerPrimary(parseOwnerName(p.primaryOwner));
+        setSellerSiteX(true);
+      }
+      if (p.secondaryOwner) {
+        setSellerSecondary(parseOwnerName(p.secondaryOwner));
+        setHasSecondarySeller(true);
+        setSellerSiteX(true);
+      }
     }
   }
 

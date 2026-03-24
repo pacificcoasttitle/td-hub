@@ -159,33 +159,50 @@ export function buildSoftProPayload(
       SecondaryBorrowerFirstName: input.buyer.secondaryFirstName ?? '',
       SecondaryBorrowerMiddleName: input.buyer.secondaryMiddleName ?? '',
       SecondaryBorrowerLastName: input.buyer.secondaryLastName ?? '',
-      IsOrganization: input.buyer.isOrganization,
+      IsOrganization: String(input.buyer.isOrganization),
       OrganizationType: input.buyer.organizationType ?? '',
       LookUpCodeEscrowOfficer: escrowOfficer?.lookupCode ?? null,
       EscrowOfficerName: escrowOfficer?.officerName ?? escrowOfficer?.fullName ?? null,
     },
-    buyersAgentDetails: mapContactSection(input.contacts?.buyerAgent),
-    listingAgentDetails: mapContactSection(input.contacts?.listingAgent),
-    escrowDetails: mapContactSection(input.contacts?.escrowCompany),
-    lenderDetails: mapContactSection(input.contacts?.lender),
-    mortgageDetails: mapContactSection(input.contacts?.mortgageBroker),
+    ...(hasContactData(input.contacts?.buyerAgent) && {
+      buyersAgentDetails: mapContactSection(input.contacts!.buyerAgent!),
+    }),
+    ...(hasContactData(input.contacts?.listingAgent) && {
+      listingAgentDetails: mapContactSection(input.contacts!.listingAgent!),
+    }),
+    ...(hasContactData(input.contacts?.escrowCompany) && {
+      escrowDetails: mapContactSection(input.contacts!.escrowCompany!),
+    }),
+    ...(hasContactData(input.contacts?.lender) && {
+      lenderDetails: mapContactSection(input.contacts!.lender!),
+    }),
+    ...(hasContactData(input.contacts?.mortgageBroker) && {
+      mortgageDetails: mapContactSection(input.contacts!.mortgageBroker!),
+    }),
   };
 }
 
-function mapContactSection(c?: {
+interface ContactInput {
   companyLookupCode?: string;
   clientLookupCode?: string;
   name?: string;
   email?: string;
   phone?: string;
   companyName?: string;
-}): Record<string, string> {
+}
+
+function hasContactData(c?: ContactInput): boolean {
+  if (!c) return false;
+  return !!(c.companyLookupCode || c.clientLookupCode || c.email || c.companyName);
+}
+
+function mapContactSection(c: ContactInput): Record<string, string> {
   return {
-    CompanyLookUpCode: c?.companyLookupCode ?? '',
-    ClientLookUpCode: c?.clientLookupCode ?? '',
-    Name: c?.name ?? '',
-    Email: c?.email ?? '',
-    Telephone: c?.phone ?? '',
-    CompanyName: c?.companyName ?? '',
+    CompanyLookUpCode: c.companyLookupCode ?? '',
+    ClientLookUpCode: c.clientLookupCode ?? '',
+    Name: c.name ?? '',
+    Email: c.email ?? '',
+    Telephone: c.phone ?? '',
+    CompanyName: c.companyName ?? '',
   };
 }

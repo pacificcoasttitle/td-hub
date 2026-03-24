@@ -19,13 +19,14 @@ export function partyVisibility(ct: string | null | undefined, ot: string, tt: s
 
   const isListingSelling = ['listing agent', 'selling agent'].includes(c);
   const isEscrowClient = ['escrow company', 'escrow officer', 'escrow'].includes(c);
+  const isRefiLike = t === 'refinance' || t === 'equity';
 
   const extEscrow = ['title only', 'title_only', 'sub escrow', 'sub_escrow', ''].includes(o);
   const intEscrow = ['title & escrow', 'title_escrow', 'escrow only', 'escrow_only'].includes(o);
 
   return {
-    buyerAgent: !['agent', 'listing agent', 'selling agent'].includes(c),
-    listingAgent: !isListingSelling,
+    buyerAgent: !['agent', 'listing agent', 'selling agent'].includes(c) && !isRefiLike,
+    listingAgent: !isListingSelling && !isRefiLike,
     lender: c !== 'lender',
     mortgageBroker: c !== 'mortgage broker',
     escrowCompany: extEscrow && !isEscrowClient,

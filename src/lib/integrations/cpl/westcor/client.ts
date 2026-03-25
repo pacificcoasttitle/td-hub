@@ -11,7 +11,7 @@ import { and, eq, gt } from 'drizzle-orm';
 import { getToken, cachedGroups, mapGroupsToBranches } from './auth';
 import type { WestcorGroup } from './auth';
 import {
-  createOrUpdateOrder, prepareAddCpl, generateCplPdf, selectCplForm,
+  createOrUpdateOrder, getOrder, prepareAddCpl, generateCplPdf, selectCplForm,
 } from './payloads';
 import type { WestcorBranchInfo } from './payloads';
 
@@ -101,15 +101,22 @@ export const westcorAdapter: CplAdapter = {
         zip: branchRow?.zip ?? '',
       };
 
+      // Step A: Create order in Westcor (legacy: POST Order/Update)
       await logRequest({ operation: 'create_order', orderId: input.orderId, requestId, startedAt: new Date(), success: true, meta: { step: 'start', branchCode: branch.branchCode } });
       const { westcorOrderId, orderResponse } = await createOrUpdateOrder(cfg, token, orderDetail, input, branch);
 
-      const westcorLenderId = orderResponse.lenders?.[0]?.Id ?? orderResponse.lenders?.[0]?.NameID ?? 0;
+      // Step B: GET the full order from Westcor (legacy: GET Order/{tvid}/{partner})
+      const westcorOrder = await getOrder(cfg, token, westcorOrderId);
 
-      const forms = await prepareAddCpl(cfg, token, westcorOrderId);
+      // Step C: PrepareAddCPL — returns forms + CPL template (legacy: $resCPL['CPL'])
+      const { forms, cplTemplate } = await prepareAddCpl(cfg, token, westcorOrderId);
       const form = selectCplForm(forms, input.cplMode ?? 'single');
 
-      const { pdf, cplId } = await generateCplPdf(cfg, token, westcorOrderId, form, orderDetail, input, branch, westcorLenderId);
+      // Step D: Generate CPL — merge GET order + CPL template + our data (legacy flow)
+      const { pdf, cplId } = await generateCplPdf(
+        cfg, token, westcorOrder, cplTemplate, form.name,
+        orderDetail, input, branch, orderResponse,
+      );
 
       const durationMs = Date.now() - start;
       await logRequest({

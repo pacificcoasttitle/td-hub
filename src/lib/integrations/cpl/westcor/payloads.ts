@@ -15,21 +15,26 @@ export interface WestcorBranchInfo {
   zip: string;
 }
 
-// ─── Westcor response shape (from Order/Update) ────────────────────────────
+// ─── Westcor response shape (from Order/Update Step A) ──────────────────────
 
 export interface WestcorOrderResponse {
   tvid?: number;
   agentnumber?: string;
-  agent_file_number?: string;
-  partnerCode?: number;
-  buyers?: Array<{ NameID?: number; First?: string; Last?: string }>;
-  sellers?: Array<{ NameID?: number; First?: string; Last?: string }>;
-  lenders?: Array<{ Id?: number; NameID?: number; name?: string }>;
+  buyers?: Array<{ NameID?: number }>;
+  sellers?: Array<{ NameID?: number }>;
+  lenders?: Array<{ Id?: number }>;
   property?: Array<{ PropertyID?: number }>;
   messages?: { success?: string[]; warning?: string[]; error?: string[] };
 }
 
-// ─── Shared body helpers (legacy-exact field names) ─────────────────────────
+// ─── PrepareAddCPL result ───────────────────────────────────────────────────
+
+export interface PrepareAddCplResult {
+  forms: CplForm[];
+  cplTemplate: Record<string, unknown>;
+}
+
+// ─── Shared body helpers (legacy-exact field names from Westcor.php) ────────
 
 function buildProperty(prop: CplOrderDetail['property']) {
   const county = (prop?.county ?? '').trim();
@@ -108,6 +113,11 @@ function buildLenders(
   }];
 }
 
+function parsePurchasePrice(val: string | null): number {
+  if (!val) return 0;
+  return parseInt(String(val).replace(/[^0-9\-]/g, ''), 10) || 0;
+}
+
 const ACTIONS_CREATE = {
   sdn: false,
   update_base: true,
@@ -123,12 +133,8 @@ const ACTIONS_CREATE = {
   update_priors: false,
 };
 
-const ACTIONS_CPL = {
-  ...ACTIONS_CREATE,
-  update_cpls: true,
-};
-
-// ─── Step A: Create / sync order ────────────────────────────────────────────
+// ─── Step A: Create order in Westcor ────────────────────────────────────────
+// Legacy: POST VendorApi/Order/Update/{partner} with $cplPostData
 
 export async function createOrUpdateOrder(
   cfg: { baseUrl: string; integrationPartner: string },
@@ -141,10 +147,8 @@ export async function createOrUpdateOrder(
     tvid: 0,
     agentnumber: branch.branchCode,
     agent_file_number: orderDetail.fileNumber,
-    email_requestor: '',
-    purchase_price: orderDetail.salesPrice
-      ? parseInt(String(orderDetail.salesPrice).replace(/[^0-9\-]/g, ''), 10) || 0
-      : 0,
+    email_requestor: 'cpl@pct.com',
+    purchase_price: parsePurchasePrice(orderDetail.salesPrice),
     property: buildProperty(orderDetail.property),
     buyers: buildBuyers(orderDetail.buyers),
     sellers: buildSellers(orderDetail.sellers),
@@ -178,18 +182,41 @@ export async function createOrUpdateOrder(
   }
 
   const data = (await res.json()) as WestcorOrderResponse;
-  const westcorOrderId = String(data.tvid ?? 0);
 
+  if (data.messages?.error && data.messages.error.length > 0) {
+    throw new Error(data.messages.error[0]);
+  }
+
+  const westcorOrderId = String(data.tvid ?? 0);
   return { westcorOrderId, orderResponse: data };
 }
 
-// ─── Step B: PrepareAddCPL ──────────────────────────────────────────────────
+// ─── Step B: GET full order from Westcor ─────────────────────────────────────
+// Legacy: GET VendorApi/Order/{tvid}/{partner} — used as the base for Step D
+
+export async function getOrder(
+  cfg: { baseUrl: string; integrationPartner: string },
+  token: string,
+  westcorOrderId: string,
+): Promise<Record<string, unknown>> {
+  const res = await fetch(
+    `${cfg.baseUrl}VendorApi/Order/${westcorOrderId}/${cfg.integrationPartner}`,
+    { headers: { 'Authorization': `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) },
+  );
+  if (!res.ok) throw new Error(`Westcor getOrder failed: HTTP ${res.status}`);
+  return (await res.json()) as Record<string, unknown>;
+}
+
+// ─── Step C: PrepareAddCPL ──────────────────────────────────────────────────
+// Legacy: GET VendorApi/ClosingLetters/PrepareAddCPL/{tvid}/{partner}
+// Returns the full CPL template ($resCPL['CPL']) plus available Forms.
+// The template is reused in Step D with field overrides.
 
 export async function prepareAddCpl(
   cfg: { baseUrl: string; integrationPartner: string },
   token: string,
   westcorOrderId: string,
-): Promise<CplForm[]> {
+): Promise<PrepareAddCplResult> {
   const url =
     `${cfg.baseUrl}VendorApi/ClosingLetters/PrepareAddCPL/${westcorOrderId}/${cfg.integrationPartner}`;
 
@@ -203,72 +230,102 @@ export async function prepareAddCpl(
   }
 
   const text = await res.text();
-  if (!text) return [];
+  if (!text) return { forms: [], cplTemplate: {} };
 
-  const data = JSON.parse(text) as {
-    CPL?: { Forms?: Array<{ FormName?: string }> };
-    cplForms?: Array<{ id?: number; name?: string }>;
-    Forms?: Array<{ FormId?: string; FormName?: string }>;
-  };
+  const data = JSON.parse(text) as Record<string, unknown>;
 
-  const rawForms = data.CPL?.Forms ?? data.cplForms ?? data.Forms ?? [];
-  return rawForms.map((f: Record<string, unknown>) => ({
-    id: String(f.id ?? f.FormId ?? f.FormName ?? ''),
-    name: String(f.name ?? f.FormName ?? ''),
+  // Legacy: $resCPL['CPL'] is the object containing Forms + TVID + other metadata
+  const cplObj = (data.CPL ?? data) as Record<string, unknown>;
+  const rawForms = (cplObj.Forms ?? []) as Array<Record<string, unknown>>;
+
+  const forms: CplForm[] = rawForms.map((f) => ({
+    id: String(f.FormId ?? f.FormName ?? ''),
+    name: String(f.FormName ?? f.name ?? ''),
   }));
+
+  return { forms, cplTemplate: cplObj };
 }
 
-// ─── Step D: Generate CPL PDF (same Order/Update endpoint with cpl array) ──
+// ─── Step D: Generate CPL PDF ───────────────────────────────────────────────
+// Legacy flow (lines 441-525 of Westcor.php):
+//   1. $res = GET Order/{tvid}/{partner}  (the full Westcor order)
+//   2. $res['cpl'] = array()              (clear any existing CPLs)
+//   3. Modify $resCPL['CPL'] with our CPL fields (LetterName, LenderID, etc.)
+//   4. $res['cpl'][] = $resCPL['CPL']     (add modified CPL template)
+//   5. Overwrite $res property/buyers/sellers/lenders/purchase_price with ours
+//   6. Set action flags on $res['actions']
+//   7. POST Order/Update with json_encode($res)
+//
+// We replicate this: take the GET order as base, overlay our data + CPL.
 
 export async function generateCplPdf(
   cfg: { baseUrl: string; integrationPartner: string },
   token: string,
-  westcorOrderId: string,
-  form: CplForm,
+  westcorOrder: Record<string, unknown>,
+  cplTemplate: Record<string, unknown>,
+  selectedFormName: string,
   orderDetail: CplOrderDetail,
   input: CplGenerateInput,
   branch: WestcorBranchInfo,
-  westcorLenderId: number,
+  orderResponse: WestcorOrderResponse,
 ): Promise<{ pdf: string; cplId: string }> {
-  const tvid = parseInt(westcorOrderId, 10) || 0;
+  // Build our data arrays
+  const buyers = buildBuyers(orderDetail.buyers);
+  const sellers = buildSellers(orderDetail.sellers);
+  const lenders = buildLenders(orderDetail, input.lenderOverrides);
 
-  const body = {
-    tvid,
-    agentnumber: branch.branchCode,
-    agent_file_number: orderDetail.fileNumber,
-    email_requestor: '',
-    purchase_price: orderDetail.salesPrice
-      ? parseInt(String(orderDetail.salesPrice).replace(/[^0-9\-]/g, ''), 10) || 0
-      : 0,
+  // Legacy: update IDs from Step A response (mutates local arrays before Step D)
+  // $buyers[0]['NameID'] = $res['buyers'][0]['NameID'];
+  const resBuyers = orderResponse.buyers ?? [];
+  for (let i = 0; i < buyers.length && i < resBuyers.length; i++) {
+    buyers[i].NameID = resBuyers[i].NameID ?? 0;
+  }
+  const resSellers = orderResponse.sellers ?? [];
+  for (let i = 0; i < sellers.length && i < resSellers.length; i++) {
+    sellers[i].NameID = resSellers[i].NameID ?? 0;
+  }
+  // Legacy: $lenders[0]['Id'] = $res['lenders'][0]['Id'];
+  const westcorLenderId = orderResponse.lenders?.[0]?.Id ?? 0;
+  if (lenders[0]) {
+    lenders[0].Id = westcorLenderId;
+  }
+
+  // Legacy: modify the CPL template from PrepareAddCPL ($resCPL['CPL'])
+  // TVID is already in the template from PrepareAddCPL — legacy does NOT set it
+  const cplEntry: Record<string, unknown> = {
+    ...cplTemplate,
+    LetterName: selectedFormName,
+    FileInformation: null,
+    CPLID: -1,
+    LenderID: westcorLenderId,
+    PolicyProducingAgentAddressID: branch.branchCode,
+    PolicyProducingAgentAddress: branch.address,
+    PolicyProducingAgentCity: branch.city,
+    PolicyProducingAgentState: branch.state,
+    PolicyProducingAgentZip: branch.zip,
+    ProtectLender: true,
+    ClosingAgentNumber: PCT_CLOSING_AGENT,
+    IsDualCPL: false,
+  };
+
+  // Legacy: merge GET order + our data + CPL entry
+  const existingActions = (westcorOrder.actions ?? {}) as Record<string, unknown>;
+  const body: Record<string, unknown> = {
+    ...westcorOrder,
+    cpl: [cplEntry],
     property: buildProperty(orderDetail.property),
-    buyers: buildBuyers(orderDetail.buyers),
-    sellers: buildSellers(orderDetail.sellers),
-    lenders: buildLenders(orderDetail, input.lenderOverrides),
-    search: null,
-    commitment: null,
-    jacket: null,
-    sdn: null,
-    history: null,
-    notes: null as string | null,
-    messages: { success: [] as string[], warning: [] as string[], error: [] as string[] },
-    actions: ACTIONS_CPL,
-    partnerCode: parseInt(cfg.integrationPartner, 10) || 0,
-    cpl: [{
-      TVID: tvid,
-      CPLID: -1,
-      FileInformation: null,
-      LetterName: form.name,
-      LenderID: westcorLenderId,
-      PolicyProducingAgentAddressID: branch.branchCode,
-      PolicyProducingAgentAddress: branch.address,
-      PolicyProducingAgentCity: branch.city,
-      PolicyProducingAgentState: branch.state,
-      PolicyProducingAgentZip: branch.zip,
-      ProtectLender: true,
-      ClosingAgentNumber: PCT_CLOSING_AGENT,
-      IsDualCPL: false,
-    }],
-    priors: null,
+    lenders,
+    buyers,
+    sellers,
+    actions: {
+      ...existingActions,
+      update_property: true,
+      update_cpls: true,
+      update_buyers: true,
+      update_sellers: true,
+      update_lender: true,
+    },
+    purchase_price: parsePurchasePrice(orderDetail.salesPrice),
   };
 
   const res = await fetch(
@@ -290,40 +347,32 @@ export async function generateCplPdf(
     cpl?: Array<{
       CPLID?: number;
       cplNumber?: string;
-      FileInformation?: { FileAsBase64?: string };
-      fileInformation?: { fileAsBase64?: string };
+      FileInformation?: { FileAsBase64?: string; FileAsDataVaultFileID?: string };
     }>;
+    messages?: { error?: string[] };
   };
 
-  const cplEntry = data.cpl?.[0];
-  if (!cplEntry) throw new Error('Westcor returned no CPL entry');
+  // Legacy: check messages.error first
+  if (data.messages?.error && data.messages.error.length > 0) {
+    throw new Error(`Westcor CPL error: ${data.messages.error.join('; ')}`);
+  }
 
-  const pdf =
-    cplEntry.FileInformation?.FileAsBase64 ??
-    cplEntry.fileInformation?.fileAsBase64 ??
-    '';
+  // Legacy: use LAST cpl entry — $cplCount = count($resultResCPL['cpl']) - 1
+  const cplEntries = data.cpl ?? [];
+  const lastCpl = cplEntries[cplEntries.length - 1];
+  if (!lastCpl) throw new Error('Westcor returned no CPL entry');
+
+  // Legacy: $resultResCPL['cpl'][$cplCount]['FileInformation']['FileAsBase64']
+  const pdf = lastCpl.FileInformation?.FileAsBase64 ?? '';
   if (!pdf) throw new Error('Westcor returned empty CPL PDF');
 
-  const cplId = String(cplEntry.CPLID ?? cplEntry.cplNumber ?? `WC-${Date.now()}`);
+  // Legacy: $resultResCPL['cpl'][$cplCount]['CPLID']
+  const cplId = String(lastCpl.CPLID ?? lastCpl.cplNumber ?? `WC-${Date.now()}`);
   return { pdf, cplId };
 }
 
-// ─── Get existing order (diagnostic / lookup) ──────────────────────────────
-
-export async function getOrder(
-  cfg: { baseUrl: string; integrationPartner: string },
-  token: string,
-  westcorOrderId: string,
-): Promise<Record<string, unknown>> {
-  const res = await fetch(
-    `${cfg.baseUrl}VendorApi/Order/${westcorOrderId}/${cfg.integrationPartner}`,
-    { headers: { 'Authorization': `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) },
-  );
-  if (!res.ok) throw new Error(`Westcor getOrder failed: HTTP ${res.status}`);
-  return (await res.json()) as Record<string, unknown>;
-}
-
 // ─── Form selection ─────────────────────────────────────────────────────────
+// Legacy: Westcor.php selectCplForm() — searches by FormName semantics
 
 export function selectCplForm(
   forms: CplForm[],

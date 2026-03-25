@@ -275,18 +275,26 @@ export async function generateCplPdf(
   const sellers = buildSellers(orderDetail.sellers);
   const lenders = buildLenders(orderDetail, input.lenderOverrides);
 
-  // Legacy: update IDs from Step A response (mutates local arrays before Step D)
-  // $buyers[0]['NameID'] = $res['buyers'][0]['NameID'];
+  // Extract IDs from Step A response, falling back to Step B GET response
+  const getOrderBuyers = (westcorOrder.buyers ?? []) as Array<Record<string, unknown>>;
+  const getOrderSellers = (westcorOrder.sellers ?? []) as Array<Record<string, unknown>>;
+  const getOrderLenders = (westcorOrder.lenders ?? []) as Array<Record<string, unknown>>;
+
   const resBuyers = orderResponse.buyers ?? [];
-  for (let i = 0; i < buyers.length && i < resBuyers.length; i++) {
-    buyers[i].NameID = resBuyers[i].NameID ?? 0;
+  for (let i = 0; i < buyers.length; i++) {
+    buyers[i].NameID = resBuyers[i]?.NameID
+      ?? (getOrderBuyers[i]?.NameID as number)
+      ?? 0;
   }
   const resSellers = orderResponse.sellers ?? [];
-  for (let i = 0; i < sellers.length && i < resSellers.length; i++) {
-    sellers[i].NameID = resSellers[i].NameID ?? 0;
+  for (let i = 0; i < sellers.length; i++) {
+    sellers[i].NameID = resSellers[i]?.NameID
+      ?? (getOrderSellers[i]?.NameID as number)
+      ?? 0;
   }
-  // Legacy: $lenders[0]['Id'] = $res['lenders'][0]['Id'];
-  const westcorLenderId = orderResponse.lenders?.[0]?.Id ?? 0;
+  const westcorLenderId = orderResponse.lenders?.[0]?.Id
+    ?? (getOrderLenders[0]?.Id as number)
+    ?? 0;
   if (lenders[0]) {
     lenders[0].Id = westcorLenderId;
   }

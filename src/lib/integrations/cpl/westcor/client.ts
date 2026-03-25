@@ -140,15 +140,43 @@ export const westcorAdapter: CplAdapter = {
       await logRequest({
         operation: 'create_order', orderId: input.orderId, requestId, startedAt: new Date(), success: true,
         meta: { step: 'complete', branchCode: branch.branchCode, tvid: westcorOrderId, reusedTvid: !!existingTvid },
-        responseMeta: { tvid: westcorOrderId },
+        responseMeta: {
+          tvid: westcorOrderId,
+          hasLenders: (orderResponse.lenders?.length ?? 0) > 0,
+          lenderId: orderResponse.lenders?.[0]?.Id ?? null,
+          hasBuyers: (orderResponse.buyers?.length ?? 0) > 0,
+          hasSellers: (orderResponse.sellers?.length ?? 0) > 0,
+        },
       });
 
       // Step B: GET the full order from Westcor (legacy: GET Order/{tvid}/{partner})
       const westcorOrder = await getOrder(cfg, token, westcorOrderId);
+      const getOrderLenders = (westcorOrder.lenders ?? []) as Array<Record<string, unknown>>;
+      await logRequest({
+        operation: 'get_order', orderId: input.orderId, requestId, startedAt: new Date(), success: true,
+        meta: {
+          tvid: westcorOrderId,
+          getHasLenders: getOrderLenders.length > 0,
+          getLenderId: getOrderLenders[0]?.Id ?? null,
+          getHasBuyers: Array.isArray(westcorOrder.buyers) && (westcorOrder.buyers as unknown[]).length > 0,
+          getHasSellers: Array.isArray(westcorOrder.sellers) && (westcorOrder.sellers as unknown[]).length > 0,
+          getHasProperty: Array.isArray(westcorOrder.property) && (westcorOrder.property as unknown[]).length > 0,
+        },
+      });
 
       // Step C: PrepareAddCPL — returns forms + CPL template (legacy: $resCPL['CPL'])
       const { forms, cplTemplate } = await prepareAddCpl(cfg, token, westcorOrderId);
       const form = selectCplForm(forms, input.cplMode ?? 'single');
+
+      await logRequest({
+        operation: 'prepare_cpl', orderId: input.orderId, requestId, startedAt: new Date(), success: true,
+        meta: {
+          formCount: forms.length, selectedForm: form.name,
+          templateHasTVID: cplTemplate.TVID != null,
+          templateTVID: cplTemplate.TVID ?? null,
+          templateKeys: Object.keys(cplTemplate).slice(0, 20),
+        },
+      });
 
       // Step D: Generate CPL — merge GET order + CPL template + our data (legacy flow)
       const { pdf, cplId } = await generateCplPdf(

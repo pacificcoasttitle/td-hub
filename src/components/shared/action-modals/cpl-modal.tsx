@@ -120,6 +120,14 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
 
   async function generate() {
     if (!branchId) return;
+    if (!lenderCompany.trim()) {
+      setResult({ ok: false, error: 'Lender company name is required to generate a CPL.' });
+      return;
+    }
+    if (!propStreet.trim()) {
+      setResult({ ok: false, error: 'Property address is required to generate a CPL.' });
+      return;
+    }
     setGenerating(true); setResult(null);
     try {
       const res = await fetch('/api/vendor-actions/cpl', {

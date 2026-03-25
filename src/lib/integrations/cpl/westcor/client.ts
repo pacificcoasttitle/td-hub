@@ -128,6 +128,10 @@ export const westcorAdapter: CplAdapter = {
         zip: branchRow?.zip ?? '',
       };
 
+      if (!orderDetail.lender?.name) {
+        throw new Error('Lender company name is required to generate a CPL. Please enter lender information in the CPL modal.');
+      }
+
       // Look up existing Westcor tvid from a previous successful Step A for this order
       const existingTvid = await lookupExistingTvid(input.orderId);
 

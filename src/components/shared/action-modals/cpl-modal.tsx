@@ -4,15 +4,28 @@ import { useState, useEffect, useRef } from 'react';
 import { ModalShell } from './modal-shell';
 
 interface Branch { id: number; code: string; name: string; }
-interface OrderData {
-  transactionType?: string; branchId?: number;
-  lenderCompanyName?: string; lenderName?: string; lenderAddress?: string;
-  lenderCity?: string; lenderState?: string; lenderZip?: string;
-  loanNumber?: string; loanAmount?: string; salesPrice?: string;
-  buyerFirstName?: string; buyerLastName?: string;
-  secondaryBuyerFirstName?: string; secondaryBuyerLastName?: string;
-  propertyStreet?: string; propertyCity?: string; propertyState?: string; propertyZip?: string;
+
+interface OrderApiResponse {
+  transactionType?: string | null;
+  branchId?: number | null;
+  salesPrice?: string | null;
+  loanAmount?: string | null;
+  property?: {
+    address?: string | null; city?: string | null;
+    state?: string | null; zip?: string | null;
+  } | null;
+  parties?: Array<{
+    role: string; externalName?: string | null;
+    externalCompany?: string | null; isPrimary?: boolean;
+  }>;
+  lenderContact?: {
+    companyName?: string | null; fullName?: string | null;
+    address1?: string | null; city?: string | null;
+    state?: string | null; zip?: string | null;
+    assignmentClause?: string | null;
+  } | null;
 }
+
 interface ExistingCpl { id: number; fileName: string; createdAt: string; }
 interface LenderResult { id: number; companyName: string; address?: string; city?: string; state?: string; zip?: string; }
 
@@ -54,12 +67,21 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
 
   const hasLender = !!(lenderCompany);
   const hasProperty = !!(propStreet);
+  const txLower = txType.toLowerCase();
+  const isPurchase = txLower === 'purchase';
+  const isRefi = txLower === 'refinance' || txLower === 'equity';
   const [lenderExpanded, setLenderExpanded] = useState(true);
   const [propertyExpanded, setPropertyExpanded] = useState(true);
 
   useEffect(() => {
     if (!open) return;
     setLoading(true); setResult(null); setLenderType('new');
+    setTxType(''); setBranchId(null);
+    setLenderCompany(''); setLenderContact(''); setAssignmentClause('');
+    setLenderAddr(''); setLenderCity(''); setLenderState(''); setLenderZip('');
+    setPropStreet(''); setPropCity(''); setPropState(''); setPropZip('');
+    setLoanNumber(''); setLoanAmount(''); setSalesAmount(''); setBorrower('');
+    setLenderExpanded(true); setPropertyExpanded(true);
 
     Promise.all([
       fetch('/api/branches').then((r) => r.ok ? r.json() : null),
@@ -70,29 +92,43 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
       if (docData?.documents) setExistingCpls(docData.documents);
 
       if (od) {
-        const o = od as OrderData;
+        const o = od as OrderApiResponse;
         if (o.branchId) setBranchId(o.branchId);
         setTxType(o.transactionType ?? '');
-        setLenderCompany(o.lenderCompanyName ?? '');
-        setLenderContact(o.lenderName ?? '');
-        setLenderAddr(o.lenderAddress ?? '');
-        setLenderCity(o.lenderCity ?? '');
-        setLenderState(o.lenderState ?? '');
-        setLenderZip(o.lenderZip ?? '');
-        setLoanNumber(o.loanNumber ?? '');
-        setLoanAmount(o.loanAmount ?? '');
         setSalesAmount(o.salesPrice ?? '');
-        setPropStreet(o.propertyStreet ?? '');
-        setPropCity(o.propertyCity ?? '');
-        setPropState(o.propertyState ?? '');
-        setPropZip(o.propertyZip ?? '');
-        const buyers = [
-          [o.buyerFirstName, o.buyerLastName].filter(Boolean).join(' '),
-          [o.secondaryBuyerFirstName, o.secondaryBuyerLastName].filter(Boolean).join(' '),
-        ].filter(Boolean).join(', ');
+        setLoanAmount(o.loanAmount ?? '');
+
+        // Property (nested object)
+        const prop = o.property;
+        if (prop) {
+          setPropStreet(prop.address ?? '');
+          setPropCity(prop.city ?? '');
+          setPropState(prop.state ?? '');
+          setPropZip(prop.zip ?? '');
+        }
+
+        // Lender from contacts join, with party fallback
+        const lc = o.lenderContact;
+        const lenderParty = o.parties?.find((p) => p.role === 'lender');
+        setLenderCompany(lc?.companyName ?? lenderParty?.externalCompany ?? '');
+        setLenderContact(lc?.fullName ?? lenderParty?.externalName ?? '');
+        setLenderAddr(lc?.address1 ?? '');
+        setLenderCity(lc?.city ?? '');
+        setLenderState(lc?.state ?? '');
+        setLenderZip(lc?.zip ?? '');
+        setAssignmentClause(lc?.assignmentClause ?? '');
+
+        // Buyer / borrower names from parties
+        const buyers = (o.parties ?? [])
+          .filter((p) => p.role === 'buyer')
+          .map((p) => p.externalName)
+          .filter(Boolean)
+          .join(', ');
         setBorrower(buyers);
-        setLenderExpanded(!o.lenderCompanyName);
-        setPropertyExpanded(!o.propertyStreet);
+
+        // Collapse sections that already have data
+        setLenderExpanded(!(lc?.companyName ?? lenderParty?.externalCompany));
+        setPropertyExpanded(!prop?.address);
       }
     }).catch(() => {}).finally(() => setLoading(false));
   }, [open, orderId]);
@@ -213,12 +249,12 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
           </Collapse>
 
           {/* ── Transaction ── */}
-          <Section label="Transaction">
+          <Section label={txType ? `Transaction — ${txType}` : 'Transaction'}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <F label="Loan Number" value={loanNumber} onChange={setLoanNumber} />
-              {txType === 'refinance' && <F label="Loan Amount" value={loanAmount} onChange={setLoanAmount} prefix="$" />}
-              {txType === 'purchase' && <F label="Sales Amount" value={salesAmount} onChange={setSalesAmount} prefix="$" />}
-              {!txType && (
+              {isRefi && <F label="Loan Amount" value={loanAmount} onChange={setLoanAmount} prefix="$" />}
+              {isPurchase && <F label="Sales Amount" value={salesAmount} onChange={setSalesAmount} prefix="$" />}
+              {!isPurchase && !isRefi && (
                 <>
                   <F label="Loan Amount" value={loanAmount} onChange={setLoanAmount} prefix="$" />
                   <F label="Sales Amount" value={salesAmount} onChange={setSalesAmount} prefix="$" />

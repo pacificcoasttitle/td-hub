@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { getOrderById } from '@/lib/domain/orders/service';
+import { db } from '@/lib/db/client';
+import { contacts } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 
 export async function GET(
   _req: NextRequest,
@@ -21,7 +24,30 @@ export async function GET(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    return NextResponse.json(order);
+    let lenderContact: {
+      companyName: string | null; fullName: string | null;
+      address1: string | null; city: string | null; state: string | null; zip: string | null;
+      assignmentClause: string | null;
+    } | null = null;
+
+    if (order.lenderId) {
+      const [lc] = await db
+        .select({
+          companyName: contacts.companyName,
+          fullName: contacts.fullName,
+          address1: contacts.address1,
+          city: contacts.city,
+          state: contacts.state,
+          zip: contacts.zip,
+          assignmentClause: contacts.assignmentClause,
+        })
+        .from(contacts)
+        .where(eq(contacts.id, order.lenderId))
+        .limit(1);
+      lenderContact = lc ?? null;
+    }
+
+    return NextResponse.json({ ...order, lenderContact });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

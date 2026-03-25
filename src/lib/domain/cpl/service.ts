@@ -69,7 +69,7 @@ export async function generateCpl(
   }
 
   // c. Build order detail for the adapter
-  const orderDetail = buildOrderDetail(order, input.lenderOverrides);
+  const orderDetail = buildOrderDetail(order, input.lenderOverrides, input.propertyOverrides);
 
   // d. Pick adapter
   const adapter = ADAPTERS[input.underwriter];
@@ -177,7 +177,8 @@ type OrderWithDetail = NonNullable<Awaited<ReturnType<typeof getOrderById>>>;
 
 function buildOrderDetail(
   order: OrderWithDetail,
-  lenderOverrides?: CplGenerateInput['lenderOverrides']
+  lenderOverrides?: CplGenerateInput['lenderOverrides'],
+  propertyOverrides?: CplGenerateInput['propertyOverrides'],
 ): CplOrderDetail {
   const buyers = order.parties
     .filter((p) => p.role === 'buyer')
@@ -210,18 +211,29 @@ function buildOrderDetail(
         }
       : null;
 
+  const dbProp = order.property;
+  const property = propertyOverrides
+    ? {
+        address: propertyOverrides.address ?? dbProp?.address ?? null,
+        city: propertyOverrides.city ?? dbProp?.city ?? null,
+        state: propertyOverrides.state ?? dbProp?.state ?? null,
+        zip: propertyOverrides.zip ?? dbProp?.zip ?? null,
+        county: propertyOverrides.county ?? dbProp?.county ?? null,
+      }
+    : dbProp
+      ? {
+          address: dbProp.address,
+          city: dbProp.city,
+          state: dbProp.state,
+          zip: dbProp.zip,
+          county: dbProp.county,
+        }
+      : null;
+
   return {
     orderId: order.id,
     fileNumber: order.fileNumber,
-    property: order.property
-      ? {
-          address: order.property.address,
-          city: order.property.city,
-          state: order.property.state,
-          zip: order.property.zip,
-          county: order.property.county,
-        }
-      : null,
+    property,
     buyers,
     sellers,
     lender,

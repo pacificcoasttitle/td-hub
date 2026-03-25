@@ -8,6 +8,7 @@ const bodySchema = z.object({
   underwriter: z.enum(['westcor', 'fnf', 'natic', 'doma']),
   branchId: z.number().int().positive(),
   cplMode: z.enum(['single', 'multiple']).optional(),
+
   lenderOverrides: z
     .object({
       name: z.string().optional(),
@@ -17,6 +18,31 @@ const bodySchema = z.object({
       zip: z.string().optional(),
     })
     .optional(),
+  propertyOverrides: z
+    .object({
+      address: z.string().optional(),
+      city: z.string().optional(),
+      state: z.string().optional(),
+      zip: z.string().optional(),
+      county: z.string().optional(),
+    })
+    .optional(),
+
+  lenderCompany: z.string().optional(),
+  lenderContact: z.string().optional(),
+  lenderAddress: z.string().optional(),
+  lenderCity: z.string().optional(),
+  lenderState: z.string().optional(),
+  lenderZip: z.string().optional(),
+  assignmentClause: z.string().optional(),
+  propertyAddress: z.string().optional(),
+  propertyCity: z.string().optional(),
+  propertyState: z.string().optional(),
+  propertyZip: z.string().optional(),
+  loanNumber: z.string().optional(),
+  loanAmount: z.string().optional(),
+  salesAmount: z.string().optional(),
+  borrowerNames: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -27,7 +53,39 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const input = bodySchema.parse(body);
+    const parsed = bodySchema.parse(body);
+
+    const lenderOverrides = parsed.lenderOverrides ?? (
+      parsed.lenderCompany
+        ? {
+            name: parsed.lenderCompany,
+            address: parsed.lenderAddress,
+            city: parsed.lenderCity,
+            state: parsed.lenderState,
+            zip: parsed.lenderZip,
+          }
+        : undefined
+    );
+
+    const propertyOverrides = parsed.propertyOverrides ?? (
+      parsed.propertyAddress
+        ? {
+            address: parsed.propertyAddress,
+            city: parsed.propertyCity,
+            state: parsed.propertyState,
+            zip: parsed.propertyZip,
+          }
+        : undefined
+    );
+
+    const input = {
+      orderId: parsed.orderId,
+      underwriter: parsed.underwriter,
+      branchId: parsed.branchId,
+      cplMode: parsed.cplMode,
+      lenderOverrides,
+      propertyOverrides,
+    };
 
     const result = await generateCpl(input, session.id);
 

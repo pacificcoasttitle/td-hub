@@ -18,6 +18,13 @@ export interface CplGenerateInput {
     state?: string;
     zip?: string;
   };
+  propertyOverrides?: {
+    address?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+    county?: string;
+  };
 }
 
 export interface CplGenerateResult {

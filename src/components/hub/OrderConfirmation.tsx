@@ -17,16 +17,38 @@ export interface PartyInfo {
   name?: string; email?: string; phone?: string; company?: string;
 }
 
+interface TpDocEntry { status: string; s3Url?: string | null }
+
 export interface ConfirmationData {
   order: { fileNumber: string; createdAt: string };
   opener?: PartyInfo;
   property?: { address?: string; city?: string; zip?: string; county?: string; apn?: string; legalDescription?: string };
-  tax?: { firstInstallment?: TaxInstallment | null; secondInstallment?: TaxInstallment | null };
-  vesting?: { briefLegal?: string | null; vestingInfo?: string | null };
-  documents?: { lv?: DocStatus; grantDeed?: DocStatus; tax?: DocStatus };
-  transaction?: { salesRep?: string; titleOfficer?: string; productType?: string; salesPrice?: number; loanAmount?: number; loanNumber?: string; escrowNumber?: string };
+  titlePoint?: {
+    legalDescription?: string | null;
+    vestingInformation?: string | null;
+    firstInstallment?: TaxInstallment | null;
+    secondInstallment?: TaxInstallment | null;
+    documents?: { lv?: TpDocEntry; grantDeed?: TpDocEntry; tax?: TpDocEntry };
+  };
+  transaction?: { salesRep?: string; titleOfficer?: string; productType?: string; salesPrice?: number; loanAmount?: number };
   seller?: { primaryOwner?: string; secondaryOwner?: string | null };
   parties?: { buyerAgent?: PartyInfo | null; listingAgent?: PartyInfo | null; lender?: PartyInfo | null; escrow?: PartyInfo | null };
+}
+
+function mapDocStatus(entry: TpDocEntry | undefined, label: string): DocStatus {
+  if (!entry || entry.status === 'not_started' || entry.status === 'failed')
+    return { status: 'not_available', url: null, label };
+  if (entry.status === 'pending' || entry.status === 'processing')
+    return { status: 'processing', url: null, label };
+  return { status: 'ready', url: entry.s3Url ?? null, label };
+}
+
+export function hasProcessingDocs(data: ConfirmationData): boolean {
+  const d = data.titlePoint?.documents;
+  if (!d) return false;
+  return [d.lv, d.grantDeed, d.tax].some(
+    (e) => e?.status === 'pending' || e?.status === 'processing',
+  );
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -49,15 +71,15 @@ function V({ label, value }: { label: string; value?: string | number | null }) 
 // ─── Order Details Card (Left) ──────────────────────────────────────────────
 
 function OrderDetailsCard({ data }: { data: ConfirmationData }) {
-  const v = data.vesting;
+  const tp = data.titlePoint;
   return (
     <div className={CARD}>
       <h2 className={H2}>Order Details</h2>
       <p className="text-2xl font-bold text-[#1B2A4A] mb-4">{data.order.fileNumber}</p>
       <p className="text-xs text-[#6B7280] mb-6">Created {data.order.createdAt}</p>
       <div className="space-y-4">
-        <V label="Brief Legal Description" value={v?.briefLegal || 'Refer to grant deed below.'} />
-        <V label="Vesting Information" value={v?.vestingInfo || 'Refer to grant deed below.'} />
+        <V label="Brief Legal Description" value={tp?.legalDescription || 'Refer to grant deed below.'} />
+        <V label="Vesting Information" value={tp?.vestingInformation || 'Refer to grant deed below.'} />
       </div>
       {data.opener && (
         <div className="border-t border-gray-100 mt-5 pt-4 space-y-2">
@@ -98,12 +120,13 @@ function InstallmentCard({ title, inst }: { title: string; inst?: TaxInstallment
 }
 
 function TaxInfoCard({ data }: { data: ConfirmationData }) {
+  const tp = data.titlePoint;
   return (
     <div className={CARD}>
       <h2 className={H2}>Tax Information</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <InstallmentCard title="1st Installment" inst={data.tax?.firstInstallment} />
-        <InstallmentCard title="2nd Installment" inst={data.tax?.secondInstallment} />
+        <InstallmentCard title="1st Installment" inst={tp?.firstInstallment} />
+        <InstallmentCard title="2nd Installment" inst={tp?.secondInstallment} />
       </div>
     </div>
   );
@@ -117,13 +140,10 @@ function DocColumn({ doc, fallbackMsg }: { doc?: DocStatus; fallbackMsg: string 
   }
   if (doc.status === 'processing') {
     return (
-      <div>
-        <p className="text-sm text-amber-600 flex items-center gap-1.5">
-          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-          Document generation is under processing
-        </p>
-        <button className="mt-2 text-xs font-medium text-[#1B2A4A] underline underline-offset-2 hover:text-[#F26B2B]">Check Status</button>
-      </div>
+      <p className="text-sm text-amber-600 flex items-center gap-1.5">
+        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+        Document generating...
+      </p>
     );
   }
   return (
@@ -136,22 +156,26 @@ function DocColumn({ doc, fallbackMsg }: { doc?: DocStatus; fallbackMsg: string 
 }
 
 function DocumentStatusSection({ data }: { data: ConfirmationData }) {
-  const d = data.documents;
+  const raw = data.titlePoint?.documents;
+  const lv = mapDocStatus(raw?.lv, 'L&V');
+  const gd = mapDocStatus(raw?.grantDeed, 'Grant Deed');
+  const tax = mapDocStatus(raw?.tax, 'Tax Document');
+
   return (
     <div className={CARD}>
       <h2 className={H2}>Grant Deed Information</h2>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div>
           <p className={`${LBL} mb-2`}>Legal &amp; Vesting</p>
-          <DocColumn doc={d?.lv} fallbackMsg="No legal vesting available. Our team will look for it and contact you shortly." />
+          <DocColumn doc={lv} fallbackMsg="No legal vesting available. Our team will look for it and contact you shortly." />
         </div>
         <div>
           <p className={`${LBL} mb-2`}>Grant Deed</p>
-          <DocColumn doc={d?.grantDeed} fallbackMsg="No grant deed available. Our team will look for it and contact you shortly." />
+          <DocColumn doc={gd} fallbackMsg="No grant deed available. Our team will look for it and contact you shortly." />
         </div>
         <div>
           <p className={`${LBL} mb-2`}>Tax Document</p>
-          <DocColumn doc={d?.tax} fallbackMsg="No tax document available. Our team will look for it and contact you shortly." />
+          <DocColumn doc={tax} fallbackMsg="No tax document available. Our team will look for it and contact you shortly." />
         </div>
       </div>
     </div>

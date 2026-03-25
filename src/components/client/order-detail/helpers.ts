@@ -1,5 +1,6 @@
 export const CATEGORY_LABELS: Record<string, string> = {
   cpl: 'CPL',
+  proposed_insured: 'Proposed Insured',
   prelim: 'Prelim',
   policy: 'Policy',
   legal_vesting: 'Legal Vesting',
@@ -12,13 +13,17 @@ export const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export const CATEGORY_STYLES: Record<string, string> = {
-  cpl: 'bg-[#FEF3C7] text-[#92400E]',
-  prelim: 'bg-[#DBEAFE] text-[#1E40AF]',
-  policy: 'bg-[#D1FAE5] text-[#065F46]',
-  general: 'bg-[#F3F4F6] text-[#4B5563]',
-  curative: 'bg-[#FEE2E2] text-[#991B1B]',
-  user_upload: 'bg-[#E0E7FF] text-[#3730A3]',
-  supporting: 'bg-[#F3F4F6] text-[#4B5563]',
+  cpl: 'bg-purple-100 text-purple-700',
+  proposed_insured: 'bg-teal-100 text-teal-700',
+  legal_vesting: 'bg-blue-100 text-blue-700',
+  tax: 'bg-green-100 text-green-700',
+  grant_deed: 'bg-amber-100 text-amber-700',
+  prelim: 'bg-blue-50 text-blue-700',
+  policy: 'bg-emerald-100 text-emerald-700',
+  general: 'bg-gray-100 text-gray-600',
+  curative: 'bg-red-100 text-red-700',
+  user_upload: 'bg-indigo-100 text-indigo-700',
+  supporting: 'bg-gray-100 text-gray-600',
 };
 
 export const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {

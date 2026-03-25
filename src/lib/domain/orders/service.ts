@@ -1,8 +1,7 @@
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderParties, orderStatusHistory, contacts, companies, profiles } from '@/lib/db/schema';
-import { eq, desc, sql, ilike, or, and, gte, SQL } from 'drizzle-orm';
+import { orders, orderProperties, orderParties, orderStatusHistory, contacts, companies, profiles, documents } from '@/lib/db/schema';
+import { eq, desc, sql, ilike, or, and, inArray, SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
-import type { MappedOrderData } from '@/lib/integrations/softpro';
 
 const salesRepContact = alias(contacts, 'sales_rep');
 const titleOfficerContact = alias(contacts, 'title_officer');
@@ -25,6 +24,15 @@ export interface OrderListParams {
   sortDir?: 'asc' | 'desc';
 }
 
+interface DocCategoryStatus {
+  exists: boolean; count: number; latestId: number | null; latestCreatedAt: string | null;
+}
+interface DocCategoryBool { exists: boolean }
+interface OrderDocuments {
+  cpl: DocCategoryStatus; proposedInsured: DocCategoryStatus;
+  legalVesting: DocCategoryBool; tax: DocCategoryBool; grantDeed: DocCategoryBool;
+}
+
 export interface OrderListResult {
   orders: Array<typeof orders.$inferSelect & {
     property: typeof orderProperties.$inferSelect | null;
@@ -37,6 +45,7 @@ export interface OrderListResult {
     underwriterName: string | null;
     createdByName: string | null;
     openedBy: string | null;
+    documents: OrderDocuments;
   }>;
   total: number;
   page: number;
@@ -125,6 +134,9 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
       .where(where),
   ]);
 
+  const orderIds = orderRows.map((r) => r.orders.id);
+  const docMap = await batchDocumentStatus(orderIds);
+
   const mapped = orderRows.map((row) => ({
     ...row.orders,
     property: row.order_properties,
@@ -137,6 +149,7 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
     underwriterName: row.underwriter_company?.name ?? null,
     createdByName: row.created_by_profile?.displayName ?? null,
     openedBy: row.opened_by?.name ?? null,
+    documents: docMap.get(row.orders.id) ?? emptyDocuments(),
   }));
 
   return {
@@ -145,6 +158,42 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
     page,
     pageSize,
   };
+}
+
+function emptyDocuments(): OrderDocuments {
+  const full = { exists: false, count: 0, latestId: null, latestCreatedAt: null };
+  return { cpl: { ...full }, proposedInsured: { ...full }, legalVesting: { exists: false }, tax: { exists: false }, grantDeed: { exists: false } };
+}
+
+const DOC_CATS = ['cpl', 'proposed_insured', 'legal_vesting', 'tax', 'grant_deed'] as const;
+
+async function batchDocumentStatus(orderIds: number[]): Promise<Map<number, OrderDocuments>> {
+  if (orderIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      orderId: documents.orderId,
+      category: documents.category,
+      cnt: sql<number>`count(*)`,
+      latestId: sql<number | null>`max(${documents.id})`,
+      latestAt: sql<string | null>`max(${documents.createdAt})::text`,
+    })
+    .from(documents)
+    .where(and(inArray(documents.orderId, orderIds), eq(documents.status, 'active'), inArray(documents.category, [...DOC_CATS])))
+    .groupBy(documents.orderId, documents.category);
+
+  const map = new Map<number, OrderDocuments>();
+  for (const r of rows) {
+    if (!map.has(r.orderId)) map.set(r.orderId, emptyDocuments());
+    const d = map.get(r.orderId)!;
+    const cnt = Number(r.cnt);
+    const full = { exists: cnt > 0, count: cnt, latestId: r.latestId ? Number(r.latestId) : null, latestCreatedAt: r.latestAt ?? null };
+    if (r.category === 'cpl') d.cpl = full;
+    else if (r.category === 'proposed_insured') d.proposedInsured = full;
+    else if (r.category === 'legal_vesting') d.legalVesting = { exists: cnt > 0 };
+    else if (r.category === 'tax') d.tax = { exists: cnt > 0 };
+    else if (r.category === 'grant_deed') d.grantDeed = { exists: cnt > 0 };
+  }
+  return map;
 }
 
 export async function getOrderById(id: number) {
@@ -196,106 +245,8 @@ export async function getOrderByFileNumber(fileNumber: string) {
   return result[0] ?? null;
 }
 
-// ─── Transaction Type Validation ─────────────────────────────────────────────
-
-const VALID_TRANSACTION_TYPES = ['Purchase', 'Refinance', 'Equity', 'Other'] as const;
-type TransactionType = (typeof VALID_TRANSACTION_TYPES)[number];
-
-function validTransactionType(value: string | null): TransactionType | null {
-  if (!value) return null;
-  if ((VALID_TRANSACTION_TYPES as readonly string[]).includes(value)) {
-    return value as TransactionType;
-  }
-  return null;
-}
-
-async function resolveContactByOfficerName(name: string | null): Promise<number | null> {
-  if (!name) return null;
-  const result = await db
-    .select({ id: contacts.id })
-    .from(contacts)
-    .where(eq(contacts.officerName, name))
-    .limit(1);
-  return result[0]?.id ?? null;
-}
-
-// ─── Upsert from SoftPro ────────────────────────────────────────────────────
-
-export async function upsertFromSoftPro(
-  mapped: MappedOrderData
-): Promise<{ created: boolean; orderId: number }> {
-  const existing = await getOrderByFileNumber(mapped.fileNumber);
-
-  if (!existing) {
-    const salesRepId = await resolveContactByOfficerName(mapped.marketingRepName);
-    const titleOfficerId = await resolveContactByOfficerName(mapped.titleOfficerName);
-
-    const [newOrder] = await db
-      .insert(orders)
-      .values({
-        fileNumber: mapped.fileNumber,
-        operationalStatus: mapped.operationalStatus,
-        softproStatus: mapped.softproStatus,
-        transactionType: validTransactionType(mapped.transactionType),
-        productType: mapped.productType,
-        orderType: mapped.orderType,
-        salesPrice: mapped.salesPrice,
-        salesRepId,
-        titleOfficerId,
-        openedAt: mapped.openedAt ?? new Date(),
-        completedAt: mapped.completedAt,
-        closedAt: mapped.closedAt,
-        source: 'softpro_sync',
-        isImported: true,
-        softproLastSyncedAt: new Date(),
-      })
-      .returning({ id: orders.id });
-
-    await db.insert(orderProperties).values({
-      orderId: newOrder!.id,
-      address: mapped.property.address,
-      city: mapped.property.city,
-      state: mapped.property.state,
-      county: mapped.property.county,
-      fullAddress: mapped.property.fullAddress,
-    });
-
-    await db.insert(orderStatusHistory).values({
-      orderId: newOrder!.id,
-      status: mapped.operationalStatus,
-      source: 'softpro_sync',
-      notes: 'Initial sync from SoftPro',
-    });
-
-    return { created: true, orderId: newOrder!.id };
-  }
-
-  const statusChanged = existing.operationalStatus !== mapped.operationalStatus;
-
-  await db
-    .update(orders)
-    .set({
-      softproStatus: mapped.softproStatus,
-      operationalStatus: mapped.operationalStatus,
-      completedAt: mapped.completedAt ?? existing.completedAt,
-      closedAt: mapped.closedAt ?? existing.closedAt,
-      salesPrice: mapped.salesPrice ?? existing.salesPrice,
-      softproLastSyncedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(orders.id, existing.id));
-
-  if (statusChanged) {
-    await db.insert(orderStatusHistory).values({
-      orderId: existing.id,
-      status: mapped.operationalStatus,
-      source: 'softpro_sync',
-      notes: `Status changed from ${existing.operationalStatus} to ${mapped.operationalStatus}`,
-    });
-  }
-
-  return { created: false, orderId: existing.id };
-}
+// ─── Upsert from SoftPro (extracted to upsert-softpro.ts) ───────────────────
+export { upsertFromSoftPro } from './upsert-softpro';
 
 // ─── Dashboard Stats ────────────────────────────────────────────────────────
 

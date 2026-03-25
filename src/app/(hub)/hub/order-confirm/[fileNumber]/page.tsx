@@ -1,32 +1,61 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { OrderConfirmation, type ConfirmationData } from '@/components/hub/OrderConfirmation';
+import {
+  OrderConfirmation,
+  hasProcessingDocs,
+  type ConfirmationData,
+} from '@/components/hub/OrderConfirmation';
+
+const POLL_INTERVAL = 10_000;
 
 export default function OrderConfirmPage() {
   const { fileNumber } = useParams<{ fileNumber: string }>();
   const [data, setData] = useState<ConfirmationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchData = useCallback(async (fn: string, isInitial: boolean) => {
+    try {
+      const res = await fetch(`/api/orders/confirm/${encodeURIComponent(fn)}`);
+      if (!res.ok) throw new Error(res.status === 404 ? 'Order not found.' : 'Failed to load confirmation.');
+      const json: ConfirmationData = await res.json();
+      setData(json);
+      return json;
+    } catch (err) {
+      if (isInitial) setError(err instanceof Error ? err.message : 'Failed to load confirmation.');
+      return null;
+    } finally {
+      if (isInitial) setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!fileNumber) return;
     let cancelled = false;
+
     (async () => {
-      try {
-        const res = await fetch(`/api/orders/confirm/${encodeURIComponent(fileNumber)}`);
-        if (!res.ok) throw new Error(res.status === 404 ? 'Order not found.' : 'Failed to load confirmation.');
-        const json = await res.json();
-        if (!cancelled) setData(json);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load confirmation.');
-      } finally {
-        if (!cancelled) setLoading(false);
+      const result = await fetchData(fileNumber, true);
+      if (cancelled || !result) return;
+
+      if (hasProcessingDocs(result)) {
+        pollRef.current = setInterval(async () => {
+          const updated = await fetchData(fileNumber, false);
+          if (!updated || !hasProcessingDocs(updated)) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+        }, POLL_INTERVAL);
       }
     })();
-    return () => { cancelled = true; };
-  }, [fileNumber]);
+
+    return () => {
+      cancelled = true;
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [fileNumber, fetchData]);
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto">

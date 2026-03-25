@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import Link from 'next/link';
 import {
   CplModal, PrelimModal, ProposedInsuredModal, NotesModal, DetailModal,
 } from '@/components/shared/action-modals';
-import { STATUS_OPTS, STATUS_LABELS, TH, StatusBadge, ActionBtn } from './orders-hub-parts';
+import { STATUS_OPTS, STATUS_LABELS, TH, StatusBadge, DocBadges, ActionsDropdown } from './orders-hub-parts';
+import type { OrderDocuments } from './orders-hub-parts';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
+
+export type { OrderDocuments };
 
 export interface HubOrder {
   id: number;
@@ -20,6 +22,7 @@ export interface HubOrder {
   openedAt: string | null;
   clientName?: string | null;
   openedBy?: string | null;
+  documents?: OrderDocuments;
 }
 
 export type ActionType = 'cpl' | 'prelim' | 'proposed' | 'notes' | 'detail' | 'fees';
@@ -233,6 +236,7 @@ export function OrdersHubTable({
                       {activityMap.has(o.id) && (
                         <span className="w-2 h-2 rounded-full bg-[#F26B2B] shrink-0" title={`New activity: ${activityMap.get(o.id)}`} />
                       )}
+                      <DocBadges docs={o.documents} />
                     </span>
                   </td>
                   <td className={`px-4 ${cellPy} text-[#1A1A2E] max-w-[300px]`}>{addr(o)}</td>
@@ -241,18 +245,17 @@ export function OrdersHubTable({
                   <td className={`px-4 ${cellPy} text-[#4B5563] capitalize`}>{o.transactionType?.replace(/_/g, ' ') ?? '—'}</td>
                   <td className={`px-4 ${cellPy} text-[#4B5563] tabular-nums whitespace-nowrap`}>{o.openedAt ? new Date(o.openedAt).toLocaleDateString() : '—'}</td>
                   {hasActions && (
-                    <td className={`px-4 ${cellPy}`}>
-                      <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                        {actions.includes('cpl') && <ActionBtn icon="cpl" title="Generate CPL" onClick={() => handleRowAction(o, 'cpl')} />}
-                        {actions.includes('prelim') && <ActionBtn icon="prelim" title="Find Prelim" onClick={() => handleRowAction(o, 'prelim')} />}
-                        {actions.includes('proposed') && <ActionBtn icon="proposed" title="Proposed Insured" onClick={() => handleRowAction(o, 'proposed')} />}
-                        {actions.includes('notes') && <ActionBtn icon="notes" title="Order Notes" onClick={() => handleRowAction(o, 'notes')} />}
-                        {actions.includes('fees') && feesHrefBuilder && (
-                          <Link href={feesHrefBuilder(o.id)} className="w-8 h-8 rounded-md flex items-center justify-center text-[#6B7280] hover:bg-[#F26B2B]/10 hover:text-[#F26B2B] transition-colors" title="Fee Estimate">
-                            <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                          </Link>
-                        )}
-                        {actions.includes('detail') && <ActionBtn icon="detail" title="View Detail" onClick={() => handleRowAction(o, 'detail')} />}
+                    <td className={`px-4 ${cellPy}`} onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center">
+                        <ActionsDropdown
+                          orderId={o.id}
+                          hasProperty={!!(o.propertyStreet || o.propertyCity)}
+                          documents={o.documents}
+                          actions={actions}
+                          isClient={isClient}
+                          onOpenModal={(type) => handleRowAction(o, type as ModalType)}
+                          feesHref={feesHrefBuilder ? feesHrefBuilder(o.id) : undefined}
+                        />
                       </div>
                     </td>
                   )}

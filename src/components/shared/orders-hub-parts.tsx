@@ -1,4 +1,47 @@
-import React from 'react';
+'use client';
+
+import React, { useState, useRef, useEffect } from 'react';
+
+/* ── Document Badge Types ──────────────────────────────────────────────────── */
+
+export interface DocCatFull { exists: boolean; count: number; latestId: number | null; latestCreatedAt: string | null }
+interface DocCatBool { exists: boolean }
+export interface OrderDocuments {
+  cpl: DocCatFull; proposedInsured: DocCatFull;
+  legalVesting: DocCatBool; tax: DocCatBool; grantDeed: DocCatBool;
+}
+
+const DOC_BADGE_CONFIG: { key: keyof OrderDocuments; label: string; bg: string; text: string }[] = [
+  { key: 'cpl',             label: 'CPL', bg: 'bg-purple-100', text: 'text-purple-700' },
+  { key: 'proposedInsured', label: 'PI',  bg: 'bg-teal-100',   text: 'text-teal-700' },
+  { key: 'legalVesting',    label: 'LV',  bg: 'bg-blue-100',   text: 'text-blue-700' },
+  { key: 'tax',             label: 'Tax', bg: 'bg-green-100',  text: 'text-green-700' },
+  { key: 'grantDeed',       label: 'GD',  bg: 'bg-amber-100',  text: 'text-amber-700' },
+];
+
+function fmtDocDate(iso: string | null | undefined): string {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
+  catch { return ''; }
+}
+
+export function DocBadges({ docs }: { docs?: OrderDocuments }) {
+  if (!docs) return null;
+  const badges = DOC_BADGE_CONFIG.filter(({ key }) => docs[key]?.exists);
+  if (badges.length === 0) return null;
+  return (
+    <span className="inline-flex items-center gap-1 ml-2">
+      {badges.map(({ key, label, bg, text }) => {
+        const cat = docs[key];
+        const date = 'latestCreatedAt' in cat ? fmtDocDate((cat as DocCatFull).latestCreatedAt) : '';
+        const tip = date ? `${label} generated ${date}` : `${label} generated`;
+        return <span key={key} title={tip} className={`${bg} ${text} text-xs px-1.5 py-0.5 rounded-full font-medium cursor-default`}>{label}</span>;
+      })}
+    </span>
+  );
+}
+
+/* ── Status Helpers ────────────────────────────────────────────────────────── */
 
 export const STATUS_OPTS = ['', 'open', 'in_process', 'closed', 'cancelled'];
 export const STATUS_LABELS: Record<string, string> = { open: 'Open', in_process: 'In Process', closed: 'Closed', cancelled: 'Cancelled' };
@@ -29,5 +72,130 @@ export function ActionBtn({ icon, title, onClick }: { icon: string; title: strin
       {icon === 'notes' && <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" /></svg>}
       {icon === 'detail' && <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>}
     </button>
+  );
+}
+
+/* ── Actions Dropdown ──────────────────────────────────────────────────────── */
+
+export interface ActionsDropdownProps {
+  orderId: number;
+  hasProperty: boolean;
+  documents?: OrderDocuments;
+  actions: string[];
+  isClient: boolean;
+  onOpenModal: (type: string) => void;
+  feesHref?: string;
+}
+
+function MenuItem({ label, onClick, disabled, tooltip }: {
+  label: string; onClick?: () => void; disabled?: boolean; tooltip?: string;
+}) {
+  return (
+    <button
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      title={tooltip}
+      className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+        disabled
+          ? 'text-gray-300 cursor-not-allowed'
+          : 'text-[#1A1A2E] hover:bg-gray-50'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function Divider() {
+  return <div className="my-1 border-t border-gray-100" />;
+}
+
+export function ActionsDropdown({
+  orderId, hasProperty, documents, actions, isClient, onOpenModal, feesHref,
+}: ActionsDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const hasCpl = !!documents?.cpl?.exists;
+  const hasPI = !!documents?.proposedInsured?.exists;
+  const cplId = hasCpl ? (documents!.cpl as DocCatFull).latestId : null;
+  const piId = hasPI ? (documents!.proposedInsured as DocCatFull).latestId : null;
+  const dlBase = isClient ? '/api/client' : '/api';
+
+  function act(fn: () => void) { fn(); setOpen(false); }
+
+  const showCpl = actions.includes('cpl');
+  const showPI = actions.includes('proposed');
+  const showPrelim = actions.includes('prelim');
+  const showNotes = actions.includes('notes');
+  const showDetail = actions.includes('detail');
+  const showFees = actions.includes('fees') && !!feesHref;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-8 h-8 rounded-md flex items-center justify-center text-[#6B7280] hover:bg-gray-100 transition-colors text-lg font-bold leading-none"
+        title="Actions"
+      >
+        ⋮
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+          {/* View Order */}
+          {showDetail && <MenuItem label="View Order" onClick={() => act(() => onOpenModal('detail'))} />}
+
+          {(showCpl || showPI) && showDetail && <Divider />}
+
+          {/* CPL actions */}
+          {showCpl && (
+            hasCpl ? (
+              <>
+                <MenuItem label="View CPL" onClick={() => act(() => window.open(`${dlBase}/documents/${cplId}/download`, '_blank'))} />
+                <MenuItem label="Regenerate CPL" onClick={() => act(() => onOpenModal('cpl'))} />
+              </>
+            ) : (
+              <MenuItem
+                label="Generate CPL"
+                disabled={!hasProperty}
+                tooltip={!hasProperty ? 'Property address required for CPL' : undefined}
+                onClick={() => act(() => onOpenModal('cpl'))}
+              />
+            )
+          )}
+
+          {showCpl && showPI && <Divider />}
+
+          {/* Proposed Insured actions */}
+          {showPI && (
+            hasPI ? (
+              <>
+                <MenuItem label="View Proposed Insured" onClick={() => act(() => window.open(`${dlBase}/documents/${piId}/download`, '_blank'))} />
+                <MenuItem label="Regenerate Proposed Insured" onClick={() => act(() => onOpenModal('proposed'))} />
+              </>
+            ) : (
+              <MenuItem label="Generate Proposed Insured" onClick={() => act(() => onOpenModal('proposed'))} />
+            )
+          )}
+
+          {(showPrelim || showNotes || showFees) && (showCpl || showPI) && <Divider />}
+
+          {/* Other actions */}
+          {showPrelim && <MenuItem label="Find Prelim" onClick={() => act(() => onOpenModal('prelim'))} />}
+          {showNotes && <MenuItem label="Order Notes" onClick={() => act(() => onOpenModal('notes'))} />}
+          {showFees && <MenuItem label="Fee Estimate" onClick={() => act(() => { window.location.href = feesHref!; })} />}
+        </div>
+      )}
+    </div>
   );
 }

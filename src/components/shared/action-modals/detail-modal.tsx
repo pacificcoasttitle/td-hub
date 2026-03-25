@@ -16,7 +16,10 @@ interface OrderDetail {
   lenderName: string | null; escrowCompanyName: string | null;
 }
 
-interface Doc { id: number; fileName: string; category: string | null; createdAt: string; }
+interface Doc {
+  id: number; filename: string; originalFilename?: string | null;
+  category: string | null; sizeBytes?: number | null; createdAt: string;
+}
 
 const TABS = ['Overview', 'Property', 'Parties', 'Documents', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
@@ -97,19 +100,13 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
               </div>
             )}
             {tab === 'Documents' && (
-              docs.length > 0 ? (
-                <div className="space-y-1.5">
-                  {docs.map((d) => (
-                    <div key={d.id} className="flex items-center justify-between px-3 py-2.5 bg-gray-50 rounded-lg">
-                      <div className="min-w-0">
-                        <p className="text-sm text-[#1A1A2E] truncate">{d.fileName}</p>
-                        <p className="text-xs text-[#6B7280]">{d.category ?? 'general'} · {new Date(d.createdAt).toLocaleDateString()}</p>
-                      </div>
-                      <a href={`/api/documents/${d.id}/download`} className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">Download</a>
-                    </div>
-                  ))}
+              docs.length > 0 ? <DocGroups docs={docs} isClient={isClient} /> : (
+                <div className="text-center py-8">
+                  <svg className="mx-auto h-10 w-10 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  <p className="text-sm font-medium text-[#1A1A2E] mt-3">No documents generated yet</p>
+                  <p className="text-xs text-[#6B7280] mt-1">Documents will appear here once generated.</p>
                 </div>
-              ) : <p className="text-sm text-[#6B7280] text-center py-4">No documents.</p>
+              )
             )}
             {tab === 'Activity' && (
               <ActivityFeed fetchUrl={`${base}/activity`} accentColor={accentColor} />
@@ -126,4 +123,87 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
 
 function F({ l, v }: { l: string; v: string }) {
   return <div className="px-3 py-2.5 bg-gray-50 rounded-lg"><p className="text-[10px] uppercase tracking-wider text-[#6B7280]">{l}</p><p className="text-sm font-medium text-[#1A1A2E] mt-0.5 truncate">{v}</p></div>;
+}
+
+/* ── Document Grouping ─────────────────────────────────────────────────────── */
+
+const CAT_BADGE: Record<string, [string, string]> = {
+  cpl:              ['CPL',              'bg-purple-100 text-purple-700'],
+  proposed_insured: ['Proposed Insured', 'bg-teal-100 text-teal-700'],
+  legal_vesting:    ['Legal Vesting',    'bg-blue-100 text-blue-700'],
+  tax:              ['Tax',              'bg-green-100 text-green-700'],
+  grant_deed:       ['Grant Deed',       'bg-amber-100 text-amber-700'],
+};
+
+const DOC_GROUPS: { label: string; cats: string[] }[] = [
+  { label: 'Open Order Documents', cats: ['legal_vesting', 'tax', 'grant_deed'] },
+  { label: 'CPLs', cats: ['cpl'] },
+  { label: 'Proposed Insured', cats: ['proposed_insured'] },
+];
+
+function fmtSize(bytes?: number | null): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fmtTime(iso: string): { display: string; full: string } {
+  try {
+    const d = new Date(iso);
+    const diff = Date.now() - d.getTime();
+    const full = d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    if (diff < 60_000) return { display: 'just now', full };
+    if (diff < 3_600_000) return { display: `${Math.floor(diff / 60_000)}m ago`, full };
+    if (diff < 86_400_000) return { display: `${Math.floor(diff / 3_600_000)}h ago`, full };
+    return { display: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), full };
+  } catch { return { display: iso, full: iso }; }
+}
+
+function DocGroups({ docs, isClient }: { docs: Doc[]; isClient?: boolean }) {
+  const dlBase = isClient ? '/api/client' : '/api';
+  const grouped = DOC_GROUPS.map(({ label, cats }) => ({
+    label,
+    items: docs.filter((d) => cats.includes(d.category ?? '')),
+  }));
+  const otherCats = new Set(DOC_GROUPS.flatMap((g) => g.cats));
+  const other = docs.filter((d) => !otherCats.has(d.category ?? ''));
+  if (other.length) grouped.push({ label: 'Other Documents', items: other });
+
+  return (
+    <div className="space-y-5">
+      {grouped.filter((g) => g.items.length > 0).map(({ label, items }) => (
+        <div key={label}>
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-2">{label}</p>
+          <div className="space-y-1.5">
+            {items.map((d) => {
+              const [badge, cls] = CAT_BADGE[d.category ?? ''] ?? [d.category ?? 'general', 'bg-gray-100 text-gray-600'];
+              const name = d.originalFilename || d.filename;
+              const size = fmtSize(d.sizeBytes);
+              const time = fmtTime(d.createdAt);
+              return (
+                <div key={d.id} className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 rounded-lg group">
+                  <span className={`shrink-0 inline-block px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>{badge}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-[#1A1A2E] truncate" title={name}>{name}</p>
+                    <p className="text-xs text-[#6B7280]">
+                      <span title={time.full}>{time.display}</span>
+                      {size && <> · {size}</>}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => window.open(`${dlBase}/documents/${d.id}/download`, '_blank')}
+                    className="shrink-0 inline-flex items-center gap-1 text-xs font-semibold text-[#F26B2B] hover:text-[#E05A1A] opacity-70 group-hover:opacity-100 transition-opacity"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                    Download
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }

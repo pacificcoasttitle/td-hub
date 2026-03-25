@@ -4,7 +4,7 @@ const TIMEOUT_MS = 15_000;
 const CPL_TIMEOUT_MS = 30_000;
 
 const PCT_CLOSING_AGENT = 'CA1038';
-const PREPARE_CPL_BASE = 'https://www.tmpoh.com/api/WestcorVendorAPI/';
+const PREPARE_CPL_BASE = 'https://services.ewestcor.com/VendorApi/';
 
 // ─── Branch info needed by the payload builders ─────────────────────────────
 
@@ -124,10 +124,7 @@ export async function createOrUpdateOrder(
   }
 
   const data = (await res.json()) as WestcorOrderResponse;
-  const westcorOrderId = String(data.tvid ?? data.id ?? '');
-  if (!westcorOrderId || westcorOrderId === '0') {
-    throw new Error('Westcor returned no order ID (tvid)');
-  }
+  const westcorOrderId = String(data.tvid ?? data.id ?? '0');
 
   return { westcorOrderId, orderResponse: data };
 }

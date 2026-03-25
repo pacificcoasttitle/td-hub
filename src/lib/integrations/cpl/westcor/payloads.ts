@@ -333,6 +333,7 @@ function buildCplEntry(
     FileInformation: null,
     LetterName: selectedFormName,
     LenderID: westcorLenderId,
+    PolicyProducingAgentNumber: branch.branchCode,
     PolicyProducingAgentAddressID: branch.branchCode,
     PolicyProducingAgentAddress: branch.address,
     PolicyProducingAgentCity: branch.city,

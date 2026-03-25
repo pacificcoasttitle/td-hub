@@ -104,7 +104,7 @@ export const westcorAdapter: CplAdapter = {
       await logRequest({ operation: 'create_order', orderId: input.orderId, requestId, startedAt: new Date(), success: true, meta: { step: 'start', branchCode: branch.branchCode } });
       const { westcorOrderId, orderResponse } = await createOrUpdateOrder(cfg, token, orderDetail, input, branch);
 
-      const westcorLenderId = orderResponse.lenders?.[0]?.NameID ?? 0;
+      const westcorLenderId = orderResponse.lenders?.[0]?.Id ?? orderResponse.lenders?.[0]?.NameID ?? 0;
 
       const forms = await prepareAddCpl(cfg, token, westcorOrderId);
       const form = selectCplForm(forms, input.cplMode ?? 'single');

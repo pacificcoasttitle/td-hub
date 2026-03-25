@@ -2,9 +2,7 @@ import type { CplOrderDetail, CplGenerateInput, CplForm } from '../types';
 
 const TIMEOUT_MS = 15_000;
 const CPL_TIMEOUT_MS = 30_000;
-
 const PCT_CLOSING_AGENT = 'CA1038';
-const PREPARE_CPL_BASE = 'https://services.ewestcor.com/VendorApi/';
 
 // ─── Branch info needed by the payload builders ─────────────────────────────
 
@@ -21,14 +19,17 @@ export interface WestcorBranchInfo {
 
 export interface WestcorOrderResponse {
   tvid?: number;
-  id?: number;
   agentnumber?: string;
+  agent_file_number?: string;
+  partnerCode?: number;
   buyers?: Array<{ NameID?: number; First?: string; Last?: string }>;
   sellers?: Array<{ NameID?: number; First?: string; Last?: string }>;
-  lenders?: Array<{ NameID?: number; CompanyName?: string }>;
+  lenders?: Array<{ Id?: number; NameID?: number; name?: string }>;
+  property?: Array<{ PropertyID?: number }>;
+  messages?: { success?: string[]; warning?: string[]; error?: string[] };
 }
 
-// ─── Shared body helpers (spec Table 3 field names) ─────────────────────────
+// ─── Shared body helpers (legacy-exact field names) ─────────────────────────
 
 function buildProperty(prop: CplOrderDetail['property']) {
   const county = (prop?.county ?? '').trim();
@@ -40,26 +41,45 @@ function buildProperty(prop: CplOrderDetail['property']) {
     PropertyID: 0,
     tvid: 0,
     CountyName: suffixed,
-    ShortLegal: '',
+    ShortLegal: null as string | null,
     StreetAddress: prop?.address ?? '',
     City: prop?.city ?? '',
     State: prop?.state ?? 'CA',
     Zip: prop?.zip ?? '',
+    PropertyType: 'R',
   }];
 }
 
 function buildBuyers(names: string[]) {
-  return names.map((n) => {
-    const { firstName, lastName } = parseName(n);
-    return { NameID: 0, First: firstName, Last: lastName, NameType: 1, tvid: 0 };
-  });
+  return names.map((fullName, i) => ({
+    NameID: 0,
+    Last: '-',
+    First: fullName.trim(),
+    NameType: 1,
+    JoiningPhrase: 'single',
+    tvid: 0,
+    Sequence: i + 1,
+    City: null as string | null,
+    State: null as string | null,
+    Zip: null as string | null,
+    Address: null as string | null,
+  }));
 }
 
 function buildSellers(names: string[]) {
-  return names.map((n) => {
-    const { firstName, lastName } = parseName(n);
-    return { NameID: 0, First: firstName, Last: lastName, NameType: 2, tvid: 0 };
-  });
+  return names.map((fullName, i) => ({
+    NameID: 0,
+    Last: '-',
+    First: fullName.trim(),
+    NameType: 2,
+    JoiningPhrase: 'single',
+    tvid: 0,
+    Sequence: i + 1,
+    City: null as string | null,
+    State: null as string | null,
+    Zip: null as string | null,
+    Address: null as string | null,
+  }));
 }
 
 function buildLenders(
@@ -70,14 +90,43 @@ function buildLenders(
   if (!lender) return [];
 
   return [{
-    NameID: 0,
-    CompanyName: lenderOverrides?.name ?? lender.name ?? '',
-    First: '',
-    Last: '',
-    NameType: 0,
+    Id: 0,
     tvid: 0,
+    name: lenderOverrides?.name ?? lender.name ?? '',
+    city: lenderOverrides?.city ?? lender.city ?? '',
+    state: lenderOverrides?.state ?? lender.state ?? '',
+    zip: lenderOverrides?.zip ?? lender.zip ?? '',
+    address: lenderOverrides?.address ?? lender.address ?? '',
+    phone: null as string | null,
+    email: null as string | null,
+    countyFIPS: null as string | null,
+    assignment: null as string | null,
+    mortgageType: null as string | null,
+    amount: 0,
+    loan_number: '',
+    vendorInternalID: null as number | null,
   }];
 }
+
+const ACTIONS_CREATE = {
+  sdn: false,
+  update_base: true,
+  update_property: true,
+  update_lender: true,
+  update_buyers: true,
+  update_sellers: true,
+  update_attorneys: false,
+  update_cpls: false,
+  update_jacket: false,
+  update_search: false,
+  update_reinsurance: false,
+  update_priors: false,
+};
+
+const ACTIONS_CPL = {
+  ...ACTIONS_CREATE,
+  update_cpls: true,
+};
 
 // ─── Step A: Create / sync order ────────────────────────────────────────────
 
@@ -91,21 +140,26 @@ export async function createOrUpdateOrder(
   const body = {
     tvid: 0,
     agentnumber: branch.branchCode,
-    agencyname: branch.agencyName,
     agent_file_number: orderDetail.fileNumber,
-    VendorTransactionID: null,
     email_requestor: '',
-    purchase_price: orderDetail.salesPrice ? parseFloat(orderDetail.salesPrice) || 0 : 0,
+    purchase_price: orderDetail.salesPrice
+      ? parseInt(String(orderDetail.salesPrice).replace(/[^0-9\-]/g, ''), 10) || 0
+      : 0,
     property: buildProperty(orderDetail.property),
     buyers: buildBuyers(orderDetail.buyers),
     sellers: buildSellers(orderDetail.sellers),
     lenders: buildLenders(orderDetail, input.lenderOverrides),
-    actions: {
-      update_property: true,
-      update_buyers: true,
-      update_sellers: true,
-      update_lender: true,
-    },
+    search: null,
+    commitment: null,
+    jacket: null,
+    sdn: null,
+    history: null,
+    notes: null as string | null,
+    messages: { success: [] as string[], warning: [] as string[], error: [] as string[] },
+    actions: ACTIONS_CREATE,
+    partnerCode: parseInt(cfg.integrationPartner, 10) || 0,
+    cpl: null,
+    priors: null,
   };
 
   const res = await fetch(
@@ -124,23 +178,20 @@ export async function createOrUpdateOrder(
   }
 
   const data = (await res.json()) as WestcorOrderResponse;
-  const westcorOrderId = String(data.tvid ?? data.id ?? '0');
+  const westcorOrderId = String(data.tvid ?? 0);
 
   return { westcorOrderId, orderResponse: data };
 }
 
-// ─── Step B: PrepareAddCPL (endpoint moved to tmpoh.com per API doc v3.8.2) ─
+// ─── Step B: PrepareAddCPL ──────────────────────────────────────────────────
 
 export async function prepareAddCpl(
   cfg: { baseUrl: string; integrationPartner: string },
   token: string,
   westcorOrderId: string,
 ): Promise<CplForm[]> {
-  const cplBase = process.env.WESTCOR_CPL_BASE_URL ?? PREPARE_CPL_BASE;
-  const base = cplBase.endsWith('/') ? cplBase : `${cplBase}/`;
-
   const url =
-    `${base}ClosingLetters/PrepareAddCPL/${westcorOrderId}/${cfg.integrationPartner}`;
+    `${cfg.baseUrl}VendorApi/ClosingLetters/PrepareAddCPL/${westcorOrderId}/${cfg.integrationPartner}`;
 
   const res = await fetch(url, {
     headers: { 'Authorization': `Bearer ${token}` },
@@ -151,14 +202,18 @@ export async function prepareAddCpl(
     throw new Error(`Westcor PrepareAddCPL failed: HTTP ${res.status}`);
   }
 
-  const data = await res.json() as {
+  const text = await res.text();
+  if (!text) return [];
+
+  const data = JSON.parse(text) as {
+    CPL?: { Forms?: Array<{ FormName?: string }> };
     cplForms?: Array<{ id?: number; name?: string }>;
-    Forms?: Array<{ FormId: string; FormName: string }>;
+    Forms?: Array<{ FormId?: string; FormName?: string }>;
   };
 
-  const rawForms = data.cplForms ?? data.Forms ?? [];
+  const rawForms = data.CPL?.Forms ?? data.cplForms ?? data.Forms ?? [];
   return rawForms.map((f: Record<string, unknown>) => ({
-    id: String(f.id ?? f.FormId ?? ''),
+    id: String(f.id ?? f.FormId ?? f.FormName ?? ''),
     name: String(f.name ?? f.FormName ?? ''),
   }));
 }
@@ -180,13 +235,24 @@ export async function generateCplPdf(
   const body = {
     tvid,
     agentnumber: branch.branchCode,
-    agencyname: branch.agencyName,
     agent_file_number: orderDetail.fileNumber,
-    purchase_price: orderDetail.salesPrice ? parseFloat(orderDetail.salesPrice) || 0 : 0,
+    email_requestor: '',
+    purchase_price: orderDetail.salesPrice
+      ? parseInt(String(orderDetail.salesPrice).replace(/[^0-9\-]/g, ''), 10) || 0
+      : 0,
     property: buildProperty(orderDetail.property),
     buyers: buildBuyers(orderDetail.buyers),
     sellers: buildSellers(orderDetail.sellers),
     lenders: buildLenders(orderDetail, input.lenderOverrides),
+    search: null,
+    commitment: null,
+    jacket: null,
+    sdn: null,
+    history: null,
+    notes: null as string | null,
+    messages: { success: [] as string[], warning: [] as string[], error: [] as string[] },
+    actions: ACTIONS_CPL,
+    partnerCode: parseInt(cfg.integrationPartner, 10) || 0,
     cpl: [{
       TVID: tvid,
       CPLID: -1,
@@ -202,13 +268,7 @@ export async function generateCplPdf(
       ClosingAgentNumber: PCT_CLOSING_AGENT,
       IsDualCPL: false,
     }],
-    actions: {
-      update_cpls: true,
-      update_property: true,
-      update_buyers: true,
-      update_sellers: true,
-      update_lender: true,
-    },
+    priors: null,
   };
 
   const res = await fetch(
@@ -289,7 +349,7 @@ export function selectCplForm(
   );
 }
 
-// ─── Name parsing ───────────────────────────────────────────────────────────
+// ─── Name parsing (kept for other callers) ──────────────────────────────────
 
 export function parseName(
   fullName: string,

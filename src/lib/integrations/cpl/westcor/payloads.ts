@@ -82,6 +82,13 @@ function parseAmount(val: string | null | undefined): number {
   return parseInt(String(val).replace(/[^0-9\-]/g, ''), 10) || 0;
 }
 
+function extractTvid(entity: unknown): number {
+  if (!entity || typeof entity !== 'object') return 0;
+  const obj = entity as Record<string, unknown>;
+  const raw = obj.TVID ?? obj.tvid ?? obj.Tvid;
+  return Number(raw) || 0;
+}
+
 /**
  * Westcor always expects a `purchase_price` field.
  * - Purchase: use salesPrice (or modal salesAmountOverride)
@@ -380,32 +387,28 @@ export async function generateCplPdf(
   const propertyId = orderResponse.property?.[0]?.PropertyID
     ?? (getOrderProperty[0]?.PropertyID as number)
     ?? 0;
-  const propertyTvid = orderResponse.property?.[0]?.tvid
-    ?? (getOrderProperty[0]?.tvid as number | string)
-    ?? westcorOrderTvid;
+  const propertyTvid = extractTvid(orderResponse.property?.[0])
+    || extractTvid(getOrderProperty[0]);
 
   const buyerIds = orderDetail.buyers.map((_, i) => ({
     NameID: orderResponse.buyers?.[i]?.NameID
       ?? (getOrderBuyers[i]?.NameID as number)
       ?? 0,
-    tvid: orderResponse.buyers?.[i]?.tvid
-      ?? (getOrderBuyers[i]?.tvid as number | string)
-      ?? westcorOrderTvid,
+    tvid: extractTvid(orderResponse.buyers?.[i])
+      || extractTvid(getOrderBuyers[i]),
   }));
   const sellerIds = buildSellers(orderDetail.sellers, orderDetail.transactionType).map((_, i) => ({
     NameID: orderResponse.sellers?.[i]?.NameID
       ?? (getOrderSellers[i]?.NameID as number)
       ?? 0,
-    tvid: orderResponse.sellers?.[i]?.tvid
-      ?? (getOrderSellers[i]?.tvid as number | string)
-      ?? westcorOrderTvid,
+    tvid: extractTvid(orderResponse.sellers?.[i])
+      || extractTvid(getOrderSellers[i]),
   }));
   const westcorLenderId = orderResponse.lenders?.[0]?.Id
     ?? (getOrderLenders[0]?.Id as number)
     ?? 0;
-  const lenderTvid = orderResponse.lenders?.[0]?.tvid
-    ?? (getOrderLenders[0]?.tvid as number | string)
-    ?? westcorOrderTvid;
+  const lenderTvid = extractTvid(orderResponse.lenders?.[0])
+    || extractTvid(getOrderLenders[0]);
 
   const property = buildProperty(orderDetail.property, {
     PropertyID: propertyId,
@@ -457,7 +460,7 @@ export async function generateCplPdf(
       update_property: true,
       update_lender: true,
       update_buyers: true,
-      update_sellers: true,
+      update_sellers: sellers.length > 0,
       update_attorneys: false,
       update_cpls: true,
       update_jacket: false,
@@ -538,6 +541,7 @@ export async function generateCplPdf(
   diagnostics.responseTopKeys = Object.keys(data);
   diagnostics.responseMessages = data.messages ?? null;
   diagnostics.responseCplCount = Array.isArray(data.cpl) ? (data.cpl as unknown[]).length : 0;
+  diagnostics.responseBody = data;
 
   const messages = data.messages as { error?: string[]; warning?: string[]; success?: string[] } | undefined;
 

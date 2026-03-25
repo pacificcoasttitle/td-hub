@@ -12,6 +12,7 @@ import { getToken, cachedGroups, mapGroupsToBranches } from './auth';
 import type { WestcorGroup } from './auth';
 import {
   createOrUpdateOrder, getOrder, prepareAddCpl, generateCplPdf, selectCplForm,
+  resolvePurchasePrice, preflightValidate,
 } from './payloads';
 import type { WestcorBranchInfo } from './payloads';
 
@@ -132,39 +133,60 @@ export const westcorAdapter: CplAdapter = {
         throw new Error('Lender company name is required to generate a CPL. Please enter lender information in the CPL modal.');
       }
 
+      const txType = orderDetail.transactionType ?? 'unknown';
+
       // Look up existing Westcor tvid from a previous successful Step A for this order
       const existingTvid = await lookupExistingTvid(input.orderId);
 
-      // Step A: Create/update order in Westcor (legacy: POST Order/Update)
+      // Step A: Create/update order in Westcor
       const { westcorOrderId, orderResponse } = await createOrUpdateOrder(cfg, token, orderDetail, input, branch, existingTvid);
+      const stepALenderId = orderResponse.lenders?.[0]?.Id ?? null;
       await logRequest({
         operation: 'create_order', orderId: input.orderId, requestId, startedAt: new Date(), success: true,
-        meta: { step: 'complete', branchCode: branch.branchCode, tvid: westcorOrderId, reusedTvid: !!existingTvid },
+        meta: {
+          step: 'complete', branchCode: branch.branchCode, tvid: westcorOrderId,
+          reusedTvid: !!existingTvid, transactionType: txType,
+          purchasePrice: resolvePurchasePrice(orderDetail, input),
+          buyerCount: orderDetail.buyers.length, sellerCount: orderDetail.sellers.length,
+          hasLender: !!orderDetail.lender?.name,
+        },
         responseMeta: {
           tvid: westcorOrderId,
           hasLenders: (orderResponse.lenders?.length ?? 0) > 0,
-          lenderId: orderResponse.lenders?.[0]?.Id ?? null,
+          lenderId: stepALenderId,
           hasBuyers: (orderResponse.buyers?.length ?? 0) > 0,
           hasSellers: (orderResponse.sellers?.length ?? 0) > 0,
         },
       });
 
-      // Step B: GET the full order from Westcor (legacy: GET Order/{tvid}/{partner})
+      // Step B: GET full order from Westcor
       const westcorOrder = await getOrder(cfg, token, westcorOrderId);
       const getOrderLenders = (westcorOrder.lenders ?? []) as Array<Record<string, unknown>>;
+      const stepBLenderId = (getOrderLenders[0]?.Id as number) ?? null;
       await logRequest({
         operation: 'get_order', orderId: input.orderId, requestId, startedAt: new Date(), success: true,
         meta: {
           tvid: westcorOrderId,
           getHasLenders: getOrderLenders.length > 0,
-          getLenderId: getOrderLenders[0]?.Id ?? null,
+          getLenderId: stepBLenderId,
           getHasBuyers: Array.isArray(westcorOrder.buyers) && (westcorOrder.buyers as unknown[]).length > 0,
           getHasSellers: Array.isArray(westcorOrder.sellers) && (westcorOrder.sellers as unknown[]).length > 0,
           getHasProperty: Array.isArray(westcorOrder.property) && (westcorOrder.property as unknown[]).length > 0,
         },
       });
 
-      // Step C: PrepareAddCPL — returns forms + CPL template (legacy: $resCPL['CPL'])
+      // Resolve the best lender ID from Step A or Step B
+      const resolvedLenderId = stepALenderId ?? stepBLenderId ?? 0;
+
+      // Preflight validation (transaction-aware)
+      const preflightErrors = preflightValidate({
+        orderDetail, input, westcorLenderId: resolvedLenderId,
+      });
+      if (preflightErrors.length > 0) {
+        throw new Error(`CPL preflight failed: ${preflightErrors.join(' ')}`);
+      }
+
+      // Step C: PrepareAddCPL
       const { forms, cplTemplate } = await prepareAddCpl(cfg, token, westcorOrderId);
       const form = selectCplForm(forms, input.cplMode ?? 'single');
 
@@ -174,11 +196,13 @@ export const westcorAdapter: CplAdapter = {
           formCount: forms.length, selectedForm: form.name,
           templateHasTVID: cplTemplate.TVID != null,
           templateTVID: cplTemplate.TVID ?? null,
-          templateKeys: Object.keys(cplTemplate).slice(0, 20),
+          templateKeys: Object.keys(cplTemplate).slice(0, 25),
+          transactionType: txType,
+          resolvedLenderId,
         },
       });
 
-      // Step D: Generate CPL — merge GET order + CPL template + our data (legacy flow)
+      // Step D: Generate CPL
       const { pdf, cplId } = await generateCplPdf(
         cfg, token, westcorOrder, cplTemplate, form.name,
         orderDetail, input, branch, orderResponse,
@@ -187,7 +211,11 @@ export const westcorAdapter: CplAdapter = {
       const durationMs = Date.now() - start;
       await logRequest({
         operation: 'generate_cpl', orderId: input.orderId, requestId, startedAt, success: true, httpStatus: 200,
-        meta: { westcorOrderId, formId: form.id, formName: form.name, cplId },
+        meta: {
+          westcorOrderId, formId: form.id, formName: form.name, cplId,
+          transactionType: txType, resolvedLenderId,
+          payloadPath: txType === 'Refinance' ? 'refinance' : 'purchase',
+        },
       });
 
       return vendorSuccess<CplGenerateResult>(

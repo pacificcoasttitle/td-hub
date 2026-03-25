@@ -6,6 +6,8 @@ export type Underwriter = 'westcor' | 'fnf' | 'natic' | 'doma';
 
 // ─── CPL Generate Input / Output ──────────────────────────────────────────────
 
+export type TransactionType = 'Purchase' | 'Refinance' | 'Equity' | 'Other';
+
 export interface CplGenerateInput {
   orderId: number;
   underwriter: Underwriter;
@@ -25,6 +27,8 @@ export interface CplGenerateInput {
     zip?: string;
     county?: string;
   };
+  salesAmountOverride?: string;
+  loanAmountOverride?: string;
 }
 
 export interface CplGenerateResult {
@@ -52,6 +56,7 @@ export interface CplBranch {
 export interface CplOrderDetail {
   orderId: number;
   fileNumber: string;
+  transactionType: TransactionType | null;
   property: {
     address: string | null;
     city: string | null;

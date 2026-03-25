@@ -85,6 +85,8 @@ export async function POST(req: NextRequest) {
       cplMode: parsed.cplMode,
       lenderOverrides,
       propertyOverrides,
+      salesAmountOverride: parsed.salesAmount || undefined,
+      loanAmountOverride: parsed.loanAmount || undefined,
     };
 
     const result = await generateCpl(input, session.id);

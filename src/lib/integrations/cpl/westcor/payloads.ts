@@ -1,8 +1,7 @@
-import type { CplOrderDetail, CplGenerateInput, CplForm } from '../types';
+import type { CplOrderDetail, CplGenerateInput, CplForm, TransactionType } from '../types';
 
 const TIMEOUT_MS = 15_000;
 const CPL_TIMEOUT_MS = 30_000;
-const PCT_CLOSING_AGENT = 'CA1038';
 
 // ─── Branch info needed by the payload builders ─────────────────────────────
 
@@ -32,6 +31,81 @@ export interface WestcorOrderResponse {
 export interface PrepareAddCplResult {
   forms: CplForm[];
   cplTemplate: Record<string, unknown>;
+}
+
+// ─── Preflight validation ───────────────────────────────────────────────────
+
+export interface PreflightContext {
+  orderDetail: CplOrderDetail;
+  input: CplGenerateInput;
+  westcorLenderId: number;
+}
+
+export function preflightValidate(ctx: PreflightContext): string[] {
+  const errors: string[] = [];
+  const { orderDetail, westcorLenderId } = ctx;
+  const txType = orderDetail.transactionType;
+
+  if (!orderDetail.property?.address) {
+    errors.push('Property address is required.');
+  }
+  if (orderDetail.buyers.length === 0) {
+    errors.push('At least one buyer/borrower is required.');
+  }
+  if (!orderDetail.lender?.name) {
+    errors.push('Lender company name is required to generate a CPL.');
+  }
+
+  if (txType === 'Purchase') {
+    if (orderDetail.sellers.length === 0) {
+      errors.push('Purchase transactions require at least one seller.');
+    }
+    const price = resolvePurchasePrice(orderDetail, ctx.input);
+    if (price <= 0) {
+      errors.push('Purchase transactions require a sales amount greater than zero.');
+    }
+  }
+
+  if (txType === 'Refinance') {
+    if (westcorLenderId === 0) {
+      errors.push('Refinance transactions require a valid Westcor lender ID. Lender may not have been registered in Westcor.');
+    }
+  }
+
+  return errors;
+}
+
+// ─── Amount resolution (transaction-aware) ──────────────────────────────────
+
+function parseAmount(val: string | null | undefined): number {
+  if (!val) return 0;
+  return parseInt(String(val).replace(/[^0-9\-]/g, ''), 10) || 0;
+}
+
+/**
+ * Westcor always expects a `purchase_price` field.
+ * - Purchase: use salesPrice (or modal salesAmountOverride)
+ * - Refinance: use loanAmount (or modal loanAmountOverride), fall back to salesPrice
+ * - Other/Equity/unknown: use whichever is nonzero, prefer salesPrice
+ */
+export function resolvePurchasePrice(
+  orderDetail: CplOrderDetail,
+  input: CplGenerateInput,
+): number {
+  const salesOverride = parseAmount(input.salesAmountOverride);
+  const loanOverride = parseAmount(input.loanAmountOverride);
+  const dbSales = parseAmount(orderDetail.salesPrice);
+  const dbLoan = parseAmount(orderDetail.loanAmount);
+  const txType = orderDetail.transactionType;
+
+  if (txType === 'Purchase') {
+    return salesOverride || dbSales || loanOverride || dbLoan || 0;
+  }
+  if (txType === 'Refinance') {
+    return loanOverride || dbLoan || salesOverride || dbSales || 0;
+  }
+  // Equity, Other, or null — use whichever is nonzero
+  return salesOverride || dbSales || loanOverride || dbLoan || 0;
 }
 
 // ─── Shared body helpers (legacy-exact field names from Westcor.php) ────────
@@ -71,8 +145,13 @@ function buildBuyers(names: string[]) {
   }));
 }
 
-function buildSellers(names: string[]) {
-  return names.map((fullName, i) => ({
+function buildSellers(names: string[], txType: TransactionType | null) {
+  // Refinance transactions typically have no seller; don't send placeholders
+  const filtered = txType === 'Refinance'
+    ? names.filter((n) => !/^tbd\b/i.test(n.trim()))
+    : names;
+
+  return filtered.map((fullName, i) => ({
     NameID: 0,
     Last: '-',
     First: fullName.trim(),
@@ -113,11 +192,6 @@ function buildLenders(
   }];
 }
 
-function parsePurchasePrice(val: string | null): number {
-  if (!val) return 0;
-  return parseInt(String(val).replace(/[^0-9\-]/g, ''), 10) || 0;
-}
-
 const ACTIONS_CREATE = {
   sdn: false,
   update_base: true,
@@ -134,7 +208,6 @@ const ACTIONS_CREATE = {
 };
 
 // ─── Step A: Create order in Westcor ────────────────────────────────────────
-// Legacy: POST VendorApi/Order/Update/{partner} with $cplPostData
 
 export async function createOrUpdateOrder(
   cfg: { baseUrl: string; integrationPartner: string },
@@ -149,10 +222,10 @@ export async function createOrUpdateOrder(
     agentnumber: branch.branchCode,
     agent_file_number: orderDetail.fileNumber,
     email_requestor: 'cpl@pct.com',
-    purchase_price: parsePurchasePrice(orderDetail.salesPrice),
+    purchase_price: resolvePurchasePrice(orderDetail, input),
     property: buildProperty(orderDetail.property),
     buyers: buildBuyers(orderDetail.buyers),
-    sellers: buildSellers(orderDetail.sellers),
+    sellers: buildSellers(orderDetail.sellers, orderDetail.transactionType),
     lenders: buildLenders(orderDetail, input.lenderOverrides),
     search: null,
     commitment: null,
@@ -193,7 +266,6 @@ export async function createOrUpdateOrder(
 }
 
 // ─── Step B: GET full order from Westcor ─────────────────────────────────────
-// Legacy: GET VendorApi/Order/{tvid}/{partner} — used as the base for Step D
 
 export async function getOrder(
   cfg: { baseUrl: string; integrationPartner: string },
@@ -209,9 +281,6 @@ export async function getOrder(
 }
 
 // ─── Step C: PrepareAddCPL ──────────────────────────────────────────────────
-// Legacy: GET VendorApi/ClosingLetters/PrepareAddCPL/{tvid}/{partner}
-// Returns the full CPL template ($resCPL['CPL']) plus available Forms.
-// The template is reused in Step D with field overrides.
 
 export async function prepareAddCpl(
   cfg: { baseUrl: string; integrationPartner: string },
@@ -235,7 +304,6 @@ export async function prepareAddCpl(
 
   const data = JSON.parse(text) as Record<string, unknown>;
 
-  // Legacy: $resCPL['CPL'] is the object containing Forms + TVID + other metadata
   const cplObj = (data.CPL ?? data) as Record<string, unknown>;
   const rawForms = (cplObj.Forms ?? []) as Array<Record<string, unknown>>;
 
@@ -247,17 +315,56 @@ export async function prepareAddCpl(
   return { forms, cplTemplate: cplObj };
 }
 
+// ─── Whitelisted CPL entry builder ──────────────────────────────────────────
+// Instead of `...cplTemplate` which sends read-only/internal Westcor fields
+// back (causing NullReferenceException), only include explicitly required fields.
+
+const CPL_TEMPLATE_SAFE_KEYS = new Set([
+  'TVID', 'CPLID', 'LetterName', 'LenderID',
+  'PolicyProducingAgentAddressID', 'PolicyProducingAgentAddress',
+  'PolicyProducingAgentCity', 'PolicyProducingAgentState', 'PolicyProducingAgentZip',
+  'PolicyProducingAgentNumber',
+  'ProtectLender', 'ClosingAgentNumber', 'IsDualCPL',
+  'FileInformation', 'EffectiveDate', 'ExpirationDate',
+  'ProtectBuyer', 'ProtectSeller', 'ProtectBorrower',
+]);
+
+function buildCplEntry(
+  cplTemplate: Record<string, unknown>,
+  selectedFormName: string,
+  westcorLenderId: number,
+  branch: WestcorBranchInfo,
+  westcorOrderTvid: string | number,
+): Record<string, unknown> {
+  // Start with only safe fields from the template
+  const safeBase: Record<string, unknown> = {};
+  for (const key of CPL_TEMPLATE_SAFE_KEYS) {
+    if (key in cplTemplate && cplTemplate[key] !== undefined) {
+      safeBase[key] = cplTemplate[key];
+    }
+  }
+
+  // Override with our required values
+  return {
+    ...safeBase,
+    TVID: safeBase.TVID ?? (Number(westcorOrderTvid) || 0),
+    CPLID: -1,
+    LetterName: selectedFormName,
+    FileInformation: null,
+    LenderID: westcorLenderId,
+    PolicyProducingAgentAddressID: branch.branchCode,
+    PolicyProducingAgentNumber: branch.branchCode,
+    PolicyProducingAgentAddress: branch.address,
+    PolicyProducingAgentCity: branch.city,
+    PolicyProducingAgentState: branch.state,
+    PolicyProducingAgentZip: branch.zip,
+    ProtectLender: true,
+    ClosingAgentNumber: branch.branchCode,
+    IsDualCPL: false,
+  };
+}
+
 // ─── Step D: Generate CPL PDF ───────────────────────────────────────────────
-// Legacy flow (lines 441-525 of Westcor.php):
-//   1. $res = GET Order/{tvid}/{partner}  (the full Westcor order)
-//   2. $res['cpl'] = array()              (clear any existing CPLs)
-//   3. Modify $resCPL['CPL'] with our CPL fields (LetterName, LenderID, etc.)
-//   4. $res['cpl'][] = $resCPL['CPL']     (add modified CPL template)
-//   5. Overwrite $res property/buyers/sellers/lenders/purchase_price with ours
-//   6. Set action flags on $res['actions']
-//   7. POST Order/Update with json_encode($res)
-//
-// We replicate this: take the GET order as base, overlay our data + CPL.
 
 export async function generateCplPdf(
   cfg: { baseUrl: string; integrationPartner: string },
@@ -270,9 +377,8 @@ export async function generateCplPdf(
   branch: WestcorBranchInfo,
   orderResponse: WestcorOrderResponse,
 ): Promise<{ pdf: string; cplId: string }> {
-  // Build our data arrays
   const buyers = buildBuyers(orderDetail.buyers);
-  const sellers = buildSellers(orderDetail.sellers);
+  const sellers = buildSellers(orderDetail.sellers, orderDetail.transactionType);
   const lenders = buildLenders(orderDetail, input.lenderOverrides);
 
   // Extract IDs from Step A response, falling back to Step B GET response
@@ -299,25 +405,12 @@ export async function generateCplPdf(
     lenders[0].Id = westcorLenderId;
   }
 
-  // Legacy: modify the CPL template from PrepareAddCPL ($resCPL['CPL'])
-  // TVID is already in the template from PrepareAddCPL — legacy does NOT set it
-  const cplEntry: Record<string, unknown> = {
-    ...cplTemplate,
-    LetterName: selectedFormName,
-    FileInformation: null,
-    CPLID: -1,
-    LenderID: westcorLenderId,
-    PolicyProducingAgentAddressID: branch.branchCode,
-    PolicyProducingAgentAddress: branch.address,
-    PolicyProducingAgentCity: branch.city,
-    PolicyProducingAgentState: branch.state,
-    PolicyProducingAgentZip: branch.zip,
-    ProtectLender: true,
-    ClosingAgentNumber: PCT_CLOSING_AGENT,
-    IsDualCPL: false,
-  };
+  const westcorOrderTvid = westcorOrder.tvid ?? orderResponse.tvid ?? 0;
 
-  // Legacy: merge GET order + our data + CPL entry
+  const cplEntry = buildCplEntry(
+    cplTemplate, selectedFormName, westcorLenderId, branch, westcorOrderTvid as string | number,
+  );
+
   const existingActions = (westcorOrder.actions ?? {}) as Record<string, unknown>;
   const body: Record<string, unknown> = {
     ...westcorOrder,
@@ -334,7 +427,7 @@ export async function generateCplPdf(
       update_sellers: true,
       update_lender: true,
     },
-    purchase_price: parsePurchasePrice(orderDetail.salesPrice),
+    purchase_price: resolvePurchasePrice(orderDetail, input),
   };
 
   const res = await fetch(
@@ -361,27 +454,22 @@ export async function generateCplPdf(
     messages?: { error?: string[] };
   };
 
-  // Legacy: check messages.error first
   if (data.messages?.error && data.messages.error.length > 0) {
     throw new Error(`Westcor CPL error: ${data.messages.error.join('; ')}`);
   }
 
-  // Legacy: use LAST cpl entry — $cplCount = count($resultResCPL['cpl']) - 1
   const cplEntries = data.cpl ?? [];
   const lastCpl = cplEntries[cplEntries.length - 1];
   if (!lastCpl) throw new Error('Westcor returned no CPL entry');
 
-  // Legacy: $resultResCPL['cpl'][$cplCount]['FileInformation']['FileAsBase64']
   const pdf = lastCpl.FileInformation?.FileAsBase64 ?? '';
   if (!pdf) throw new Error('Westcor returned empty CPL PDF');
 
-  // Legacy: $resultResCPL['cpl'][$cplCount]['CPLID']
   const cplId = String(lastCpl.CPLID ?? lastCpl.cplNumber ?? `WC-${Date.now()}`);
   return { pdf, cplId };
 }
 
 // ─── Form selection ─────────────────────────────────────────────────────────
-// Legacy: Westcor.php selectCplForm() — searches by FormName semantics
 
 export function selectCplForm(
   forms: CplForm[],

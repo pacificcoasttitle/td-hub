@@ -233,6 +233,7 @@ function buildOrderDetail(
   return {
     orderId: order.id,
     fileNumber: order.fileNumber,
+    transactionType: order.transactionType ?? null,
     property,
     buyers,
     sellers,

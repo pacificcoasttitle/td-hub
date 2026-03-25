@@ -12,6 +12,44 @@ const USER_TYPE_MAP: Record<string, string> = {
   listing_agent: 'ListingAgentBroker',
 };
 
+const OFFICER_BRANCH_MAP: Record<string, string> = {
+  'jim jean': 'OCT',
+  'clive virata': 'OCT',
+  'kevin cameron': 'TSG',
+  'susan dana': 'TSG',
+  'rachel barcena': 'GLT',
+  'eddie lasmarias': 'GLT',
+  'joseph gomez': 'GLT',
+  'karla casco': 'ONT',
+  'analleli ayala': 'OCT',
+  'lupe vidaca': 'OCT',
+  'christine quintanar': 'OCT',
+  'anna ballesteros': 'PRV',
+};
+
+const ESCROW_ORDER_TYPES = ['Title & Escrow', 'Escrow only'];
+
+function resolveBranchCode(
+  orderType: string,
+  titleOfficer?: ResolvedContact,
+  escrowOfficer?: ResolvedContact,
+): string {
+  const useEscrow = ESCROW_ORDER_TYPES.includes(orderType);
+  const officer = useEscrow ? escrowOfficer : titleOfficer;
+  if (officer?.officeLookupCode) return officer.officeLookupCode;
+  const name = (officer?.officerName ?? officer?.fullName ?? '').toLowerCase().trim();
+  if (name && OFFICER_BRANCH_MAP[name]) return OFFICER_BRANCH_MAP[name];
+  return 'GLT';
+}
+
+function stripPhone(raw: string | null | undefined): string {
+  return (raw ?? '').replace(/\D/g, '');
+}
+
+function titleCase(s: string): string {
+  return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
 export interface ResolvedContact {
   id: number;
   fullName: string | null;
@@ -92,10 +130,7 @@ export function buildSoftProPayload(
 
   const salesRepLookup = salesRep?.lookupCode ?? '';
   const titleOfficeLookup = titleOfficer?.lookupCode ?? '';
-  const officeBranchCode =
-    company?.branchCode ??
-    titleOfficer?.officeLookupCode ??
-    input.transaction.branchCode;
+  const branchCode = resolveBranchCode(input.orderType, titleOfficer, escrowOfficer);
 
   return {
     baseDetails: {
@@ -111,7 +146,7 @@ export function buildSoftProPayload(
       Email: opener?.email ?? '',
       FirstName: opener?.firstName ?? '',
       LastName: opener?.lastName ?? '',
-      Telephone: opener?.phone ?? '',
+      Telephone: stripPhone(opener?.phone),
       Address: opener?.address1 ?? '',
       City: opener?.city ?? '',
       ZipCode: opener?.zip ?? '',
@@ -123,7 +158,7 @@ export function buildSoftProPayload(
       Address1: input.property.address,
       Address2: input.property.unitNumber ?? '',
       APNNumberParcelID: enriched.apn,
-      Country: enriched.county,
+      Country: titleCase(enriched.county),
       Description: enriched.legal,
       IsPrimaryResidence: true,
       City: input.property.city,
@@ -143,7 +178,7 @@ export function buildSoftProPayload(
       IsOrganization: String(input.seller.isOrganization),
     },
     transactionDetails: {
-      LookUpCodeTitleOffice: officeBranchCode,
+      LookUpCodeTitleOffice: branchCode,
       TitleOffice: titleOfficeLookup,
       Product: input.transaction.product,
       EscrowNumber: input.transaction.escrowNumber ?? '',
@@ -159,7 +194,7 @@ export function buildSoftProPayload(
       SecondaryBorrowerFirstName: input.buyer.secondaryFirstName ?? '',
       SecondaryBorrowerMiddleName: input.buyer.secondaryMiddleName ?? '',
       SecondaryBorrowerLastName: input.buyer.secondaryLastName ?? '',
-      IsOrganization: String(input.buyer.isOrganization),
+      IsOrganization: input.buyer.isOrganization === true,
       OrganizationType: input.buyer.organizationType ?? '',
       LookUpCodeEscrowOfficer: escrowOfficer?.lookupCode ?? null,
       EscrowOfficerName: escrowOfficer?.officerName ?? escrowOfficer?.fullName ?? null,

@@ -340,19 +340,24 @@ export async function prepareAddCpl(
 // ONLY the 13 fields the legacy PHP sends. Nothing from the template.
 
 function buildCplEntry(
-  _cplTemplate: Record<string, unknown>,
+  cplTemplate: Record<string, unknown>,
   selectedFormName: string,
   westcorLenderId: number,
   branch: WestcorBranchInfo,
   westcorOrderTvid: string | number,
 ): Record<string, unknown> {
+  const templateBase = { ...cplTemplate } as Record<string, unknown>;
+  delete templateBase.Forms;
+  delete templateBase.additionalinfo;
+
   return {
+    ...templateBase,
     TVID: Number(westcorOrderTvid) || 0,
     CPLID: -1,
     FileInformation: null,
     LetterName: selectedFormName,
     LenderID: westcorLenderId,
-    PolicyProducingAgentNumber: branch.branchCode,
+    PolicyProducingAgentNumber: templateBase.PolicyProducingAgentNumber ?? branch.branchCode,
     PolicyProducingAgentAddressID: branch.branchCode,
     PolicyProducingAgentAddress: branch.address,
     PolicyProducingAgentCity: branch.city,
@@ -432,48 +437,31 @@ export async function generateCplPdf(
     'actions', 'partnerCode', 'cpl', 'priors',
   ] as const;
 
-  // Build the full legacy-shaped Step D payload, but only from our own
-  // allowlisted builders with Westcor-assigned IDs preserved.
+  const existingActions = (westcorOrder.actions ?? {}) as Record<string, unknown>;
+
+  // Last-mile parity: start from Westcor's own order object and override only
+  // the mutable sections/flags that legacy updates for Step D.
   const body: Record<string, unknown> = {
-    tvid: Number(westcorOrderTvid) || 0,
-    agentnumber: branch.branchCode,
-    agencyname: branch.agencyName,
-    agent_file_number: orderDetail.fileNumber,
-    email_requestor: 'cpl@pct.com',
-    purchase_price: resolvePurchasePrice(orderDetail, input),
+    ...westcorOrder,
+    purchase_price: String(resolvePurchasePrice(orderDetail, input)),
     property,
     buyers,
     sellers,
     lenders,
-    search: null,
-    commitment: null,
-    jacket: null,
-    sdn: null,
-    history: null,
-    notes: null,
-    messages: { success: [] as string[], warning: [] as string[], error: [] as string[] },
-    partnerCode: parseInt(cfg.integrationPartner, 10) || 0,
     cpl: [cplEntry],
     actions: {
-      sdn: false,
-      update_base: true,
+      ...existingActions,
       update_property: true,
-      update_lender: true,
       update_buyers: true,
       update_sellers: sellers.length > 0,
-      update_attorneys: false,
+      update_lender: true,
       update_cpls: true,
-      update_jacket: false,
-      update_search: false,
-      update_reinsurance: false,
-      update_priors: false,
     },
-    priors: null,
   };
 
   // Capture payload diagnostics for logging
   const diagnostics: Record<string, unknown> = {
-    variant: 'C_full_id_aware',
+    variant: 'D_get_order_base_template_cpl',
     payloadTopKeys: Object.keys(body),
     legacyExpectedTopKeys: LEGACY_STEP_D_FIELDS,
     legacyMissingTopKeys: LEGACY_STEP_D_FIELDS.filter((key) => !(key in body)),

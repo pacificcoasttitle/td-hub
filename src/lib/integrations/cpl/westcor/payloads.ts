@@ -411,34 +411,24 @@ export async function generateCplPdf(
     cplTemplate, selectedFormName, westcorLenderId, branch, westcorOrderTvid as string | number,
   );
 
-  // Build Step D body from scratch — NEVER spread westcorOrder.
-  // Legacy PHP builds Step D identically to Step A, only adding
-  // the CPL entry and setting update_cpls: true.
-  const body = {
+  // ── Variant A: CPL-only scalpel ──────────────────────────────────────────
+  // Step A already created/updated the order with property, buyers, sellers,
+  // lenders. Step D should ONLY attach the CPL. Don't re-update entities —
+  // that's what was causing "An error occurred while updating the entries."
+  const body: Record<string, unknown> = {
     tvid: Number(westcorOrderTvid) || 0,
     agentnumber: branch.branchCode,
     agent_file_number: orderDetail.fileNumber,
-    email_requestor: 'cpl@pct.com',
     purchase_price: resolvePurchasePrice(orderDetail, input),
-    property: buildProperty(orderDetail.property),
-    buyers,
-    sellers,
-    lenders,
+    partnerCode: parseInt(cfg.integrationPartner, 10) || 0,
     cpl: [cplEntry],
-    search: null,
-    commitment: null,
-    jacket: null,
-    sdn: null,
-    history: null,
-    notes: null as string | null,
-    messages: { success: [] as string[], warning: [] as string[], error: [] as string[] },
     actions: {
       sdn: false,
-      update_base: true,
-      update_property: true,
-      update_lender: true,
-      update_buyers: true,
-      update_sellers: true,
+      update_base: false,
+      update_property: false,
+      update_lender: false,
+      update_buyers: false,
+      update_sellers: false,
       update_attorneys: false,
       update_cpls: true,
       update_jacket: false,
@@ -446,12 +436,11 @@ export async function generateCplPdf(
       update_reinsurance: false,
       update_priors: false,
     },
-    partnerCode: parseInt(cfg.integrationPartner, 10) || 0,
-    priors: null,
   };
 
   // Capture payload diagnostics for logging
   const diagnostics: Record<string, unknown> = {
+    variant: 'A_cpl_only',
     payloadTopKeys: Object.keys(body),
     tvid: body.tvid,
     cplEntryKeys: Object.keys(cplEntry),
@@ -463,8 +452,8 @@ export async function generateCplPdf(
     lenderCount: lenders.length,
     lenderId: lenders[0]?.Id ?? null,
     lenderTvid: lenders[0]?.tvid ?? null,
-    propertyId: body.property[0]?.PropertyID ?? null,
     purchasePrice: body.purchase_price,
+    actionFlags: body.actions,
   };
 
   const res = await fetch(

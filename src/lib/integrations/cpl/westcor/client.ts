@@ -226,7 +226,7 @@ export const westcorAdapter: CplAdapter = {
         },
       });
 
-      const { pdf, cplId } = await generateCplPdf(
+      const { pdf, cplId, diagnostics: stepDDiag } = await generateCplPdf(
         cfg, token, westcorOrder, cplTemplate, form.name,
         orderDetail, input, branch, orderResponse,
       );
@@ -238,6 +238,7 @@ export const westcorAdapter: CplAdapter = {
           westcorOrderId, formId: form.id, formName: form.name, cplId,
           transactionType: txType, resolvedLenderId,
           payloadPath: txType === 'Refinance' ? 'refinance' : 'purchase',
+          ...stepDDiag,
         },
       });
 
@@ -247,7 +248,11 @@ export const westcorAdapter: CplAdapter = {
       );
     } catch (err) {
       const durationMs = Date.now() - start;
-      await logRequest({ operation: 'generate_cpl', orderId: input.orderId, requestId, startedAt, success: false, errorCategory: 'CPL_ERROR', meta: { error: err instanceof Error ? err.message : 'unknown' } });
+      const errDiag = (err as { diagnostics?: Record<string, unknown> }).diagnostics ?? {};
+      await logRequest({
+        operation: 'generate_cpl', orderId: input.orderId, requestId, startedAt, success: false, errorCategory: 'CPL_ERROR',
+        meta: { error: err instanceof Error ? err.message : 'unknown', ...errDiag },
+      });
       return vendorError<CplGenerateResult>(VENDOR, 'CPL_GENERATION_FAILED', err instanceof Error ? err.message : 'Unknown Westcor error', { requestId, durationMs });
     }
   },

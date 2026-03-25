@@ -376,7 +376,7 @@ export async function generateCplPdf(
   input: CplGenerateInput,
   branch: WestcorBranchInfo,
   orderResponse: WestcorOrderResponse,
-): Promise<{ pdf: string; cplId: string }> {
+): Promise<{ pdf: string; cplId: string; diagnostics: Record<string, unknown> }> {
   const buyers = buildBuyers(orderDetail.buyers);
   const sellers = buildSellers(orderDetail.sellers, orderDetail.transactionType);
   const lenders = buildLenders(orderDetail, input.lenderOverrides);
@@ -450,6 +450,23 @@ export async function generateCplPdf(
     priors: null,
   };
 
+  // Capture payload diagnostics for logging
+  const diagnostics: Record<string, unknown> = {
+    payloadTopKeys: Object.keys(body),
+    tvid: body.tvid,
+    cplEntryKeys: Object.keys(cplEntry),
+    cplEntry,
+    buyerCount: buyers.length,
+    buyerIds: buyers.map((b) => b.NameID),
+    sellerCount: sellers.length,
+    sellerIds: sellers.map((s) => s.NameID),
+    lenderCount: lenders.length,
+    lenderId: lenders[0]?.Id ?? null,
+    lenderTvid: lenders[0]?.tvid ?? null,
+    propertyId: body.property[0]?.PropertyID ?? null,
+    purchasePrice: body.purchase_price,
+  };
+
   const res = await fetch(
     `${cfg.baseUrl}VendorApi/Order/Update/${cfg.integrationPartner}`,
     {
@@ -462,31 +479,66 @@ export async function generateCplPdf(
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`Westcor CPL generation failed: HTTP ${res.status} — ${text.slice(0, 300)}`);
+    diagnostics.httpStatus = res.status;
+    diagnostics.rawResponse = text.slice(0, 500);
+    throw Object.assign(
+      new Error(`Westcor CPL generation failed: HTTP ${res.status} — ${text.slice(0, 300)}`),
+      { diagnostics },
+    );
   }
 
-  const data = await res.json() as {
-    cpl?: Array<{
-      CPLID?: number;
-      cplNumber?: string;
-      FileInformation?: { FileAsBase64?: string; FileAsDataVaultFileID?: string };
-    }>;
-    messages?: { error?: string[] };
-  };
-
-  if (data.messages?.error && data.messages.error.length > 0) {
-    throw new Error(`Westcor CPL error: ${data.messages.error.join('; ')}`);
+  const rawText = await res.text();
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    diagnostics.rawResponse = rawText.slice(0, 500);
+    throw Object.assign(
+      new Error('Westcor CPL response was not valid JSON'),
+      { diagnostics },
+    );
   }
 
-  const cplEntries = data.cpl ?? [];
+  // Capture full response shape for debugging
+  diagnostics.responseTopKeys = Object.keys(data);
+  diagnostics.responseMessages = data.messages ?? null;
+  diagnostics.responseCplCount = Array.isArray(data.cpl) ? (data.cpl as unknown[]).length : 0;
+
+  const messages = data.messages as { error?: string[]; warning?: string[]; success?: string[] } | undefined;
+
+  if (messages?.error && messages.error.length > 0) {
+    diagnostics.westcorErrors = messages.error;
+    diagnostics.westcorWarnings = messages.warning ?? [];
+    throw Object.assign(
+      new Error(`Westcor CPL error: ${messages.error.join('; ')}`),
+      { diagnostics },
+    );
+  }
+
+  const cplEntries = (data.cpl ?? []) as Array<{
+    CPLID?: number;
+    cplNumber?: string;
+    FileInformation?: { FileAsBase64?: string; FileAsDataVaultFileID?: string };
+  }>;
   const lastCpl = cplEntries[cplEntries.length - 1];
-  if (!lastCpl) throw new Error('Westcor returned no CPL entry');
+  if (!lastCpl) {
+    throw Object.assign(
+      new Error('Westcor returned no CPL entry'),
+      { diagnostics },
+    );
+  }
 
   const pdf = lastCpl.FileInformation?.FileAsBase64 ?? '';
-  if (!pdf) throw new Error('Westcor returned empty CPL PDF');
+  if (!pdf) {
+    diagnostics.cplEntryResponse = lastCpl;
+    throw Object.assign(
+      new Error('Westcor returned empty CPL PDF'),
+      { diagnostics },
+    );
+  }
 
   const cplId = String(lastCpl.CPLID ?? lastCpl.cplNumber ?? `WC-${Date.now()}`);
-  return { pdf, cplId };
+  return { pdf, cplId, diagnostics };
 }
 
 // ─── Form selection ─────────────────────────────────────────────────────────

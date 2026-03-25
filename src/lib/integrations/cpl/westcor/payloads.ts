@@ -315,51 +315,31 @@ export async function prepareAddCpl(
   return { forms, cplTemplate: cplObj };
 }
 
-// ─── Whitelisted CPL entry builder ──────────────────────────────────────────
-// Instead of `...cplTemplate` which sends read-only/internal Westcor fields
-// back (causing NullReferenceException), only include explicitly required fields.
-
-const CPL_TEMPLATE_SAFE_KEYS = new Set([
-  'TVID', 'CPLID', 'LetterName', 'LenderID',
-  'PolicyProducingAgentAddressID', 'PolicyProducingAgentAddress',
-  'PolicyProducingAgentCity', 'PolicyProducingAgentState', 'PolicyProducingAgentZip',
-  'PolicyProducingAgentNumber',
-  'ProtectLender', 'ClosingAgentNumber', 'IsDualCPL',
-  'FileInformation', 'EffectiveDate', 'ExpirationDate',
-  'ProtectBuyer', 'ProtectSeller', 'ProtectBorrower',
-]);
+// ─── CPL entry builder (legacy-exact, zero template inheritance) ─────────
+// Previous approaches inherited from cplTemplate (first blind spread, then
+// whitelist). Both caused Westcor EF errors. Now: build from scratch using
+// ONLY the 13 fields the legacy PHP sends. Nothing from the template.
 
 function buildCplEntry(
-  cplTemplate: Record<string, unknown>,
+  _cplTemplate: Record<string, unknown>,
   selectedFormName: string,
   westcorLenderId: number,
   branch: WestcorBranchInfo,
   westcorOrderTvid: string | number,
 ): Record<string, unknown> {
-  // Start with only safe fields from the template
-  const safeBase: Record<string, unknown> = {};
-  for (const key of CPL_TEMPLATE_SAFE_KEYS) {
-    if (key in cplTemplate && cplTemplate[key] !== undefined) {
-      safeBase[key] = cplTemplate[key];
-    }
-  }
-
-  // Override with our required values
   return {
-    ...safeBase,
-    TVID: safeBase.TVID ?? (Number(westcorOrderTvid) || 0),
+    TVID: Number(westcorOrderTvid) || 0,
     CPLID: -1,
-    LetterName: selectedFormName,
     FileInformation: null,
+    LetterName: selectedFormName,
     LenderID: westcorLenderId,
     PolicyProducingAgentAddressID: branch.branchCode,
-    PolicyProducingAgentNumber: branch.branchCode,
     PolicyProducingAgentAddress: branch.address,
     PolicyProducingAgentCity: branch.city,
     PolicyProducingAgentState: branch.state,
     PolicyProducingAgentZip: branch.zip,
     ProtectLender: true,
-    ClosingAgentNumber: branch.branchCode,
+    ClosingAgentNumber: 'CA1038',
     IsDualCPL: false,
   };
 }

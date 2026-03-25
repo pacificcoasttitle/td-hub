@@ -6,13 +6,14 @@ import type {
 } from '../types';
 import { MOCK_PDF_BASE64 } from '../types';
 import { db } from '@/lib/db/client';
-import { vendorApiLogs, vendorTokens } from '@/lib/db/schema';
+import { vendorApiLogs, vendorTokens, cplBranches } from '@/lib/db/schema';
 import { and, eq, gt } from 'drizzle-orm';
 import { getToken, cachedGroups, mapGroupsToBranches } from './auth';
 import type { WestcorGroup } from './auth';
 import {
   createOrUpdateOrder, prepareAddCpl, generateCplPdf, selectCplForm,
 } from './payloads';
+import type { WestcorBranchInfo } from './payloads';
 
 const VENDOR = 'westcor';
 
@@ -85,13 +86,30 @@ export const westcorAdapter: CplAdapter = {
     try {
       const token = await getToken(cfg);
 
-      await logRequest({ operation: 'create_order', orderId: input.orderId, requestId, startedAt: new Date(), success: true, meta: { step: 'start' } });
-      const { westcorOrderId } = await createOrUpdateOrder(cfg, token, orderDetail, input);
+      const [branchRow] = await db
+        .select()
+        .from(cplBranches)
+        .where(eq(cplBranches.id, input.branchId))
+        .limit(1);
+
+      const branch: WestcorBranchInfo = {
+        branchCode: branchRow?.branchCode ?? cfg.integrationPartner,
+        agencyName: branchRow?.agencyName ?? 'Pacific Coast Title Company',
+        address: branchRow?.address ?? '',
+        city: branchRow?.city ?? '',
+        state: branchRow?.state ?? 'CA',
+        zip: branchRow?.zip ?? '',
+      };
+
+      await logRequest({ operation: 'create_order', orderId: input.orderId, requestId, startedAt: new Date(), success: true, meta: { step: 'start', branchCode: branch.branchCode } });
+      const { westcorOrderId, orderResponse } = await createOrUpdateOrder(cfg, token, orderDetail, input, branch);
+
+      const westcorLenderId = orderResponse.lenders?.[0]?.NameID ?? 0;
 
       const forms = await prepareAddCpl(cfg, token, westcorOrderId);
       const form = selectCplForm(forms, input.cplMode ?? 'single');
 
-      const { pdf, cplId } = await generateCplPdf(cfg, token, westcorOrderId, form.id, orderDetail, input);
+      const { pdf, cplId } = await generateCplPdf(cfg, token, westcorOrderId, form, orderDetail, input, branch, westcorLenderId);
 
       const durationMs = Date.now() - start;
       await logRequest({

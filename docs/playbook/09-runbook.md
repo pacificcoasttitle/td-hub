@@ -108,7 +108,7 @@ TP_BASE_URL=https://tps.titlepoint.com/TPS/
 TP_IMAGE_ENDPOINT=https://images.titlepoint.com/ImageRequest.asmx/GetImage?
 
 # ─── Westcor ─────────────────────────────────────────────────────────────
-WESTCOR_URL=https://api.westcor.com/
+WESTCOR_URL=https://services.ewestcor.com/
 WESTCOR_GRANT_TYPE=password
 WESTCOR_USERNAME=your-westcor-username
 WESTCOR_PASSWORD=your-westcor-password

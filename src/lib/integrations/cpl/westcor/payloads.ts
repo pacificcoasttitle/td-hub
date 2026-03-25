@@ -411,23 +411,43 @@ export async function generateCplPdf(
     cplTemplate, selectedFormName, westcorLenderId, branch, westcorOrderTvid as string | number,
   );
 
-  const existingActions = (westcorOrder.actions ?? {}) as Record<string, unknown>;
-  const body: Record<string, unknown> = {
-    ...westcorOrder,
-    cpl: [cplEntry],
+  // Build Step D body from scratch — NEVER spread westcorOrder.
+  // Legacy PHP builds Step D identically to Step A, only adding
+  // the CPL entry and setting update_cpls: true.
+  const body = {
+    tvid: Number(westcorOrderTvid) || 0,
+    agentnumber: branch.branchCode,
+    agent_file_number: orderDetail.fileNumber,
+    email_requestor: 'cpl@pct.com',
+    purchase_price: resolvePurchasePrice(orderDetail, input),
     property: buildProperty(orderDetail.property),
-    lenders,
     buyers,
     sellers,
+    lenders,
+    cpl: [cplEntry],
+    search: null,
+    commitment: null,
+    jacket: null,
+    sdn: null,
+    history: null,
+    notes: null as string | null,
+    messages: { success: [] as string[], warning: [] as string[], error: [] as string[] },
     actions: {
-      ...existingActions,
+      sdn: false,
+      update_base: true,
       update_property: true,
-      update_cpls: true,
+      update_lender: true,
       update_buyers: true,
       update_sellers: true,
-      update_lender: true,
+      update_attorneys: false,
+      update_cpls: true,
+      update_jacket: false,
+      update_search: false,
+      update_reinsurance: false,
+      update_priors: false,
     },
-    purchase_price: resolvePurchasePrice(orderDetail, input),
+    partnerCode: parseInt(cfg.integrationPartner, 10) || 0,
+    priors: null,
   };
 
   const res = await fetch(

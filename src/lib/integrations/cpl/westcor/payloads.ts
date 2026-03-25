@@ -142,9 +142,10 @@ export async function createOrUpdateOrder(
   orderDetail: CplOrderDetail,
   input: CplGenerateInput,
   branch: WestcorBranchInfo,
+  existingTvid?: string | null,
 ): Promise<{ westcorOrderId: string; orderResponse: WestcorOrderResponse }> {
   const body = {
-    tvid: 0,
+    tvid: existingTvid ? parseInt(existingTvid, 10) || 0 : 0,
     agentnumber: branch.branchCode,
     agent_file_number: orderDetail.fileNumber,
     email_requestor: 'cpl@pct.com',

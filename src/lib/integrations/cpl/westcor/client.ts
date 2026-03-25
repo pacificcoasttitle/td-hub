@@ -7,7 +7,7 @@ import type {
 import { MOCK_PDF_BASE64 } from '../types';
 import { db } from '@/lib/db/client';
 import { vendorApiLogs, vendorTokens, cplBranches } from '@/lib/db/schema';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, desc } from 'drizzle-orm';
 import { getToken, cachedGroups, mapGroupsToBranches } from './auth';
 import type { WestcorGroup } from './auth';
 import {
@@ -32,6 +32,7 @@ async function logRequest(params: {
   operation: string; orderId?: number; requestId: string; startedAt: Date;
   success: boolean; httpStatus?: number; errorCategory?: string;
   meta?: Record<string, unknown>;
+  responseMeta?: Record<string, unknown> | null;
 }) {
   try {
     await db.insert(vendorApiLogs).values({
@@ -39,7 +40,7 @@ async function logRequest(params: {
       requestId: params.requestId, startedAt: params.startedAt, endedAt: new Date(),
       success: params.success, httpStatus: params.httpStatus ?? null,
       errorCategory: params.errorCategory ?? null,
-      requestMeta: params.meta ?? null, responseMeta: null,
+      requestMeta: params.meta ?? null, responseMeta: params.responseMeta ?? null,
     });
   } catch { /* logging must not break the main flow */ }
 }
@@ -68,6 +69,32 @@ const MOCK_BRANCHES: CplBranch[] = [
     city: 'Pasadena', state: 'CA', zip: '91101', underwriterCode: 'AG-5002',
   },
 ];
+
+// ─── Tvid lookup (reuse Westcor order on retry) ─────────────────────────────
+
+async function lookupExistingTvid(orderId: number): Promise<string | null> {
+  try {
+    const [row] = await db
+      .select({ responseMeta: vendorApiLogs.responseMeta })
+      .from(vendorApiLogs)
+      .where(
+        and(
+          eq(vendorApiLogs.vendor, VENDOR),
+          eq(vendorApiLogs.operation, 'create_order'),
+          eq(vendorApiLogs.success, true),
+          eq(vendorApiLogs.orderId, orderId),
+        ),
+      )
+      .orderBy(desc(vendorApiLogs.createdAt))
+      .limit(1);
+
+    const meta = row?.responseMeta as { tvid?: string | number } | null;
+    const tvid = meta?.tvid != null ? String(meta.tvid) : null;
+    return tvid && tvid !== '0' ? tvid : null;
+  } catch {
+    return null;
+  }
+}
 
 // ─── Adapter ────────────────────────────────────────────────────────────────
 
@@ -101,9 +128,16 @@ export const westcorAdapter: CplAdapter = {
         zip: branchRow?.zip ?? '',
       };
 
-      // Step A: Create order in Westcor (legacy: POST Order/Update)
-      await logRequest({ operation: 'create_order', orderId: input.orderId, requestId, startedAt: new Date(), success: true, meta: { step: 'start', branchCode: branch.branchCode } });
-      const { westcorOrderId, orderResponse } = await createOrUpdateOrder(cfg, token, orderDetail, input, branch);
+      // Look up existing Westcor tvid from a previous successful Step A for this order
+      const existingTvid = await lookupExistingTvid(input.orderId);
+
+      // Step A: Create/update order in Westcor (legacy: POST Order/Update)
+      const { westcorOrderId, orderResponse } = await createOrUpdateOrder(cfg, token, orderDetail, input, branch, existingTvid);
+      await logRequest({
+        operation: 'create_order', orderId: input.orderId, requestId, startedAt: new Date(), success: true,
+        meta: { step: 'complete', branchCode: branch.branchCode, tvid: westcorOrderId, reusedTvid: !!existingTvid },
+        responseMeta: { tvid: westcorOrderId },
+      });
 
       // Step B: GET the full order from Westcor (legacy: GET Order/{tvid}/{partner})
       const westcorOrder = await getOrder(cfg, token, westcorOrderId);

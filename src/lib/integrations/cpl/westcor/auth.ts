@@ -60,17 +60,24 @@ export async function getToken(cfg: {
   const rid = `westcor-token-${crypto.randomUUID()}`;
   const startedAt = new Date();
 
-  const res = await fetch(`${cfg.baseUrl}Token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'password',
-      username: cfg.username,
-      password: cfg.password,
-      integrationpartner: cfg.integrationPartner,
-    }).toString(),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.baseUrl}Token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'password',
+        username: cfg.username,
+        password: cfg.password,
+        integrationpartner: cfg.integrationPartner,
+      }).toString(),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'fetch failed';
+    await logAuthRequest({ operation: 'get_token', requestId: rid, startedAt, success: false, errorCategory: 'NETWORK_ERROR', meta: { error: msg, url: `${cfg.baseUrl}Token` } });
+    throw new Error(`Westcor token fetch failed: ${msg}`);
+  }
 
   if (!res.ok) {
     await logAuthRequest({ operation: 'get_token', requestId: rid, startedAt, success: false, httpStatus: res.status, errorCategory: 'AUTH_ERROR' });

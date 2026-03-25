@@ -203,6 +203,29 @@ export const westcorAdapter: CplAdapter = {
       });
 
       // Step D: Generate CPL
+      // Log what we're intentionally excluding from westcorOrder (the GET response)
+      const STEP_D_WHITELIST = new Set([
+        'tvid', 'agentnumber', 'agent_file_number', 'email_requestor',
+        'purchase_price', 'property', 'buyers', 'sellers', 'lenders',
+        'cpl', 'actions', 'partnerCode', 'search', 'commitment', 'jacket',
+        'sdn', 'history', 'notes', 'messages', 'priors',
+      ]);
+      const getOrderKeys = Object.keys(westcorOrder);
+      const excludedKeys = getOrderKeys.filter((k) => !STEP_D_WHITELIST.has(k));
+
+      await logRequest({
+        operation: 'step_d_diagnostic', orderId: input.orderId, requestId, startedAt: new Date(), success: true,
+        meta: {
+          getOrderKeyCount: getOrderKeys.length,
+          excludedKeyCount: excludedKeys.length,
+          excludedKeys: excludedKeys.slice(0, 30),
+          buyerIdsFromA: (orderResponse.buyers ?? []).map((b) => b.NameID).slice(0, 5),
+          lenderIdFromA: stepALenderId,
+          lenderIdFromB: stepBLenderId,
+          resolvedLenderId,
+        },
+      });
+
       const { pdf, cplId } = await generateCplPdf(
         cfg, token, westcorOrder, cplTemplate, form.name,
         orderDetail, input, branch, orderResponse,

@@ -69,6 +69,89 @@ export function PropertySection({ s }: { s: QuickEntryState }) {
       </div>
       {/* Legal Description — full width */}
       <div><label className={FL}>Legal Description</label><textarea className={`${IN} resize-none`} rows={2} value={s.legalDesc} onChange={(e) => s.setLegalDesc(e.target.value)} /></div>
+
+      {/* Seller / Borrower from property records — visibility follows transaction type */}
+      <OwnerFields s={s} />
+    </div>
+  );
+}
+
+// ─── Owner fields (seller / borrower) — rendered inside PropertySection ─────
+
+const AUTOFILL_BADGE = (
+  <div className="flex items-center gap-1 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg mb-3">
+    <svg className="h-3.5 w-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+    <p className="text-xs text-green-700 font-medium">Auto-filled from property records</p>
+  </div>
+);
+
+function OwnerFields({ s }: { s: QuickEntryState }) {
+  const isPurchase = s.txType === 'Purchase';
+  const isRefiLike = s.txType === 'Refinance' || s.txType === 'Equity';
+  if (!isPurchase && !isRefiLike) return null;
+
+  const siteXActive = isPurchase ? s.sellerSiteX : s.borrowerSiteX;
+  const inputHighlight = siteXActive ? 'bg-green-50' : '';
+
+  return (
+    <div className="border-t border-gray-200 pt-4 mt-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-3">
+        {isPurchase ? 'Seller / Owner (from property records)' : 'Borrower (from property records)'}
+      </p>
+
+      {siteXActive && AUTOFILL_BADGE}
+
+      {isPurchase ? (
+        <>
+          <div className="flex items-center gap-3 mb-3">
+            <label className="flex items-center gap-2 text-xs text-[#6B7280]">
+              <input type="checkbox" checked={s.sellerIsOrg} onChange={(e) => s.setSellerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4" /> Organization
+            </label>
+            {s.sellerIsOrg && (
+              <select value={s.sellerOrgType} onChange={(e) => s.setSellerOrgType(e.target.value)} className="h-9 px-2 border border-gray-200 rounded-lg text-xs">
+                <option value="">Type…</option>
+                {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            )}
+          </div>
+          <PersonFields person={s.sellerPrimary} onChange={s.setSellerPrimary} label="Primary seller" highlight={inputHighlight} />
+          {!s.hasSecondarySeller ? (
+            <button type="button" onClick={() => s.setHasSecondarySeller(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary seller</button>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-[#6B7280]">Secondary seller</span>
+                <button type="button" onClick={() => { s.setHasSecondarySeller(false); s.setSellerSecondary({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button>
+              </div>
+              <PersonFields person={s.sellerSecondary} onChange={s.setSellerSecondary} label="" highlight={inputHighlight} />
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <PersonFields person={s.borrower} onChange={s.setBorrower} label="Primary borrower" highlight={inputHighlight} />
+          {!s.hasSecBorrower ? (
+            <button type="button" onClick={() => s.setHasSecBorrower(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary borrower</button>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-[#6B7280]">Secondary borrower</span>
+                <button type="button" onClick={() => { s.setHasSecBorrower(false); s.setSecBorrower({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button>
+              </div>
+              <PersonFields person={s.secBorrower} onChange={s.setSecBorrower} label="" highlight={inputHighlight} />
+            </>
+          )}
+          <label className="flex items-center gap-2 text-xs text-[#6B7280] mt-2">
+            <input type="checkbox" checked={s.borrowerIsOrg} onChange={(e) => s.setBorrowerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4" /> Borrower is an organization
+          </label>
+          {s.borrowerIsOrg && (
+            <select value={s.borrowerOrgType} onChange={(e) => s.setBorrowerOrgType(e.target.value)} className="mt-2 h-9 px-2 border border-gray-200 rounded-lg text-xs">
+              <option value="">Type…</option>
+              {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -87,7 +170,6 @@ function CurrencyInput({ value, onChange, placeholder = '0.00' }: { value: strin
 export function TransactionSection({ s }: { s: QuickEntryState }) {
   const isPurchase = s.txType === 'Purchase';
   const isRefi = s.txType === 'Refinance';
-  const isRefiLike = isRefi || s.txType === 'Equity';
   const showFinancials = isPurchase || isRefi;
 
   function handleLoanAmountChange(raw: string) {
@@ -190,71 +272,6 @@ export function TransactionSection({ s }: { s: QuickEntryState }) {
         <div className="mb-3"><label className={FL}>Coverage Amount</label><CurrencyInput value={s.coverageAmount} onChange={(v) => s.setCoverageAmount(v)} /></div>
       )}
 
-      {/* Owners / borrowers — same SiteX source; visibility follows transaction type */}
-      {isPurchase && (
-        <div className="border-t border-gray-200 pt-4 mt-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-3">Sellers (from property records)</p>
-          {s.sellerSiteX && (
-            <div className="flex items-center gap-1 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg mb-3">
-              <svg className="h-3.5 w-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
-              <p className="text-xs text-green-700 font-medium">Auto-filled from property records</p>
-            </div>
-          )}
-          <div className="flex items-center gap-3 mb-3">
-            <label className="flex items-center gap-2 text-xs text-[#6B7280]">
-              <input type="checkbox" checked={s.sellerIsOrg} onChange={(e) => s.setSellerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4" /> Organization
-            </label>
-            {s.sellerIsOrg && (
-              <select value={s.sellerOrgType} onChange={(e) => s.setSellerOrgType(e.target.value)} className="h-9 px-2 border border-gray-200 rounded-lg text-xs">
-                <option value="">Type…</option>
-                {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-            )}
-          </div>
-          <PersonFields person={s.sellerPrimary} onChange={s.setSellerPrimary} label="Primary seller" />
-          {!s.hasSecondarySeller ? (
-            <button type="button" onClick={() => s.setHasSecondarySeller(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary seller</button>
-          ) : (
-            <>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-[#6B7280]">Secondary seller</span>
-                <button type="button" onClick={() => { s.setHasSecondarySeller(false); s.setSellerSecondary({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button>
-              </div>
-              <PersonFields person={s.sellerSecondary} onChange={s.setSellerSecondary} label="" />
-            </>
-          )}
-        </div>
-      )}
-
-      {isRefiLike && (
-        <div className="border-t border-gray-200 pt-4 mt-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-3">Borrowers (from property records)</p>
-          {s.borrowerSiteX && (
-            <div className="flex items-center gap-1 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg mb-3">
-              <svg className="h-3.5 w-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
-              <p className="text-xs text-green-700 font-medium">Auto-filled from property records</p>
-            </div>
-          )}
-          <PersonFields person={s.borrower} onChange={s.setBorrower} label="Primary borrower" />
-          {!s.hasSecBorrower ? (
-            <button type="button" onClick={() => s.setHasSecBorrower(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary borrower</button>
-          ) : (
-            <>
-              <div className="flex items-center justify-between"><span className="text-xs text-[#6B7280]">Secondary borrower</span><button type="button" onClick={() => { s.setHasSecBorrower(false); s.setSecBorrower({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button></div>
-              <PersonFields person={s.secBorrower} onChange={s.setSecBorrower} label="" />
-            </>
-          )}
-          <label className="flex items-center gap-2 text-xs text-[#6B7280] mt-2">
-            <input type="checkbox" checked={s.borrowerIsOrg} onChange={(e) => s.setBorrowerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4" /> Borrower is an organization
-          </label>
-          {s.borrowerIsOrg && (
-            <select value={s.borrowerOrgType} onChange={(e) => s.setBorrowerOrgType(e.target.value)} className="mt-2 h-9 px-2 border border-gray-200 rounded-lg text-xs">
-              <option value="">Type…</option>
-              {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          )}
-        </div>
-      )}
     </div>
   );
 }

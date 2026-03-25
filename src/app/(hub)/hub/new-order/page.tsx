@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { ClientSelector } from '@/components/admin/client-selector';
 import { PropertyConfirmModal } from '@/components/shared/property-confirm-modal';
+import { OrderSubmitOverlay } from '@/components/shared/order-submit-overlay';
 import { OrderSummaryPanel } from '@/components/admin/OrderSummaryPanel';
 import { SECTION, SH } from '@/components/admin/quick-entry/types';
 import { useQuickEntry } from '@/components/admin/quick-entry/use-quick-entry';
@@ -79,6 +80,8 @@ export default function HubNewOrderPage() {
           {s.submitting ? 'Creating Order…' : 'Create Order'}
         </button>
       </div>
+
+      <OrderSubmitOverlay visible={s.submitting} />
 
       <PropertyConfirmModal
         open={s.showConfirmModal}

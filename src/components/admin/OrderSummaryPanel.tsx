@@ -80,8 +80,8 @@ export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
           )}
         </Section>
 
-        {/* Property */}
-        <Section filled={hasProperty} label="Property" placeholder="Property details will appear here">
+        {/* Property + Seller/Borrower (grouped) */}
+        <Section filled={hasProperty || hasPrimaryParty} label="Property" placeholder="Property details will appear here">
           {hasProperty && (
             <>
               <Field label="Address" value={[s.street, s.city, s.state, s.zip].filter(Boolean).join(', ')} />
@@ -90,16 +90,9 @@ export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
               {s.propType && <Field label="Type" value={s.propType} />}
             </>
           )}
-        </Section>
-
-        {/* Seller / Borrower */}
-        <Section
-          filled={hasPrimaryParty}
-          label={isBorrowerFlow ? 'Borrower' : 'Seller'}
-          placeholder={`${isBorrowerFlow ? 'Borrower' : 'Seller'} details will appear here`}
-        >
           {hasPrimaryParty && (
-            <>
+            <div className={hasProperty ? 'border-t border-gray-100 pt-2 mt-2' : ''}>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">{isBorrowerFlow ? 'Borrower' : 'Seller / Owner'}</span>
               <Field
                 label={(isBorrowerFlow ? s.borrowerIsOrg : s.sellerIsOrg) ? 'Organization' : 'Name'}
                 value={primaryPartyName}
@@ -112,7 +105,7 @@ export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
                   </span>
                 </div>
               )}
-            </>
+            </div>
           )}
         </Section>
 

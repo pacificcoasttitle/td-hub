@@ -19,10 +19,10 @@ export interface WestcorBranchInfo {
 export interface WestcorOrderResponse {
   tvid?: number;
   agentnumber?: string;
-  buyers?: Array<{ NameID?: number }>;
-  sellers?: Array<{ NameID?: number }>;
-  lenders?: Array<{ Id?: number }>;
-  property?: Array<{ PropertyID?: number }>;
+  buyers?: Array<{ NameID?: number; tvid?: number | string }>;
+  sellers?: Array<{ NameID?: number; tvid?: number | string }>;
+  lenders?: Array<{ Id?: number; tvid?: number | string }>;
+  property?: Array<{ PropertyID?: number; tvid?: number | string }>;
   messages?: { success?: string[]; warning?: string[]; error?: string[] };
 }
 
@@ -110,15 +110,18 @@ export function resolvePurchasePrice(
 
 // ─── Shared body helpers (legacy-exact field names from Westcor.php) ────────
 
-function buildProperty(prop: CplOrderDetail['property']) {
+function buildProperty(
+  prop: CplOrderDetail['property'],
+  ids?: { PropertyID?: number; tvid?: number | string },
+) {
   const county = (prop?.county ?? '').trim();
   const suffixed = county
     ? county.toLowerCase().endsWith('county') ? county : `${county} County`
     : '';
 
   return [{
-    PropertyID: 0,
-    tvid: 0,
+    PropertyID: ids?.PropertyID ?? 0,
+    tvid: Number(ids?.tvid ?? 0) || 0,
     CountyName: suffixed,
     ShortLegal: null as string | null,
     StreetAddress: prop?.address ?? '',
@@ -129,14 +132,17 @@ function buildProperty(prop: CplOrderDetail['property']) {
   }];
 }
 
-function buildBuyers(names: string[]) {
+function buildBuyers(
+  names: string[],
+  ids?: Array<{ NameID?: number; tvid?: number | string }>,
+) {
   return names.map((fullName, i) => ({
-    NameID: 0,
+    NameID: ids?.[i]?.NameID ?? 0,
     Last: '-',
     First: fullName.trim(),
     NameType: 1,
     JoiningPhrase: 'single',
-    tvid: 0,
+    tvid: Number(ids?.[i]?.tvid ?? 0) || 0,
     Sequence: i + 1,
     City: null as string | null,
     State: null as string | null,
@@ -145,19 +151,23 @@ function buildBuyers(names: string[]) {
   }));
 }
 
-function buildSellers(names: string[], txType: TransactionType | null) {
+function buildSellers(
+  names: string[],
+  txType: TransactionType | null,
+  ids?: Array<{ NameID?: number; tvid?: number | string }>,
+) {
   // Refinance transactions typically have no seller; don't send placeholders
   const filtered = txType === 'Refinance'
     ? names.filter((n) => !/^tbd\b/i.test(n.trim()))
     : names;
 
   return filtered.map((fullName, i) => ({
-    NameID: 0,
+    NameID: ids?.[i]?.NameID ?? 0,
     Last: '-',
     First: fullName.trim(),
     NameType: 2,
     JoiningPhrase: 'single',
-    tvid: 0,
+    tvid: Number(ids?.[i]?.tvid ?? 0) || 0,
     Sequence: i + 1,
     City: null as string | null,
     State: null as string | null,
@@ -169,13 +179,14 @@ function buildSellers(names: string[], txType: TransactionType | null) {
 function buildLenders(
   orderDetail: CplOrderDetail,
   lenderOverrides?: CplGenerateInput['lenderOverrides'],
+  ids?: { Id?: number; tvid?: number | string },
 ) {
   const lender = orderDetail.lender;
   if (!lender) return [];
 
   return [{
-    Id: 0,
-    tvid: 0,
+    Id: ids?.Id ?? 0,
+    tvid: Number(ids?.tvid ?? 0) || 0,
     name: lenderOverrides?.name ?? lender.name ?? '',
     city: lenderOverrides?.city ?? lender.city ?? '',
     state: lenderOverrides?.state ?? lender.state ?? '',
@@ -220,6 +231,7 @@ export async function createOrUpdateOrder(
   const body = {
     tvid: existingTvid ? parseInt(existingTvid, 10) || 0 : 0,
     agentnumber: branch.branchCode,
+    agencyname: branch.agencyName,
     agent_file_number: orderDetail.fileNumber,
     email_requestor: 'cpl@pct.com',
     purchase_price: resolvePurchasePrice(orderDetail, input),
@@ -358,58 +370,94 @@ export async function generateCplPdf(
   branch: WestcorBranchInfo,
   orderResponse: WestcorOrderResponse,
 ): Promise<{ pdf: string; cplId: string; diagnostics: Record<string, unknown> }> {
-  const buyers = buildBuyers(orderDetail.buyers);
-  const sellers = buildSellers(orderDetail.sellers, orderDetail.transactionType);
-  const lenders = buildLenders(orderDetail, input.lenderOverrides);
-
   // Extract IDs from Step A response, falling back to Step B GET response
   const getOrderBuyers = (westcorOrder.buyers ?? []) as Array<Record<string, unknown>>;
   const getOrderSellers = (westcorOrder.sellers ?? []) as Array<Record<string, unknown>>;
   const getOrderLenders = (westcorOrder.lenders ?? []) as Array<Record<string, unknown>>;
+  const getOrderProperty = (westcorOrder.property ?? []) as Array<Record<string, unknown>>;
+  const westcorOrderTvid = westcorOrder.tvid ?? orderResponse.tvid ?? 0;
 
-  const resBuyers = orderResponse.buyers ?? [];
-  for (let i = 0; i < buyers.length; i++) {
-    buyers[i].NameID = resBuyers[i]?.NameID
+  const propertyId = orderResponse.property?.[0]?.PropertyID
+    ?? (getOrderProperty[0]?.PropertyID as number)
+    ?? 0;
+  const propertyTvid = orderResponse.property?.[0]?.tvid
+    ?? (getOrderProperty[0]?.tvid as number | string)
+    ?? westcorOrderTvid;
+
+  const buyerIds = orderDetail.buyers.map((_, i) => ({
+    NameID: orderResponse.buyers?.[i]?.NameID
       ?? (getOrderBuyers[i]?.NameID as number)
-      ?? 0;
-  }
-  const resSellers = orderResponse.sellers ?? [];
-  for (let i = 0; i < sellers.length; i++) {
-    sellers[i].NameID = resSellers[i]?.NameID
+      ?? 0,
+    tvid: orderResponse.buyers?.[i]?.tvid
+      ?? (getOrderBuyers[i]?.tvid as number | string)
+      ?? westcorOrderTvid,
+  }));
+  const sellerIds = buildSellers(orderDetail.sellers, orderDetail.transactionType).map((_, i) => ({
+    NameID: orderResponse.sellers?.[i]?.NameID
       ?? (getOrderSellers[i]?.NameID as number)
-      ?? 0;
-  }
+      ?? 0,
+    tvid: orderResponse.sellers?.[i]?.tvid
+      ?? (getOrderSellers[i]?.tvid as number | string)
+      ?? westcorOrderTvid,
+  }));
   const westcorLenderId = orderResponse.lenders?.[0]?.Id
     ?? (getOrderLenders[0]?.Id as number)
     ?? 0;
-  if (lenders[0]) {
-    lenders[0].Id = westcorLenderId;
-  }
+  const lenderTvid = orderResponse.lenders?.[0]?.tvid
+    ?? (getOrderLenders[0]?.tvid as number | string)
+    ?? westcorOrderTvid;
 
-  const westcorOrderTvid = westcorOrder.tvid ?? orderResponse.tvid ?? 0;
+  const property = buildProperty(orderDetail.property, {
+    PropertyID: propertyId,
+    tvid: propertyTvid,
+  });
+  const buyers = buildBuyers(orderDetail.buyers, buyerIds);
+  const sellers = buildSellers(orderDetail.sellers, orderDetail.transactionType, sellerIds);
+  const lenders = buildLenders(orderDetail, input.lenderOverrides, {
+    Id: westcorLenderId,
+    tvid: lenderTvid,
+  });
 
   const cplEntry = buildCplEntry(
     cplTemplate, selectedFormName, westcorLenderId, branch, westcorOrderTvid as string | number,
   );
 
-  // ── Variant A: CPL-only scalpel ──────────────────────────────────────────
-  // Step A already created/updated the order with property, buyers, sellers,
-  // lenders. Step D should ONLY attach the CPL. Don't re-update entities —
-  // that's what was causing "An error occurred while updating the entries."
+  const LEGACY_STEP_D_FIELDS = [
+    'tvid', 'agentnumber', 'agencyname', 'agent_file_number', 'email_requestor',
+    'purchase_price', 'property', 'buyers', 'sellers', 'lenders',
+    'search', 'commitment', 'jacket', 'sdn', 'history', 'notes', 'messages',
+    'actions', 'partnerCode', 'cpl', 'priors',
+  ] as const;
+
+  // Build the full legacy-shaped Step D payload, but only from our own
+  // allowlisted builders with Westcor-assigned IDs preserved.
   const body: Record<string, unknown> = {
     tvid: Number(westcorOrderTvid) || 0,
     agentnumber: branch.branchCode,
+    agencyname: branch.agencyName,
     agent_file_number: orderDetail.fileNumber,
+    email_requestor: 'cpl@pct.com',
     purchase_price: resolvePurchasePrice(orderDetail, input),
+    property,
+    buyers,
+    sellers,
+    lenders,
+    search: null,
+    commitment: null,
+    jacket: null,
+    sdn: null,
+    history: null,
+    notes: null,
+    messages: { success: [] as string[], warning: [] as string[], error: [] as string[] },
     partnerCode: parseInt(cfg.integrationPartner, 10) || 0,
     cpl: [cplEntry],
     actions: {
       sdn: false,
-      update_base: false,
-      update_property: false,
-      update_lender: false,
-      update_buyers: false,
-      update_sellers: false,
+      update_base: true,
+      update_property: true,
+      update_lender: true,
+      update_buyers: true,
+      update_sellers: true,
       update_attorneys: false,
       update_cpls: true,
       update_jacket: false,
@@ -417,24 +465,41 @@ export async function generateCplPdf(
       update_reinsurance: false,
       update_priors: false,
     },
+    priors: null,
   };
 
   // Capture payload diagnostics for logging
   const diagnostics: Record<string, unknown> = {
-    variant: 'A_cpl_only',
+    variant: 'C_full_id_aware',
     payloadTopKeys: Object.keys(body),
+    legacyExpectedTopKeys: LEGACY_STEP_D_FIELDS,
+    legacyMissingTopKeys: LEGACY_STEP_D_FIELDS.filter((key) => !(key in body)),
+    legacyExtraTopKeys: Object.keys(body).filter(
+      (key) => !LEGACY_STEP_D_FIELDS.includes(key as (typeof LEGACY_STEP_D_FIELDS)[number]),
+    ),
     tvid: body.tvid,
     cplEntryKeys: Object.keys(cplEntry),
     cplEntry,
+    propertyCount: property.length,
+    propertyIds: property.map((p) => p.PropertyID),
+    propertyTvids: property.map((p) => p.tvid),
     buyerCount: buyers.length,
     buyerIds: buyers.map((b) => b.NameID),
+    buyerTvids: buyers.map((b) => b.tvid),
     sellerCount: sellers.length,
     sellerIds: sellers.map((s) => s.NameID),
+    sellerTvids: sellers.map((s) => s.tvid),
     lenderCount: lenders.length,
     lenderId: lenders[0]?.Id ?? null,
     lenderTvid: lenders[0]?.tvid ?? null,
     purchasePrice: body.purchase_price,
     actionFlags: body.actions,
+    missingEntityIds: {
+      property: property.some((p) => !p.PropertyID),
+      buyers: buyers.some((b) => !b.NameID),
+      sellers: sellers.some((s) => !s.NameID),
+      lenders: lenders.some((l) => !l.Id),
+    },
   };
 
   const res = await fetch(

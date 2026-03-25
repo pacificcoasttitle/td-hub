@@ -117,6 +117,32 @@ function deriveUserType(
   return 'EscrowCompany';
 }
 
+function buildSellerDetails(input: CreateOrderInput): Record<string, string> {
+  const isPurchase = input.transaction.type === 'Purchase';
+  if (!isPurchase) {
+    return {
+      PrimaryOwnerFirstName: '',
+      PrimaryOwnerMiddleName: '',
+      PrimaryOwnerLastName: '',
+      SecondaryOwnerFirstName: '',
+      SecondaryOwnerMiddleName: '',
+      SecondaryOwnerLastName: '',
+      OrganizationType: '',
+      IsOrganization: 'false',
+    };
+  }
+  return {
+    PrimaryOwnerFirstName: input.seller.firstName,
+    PrimaryOwnerMiddleName: input.seller.middleName ?? '',
+    PrimaryOwnerLastName: input.seller.lastName,
+    SecondaryOwnerFirstName: input.seller.secondaryFirstName ?? '',
+    SecondaryOwnerMiddleName: input.seller.secondaryMiddleName ?? '',
+    SecondaryOwnerLastName: input.seller.secondaryLastName ?? '',
+    OrganizationType: input.seller.isOrganization ? (input.seller.organizationType ?? '') : '',
+    IsOrganization: String(input.seller.isOrganization),
+  };
+}
+
 export function buildSoftProPayload(
   input: CreateOrderInput,
   enriched: { apn: string; legal: string; county: string },
@@ -167,16 +193,7 @@ export function buildSoftProPayload(
       EscrowBriefLegalLookupCode: null,
       EscrowBriefLegal: enriched.legal,
     }],
-    sellerDetails: {
-      PrimaryOwnerFirstName: input.seller.firstName,
-      PrimaryOwnerMiddleName: input.seller.middleName ?? '',
-      PrimaryOwnerLastName: input.seller.lastName,
-      SecondaryOwnerFirstName: input.seller.secondaryFirstName ?? '',
-      SecondaryOwnerMiddleName: input.seller.secondaryMiddleName ?? '',
-      SecondaryOwnerLastName: input.seller.secondaryLastName ?? '',
-      OrganizationType: input.seller.isOrganization ? (input.seller.organizationType ?? '') : '',
-      IsOrganization: String(input.seller.isOrganization),
-    },
+    sellerDetails: buildSellerDetails(input),
     transactionDetails: {
       LookUpCodeTitleOffice: branchCode,
       TitleOffice: titleOfficeLookup,

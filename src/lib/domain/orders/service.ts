@@ -36,6 +36,10 @@ interface OrderDocuments {
 export interface OrderListResult {
   orders: Array<typeof orders.$inferSelect & {
     property: typeof orderProperties.$inferSelect | null;
+    propertyStreet: string | null;
+    propertyCity: string | null;
+    propertyState: string | null;
+    clientName: string | null;
     salesRepName: string | null;
     titleOfficerName: string | null;
     escrowOfficerName: string | null;
@@ -48,6 +52,7 @@ export interface OrderListResult {
     documents: OrderDocuments;
   }>;
   total: number;
+  totalPages: number;
   page: number;
   pageSize: number;
 }
@@ -137,9 +142,15 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
   const orderIds = orderRows.map((r) => r.orders.id);
   const docMap = await batchDocumentStatus(orderIds);
 
+  const total = Number(countResult[0]?.count ?? 0);
+
   const mapped = orderRows.map((row) => ({
     ...row.orders,
     property: row.order_properties,
+    propertyStreet: row.order_properties?.address ?? null,
+    propertyCity: row.order_properties?.city ?? null,
+    propertyState: row.order_properties?.state ?? null,
+    clientName: row.opened_by?.name ?? null,
     salesRepName: contactName(row.sales_rep),
     titleOfficerName: contactName(row.title_officer),
     escrowOfficerName: contactName(row.escrow_officer),
@@ -154,7 +165,8 @@ export async function getOrders(params: OrderListParams = {}): Promise<OrderList
 
   return {
     orders: mapped,
-    total: Number(countResult[0]?.count ?? 0),
+    total,
+    totalPages: Math.ceil(total / pageSize),
     page,
     pageSize,
   };

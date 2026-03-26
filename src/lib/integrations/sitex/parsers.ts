@@ -18,6 +18,7 @@ export function mapProfile(profile: SiteXRawPropertyProfile): Omit<SiteXProperty
     apn: profile.APN ?? null,
     legalDescription: profile.LegalDescriptionInfo?.LegalBriefDescription ?? null,
     county: profile.CountyName ?? null,
+    fips: profile.FIPS ?? null,
     propertyType: profile.PropertyCharacteristics?.UseCodeDescription ?? null,
     primaryOwner: owners.primary,
     secondaryOwner: owners.secondary,
@@ -45,7 +46,7 @@ function splitOwners(raw: string | undefined): { primary: string | null; seconda
 
 export function emptyResult(matchCode: 'M' | 'N'): SiteXPropertyData {
   return {
-    matchCode, apn: null, legalDescription: null, county: null,
+    matchCode, apn: null, legalDescription: null, county: null, fips: null,
     propertyType: null, primaryOwner: null, secondaryOwner: null,
     fullAddress: null, city: null, state: null, zip: null, unitNumber: null,
     beds: null, baths: null, sqft: null, lotSize: null,
@@ -58,6 +59,7 @@ export const MOCK_PROPERTY: SiteXPropertyData = {
   apn: '8321-027-034',
   legalDescription: 'LOT 34, TRACT 12345, PER MAP REC IN BK 100 PG 50',
   county: 'Los Angeles',
+  fips: '06037',
   propertyType: 'Single Family Residence',
   primaryOwner: 'Joel S Cruz Pablo',
   secondaryOwner: 'Maria Sebastian',

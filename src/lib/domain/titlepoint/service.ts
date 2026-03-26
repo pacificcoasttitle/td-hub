@@ -1,10 +1,11 @@
 import { db } from '@/lib/db/client';
-import { titlePointData, orderProperties } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { titlePointData, orderProperties, jobs } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
 import { getOrderByIdSimple } from '@/lib/domain/orders/service';
 import { uploadDocument } from '@/lib/domain/documents/service';
 import { createService, getRequestSummaries, getResult } from '@/lib/integrations/titlepoint/client';
 import { requestImage, getImage } from '@/lib/integrations/titlepoint/client-image';
+import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
 import type { TitlePointSearchType } from '@/lib/integrations/titlepoint/types';
 
 // ─── Search-type to document category mapping ───────────────────────────────
@@ -36,10 +37,11 @@ export async function initiateSearch(
   const city = property?.city ?? '';
   const state = property?.state ?? 'CA';
   const county = property?.county ?? '';
-  const fips = property?.fips ?? undefined;
+  const apn = property?.apn ?? undefined;
+  const fips = property?.fips ?? resolveCaliforniaFips(county) ?? undefined;
 
   const result = await createService(
-    { address, city, state, county, fips, searchType },
+    { address, city, state, county, fips, apn, searchType },
     orderId
   );
 
@@ -263,6 +265,59 @@ export async function fetchImage(
 
     return { success: false, error: msg };
   }
+}
+
+// ─── Retry Failed Searches ──────────────────────────────────────────────────
+
+export async function retryFailedSearches(
+  orderId: number,
+  userId: string
+): Promise<{ retried: number; failed: number; results: Array<{ searchType: string; status: string; error?: string }> }> {
+  const failedRows = await db
+    .select()
+    .from(titlePointData)
+    .where(
+      and(
+        eq(titlePointData.orderId, orderId),
+        eq(titlePointData.status, 'failed'),
+      )
+    );
+
+  if (failedRows.length === 0) {
+    return { retried: 0, failed: 0, results: [] };
+  }
+
+  const results: Array<{ searchType: string; status: string; error?: string }> = [];
+  let retried = 0;
+  let failed = 0;
+
+  for (const row of failedRows) {
+    const searchType = (row.searchType ?? 'geo_address') as TitlePointSearchType;
+
+    const initResult = await initiateSearch(orderId, searchType, userId);
+
+    if (initResult.success && initResult.titlePointDataId) {
+      await db.insert(jobs).values({
+        jobType: 'titlepoint.poll',
+        payload: { titlePointDataId: initResult.titlePointDataId } as Record<string, unknown>,
+        status: 'queued',
+        nextRetryAt: new Date(Date.now() + 30_000),
+      });
+
+      await db
+        .update(titlePointData)
+        .set({ status: 'superseded', message: `Retried — new record #${initResult.titlePointDataId}`, updatedAt: new Date() })
+        .where(eq(titlePointData.id, row.id));
+
+      retried++;
+      results.push({ searchType, status: 'retried' });
+    } else {
+      failed++;
+      results.push({ searchType, status: 'failed', error: initResult.error });
+    }
+  }
+
+  return { retried, failed, results };
 }
 
 // ─── Query Helpers ──────────────────────────────────────────────────────────

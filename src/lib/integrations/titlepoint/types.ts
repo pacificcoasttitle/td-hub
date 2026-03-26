@@ -42,5 +42,6 @@ export interface TitlePointCreateInput {
   state: string;
   county?: string;
   fips?: string;
+  apn?: string;
   searchType: TitlePointSearchType;
 }

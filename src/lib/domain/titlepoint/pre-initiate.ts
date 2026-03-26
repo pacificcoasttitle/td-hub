@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import { titlePointData, jobs, vendorApiLogs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { createService } from '@/lib/integrations/titlepoint/client';
+import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
 import { fetchImage } from './service';
 import { fetchGrantDeed } from './grant-deed';
 import { maybeEnqueueConfirmation } from './completion-checker';
@@ -51,7 +52,8 @@ export async function preInitiateSearches(property: {
           city: property.city,
           state: property.state,
           county: property.county,
-          fips: undefined,
+          fips: resolveCaliforniaFips(property.county),
+          apn: property.apn ?? undefined,
           searchType,
         },
       );

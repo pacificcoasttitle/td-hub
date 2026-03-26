@@ -8,6 +8,7 @@ import type { SiteXPropertyData } from '@/lib/integrations/sitex/types';
 import { autoTriggerTitlePoint } from '@/lib/domain/titlepoint/auto-trigger';
 import { linkSessionToOrder } from '@/lib/domain/titlepoint/pre-initiate';
 import { getSetting } from '@/lib/domain/settings/service';
+import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
 import { buildSoftProPayload, type ResolvedContacts } from './softpro-payload';
 
 // ─── Zod Schema ─────────────────────────────────────────────────────────────
@@ -108,6 +109,7 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
   const apn = input.property.apn ?? sitexData?.apn ?? '';
   const legal = input.property.legalDescription ?? sitexData?.legalDescription ?? '';
   const county = input.property.county ?? sitexData?.county ?? '';
+  const fips = sitexData?.fips ?? resolveCaliforniaFips(county) ?? null;
 
   const uwCode = resolveUnderwriterCode(input.transaction.product);
   input.transaction.underwriterCode = uwCode;
@@ -130,7 +132,7 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
 
   const fileNumber = spResult.data.orderNumber;
 
-  const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county }, userId, underwriterId);
+  const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county, fips }, userId, underwriterId);
 
   if (input.titlePointSessionId) {
     try {
@@ -144,7 +146,7 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
         state: input.property.state,
         county,
         apn: apn || null,
-        fips: null,
+        fips,
       });
 
       if (tpResult.skipped) {
@@ -171,7 +173,7 @@ async function createLocalRecords(
   input: CreateOrderInput,
   fileNumber: string,
   sitex: SiteXPropertyData | null,
-  enriched: { apn: string; legal: string; county: string },
+  enriched: { apn: string; legal: string; county: string; fips: string | null },
   userId?: string,
   underwriterId?: number | null,
 ): Promise<{ orderId: number }> {
@@ -205,6 +207,7 @@ async function createLocalRecords(
     propertyType: sitex?.propertyType ?? null,
     primaryOwner: sitex?.primaryOwner ?? null,
     secondaryOwner: sitex?.secondaryOwner ?? null,
+    fips: enriched.fips,
     fullAddress: [
       input.property.unitNumber
         ? `${input.property.address} ${input.property.unitNumber}`

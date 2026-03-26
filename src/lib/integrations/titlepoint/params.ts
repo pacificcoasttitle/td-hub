@@ -11,14 +11,14 @@ export function buildParameters(input: TitlePointCreateInput): string {
   switch (input.searchType) {
     case 'tax':
       return [
-        `APN=${input.fips ?? ''}`,
+        `APN=${input.apn ?? ''}`,
         'Property.AutoSearchTaxes=True',
         'Property.AutoSearchProperty=True',
       ].join(';');
     case 'legal_vesting':
       return [
         input.fips ? `FIPS=${input.fips}` : '',
-        `APN=${input.fips ?? ''}`,
+        `APN=${input.apn ?? ''}`,
         `Address1=${input.address}`,
         `City=${input.city}`,
       ].filter(Boolean).join(';');

@@ -10,6 +10,7 @@ export interface SiteXPropertyData {
   apn: string | null;
   legalDescription: string | null;
   county: string | null;
+  fips: string | null;
   propertyType: string | null;
   primaryOwner: string | null;
   secondaryOwner: string | null;

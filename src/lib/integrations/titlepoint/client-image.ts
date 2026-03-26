@@ -38,7 +38,16 @@ export async function requestImage(
       serviceId1: serviceId, fileType: 'pdf', source: '', clientKey1: '', clientKey2: '',
       sortOrder: '', serviceId2: '', serviceId3: '', serviceId4: '', serviceId5: '',
     }));
-    const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+    } catch (parseErr) {
+      const snippet = xml.slice(0, 500);
+      await logRequest({ operation: 'request_image', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'XML_PARSE_ERROR', requestMeta: { serviceId }, responseMeta: { rawSnippet: snippet, parseError: parseErr instanceof Error ? parseErr.message : 'parse failed' } });
+      return vendorError(VENDOR, 'IMAGE_REQUEST_FAILED', 'XML parse error — see vendor_api_logs for raw response', { requestId, durationMs: Date.now() - startedAt.getTime() });
+    }
+
     const result = extractXmlResult(parsed, 'CreateAsynchServicesReturn', 'CreateRequest3Return') as Record<string, unknown>;
 
     const returnStatus = String(result.ReturnStatus ?? '');
@@ -81,7 +90,16 @@ export async function getImage(
 
     for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
       const { status: httpStatus, body: xml } = await rawPost(url, body);
-      const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+      } catch (parseErr) {
+        const snippet = xml.slice(0, 500);
+        await logRequest({ operation: 'get_image', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'XML_PARSE_ERROR', requestMeta: { imgRequestId, attempt }, responseMeta: { rawSnippet: snippet, parseError: parseErr instanceof Error ? parseErr.message : 'parse failed' } });
+        return vendorError(VENDOR, 'IMAGE_FETCH_FAILED', 'XML parse error — see vendor_api_logs for raw response', { requestId, durationMs: Date.now() - startedAt.getTime() });
+      }
+
       const result = extractXmlResult(parsed, 'GenerateImageData', 'GetGeneratedImageReturn') as Record<string, unknown>;
 
       const returnStatus = String(result.ReturnStatus ?? '');
@@ -155,7 +173,15 @@ export async function getDocumentsByParameters3(
       fileType: 'PDF',
     }), 60_000);
 
-    const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+    } catch (parseErr) {
+      const snippet = xml.slice(0, 500);
+      await logRequest({ operation: 'get_documents_by_parameters3', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'XML_PARSE_ERROR', requestMeta: params, responseMeta: { rawSnippet: snippet, parseError: parseErr instanceof Error ? parseErr.message : 'parse failed' } });
+      return vendorError(VENDOR, 'DOCUMENT_FETCH_FAILED', 'XML parse error — see vendor_api_logs for raw response', { requestId, durationMs: Date.now() - startedAt.getTime() });
+    }
+
     const result = extractXmlResult(parsed, 'GetDocumentsByParameters3Return', 'DocumentResponse') as Record<string, unknown>;
 
     const returnStatus = String(result.ReturnStatus ?? '');

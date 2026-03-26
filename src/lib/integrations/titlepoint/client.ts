@@ -69,7 +69,17 @@ export async function createService(
 
     const url = `${cfg.baseUrl}${endpoint}?`;
     const { status: httpStatus, body: xml } = await rawPost(url, buildRawBody(params));
-    const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+    } catch (parseErr) {
+      const snippet = xml.slice(0, 500);
+      const isHtml = /<html/i.test(snippet);
+      await logRequest({ operation: 'create_service', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'XML_PARSE_ERROR', requestMeta: { searchType: input.searchType, endpoint }, responseMeta: { rawSnippet: snippet, isHtml, parseError: parseErr instanceof Error ? parseErr.message : 'parse failed' } });
+      return vendorError(VENDOR, 'CREATE_SERVICE_FAILED', `XML parse error (${isHtml ? 'HTML error page' : 'malformed XML'}) — see vendor_api_logs for raw response`, { requestId, durationMs: Date.now() - startedAt.getTime() });
+    }
+
     const result = extractXmlResult(parsed, 'CreateAsynchServicesReturn');
 
     const returnStatus = String(result.ReturnStatus ?? '');
@@ -112,7 +122,16 @@ export async function getRequestSummaries(
       userID: cfg.userID, password: cfg.password,
       requestID: tpRequestId, company: '', department: '', titleOfficer: '', maxWaitSeconds: '15',
     }));
-    const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+    } catch (parseErr) {
+      const snippet = xml.slice(0, 500);
+      await logRequest({ operation: 'get_request_summaries', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'XML_PARSE_ERROR', requestMeta: { tpRequestId }, responseMeta: { rawSnippet: snippet, parseError: parseErr instanceof Error ? parseErr.message : 'parse failed' } });
+      return vendorError(VENDOR, 'POLL_FAILED', 'XML parse error — see vendor_api_logs for raw response', { requestId, durationMs: Date.now() - startedAt.getTime() });
+    }
+
     const result = extractXmlResult(parsed, 'GetRequestSummariesReturn');
 
     const returnStatus = String(result.ReturnStatus ?? '');
@@ -184,7 +203,16 @@ export async function getResult(
       userID: cfg.userID, password: cfg.password,
       resultID: serviceId, requestingTPXML: 'true', company: '', department: '', titleOfficer: '',
     }));
-    const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
+    } catch (parseErr) {
+      const snippet = xml.slice(0, 500);
+      await logRequest({ operation: 'get_result', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'XML_PARSE_ERROR', requestMeta: { serviceId }, responseMeta: { rawSnippet: snippet, parseError: parseErr instanceof Error ? parseErr.message : 'parse failed' } });
+      return vendorError(VENDOR, 'RESULT_FETCH_FAILED', 'XML parse error — see vendor_api_logs for raw response', { requestId, durationMs: Date.now() - startedAt.getTime() });
+    }
+
     const result = extractXmlResult(parsed, 'GetResultReturn', 'GetResultByID3Return') as Record<string, unknown>;
 
     const returnStatus = String(result.ReturnStatus ?? '');

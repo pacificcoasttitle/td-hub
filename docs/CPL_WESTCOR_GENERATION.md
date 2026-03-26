@@ -1,7 +1,7 @@
 # Westcor CPL Generation — Exact Implementation & Issue Log
 
-**Last updated:** 2026-03-25  
-**Status:** Step A (order create/update) works. Step D (CPL PDF generation) fails with Westcor `NullReferenceException`.  
+**Last updated:** 2026-03-26  
+**Status:** Fully operational. All steps (A through D) succeed. PDF generated, uploaded to S3, downloadable.  
 **Source of truth:** This document reflects the actual code in `src/lib/integrations/cpl/westcor/`.
 
 ---
@@ -138,10 +138,10 @@ If `tvid: 0` and the agent+file combo already exists in Westcor, the API returns
       "phone": null,
       "email": null,
       "countyFIPS": null,
-      "assignment": null,
+      "assignment": "<from modal assignmentClause>",
       "mortgageType": null,
       "amount": 0,
-      "loan_number": "",
+      "loan_number": "<from modal loanNumber>",
       "vendorInternalID": null
     }
   ],
@@ -269,7 +269,7 @@ const body = {
     update_sellers: true,
     update_lender: true,
   },
-  purchase_price: <parsed int>,
+  purchase_price: "<amount as string>",
 };
 ```
 
@@ -325,15 +325,22 @@ POST /api/vendor-actions/cpl (route.ts)
   Zod validates, maps flat fields:
     lenderCompany → lenderOverrides.name
     propertyAddress → propertyOverrides.address
+    loanNumber → loanNumberOverride
+    loanAmount → loanAmountOverride
+    assignmentClause → assignmentClause
+    lenderContact → lenderContactName
     ↓
 generateCpl() (service.ts)
   buildOrderDetail(order, lenderOverrides, propertyOverrides)
     Property: propertyOverrides ?? DB order_properties
     Lender: lenderOverrides ?? DB order_parties (role=lender)
+  After success: persistCplInputToOrder() saves data back to order
     ↓
 westcorAdapter.generateCpl(input, orderDetail)
   orderDetail.property.address → buildProperty() → StreetAddress
   orderDetail.lender.name → buildLenders() → name
+  input.loanNumberOverride → buildLenders() → loan_number
+  input.assignmentClause → buildLenders() → assignment
 ```
 
 **Critical:** If the user doesn't fill in lender company in the modal AND the order has no lender party in the DB, the lenders array is empty and Westcor crashes with a NullReferenceException. Validation now blocks this at both modal and server level.
@@ -351,35 +358,18 @@ westcorAdapter.generateCpl(input, orderDetail)
 | 19:26 | "Object reference not set to an instance of an object" | Order 50 had no lender party and no lender entered in modal → empty lenders array → `LenderID: 0` → Westcor null ref | Added lender validation (modal + server), but user may not have entered lender |
 | 19:34 | Same null reference | Lender was entered (validation passed). Entity IDs from Step A response may be missing — code only used Step A IDs, not Step B GET response as fallback | Added Step B GET response as fallback for lender/buyer/seller IDs; added diagnostic logging per step |
 
-### Current blocker (19:34)
+### Resolution (March 25–26)
 
-**Error:** `Westcor CPL error: An Exception Occurred When Processing Your CPL Request. Object reference not set to an instance of an object.`
+The null reference and EF update errors were resolved through multiple iterations:
 
-**What works:**
-- Token acquisition (Step 0)
-- Order create/update (Step A) — tvid `3719520` returned and stored
-- Tvid reuse on retry
+1. **Blind CPL template spread** — Spreading the full `cplTemplate` from PrepareAddCPL sent Westcor's internal/read-only fields back, causing the null reference. Fixed by using the template as a base but overriding all legacy-required fields.
+2. **Blind order response spread** — Spreading `...westcorOrder` from the GET response sent Entity Framework tracked entities back, causing "An error occurred while updating the entries." Fixed by using `westcorOrder` as the base body and overriding only the 6 mutable sections (property, buyers, sellers, lenders, cpl, actions).
+3. **Missing `PolicyProducingAgentNumber`** — Westcor requires this field on the CPL entry. Added from the template or branch code.
+4. **Entity TVID resolution** — Nested entity TVIDs (buyer, seller, lender, property) now resolved from Step A response with Step B GET fallback.
+5. **`purchase_price` as string** — Legacy PHP sends `"350000"` not `350000`. Changed to `String(amount)`.
+6. **S3 credential mismatch** — AWS credentials on Vercel were incorrect. Updated and confirmed working March 26.
 
-**What fails:**
-- Step D (CPL PDF generation) — Westcor returns HTTP 200 but with `messages.error` containing the null reference
-
-**Most likely causes (pending diagnostic logs from next test):**
-1. `LenderID` is `0` in the CPL entry because neither Step A nor Step B returned a lender ID (lender may not have been saved to Westcor despite being in our payload)
-2. The `cplTemplate` from PrepareAddCPL has unexpected null fields that Westcor's CPL processor can't handle
-3. A required field in the CPL entry (like `TVID`) is missing from the template spread
-
-**Diagnostic logging added (deploy 5b985ec):**
-- `create_order` log now includes: `hasLenders`, `lenderId`, `hasBuyers`, `hasSellers`
-- `get_order` log now includes: `getHasLenders`, `getLenderId`, `getHasBuyers`, `getHasSellers`, `getHasProperty`
-- `prepare_cpl` log now includes: `formCount`, `selectedForm`, `templateHasTVID`, `templateTVID`, `templateKeys`
-
-After the next test, query:
-```sql
-SELECT id, operation, request_meta, response_meta
-FROM vendor_api_logs
-WHERE vendor = 'westcor' AND created_at > '2026-03-25 19:34:00'
-ORDER BY created_at;
-```
+**Final successful test:** March 26, 2026 — all 8 vendor_api_logs entries green (get_token through s3 get_signed_url).
 
 ---
 
@@ -443,10 +433,23 @@ Our implementation is modeled after `TransactionDeskClone/application/libraries/
 
 ---
 
-## 13. Next steps to resolve the null reference
+## 13. Post-generation: data save-back
 
-1. **Run the test again** after deploy `5b985ec` — diagnostic logs will reveal exactly which IDs are null/0
-2. **Check the diagnostic logs** — specifically `getLenderId` from `get_order` and `templateKeys` from `prepare_cpl`
-3. **If LenderID is 0**: Westcor may not be persisting the lender from Step A. May need to call Step A twice — once to create the base order, once to add the lender — or investigate whether the lender payload structure is wrong
-4. **If template is missing TVID**: The PrepareAddCPL response structure may differ from what we expect — check `templateKeys` in logs
-5. **If all IDs look correct**: The null reference may be in a field we're not tracking — compare the full Step D body against a working legacy request
+After successful CPL generation, the service persists user-entered data back to the order (COALESCE — only writes if the field is currently null):
+
+- `orders.sales_price` ← from `salesAmountOverride`
+- `orders.loan_amount` ← from `loanAmountOverride`
+- `order_parties` (role=lender) ← upserts `externalCompany` and `externalName` from lender overrides
+
+**Note:** The `orders` table has no `loan_number` column. The loan number is passed through to Westcor's lender `loan_number` field but is not persisted locally.
+
+---
+
+## 14. Known hardcoded values
+
+| Value | Location | Recommendation |
+|-------|----------|---------------|
+| `CA1038` | `payloads.ts` → `buildCplEntry()` → `ClosingAgentNumber` | Matches legacy. Could be moved to branch data if PCT gets multiple closing agent numbers. |
+| `cpl@pct.com` | `payloads.ts` → `createOrUpdateOrder()` → `email_requestor` | Matches legacy. Could be env var if requestor email changes. |
+| `services.ewestcor.com` | Read from `WESTCOR_URL` env var | Correct — not hardcoded. |
+| `7758` | Read from `WESTCOR_INTEGRATION_PARTNER` env var | Correct — not hardcoded. |

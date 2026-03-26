@@ -6,7 +6,7 @@ import type {
   TitlePointSummaryResponse, TitlePointResultResponse,
 } from './types';
 import { VENDOR, logRequest } from './logging';
-import { rawPost, buildRawBody, dig, extractXmlResult } from './http';
+import { tpPostRawForm, dig, extractXmlResult } from './http';
 import { SERVICE_TYPE_MAP, buildParameters } from './params';
 import { mockCreateService, mockGetRequestSummaries, mockGetResult } from './mocks';
 
@@ -37,6 +37,9 @@ function getConfig() {
 }
 
 // ─── CreateService ───────────────────────────────────────────────────────────
+// Legacy: Titlepoint.php generateGeoDoc() line 464-488 (POST via curl_post)
+// Legacy: frontend TitlePoint.php createService() (GET via file_get_contents)
+// TD Hub uses POST (library path) for all post-order automation.
 
 export async function createService(
   input: TitlePointCreateInput,
@@ -52,23 +55,32 @@ export async function createService(
   const endpoint = isLV ? TP_ENDPOINTS.createService4 : TP_ENDPOINTS.createService3;
 
   try {
+    // Base params matching legacy array order from Titlepoint.php line 464-481
     const params: Record<string, string> = {
-      userID: cfg.userID, password: cfg.password,
+      userID: cfg.userID,
+      password: cfg.password,
       serviceType: SERVICE_TYPE_MAP[input.searchType],
       parameters: buildParameters(input),
-      department: '', orderNo: '', customerRef: orderId ? String(orderId) : '',
-      company: '', titleOfficer: '', orderComment: '', starterRemarks: '',
+      department: '',
+      orderNo: '',
+      customerRef: orderId ? String(orderId) : '',
+      company: '',
+      titleOfficer: '',
+      orderComment: '',
+      starterRemarks: '',
     };
 
     if (isLV) {
+      // LV uses fipsCode, no state/county
       params.fipsCode = input.fips ?? '';
     } else {
+      // Geo and Tax use state + county
       params.state = input.state;
       params.county = input.county ?? '';
     }
 
-    const url = `${cfg.baseUrl}${endpoint}?`;
-    const { status: httpStatus, body: xml } = await rawPost(url, buildRawBody(params));
+    const url = `${cfg.baseUrl}${endpoint}`;
+    const { status: httpStatus, body: xml } = await tpPostRawForm(url, params);
 
     let parsed: Record<string, unknown>;
     try {
@@ -105,6 +117,9 @@ export async function createService(
 }
 
 // ─── GetRequestSummaries ────────────────────────────────────────────────────
+// Legacy: Titlepoint.php getGeoImageRequestStatus() line 1428-1478 (POST via curl_post)
+// Param order matches legacy line 1431-1438.
+// FIXES: requestId (lowercase d), maxWaitSeconds=20
 
 export async function getRequestSummaries(
   tpRequestId: string,
@@ -117,11 +132,16 @@ export async function getRequestSummaries(
   if (!cfg) return mockGetRequestSummaries(tpRequestId, orderId, requestId, startedAt);
 
   try {
-    const url = `${cfg.baseUrl}${TP_ENDPOINTS.getRequestSummaries}?`;
-    const { status: httpStatus, body: xml } = await rawPost(url, buildRawBody({
-      userID: cfg.userID, password: cfg.password,
-      requestID: tpRequestId, company: '', department: '', titleOfficer: '', maxWaitSeconds: '15',
-    }));
+    const url = `${cfg.baseUrl}${TP_ENDPOINTS.getRequestSummaries}`;
+    const { status: httpStatus, body: xml } = await tpPostRawForm(url, {
+      userID: cfg.userID,
+      password: cfg.password,
+      company: '',
+      department: '',
+      titleOfficer: '',
+      requestId: tpRequestId,
+      maxWaitSeconds: '20',
+    });
 
     let parsed: Record<string, unknown>;
     try {
@@ -186,6 +206,8 @@ export async function getRequestSummaries(
 }
 
 // ─── GetResultByID3 ─────────────────────────────────────────────────────────
+// Legacy: Titlepoint.php generateGeoDocument() line 1150-1176 (POST via curl_post)
+// Param order matches legacy line 1150-1157.
 
 export async function getResult(
   serviceId: string,
@@ -198,11 +220,16 @@ export async function getResult(
   if (!cfg) return mockGetResult(serviceId, orderId, requestId, startedAt);
 
   try {
-    const url = `${cfg.baseUrl}${TP_ENDPOINTS.getResultById3}?`;
-    const { status: httpStatus, body: xml } = await rawPost(url, buildRawBody({
-      userID: cfg.userID, password: cfg.password,
-      resultID: serviceId, requestingTPXML: 'true', company: '', department: '', titleOfficer: '',
-    }));
+    const url = `${cfg.baseUrl}${TP_ENDPOINTS.getResultById3}`;
+    const { status: httpStatus, body: xml } = await tpPostRawForm(url, {
+      userID: cfg.userID,
+      password: cfg.password,
+      company: '',
+      department: '',
+      titleOfficer: '',
+      requestingTPXML: 'true',
+      resultID: serviceId,
+    });
 
     let parsed: Record<string, unknown>;
     try {
@@ -227,5 +254,3 @@ export async function getResult(
     return vendorError(VENDOR, 'RESULT_FETCH_FAILED', msg, { requestId, durationMs: Date.now() - startedAt.getTime() });
   }
 }
-
-

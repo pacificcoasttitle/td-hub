@@ -4,7 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { getOrderByIdSimple } from '@/lib/domain/orders/service';
 import { uploadDocument } from '@/lib/domain/documents/service';
 import { createService, getRequestSummaries, getResult } from '@/lib/integrations/titlepoint/client';
-import { requestImage, getImage } from '@/lib/integrations/titlepoint/client-image';
+import { requestImage, getRequestStatus, getImage } from '@/lib/integrations/titlepoint/client-image';
 import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
 import type { TitlePointSearchType } from '@/lib/integrations/titlepoint/types';
 
@@ -212,19 +212,25 @@ export async function fetchImage(
   const userId = (meta.userId as string) ?? 'system';
   const oid = record.orderId;
 
-  // Step 1: Request image
+  // Step 1: CreateRequest3 — request image generation
   const imgReqResult = await requestImage(record.serviceId, oid);
   if (!imgReqResult.success) {
     return { success: false, error: imgReqResult.error?.message ?? 'Image request failed' };
   }
 
-  // Step 2: Get image data
+  // Step 2: GetRequestStatus — poll until ready (legacy step)
+  const statusResult = await getRequestStatus(imgReqResult.data!.requestId, oid);
+  if (!statusResult.success) {
+    return { success: false, error: statusResult.error?.message ?? 'Image status check failed' };
+  }
+
+  // Step 3: GetGeneratedImage — download the PDF
   const imgResult = await getImage(imgReqResult.data!.requestId, oid);
   if (!imgResult.success) {
     return { success: false, error: imgResult.error?.message ?? 'Image fetch failed' };
   }
 
-  // Step 3: Decode base64 → upload to S3 → create document
+  // Step 4: Decode base64 → upload to S3 → create document
   const pdfBuffer = Buffer.from(imgResult.data!.base64Data, 'base64');
   const searchType = (record.searchType ?? 'general') as TitlePointSearchType;
   const docCategory = SEARCH_TYPE_DOC_CATEGORY[searchType] ?? 'general';

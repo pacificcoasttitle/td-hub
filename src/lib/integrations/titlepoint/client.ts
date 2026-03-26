@@ -86,7 +86,7 @@ export async function createService(
     try {
       parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
     } catch (parseErr) {
-      const snippet = xml.slice(0, 500);
+      const snippet = xml.slice(0, 3000);
       const isHtml = /<html/i.test(snippet);
       await logRequest({ operation: 'create_service', orderId, requestId, startedAt, success: false, httpStatus, errorCategory: 'XML_PARSE_ERROR', requestMeta: { searchType: input.searchType, endpoint }, responseMeta: { rawSnippet: snippet, isHtml, parseError: parseErr instanceof Error ? parseErr.message : 'parse failed' } });
       return vendorError(VENDOR, 'CREATE_SERVICE_FAILED', `XML parse error (${isHtml ? 'HTML error page' : 'malformed XML'}) — see vendor_api_logs for raw response`, { requestId, durationMs: Date.now() - startedAt.getTime() });

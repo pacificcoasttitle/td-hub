@@ -4,6 +4,8 @@ import {
   orderExternalRefs,
   cplErrorLogs,
   documents,
+  orders,
+  orderParties,
 } from '@/lib/db/schema';
 import { eq, and, asc, sql } from 'drizzle-orm';
 import { getOrderById } from '@/lib/domain/orders/service';
@@ -130,6 +132,15 @@ export async function generateCpl(
   } catch (err) {
     errors.push(
       `SoftPro attach error: ${err instanceof Error ? err.message : 'unknown'}`
+    );
+  }
+
+  // j. Persist user-entered data back to the order (COALESCE — only if null)
+  try {
+    await persistCplInputToOrder(input, order);
+  } catch (err) {
+    errors.push(
+      `Save-back: ${err instanceof Error ? err.message : 'unknown'}`
     );
   }
 
@@ -284,5 +295,45 @@ async function logCplError(
     });
   } catch {
     // Don't let error logging fail the main flow
+  }
+}
+
+async function persistCplInputToOrder(
+  input: CplGenerateInput,
+  order: OrderWithDetail,
+): Promise<void> {
+  if (input.salesAmountOverride && !order.salesPrice) {
+    await db
+      .update(orders)
+      .set({ salesPrice: input.salesAmountOverride })
+      .where(eq(orders.id, input.orderId));
+  }
+
+  if (input.loanAmountOverride && !order.loanAmount) {
+    await db
+      .update(orders)
+      .set({ loanAmount: input.loanAmountOverride })
+      .where(eq(orders.id, input.orderId));
+  }
+
+  if (input.lenderOverrides?.name) {
+    const existingLender = order.parties.find((p) => p.role === 'lender');
+    if (existingLender) {
+      await db
+        .update(orderParties)
+        .set({
+          externalCompany: input.lenderOverrides.name,
+          externalName: input.lenderContactName ?? existingLender.externalName,
+        })
+        .where(eq(orderParties.id, existingLender.id));
+    } else {
+      await db.insert(orderParties).values({
+        orderId: input.orderId,
+        role: 'lender',
+        externalCompany: input.lenderOverrides.name,
+        externalName: input.lenderContactName ?? null,
+        isPrimary: true,
+      });
+    }
   }
 }

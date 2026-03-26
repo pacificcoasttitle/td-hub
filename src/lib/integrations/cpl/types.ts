@@ -29,6 +29,10 @@ export interface CplGenerateInput {
   };
   salesAmountOverride?: string;
   loanAmountOverride?: string;
+  loanNumberOverride?: string;
+  borrowerNamesOverride?: string;
+  assignmentClause?: string;
+  lenderContactName?: string;
 }
 
 export interface CplGenerateResult {

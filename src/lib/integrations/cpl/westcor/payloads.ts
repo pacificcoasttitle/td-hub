@@ -185,10 +185,11 @@ function buildSellers(
 
 function buildLenders(
   orderDetail: CplOrderDetail,
-  lenderOverrides?: CplGenerateInput['lenderOverrides'],
+  input: CplGenerateInput,
   ids?: { Id?: number; tvid?: number | string },
 ) {
   const lender = orderDetail.lender;
+  const lenderOverrides = input.lenderOverrides;
   if (!lender) return [];
 
   return [{
@@ -202,10 +203,10 @@ function buildLenders(
     phone: null as string | null,
     email: null as string | null,
     countyFIPS: null as string | null,
-    assignment: null as string | null,
+    assignment: input.assignmentClause ?? null,
     mortgageType: null as string | null,
     amount: 0,
-    loan_number: '',
+    loan_number: input.loanNumberOverride ?? '',
     vendorInternalID: null as number | null,
   }];
 }
@@ -245,7 +246,7 @@ export async function createOrUpdateOrder(
     property: buildProperty(orderDetail.property),
     buyers: buildBuyers(orderDetail.buyers),
     sellers: buildSellers(orderDetail.sellers, orderDetail.transactionType),
-    lenders: buildLenders(orderDetail, input.lenderOverrides),
+    lenders: buildLenders(orderDetail, input),
     search: null,
     commitment: null,
     jacket: null,
@@ -421,7 +422,7 @@ export async function generateCplPdf(
   });
   const buyers = buildBuyers(orderDetail.buyers, buyerIds);
   const sellers = buildSellers(orderDetail.sellers, orderDetail.transactionType, sellerIds);
-  const lenders = buildLenders(orderDetail, input.lenderOverrides, {
+  const lenders = buildLenders(orderDetail, input, {
     Id: westcorLenderId,
     tvid: lenderTvid,
   });

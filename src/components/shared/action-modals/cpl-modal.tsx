@@ -277,7 +277,7 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
           {/* ── Result ── */}
           {result && (
             <div className={`px-4 py-3 rounded-lg text-sm ${result.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-              {result.ok ? <span>CPL generated. <a href={`/api/documents/${result.docId}/download`} className="underline font-semibold text-[#F26B2B]">Download CPL</a></span> : result.error}
+              {result.ok ? <span>CPL generated. <a href={`/api/documents/${result.docId}/download`} target="_blank" rel="noopener noreferrer" className="underline font-semibold text-[#F26B2B]">Download CPL</a></span> : result.error}
             </div>
           )}
 

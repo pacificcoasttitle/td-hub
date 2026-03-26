@@ -302,20 +302,19 @@ async function persistCplInputToOrder(
   input: CplGenerateInput,
   order: OrderWithDetail,
 ): Promise<void> {
+  // COALESCE updates to orders table (only if currently null)
+  const orderUpdates: Record<string, string> = {};
   if (input.salesAmountOverride && !order.salesPrice) {
-    await db
-      .update(orders)
-      .set({ salesPrice: input.salesAmountOverride })
-      .where(eq(orders.id, input.orderId));
+    orderUpdates.salesPrice = input.salesAmountOverride;
   }
-
   if (input.loanAmountOverride && !order.loanAmount) {
-    await db
-      .update(orders)
-      .set({ loanAmount: input.loanAmountOverride })
-      .where(eq(orders.id, input.orderId));
+    orderUpdates.loanAmount = input.loanAmountOverride;
+  }
+  if (Object.keys(orderUpdates).length > 0) {
+    await db.update(orders).set(orderUpdates).where(eq(orders.id, input.orderId));
   }
 
+  // Upsert lender party (company name + contact name)
   if (input.lenderOverrides?.name) {
     const existingLender = order.parties.find((p) => p.role === 'lender');
     if (existingLender) {
@@ -335,5 +334,27 @@ async function persistCplInputToOrder(
         isPrimary: true,
       });
     }
+  }
+
+  // Store all CPL-specific fields in order_external_refs for round-trip
+  const cplRefs: Record<string, string> = {};
+  if (input.lenderOverrides?.address) cplRefs.cpl_lender_address = input.lenderOverrides.address;
+  if (input.lenderOverrides?.city)    cplRefs.cpl_lender_city = input.lenderOverrides.city;
+  if (input.lenderOverrides?.state)   cplRefs.cpl_lender_state = input.lenderOverrides.state;
+  if (input.lenderOverrides?.zip)     cplRefs.cpl_lender_zip = input.lenderOverrides.zip;
+  if (input.assignmentClause)         cplRefs.cpl_assignment_clause = input.assignmentClause;
+  if (input.loanNumberOverride)       cplRefs.cpl_loan_number = input.loanNumberOverride;
+  if (input.lenderContactName)        cplRefs.cpl_lender_contact = input.lenderContactName;
+  cplRefs.cpl_branch_id = String(input.branchId);
+
+  const system = input.underwriter as typeof orderExternalRefs.system.enumValues[number];
+  for (const [refType, refValue] of Object.entries(cplRefs)) {
+    await db
+      .insert(orderExternalRefs)
+      .values({ orderId: input.orderId, system, refType, refValue })
+      .onConflictDoUpdate({
+        target: [orderExternalRefs.orderId, orderExternalRefs.system, orderExternalRefs.refType],
+        set: { refValue },
+      });
   }
 }

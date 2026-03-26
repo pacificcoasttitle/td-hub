@@ -24,6 +24,7 @@ interface OrderApiResponse {
     state?: string | null; zip?: string | null;
     assignmentClause?: string | null;
   } | null;
+  cplData?: Record<string, string>;
 }
 
 interface ExistingCpl { id: number; fileName: string; createdAt: string; }
@@ -93,10 +94,17 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
 
       if (od) {
         const o = od as OrderApiResponse;
-        if (o.branchId) setBranchId(o.branchId);
+        const cpd = o.cplData ?? {};
+
+        // Branch: prefer saved CPL branch, then order branch
+        const savedBranch = cpd.cpl_branch_id ? Number(cpd.cpl_branch_id) : null;
+        if (savedBranch) setBranchId(savedBranch);
+        else if (o.branchId) setBranchId(o.branchId);
+
         setTxType(o.transactionType ?? '');
         setSalesAmount(o.salesPrice ?? '');
         setLoanAmount(o.loanAmount ?? '');
+        setLoanNumber(cpd.cpl_loan_number ?? '');
 
         // Property (nested object)
         const prop = o.property;
@@ -107,16 +115,16 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
           setPropZip(prop.zip ?? '');
         }
 
-        // Lender from contacts join, with party fallback
+        // Lender: CPL saved data > contacts join > party fallback
         const lc = o.lenderContact;
         const lenderParty = o.parties?.find((p) => p.role === 'lender');
         setLenderCompany(lc?.companyName ?? lenderParty?.externalCompany ?? '');
-        setLenderContact(lc?.fullName ?? lenderParty?.externalName ?? '');
-        setLenderAddr(lc?.address1 ?? '');
-        setLenderCity(lc?.city ?? '');
-        setLenderState(lc?.state ?? '');
-        setLenderZip(lc?.zip ?? '');
-        setAssignmentClause(lc?.assignmentClause ?? '');
+        setLenderContact(cpd.cpl_lender_contact ?? lc?.fullName ?? lenderParty?.externalName ?? '');
+        setLenderAddr(cpd.cpl_lender_address ?? lc?.address1 ?? '');
+        setLenderCity(cpd.cpl_lender_city ?? lc?.city ?? '');
+        setLenderState(cpd.cpl_lender_state ?? lc?.state ?? '');
+        setLenderZip(cpd.cpl_lender_zip ?? lc?.zip ?? '');
+        setAssignmentClause(cpd.cpl_assignment_clause ?? lc?.assignmentClause ?? '');
 
         // Buyer / borrower names from parties
         const buyers = (o.parties ?? [])

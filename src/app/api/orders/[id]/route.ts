@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { getOrderById } from '@/lib/domain/orders/service';
 import { db } from '@/lib/db/client';
-import { contacts } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { contacts, orderExternalRefs } from '@/lib/db/schema';
+import { eq, and, like } from 'drizzle-orm';
 
 export async function GET(
   _req: NextRequest,
@@ -47,7 +47,23 @@ export async function GET(
       lenderContact = lc ?? null;
     }
 
-    return NextResponse.json({ ...order, lenderContact });
+    // Load CPL-specific saved data from external refs
+    const cplRefRows = await db
+      .select({ refType: orderExternalRefs.refType, refValue: orderExternalRefs.refValue })
+      .from(orderExternalRefs)
+      .where(
+        and(
+          eq(orderExternalRefs.orderId, orderId),
+          like(orderExternalRefs.refType, 'cpl_%'),
+        )
+      );
+
+    const cplData: Record<string, string> = {};
+    for (const row of cplRefRows) {
+      cplData[row.refType] = row.refValue;
+    }
+
+    return NextResponse.json({ ...order, lenderContact, cplData });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

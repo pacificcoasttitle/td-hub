@@ -1,10 +1,47 @@
 import { parseStringPromise } from 'xml2js';
-import type { CplOrderDetail, CplForm } from '../types';
+import type { CplForm } from '../types';
 
 const TIMEOUT_MS = 20_000;
+const CPL_TIMEOUT_MS = 30_000;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SoapAny = Record<string, any>;
+// Namespaces — exact match to legacy Fnf.php
+const NS_SOAP = 'http://schemas.xmlsoap.org/soap/envelope/';
+const NS_CPL = 'http://cpl.fnf.com/services/v3/cplmanagement/';
+const NS_DATA = 'http://schemas.datacontract.org/2004/07/FNF.CPL.ServiceModel.Data.V3';
+const NS_ENUMS = 'http://schemas.datacontract.org/2004/07/FNF.CPL.ServiceModel.Data.Enums';
+
+export interface FnfBranchInfo {
+  agentNumber: string;   // CLUP — maps to cpl_branches.branch_code
+  underwriterCode: string; // maps to cpl_branches.underwriter_code
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  phone: string;
+}
+
+export interface FnfGenerateCplParams {
+  fileNumber: string;
+  branch: FnfBranchInfo;
+  formName: string;
+  onBehalfOfUser: string;
+  userToken: string;
+  borrowerVesting: string;
+  lenderName: string;
+  lenderAttnName: string;
+  lenderAddress: string;
+  lenderCity: string;
+  lenderState: string;
+  lenderZip: string;
+  lenderAssignmentClause: string;
+  loanNumber: string;
+  propertyAddress: string;
+  propertyCity: string;
+  propertyState: string;
+  propertyZip: string;
+  propertyCounty: string;
+  documentId?: string | null; // null → CreateCPL; present → EditCPL
+}
 
 export function escapeXml(s: string): string {
   return s
@@ -15,78 +52,143 @@ export function escapeXml(s: string): string {
     .replace(/'/g, '&apos;');
 }
 
-export function buildGetCplListEnvelope(orderDetail: CplOrderDetail, userToken: string): string {
-  const prop = orderDetail.property;
-  return [
-    '<?xml version="1.0" encoding="utf-8"?>',
-    '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"',
-    '                  xmlns:v3="http://www.fnf.com/xes/cpl/v3">',
-    '  <soapenv:Header/>',
-    '  <soapenv:Body>',
-    '    <v3:GetCPLList>',
-    '      <v3:Token>' + escapeXml(userToken) + '</v3:Token>',
-    '      <v3:PropertyState>' + escapeXml(prop?.state ?? 'CA') + '</v3:PropertyState>',
-    '      <v3:PropertyCounty>' + escapeXml(prop?.county ?? '') + '</v3:PropertyCounty>',
-    '    </v3:GetCPLList>',
-    '  </soapenv:Body>',
-    '</soapenv:Envelope>',
-  ].join('\n');
+// ─── GetCPLList — legacy-exact envelope ─────────────────────────────────────
+
+export function buildGetCplListEnvelope(params: {
+  agentNumber: string;
+  onBehalfOfUser: string;
+  fileNumber: string;
+  state: string;
+  underwriterCode: string;
+}): string {
+  return `<soapenv:Envelope xmlns:soapenv="${NS_SOAP}" xmlns:cpl="${NS_CPL}">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <cpl:GetCPLListRequest>
+      <cpl:CLUP>${escapeXml(params.agentNumber)}</cpl:CLUP>
+      <cpl:OnBehalfOfUser>${escapeXml(params.onBehalfOfUser)}</cpl:OnBehalfOfUser>
+      <cpl:OrderNumber>${escapeXml(params.fileNumber)}</cpl:OrderNumber>
+      <cpl:StateAbbreviation>${escapeXml(params.state)}</cpl:StateAbbreviation>
+      <cpl:UnderwriterShortName>${escapeXml(params.underwriterCode)}</cpl:UnderwriterShortName>
+    </cpl:GetCPLListRequest>
+  </soapenv:Body>
+</soapenv:Envelope>`;
 }
 
-export function buildCreateCplEnvelope(orderDetail: CplOrderDetail, formId: string, userToken: string): string {
-  const prop = orderDetail.property;
-  const lender = orderDetail.lender;
-  const buyerNames = orderDetail.buyers.join('; ');
-  const sellerNames = orderDetail.sellers.join('; ');
+// ─── GenerateCPL / EditCPL — legacy-exact envelope ──────────────────────────
 
-  return [
-    '<?xml version="1.0" encoding="utf-8"?>',
-    '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"',
-    '                  xmlns:v3="http://www.fnf.com/xes/cpl/v3">',
-    '  <soapenv:Header/>',
-    '  <soapenv:Body>',
-    '    <v3:CreateCPL>',
-    '      <v3:Token>' + escapeXml(userToken) + '</v3:Token>',
-    '      <v3:CPLFormID>' + escapeXml(formId) + '</v3:CPLFormID>',
-    '      <v3:FileNumber>' + escapeXml(orderDetail.fileNumber) + '</v3:FileNumber>',
-    '      <v3:PropertyAddress>' + escapeXml(prop?.address ?? '') + '</v3:PropertyAddress>',
-    '      <v3:PropertyCity>' + escapeXml(prop?.city ?? '') + '</v3:PropertyCity>',
-    '      <v3:PropertyState>' + escapeXml(prop?.state ?? 'CA') + '</v3:PropertyState>',
-    '      <v3:PropertyZip>' + escapeXml(prop?.zip ?? '') + '</v3:PropertyZip>',
-    '      <v3:PropertyCounty>' + escapeXml(prop?.county ?? '') + '</v3:PropertyCounty>',
-    '      <v3:BuyerName>' + escapeXml(buyerNames) + '</v3:BuyerName>',
-    '      <v3:SellerName>' + escapeXml(sellerNames) + '</v3:SellerName>',
-    '      <v3:LenderName>' + escapeXml(lender?.name ?? '') + '</v3:LenderName>',
-    '      <v3:LenderAddress>' + escapeXml(lender?.address ?? '') + '</v3:LenderAddress>',
-    '      <v3:LenderCity>' + escapeXml(lender?.city ?? '') + '</v3:LenderCity>',
-    '      <v3:LenderState>' + escapeXml(lender?.state ?? '') + '</v3:LenderState>',
-    '      <v3:LenderZip>' + escapeXml(lender?.zip ?? '') + '</v3:LenderZip>',
-    '      <v3:PurchasePrice>' + escapeXml(orderDetail.salesPrice ?? '0') + '</v3:PurchasePrice>',
-    '      <v3:LoanAmount>' + escapeXml(orderDetail.loanAmount ?? '0') + '</v3:LoanAmount>',
-    '    </v3:CreateCPL>',
-    '  </soapenv:Body>',
-    '</soapenv:Envelope>',
-  ].join('\n');
+function buildFormFields(p: FnfGenerateCplParams): string {
+  const nv = (name: string, value: string) =>
+    `<a:NameValue>
+      <a:Name>${escapeXml(name)}</a:Name>
+      <a:Value>${escapeXml(value)}</a:Value>
+    </a:NameValue>`;
+
+  const fields: string[] = [
+    nv('[Buyer/Borrower Name]', p.borrowerVesting),
+    nv('[Lender Name]', p.lenderName),
+    nv('[Lender Clause]', p.lenderAssignmentClause),
+    nv('[Lender Address 1]', p.lenderAddress),
+    nv('[Lender City]', p.lenderCity),
+    nv('[Lender State]', p.lenderState),
+    nv('[Lender Zip Code]', p.lenderZip),
+    nv('[Lender Attention]', p.lenderAttnName),
+  ];
+
+  if (p.loanNumber) {
+    fields.push(nv('[Loan Number]', p.loanNumber));
+  }
+
+  fields.push(
+    nv('[Underwriter]', p.branch.underwriterCode),
+    nv('[Property Street Address]', p.propertyAddress),
+    nv('[Property City]', p.propertyCity),
+    nv('[Property County]', p.propertyCounty),
+    nv('[Property State]', p.propertyState),
+    nv('[Property Zip Code]', p.propertyZip),
+    nv('[Date]', formatDate()),
+    nv('[File Number]', p.fileNumber),
+    nv('[Agent/Company City]', p.branch.city),
+    nv('[Agent/Company Name]', 'Pacific Coast Title Company'),
+    nv('[Agent/Company State]', 'CA'),
+    nv('[Agent/Company Street Address]', p.branch.address),
+  );
+
+  if (p.branch.phone) {
+    fields.push(nv('[Agent/Company Telephone]', p.branch.phone));
+  }
+
+  fields.push(nv('[Agent/Company Zip Code]', p.branch.zip));
+
+  return fields.join('\n');
 }
 
-function extractSoapBody(parsed: SoapAny): SoapAny | null {
-  const envelope = parsed['s:Envelope'] ?? parsed['soap:Envelope'] ?? parsed['soapenv:Envelope'];
-  if (!envelope) return null;
-  return envelope['s:Body'] ?? envelope['soap:Body'] ?? envelope['soapenv:Body'] ?? null;
+function formatDate(): string {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${mm}/${dd}/${yyyy}`;
 }
+
+export function buildGenerateCplEnvelope(p: FnfGenerateCplParams): string {
+  const state = p.propertyState || 'CA';
+  const isEdit = !!p.documentId;
+
+  const documentIdNode = isEdit
+    ? `<a:DocumentId>${escapeXml(p.documentId!)}</a:DocumentId>`
+    : '';
+  const formNameNode = isEdit
+    ? ''
+    : `<a:FormName>${escapeXml(p.formName)}</a:FormName>`;
+
+  return `<s:Envelope xmlns:s="${NS_SOAP}">
+  <s:Body>
+    <GenerateCPLRequest xmlns="${NS_CPL}">
+      <CPLInformation xmlns:a="${NS_DATA}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <a:CLUP>${escapeXml(p.branch.agentNumber)}</a:CLUP>
+        <a:DBAsIndicator>false</a:DBAsIndicator>
+        ${documentIdNode}${formNameNode}
+        <a:LegalNameIndicator>true</a:LegalNameIndicator>
+        <a:OrderNumber>${escapeXml(p.fileNumber)}</a:OrderNumber>
+        <a:RecipientTypes xmlns:b="${NS_ENUMS}">
+          <b:RecipientType>Lender</b:RecipientType>
+        </a:RecipientTypes>
+        <a:StateAbbreviation>${escapeXml(state)}</a:StateAbbreviation>
+        <a:UnderwriterShortName>${escapeXml(p.branch.underwriterCode)}</a:UnderwriterShortName>
+      </CPLInformation>
+      <ContextUser s:nil="true"/>
+      <FormFields xmlns:a="${NS_DATA}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        ${buildFormFields(p)}
+      </FormFields>
+      <OnBehalfOfUser>${escapeXml(p.onBehalfOfUser)}</OnBehalfOfUser>
+      <TraxToken>${escapeXml(p.userToken)}</TraxToken>
+    </GenerateCPLRequest>
+  </s:Body>
+</s:Envelope>`;
+}
+
+// ─── HTTP + Parsing ─────────────────────────────────────────────────────────
 
 export async function getCplForms(
-  cfg: { cplUrl: string; clientId: string },
+  cfg: { cplUrl: string; clientId: string; onBehalfOfUser: string },
   vendorToken: string,
-  userToken: string,
-  orderDetail: CplOrderDetail,
+  branch: FnfBranchInfo,
+  fileNumber: string,
+  state: string,
 ): Promise<CplForm[]> {
-  const envelope = buildGetCplListEnvelope(orderDetail, userToken);
+  const envelope = buildGetCplListEnvelope({
+    agentNumber: branch.agentNumber,
+    onBehalfOfUser: cfg.onBehalfOfUser,
+    fileNumber,
+    state: state || 'CA',
+    underwriterCode: branch.underwriterCode,
+  });
 
   const res = await fetch(`${cfg.cplUrl}v3/CPLManagement.svc`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'text/xml; charset=utf-8',
+      'Content-Type': 'text/xml',
       'SOAPAction': 'GetCPLList',
       'Authorization': `Bearer ${vendorToken}`,
       'ClientID': cfg.clientId,
@@ -102,61 +204,83 @@ export async function getCplForms(
 
   const xml = await res.text();
   const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
-  const body = extractSoapBody(parsed);
-  const result = body?.GetCPLListResponse?.GetCPLListResult;
-  if (!result) return [];
 
-  const rawForms = Array.isArray(result.CPLForms?.CPLForm)
-    ? result.CPLForms.CPLForm
-    : result.CPLForms?.CPLForm ? [result.CPLForms.CPLForm] : [];
+  // Legacy path: s:Envelope → s:Body → GetCPLListResponse → UnderwriterStateCPLs → a:UnderwriterStateCPL
+  const body = parsed['s:Envelope']?.['s:Body'];
+  if (!body) throw new Error('FNF GetCPLList: no SOAP body in response');
 
-  return rawForms.map((f: Record<string, string>) => ({
-    id: f.CPLFormID ?? f.FormID ?? '',
-    name: f.CPLFormName ?? f.FormName ?? f.Description ?? '',
+  const listResponse = body['GetCPLListResponse'];
+  if (!listResponse) throw new Error('FNF GetCPLList: no GetCPLListResponse');
+
+  const cplItems = listResponse['UnderwriterStateCPLs']?.['a:UnderwriterStateCPL'];
+  if (!cplItems) return [];
+
+  const items = Array.isArray(cplItems) ? cplItems : [cplItems];
+  return items.map((item: Record<string, string>) => ({
+    id: item['a:FormName'] ?? '',
+    name: item['a:FormName'] ?? '',
   }));
 }
 
 export async function generateCplSoap(
   cfg: { cplUrl: string; clientId: string },
   vendorToken: string,
-  userToken: string,
-  orderDetail: CplOrderDetail,
-  formId: string,
-): Promise<{ pdf: string; cplId: string; cplNumber: string }> {
-  const envelope = buildCreateCplEnvelope(orderDetail, formId, userToken);
+  params: FnfGenerateCplParams,
+): Promise<{ pdf: string; cplId: string; cplNumber: string; documentId: string }> {
+  const isEdit = !!params.documentId;
+  const envelope = buildGenerateCplEnvelope(params);
+  const soapAction = isEdit ? 'EditCPL' : 'CreateCPL';
 
   const res = await fetch(`${cfg.cplUrl}v3/CPLManagement.svc`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'text/xml; charset=utf-8',
-      'SOAPAction': 'CreateCPL',
+      'Content-Type': 'text/xml',
+      'SOAPAction': soapAction,
       'Authorization': `Bearer ${vendorToken}`,
       'ClientID': cfg.clientId,
     },
     body: envelope,
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(CPL_TIMEOUT_MS),
   });
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`FNF CreateCPL failed: HTTP ${res.status} — ${text.slice(0, 300)}`);
+    throw new Error(`FNF ${soapAction} failed: HTTP ${res.status} — ${text.slice(0, 300)}`);
   }
 
   const xml = await res.text();
   const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
-  const body = extractSoapBody(parsed);
-  const result = body?.CreateCPLResponse?.CreateCPLResult ?? body?.GenerateCPLResponse?.GenerateCPLResult;
-  if (!result) throw new Error('FNF CreateCPL returned no result');
 
-  const letters = result.CPLLetters;
-  const letter = Array.isArray(letters?.['a:CPLLetter'])
-    ? letters['a:CPLLetter'][0]
-    : letters?.['a:CPLLetter'] ?? letters?.CPLLetter;
+  // Legacy path: s:Envelope → s:Body → GenerateCPLResponse → CPLLetters → a:CPLLetter
+  const body = parsed['s:Envelope']?.['s:Body'];
+  if (!body) throw new Error(`FNF ${soapAction}: no SOAP body in response`);
 
-  const pdf = letter?.['a:Content'] ?? letter?.Content ?? '';
-  if (!pdf) throw new Error('FNF returned empty CPL PDF content');
+  const genResponse = body['GenerateCPLResponse'];
+  if (!genResponse) throw new Error(`FNF ${soapAction}: no GenerateCPLResponse`);
 
-  const cplId = letter?.['a:CPLLetterID'] ?? letter?.CPLLetterID ?? `FNF-${Date.now()}`;
-  const cplNumber = letter?.['a:CPLNumber'] ?? letter?.CPLNumber ?? '';
-  return { pdf, cplId: String(cplId), cplNumber: String(cplNumber) };
+  const cplLetters = genResponse['CPLLetters'];
+  const letter = cplLetters?.['a:CPLLetter'];
+  if (!letter) {
+    if (isEdit && !cplLetters) {
+      throw new EditCplEmptyError('FNF EditCPL returned empty CPLLetters — fallback to CreateCPL');
+    }
+    throw new Error(`FNF ${soapAction}: no CPLLetter in response`);
+  }
+
+  const firstLetter = Array.isArray(letter) ? letter[0] : letter;
+  const pdf = firstLetter['a:Content'] ?? '';
+  if (!pdf) throw new Error(`FNF ${soapAction}: empty PDF content`);
+
+  const documentId = String(firstLetter['a:DocumentId'] ?? '');
+  const cplId = String(firstLetter['a:CPLLetterID'] ?? documentId);
+  const cplNumber = String(firstLetter['a:CPLNumber'] ?? '');
+
+  return { pdf, cplId, cplNumber, documentId };
+}
+
+export class EditCplEmptyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EditCplEmptyError';
+  }
 }

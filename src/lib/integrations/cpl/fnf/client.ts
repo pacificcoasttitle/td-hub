@@ -2,13 +2,15 @@ import { vendorSuccess, vendorError } from '@/lib/integrations/types';
 import type { VendorResult } from '@/lib/integrations/types';
 import type {
   CplAdapter, CplGenerateInput, CplGenerateResult,
-  CplOrderDetail, CplBranch, CplForm,
+  CplOrderDetail, CplBranch,
 } from '../types';
 import { MOCK_PDF_BASE64 } from '../types';
 import { db } from '@/lib/db/client';
-import { vendorApiLogs } from '@/lib/db/schema';
+import { vendorApiLogs, cplBranches, orderExternalRefs } from '@/lib/db/schema';
+import { eq, and, asc } from 'drizzle-orm';
 import { getVendorToken, getUserToken } from './auth';
-import { getCplForms, generateCplSoap } from './soap';
+import { getCplForms, generateCplSoap, EditCplEmptyError } from './soap';
+import type { FnfBranchInfo, FnfGenerateCplParams } from './soap';
 
 const VENDOR = 'fnf';
 
@@ -45,18 +47,39 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function selectCplForm(forms: CplForm[], mode: 'single' | 'multiple' = 'single'): CplForm {
-  if (forms.length === 0) throw new Error('No CPL forms available from FNF');
-  if (mode === 'single') {
-    const match = forms.find((f) => /\bsingle\b/i.test(f.name) && !/multiple|blanket/i.test(f.name));
-    if (match) return match;
-    const fallback = forms.find((f) => !/multiple|blanket/i.test(f.name));
-    if (fallback) return fallback;
-  } else {
-    const match = forms.find((f) => /multiple|blanket/i.test(f.name));
-    if (match) return match;
-  }
-  return forms[0]!;
+async function loadBranch(branchId: number): Promise<FnfBranchInfo> {
+  const [row] = await db
+    .select()
+    .from(cplBranches)
+    .where(and(eq(cplBranches.id, branchId), eq(cplBranches.isActive, true)))
+    .limit(1);
+
+  if (!row) throw new Error(`FNF branch ${branchId} not found or inactive`);
+
+  return {
+    agentNumber: row.branchCode ?? '',
+    underwriterCode: row.underwriterCode ?? '',
+    address: row.address ?? '',
+    city: row.city ?? '',
+    state: row.state ?? 'CA',
+    zip: row.zip ?? '',
+    phone: row.phone ?? '',
+  };
+}
+
+async function getExistingDocumentId(orderId: number): Promise<string | null> {
+  const [ref] = await db
+    .select({ refValue: orderExternalRefs.refValue })
+    .from(orderExternalRefs)
+    .where(
+      and(
+        eq(orderExternalRefs.orderId, orderId),
+        eq(orderExternalRefs.system, 'fnf'),
+        eq(orderExternalRefs.refType, 'fnf_document_id'),
+      )
+    )
+    .limit(1);
+  return ref?.refValue ?? null;
 }
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────
@@ -89,35 +112,127 @@ export const fnfAdapter: CplAdapter = {
     if (!cfg) return mockGenerateCpl(input, requestId, startedAt);
 
     try {
+      // Step 1: Authenticate
       const vendorToken = await getVendorToken(cfg);
       const userToken = await getUserToken(cfg, vendorToken);
 
-      const forms = await getCplForms(cfg, vendorToken, userToken, orderDetail);
+      // Step 2: Load branch/agent info (CLUP)
+      const branch = await loadBranch(input.branchId);
       await logRequest({
-        operation: 'get_cpl_forms', orderId: input.orderId, requestId, startedAt: new Date(), success: true,
-        meta: { formCount: forms.length },
+        operation: 'get_agents', orderId: input.orderId, requestId, startedAt: new Date(),
+        success: true, meta: { agentNumber: branch.agentNumber, underwriterCode: branch.underwriterCode },
       });
 
-      const form = selectCplForm(forms, input.cplMode ?? 'single');
-      const { pdf, cplId, cplNumber } = await generateCplSoap(cfg, vendorToken, userToken, orderDetail, form.id);
+      // Step 3: Resolve property — legacy uses cpl_proposed_property_* (user overrides)
+      const prop = orderDetail.property;
+      const propAddr = input.propertyOverrides?.address ?? prop?.address ?? '';
+      const propCity = input.propertyOverrides?.city ?? prop?.city ?? '';
+      const propState = input.propertyOverrides?.state ?? prop?.state ?? 'CA';
+      const propZip = input.propertyOverrides?.zip ?? prop?.zip ?? '';
+      const propCounty = input.propertyOverrides?.county ?? prop?.county ?? '';
+
+      // Step 4: GetCPLList
+      const forms = await getCplForms(cfg, vendorToken, branch, orderDetail.fileNumber, propState);
+      await logRequest({
+        operation: 'get_cpl_list', orderId: input.orderId, requestId, startedAt: new Date(),
+        success: true, meta: { formCount: forms.length, forms: forms.map((f) => f.name) },
+      });
+
+      // Step 5: Select form — legacy hardcodes: 'Standard CPL_' + state
+      const formName = `Standard CPL_${propState}`;
+
+      // Step 6: Check for existing DocumentId (create vs edit)
+      const existingDocId = await getExistingDocumentId(input.orderId);
+
+      // Resolve borrower/lender — legacy uses borrowers_vesting and lender overrides
+      const lender = orderDetail.lender;
+      const buyerNames = orderDetail.buyers.join('; ');
+      const borrowerVesting = input.borrowerNamesOverride || buyerNames || '';
+
+      const soapParams: FnfGenerateCplParams = {
+        fileNumber: orderDetail.fileNumber,
+        branch,
+        formName,
+        onBehalfOfUser: cfg.onBehalfOfUser,
+        userToken,
+        borrowerVesting,
+        lenderName: input.lenderOverrides?.name ?? lender?.name ?? '',
+        lenderAttnName: input.lenderContactName ?? '',
+        lenderAddress: input.lenderOverrides?.address ?? lender?.address ?? '',
+        lenderCity: input.lenderOverrides?.city ?? lender?.city ?? '',
+        lenderState: input.lenderOverrides?.state ?? lender?.state ?? '',
+        lenderZip: input.lenderOverrides?.zip ?? lender?.zip ?? '',
+        lenderAssignmentClause: input.assignmentClause ?? '',
+        loanNumber: input.loanNumberOverride ?? '',
+        propertyAddress: propAddr,
+        propertyCity: propCity,
+        propertyState: propState,
+        propertyZip: propZip,
+        propertyCounty: propCounty,
+        documentId: existingDocId,
+      };
+
+      // Step 6: CreateCPL or EditCPL
+      let result;
+      const isEdit = !!existingDocId;
+
+      try {
+        result = await generateCplSoap(cfg, vendorToken, soapParams);
+        await logRequest({
+          operation: isEdit ? 'edit_cpl' : 'create_cpl',
+          orderId: input.orderId, requestId, startedAt: new Date(),
+          success: true, meta: { formName, documentId: result.documentId, cplId: result.cplId, isEdit },
+        });
+      } catch (err) {
+        // Legacy: if EditCPL returns empty, fall back to CreateCPL
+        if (isEdit && err instanceof EditCplEmptyError) {
+          await logRequest({
+            operation: 'edit_cpl', orderId: input.orderId, requestId, startedAt: new Date(),
+            success: false, errorCategory: 'EDIT_EMPTY', meta: { fallbackToCreate: true },
+          });
+          soapParams.documentId = null;
+          result = await generateCplSoap(cfg, vendorToken, soapParams);
+          await logRequest({
+            operation: 'create_cpl', orderId: input.orderId, requestId, startedAt: new Date(),
+            success: true, meta: { formName, documentId: result.documentId, cplId: result.cplId, fallbackFromEdit: true },
+          });
+        } else {
+          throw err;
+        }
+      }
+
+      // Step 7: Log PDF parse
+      await logRequest({
+        operation: 'parse_pdf', orderId: input.orderId, requestId, startedAt: new Date(),
+        success: true, meta: { pdfSizeBytes: result.pdf.length, documentId: result.documentId },
+      });
 
       const durationMs = Date.now() - start;
-      await logRequest({
-        operation: 'generate_cpl', orderId: input.orderId, requestId, startedAt, success: true, httpStatus: 200,
-        meta: { formId: form.id, formName: form.name, cplId, cplNumber },
-      });
-
       return vendorSuccess<CplGenerateResult>(
-        { pdfBase64: pdf, cplId, vendorRefs: { fnf_cpl_id: cplId, fnf_cpl_number: cplNumber || `CPL-${Date.now()}`, fnf_form_id: form.id, fnf_form_name: form.name } },
+        {
+          pdfBase64: result.pdf,
+          cplId: result.cplId,
+          vendorRefs: {
+            fnf_cpl_id: result.cplId,
+            fnf_cpl_number: result.cplNumber || `CPL-${Date.now()}`,
+            fnf_form_name: formName,
+            fnf_document_id: result.documentId,
+          },
+        },
         { requestId, durationMs },
       );
     } catch (err) {
       const durationMs = Date.now() - start;
       await logRequest({
-        operation: 'generate_cpl', orderId: input.orderId, requestId, startedAt, success: false,
-        errorCategory: 'CPL_ERROR', meta: { error: err instanceof Error ? err.message : 'unknown' },
+        operation: 'generate_cpl', orderId: input.orderId, requestId, startedAt,
+        success: false, errorCategory: 'CPL_ERROR',
+        meta: { error: err instanceof Error ? err.message : 'unknown' },
       });
-      return vendorError<CplGenerateResult>(VENDOR, 'CPL_GENERATION_FAILED', err instanceof Error ? err.message : 'Unknown FNF error', { requestId, durationMs });
+      return vendorError<CplGenerateResult>(
+        VENDOR, 'CPL_GENERATION_FAILED',
+        err instanceof Error ? err.message : 'Unknown FNF error',
+        { requestId, durationMs },
+      );
     }
   },
 
@@ -133,9 +248,27 @@ export const fnfAdapter: CplAdapter = {
       return vendorSuccess(MOCK_BRANCHES, { requestId: rid, durationMs });
     }
 
+    const rows = await db
+      .select()
+      .from(cplBranches)
+      .where(and(eq(cplBranches.underwriter, 'fnf'), eq(cplBranches.isActive, true)))
+      .orderBy(asc(cplBranches.branchName));
+
+    const branches: CplBranch[] = rows.map((r) => ({
+      branchCode: r.branchCode ?? '',
+      branchName: r.branchName ?? '',
+      agencyName: r.agencyName ?? '',
+      address: r.address ?? '',
+      city: r.city ?? '',
+      state: r.state ?? '',
+      zip: r.zip ?? '',
+      phone: r.phone ?? '',
+      underwriterCode: r.underwriterCode ?? '',
+    }));
+
     const durationMs = Date.now() - s;
-    await logRequest({ operation: 'get_branches', requestId: rid, startedAt: new Date(s), success: true, meta: { source: 'static' } });
-    return vendorSuccess(MOCK_BRANCHES, { requestId: rid, durationMs });
+    await logRequest({ operation: 'get_branches', requestId: rid, startedAt: new Date(s), success: true, meta: { count: branches.length } });
+    return vendorSuccess(branches, { requestId: rid, durationMs });
   },
 };
 
@@ -149,7 +282,10 @@ async function mockGenerateCpl(
   const durationMs = Date.now() - startedAt.getTime();
   await logRequest({ operation: 'generate_cpl', requestId, startedAt, success: true, meta: { mock: true } });
   return vendorSuccess<CplGenerateResult>(
-    { pdfBase64: MOCK_PDF_BASE64, cplId: fnfCplId, vendorRefs: { fnf_cpl_id: fnfCplId, fnf_cpl_number: `CPL-${Math.floor(Math.random() * 900000) + 100000}` } },
+    {
+      pdfBase64: MOCK_PDF_BASE64, cplId: fnfCplId,
+      vendorRefs: { fnf_cpl_id: fnfCplId, fnf_cpl_number: `CPL-${Math.floor(Math.random() * 900000) + 100000}` },
+    },
     { requestId, durationMs },
   );
 }

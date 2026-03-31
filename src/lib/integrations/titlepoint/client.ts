@@ -384,8 +384,8 @@ export function buildTaxGetResultById3Request(
     'company=&' +
     'department=&' +
     'titleOfficer=&' +
-    'requestingTPXML=true&' +
-    `resultID=${encodeValue(resultId)}`;
+    `resultID=${encodeValue(resultId)}&` +
+    'requestingTPXML=true';
 
   return { method: 'GET', url };
 }
@@ -832,7 +832,7 @@ export async function getResultById3Tax(
   const wire = buildTaxGetResultById3Request(cfg, resultId);
 
   try {
-    const http = await sendTitlePointPost(wire.url, wire.rawBody ?? '');
+    const http = await sendTitlePointGet(wire.url);
 
     let parsed: Record<string, unknown>;
     try {
@@ -858,7 +858,8 @@ export async function getResultById3Tax(
       });
     }
 
-    const root = (parsed.ServiceResult ?? {}) as Record<string, unknown>;
+    const parsedRoot = parsed.GetResultReturn != null ? 'GetResultReturn' : 'ServiceResult';
+    const root = ((parsed.GetResultReturn ?? parsed.ServiceResult) ?? {}) as Record<string, unknown>;
     const returnStatus = String(root.ReturnStatus ?? '');
     if (returnStatus !== 'Success') {
       const message = getServiceErrorDescription(root, `TitlePoint returned ${returnStatus}`);
@@ -872,7 +873,7 @@ export async function getResultById3Tax(
         errorCategory: 'TP_RESULT_ERROR',
         requestMeta: { endpointKind: 'GetResultByID3', method: wire.method, url: wire.url, rawBody: wire.rawBody ?? null, contentType: wire.contentType ?? null, resultId, searchType: 'tax' },
         responseMeta: buildResponseMeta(http.status, http.response.contentType, http.body, {
-          parsedRoot: 'ServiceResult',
+          parsedRoot,
           returnStatus,
         }),
       });
@@ -892,7 +893,7 @@ export async function getResultById3Tax(
       httpStatus: http.status,
       requestMeta: { endpointKind: 'GetResultByID3', method: wire.method, url: wire.url, rawBody: wire.rawBody ?? null, contentType: wire.contentType ?? null, resultId, searchType: 'tax' },
       responseMeta: buildResponseMeta(http.status, http.response.contentType, http.body, {
-        parsedRoot: 'ServiceResult',
+        parsedRoot,
         returnStatus,
       }),
     });
@@ -1004,7 +1005,8 @@ export async function getResultById3Geo(
       });
     }
 
-    const root = (parsed.ServiceResult ?? {}) as Record<string, unknown>;
+    const parsedRoot = parsed.GetResultReturn != null ? 'GetResultReturn' : 'ServiceResult';
+    const root = ((parsed.GetResultReturn ?? parsed.ServiceResult) ?? {}) as Record<string, unknown>;
     const returnStatus = String(root.ReturnStatus ?? '');
     if (returnStatus !== 'Success') {
       const message = getServiceErrorDescription(root, `TitlePoint returned ${returnStatus}`);
@@ -1026,7 +1028,7 @@ export async function getResultById3Geo(
           contentType: postWire.contentType ?? null,
         },
         responseMeta: buildResponseMeta(parsedHttp.status, parsedHttp.response.contentType, parsedHttp.body, {
-          parsedRoot: 'ServiceResult',
+          parsedRoot,
           returnStatus,
           archivedTo: rawArchiveKey,
         }),
@@ -1055,7 +1057,7 @@ export async function getResultById3Geo(
         contentType: postWire.contentType ?? null,
       },
       responseMeta: buildResponseMeta(parsedHttp.status, parsedHttp.response.contentType, parsedHttp.body, {
-        parsedRoot: 'ServiceResult',
+        parsedRoot,
         returnStatus,
         archivedTo: rawArchiveKey,
       }),

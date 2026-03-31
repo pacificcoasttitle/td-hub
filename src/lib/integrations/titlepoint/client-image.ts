@@ -35,6 +35,17 @@ async function parseXml(xml: string): Promise<Record<string, unknown>> {
   return await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true }) as Record<string, unknown>;
 }
 
+export async function parseCreateRequest3LiveResponse(xml: string) {
+  const parsed = await parseXml(xml);
+  const root = (parsed.CreateAsynchServicesReturn ?? {}) as Record<string, unknown>;
+
+  return {
+    returnStatus: String(root.ReturnStatus ?? ''),
+    requestId: String(root.RequestID ?? ''),
+    orderId: String(root.OrderID ?? ''),
+  };
+}
+
 export async function parseGrantDeedImageResponse(xml: string) {
   const parsed = await parseXml(xml);
   const root = (parsed.ImageResult ?? {}) as Record<string, unknown>;
@@ -176,9 +187,9 @@ export async function requestImage(
   try {
     const http = await sendTitlePointPost(wire.url, wire.rawBody ?? '');
 
-    let parsed: Record<string, unknown>;
+    let createResult: Awaited<ReturnType<typeof parseCreateRequest3LiveResponse>>;
     try {
-      parsed = await parseXml(http.body);
+      createResult = await parseCreateRequest3LiveResponse(http.body);
     } catch (parseErr) {
       await logRequest({
         operation: 'request_image',
@@ -200,13 +211,12 @@ export async function requestImage(
       });
     }
 
-    const root = (parsed.GenerateImageResult ?? {}) as Record<string, unknown>;
-    const returnStatus = String(root.ReturnStatus ?? '');
-    const imgRequestId = String(root.RequestID ?? '');
-    const imgOrderId = String(root.OrderID ?? '');
+    const returnStatus = createResult.returnStatus;
+    const imgRequestId = createResult.requestId;
+    const imgOrderId = createResult.orderId;
 
     if (returnStatus !== 'Success' || !imgRequestId) {
-      const message = getErrorDescription(root, 'Image request failed');
+      const message = 'Image request failed';
       await logRequest({
         operation: 'request_image',
         orderId,
@@ -217,7 +227,7 @@ export async function requestImage(
         errorCategory: 'TP_IMAGE_ERROR',
         requestMeta: { method: wire.method, url: wire.url, rawBody: wire.rawBody ?? null, contentType: wire.contentType ?? null, serviceId },
         responseMeta: buildResponseMeta(http.status, http.response.contentType, http.body, {
-          parsedRoot: 'GenerateImageResult',
+          parsedRoot: 'CreateAsynchServicesReturn',
           returnStatus,
         }),
       });
@@ -236,7 +246,7 @@ export async function requestImage(
       httpStatus: http.status,
       requestMeta: { method: wire.method, url: wire.url, rawBody: wire.rawBody ?? null, contentType: wire.contentType ?? null, serviceId },
       responseMeta: buildResponseMeta(http.status, http.response.contentType, http.body, {
-        parsedRoot: 'GenerateImageResult',
+        parsedRoot: 'CreateAsynchServicesReturn',
         returnStatus,
         imgRequestId,
       }),

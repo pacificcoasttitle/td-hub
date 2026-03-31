@@ -22,6 +22,7 @@ import {
   buildGetDocumentsByParameters3Request,
   buildGetGeneratedImageRequest,
   buildGetRequestStatusRequest,
+  parseCreateRequest3LiveResponse,
   parseGrantDeedImageResponse,
 } from '../src/lib/integrations/titlepoint/client-image';
 import {
@@ -198,7 +199,7 @@ console.log('\n3. GetRequestSummaries and result specs');
   assert('Tax GetResultByID3 uses GET', taxResult.method === 'GET');
   assert('Tax GetResultByID3 keeps requestingTPXML=true', taxResult.url.includes('requestingTPXML=true'));
   assertParamOrder('Tax GetResultByID3 param order matches legacy', taxResult.url, [
-    'userID', 'password', 'company', 'department', 'titleOfficer', 'requestingTPXML', 'resultID',
+    'userID', 'password', 'company', 'department', 'titleOfficer', 'resultID', 'requestingTPXML',
   ]);
 
   assert('Geo raw result uses GET', geoResultGet.method === 'GET');
@@ -318,6 +319,20 @@ console.log('\n6. Live root parser assertions');
     <ID>BAD</ID>
   </Result>
 </ServiceResult>`;
+  const createRequestXml = `<?xml version="1.0" encoding="utf-8"?>
+<CreateAsynchServicesReturn xmlns="http://www.TitlePoint.com">
+  <ReturnStatus>Success</ReturnStatus>
+  <ReturnErrors />
+  <ReturnMessages />
+  <RequestID>189500001</RequestID>
+  <OrderID>0</OrderID>
+</CreateAsynchServicesReturn>`;
+  const createRequestWrongRootXml = `<?xml version="1.0" encoding="utf-8"?>
+<GenerateImageResult xmlns="http://www.TitlePoint.com">
+  <ReturnStatus>Success</ReturnStatus>
+  <RequestID>BAD</RequestID>
+  <OrderID>BAD</OrderID>
+</GenerateImageResult>`;
   const grantDeedXml = `<?xml version="1.0" encoding="utf-8"?>
 <ImageResult xmlns="http://titlepoint.com/ws/">
   <Status>
@@ -348,6 +363,8 @@ console.log('\n6. Live root parser assertions');
   const summaryWrongRootParsed = await parseGetRequestSummariesLiveResponse(summaryWrongRootXml);
   const lvParsed = await parseLvGetResultLiveResponse(lvResultXml);
   const lvWrongRootParsed = await parseLvGetResultLiveResponse(lvWrongRootXml);
+  const createRequestParsed = await parseCreateRequest3LiveResponse(createRequestXml);
+  const createRequestWrongRootParsed = await parseCreateRequest3LiveResponse(createRequestWrongRootXml);
   const grantDeedParsed = await parseGrantDeedImageResponse(grantDeedXml);
   const grantDeedWrongRootParsed = await parseGrantDeedImageResponse(grantDeedWrongRootXml);
 
@@ -370,6 +387,11 @@ console.log('\n6. Live root parser assertions');
   assert('LV result parser reads Fips', lvParsed.data.Fips === '06037');
   assert('LV result parser reads deed info', (lvParsed.data.LvDeeds as { LegalAndVesting2DeedInfo?: { InstrumentNumber?: string } }).LegalAndVesting2DeedInfo?.InstrumentNumber === '15-1611995');
   assert('LV result parser no longer depends on ServiceResult', lvWrongRootParsed.returnStatus === '' && lvWrongRootParsed.data.ID === '');
+
+  assert('CreateRequest3 parser reads CreateAsynchServicesReturn ReturnStatus', createRequestParsed.returnStatus === 'Success');
+  assert('CreateRequest3 parser reads CreateAsynchServicesReturn RequestID', createRequestParsed.requestId === '189500001');
+  assert('CreateRequest3 parser reads CreateAsynchServicesReturn OrderID', createRequestParsed.orderId === '0');
+  assert('CreateRequest3 parser no longer depends on GenerateImageResult', createRequestWrongRootParsed.returnStatus === '' && createRequestWrongRootParsed.requestId === '' && createRequestWrongRootParsed.orderId === '');
 
   assert('Grant deed parser reads ImageResult Status.Msg', grantDeedParsed.returnStatus === 'OK');
   assert('Grant deed parser reads DocStatus.Msg', grantDeedParsed.docStatus === 'OK');

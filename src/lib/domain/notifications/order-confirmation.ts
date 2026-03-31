@@ -27,6 +27,7 @@ export async function handleOrderConfirmation(
   payload: Record<string, unknown> | null,
 ): Promise<void> {
   const noDocuments = payload?.noDocuments === true;
+  const testOverride = typeof payload?.testOverrideTo === 'string' ? payload.testOverrideTo.trim() : '';
 
   const [row] = await db
     .select({
@@ -116,15 +117,17 @@ export async function handleOrderConfirmation(
 
   const fromEmail = process.env.OPEN_ORDERS_FROM_EMAIL ?? process.env.FROM_EMAIL ?? 'openorders@pct.com';
   const { dedupedTo, dedupedCc } = recipientEmails;
+  const finalTo = testOverride ? [testOverride] : dedupedTo;
+  const finalCc = testOverride ? [] : dedupedCc;
 
-  if (dedupedTo.length === 0) {
+  if (finalTo.length === 0) {
     await db.update(orders).set({ emailStatus: 'no_recipients', updatedAt: new Date() }).where(eq(orders.id, orderId));
     return;
   }
 
   const result = await sendEmail({
-    to: dedupedTo,
-    cc: dedupedCc.length > 0 ? dedupedCc : undefined,
+    to: finalTo,
+    cc: finalCc.length > 0 ? finalCc : undefined,
     subject, html, from: fromEmail,
     attachments: attachments.length > 0 ? attachments : undefined,
   });

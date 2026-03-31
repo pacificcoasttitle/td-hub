@@ -23,6 +23,8 @@ import {
   buildGetGeneratedImageRequest,
   buildGetRequestStatusRequest,
   parseCreateRequest3LiveResponse,
+  parseGetGeneratedImageLiveResponse,
+  parseGetRequestStatusLiveResponse,
   parseGrantDeedImageResponse,
 } from '../src/lib/integrations/titlepoint/client-image';
 import {
@@ -333,6 +335,30 @@ console.log('\n6. Live root parser assertions');
   <RequestID>BAD</RequestID>
   <OrderID>BAD</OrderID>
 </GenerateImageResult>`;
+  const requestStatusXml = `<?xml version="1.0" encoding="utf-8"?>
+<GenerateImageRequestStatusReturn xmlns="http://www.TitlePoint.com">
+  <ReturnStatus>Success</ReturnStatus>
+  <RequestId>189501141</RequestId>
+  <Status>Processing</Status>
+  <Message>OK</Message>
+</GenerateImageRequestStatusReturn>`;
+  const requestStatusWrongRootXml = `<?xml version="1.0" encoding="utf-8"?>
+<GenerateImageResult xmlns="http://www.TitlePoint.com">
+  <ReturnStatus>Success</ReturnStatus>
+  <Status>BAD</Status>
+</GenerateImageResult>`;
+  const generatedImageXml = `<?xml version="1.0" encoding="utf-8"?>
+<GenerateImageData xmlns="http://www.TitlePoint.com">
+  <ReturnStatus>Success</ReturnStatus>
+  <Status>Processing</Status>
+  <Message>OK</Message>
+  <Data></Data>
+</GenerateImageData>`;
+  const generatedImageWrongRootXml = `<?xml version="1.0" encoding="utf-8"?>
+<GenerateImageResult xmlns="http://www.TitlePoint.com">
+  <ReturnStatus>Success</ReturnStatus>
+  <Data>BAD</Data>
+</GenerateImageResult>`;
   const grantDeedXml = `<?xml version="1.0" encoding="utf-8"?>
 <ImageResult xmlns="http://titlepoint.com/ws/">
   <Status>
@@ -365,6 +391,10 @@ console.log('\n6. Live root parser assertions');
   const lvWrongRootParsed = await parseLvGetResultLiveResponse(lvWrongRootXml);
   const createRequestParsed = await parseCreateRequest3LiveResponse(createRequestXml);
   const createRequestWrongRootParsed = await parseCreateRequest3LiveResponse(createRequestWrongRootXml);
+  const requestStatusParsed = await parseGetRequestStatusLiveResponse(requestStatusXml);
+  const requestStatusWrongRootParsed = await parseGetRequestStatusLiveResponse(requestStatusWrongRootXml);
+  const generatedImageParsed = await parseGetGeneratedImageLiveResponse(generatedImageXml);
+  const generatedImageWrongRootParsed = await parseGetGeneratedImageLiveResponse(generatedImageWrongRootXml);
   const grantDeedParsed = await parseGrantDeedImageResponse(grantDeedXml);
   const grantDeedWrongRootParsed = await parseGrantDeedImageResponse(grantDeedWrongRootXml);
 
@@ -392,6 +422,18 @@ console.log('\n6. Live root parser assertions');
   assert('CreateRequest3 parser reads CreateAsynchServicesReturn RequestID', createRequestParsed.requestId === '189500001');
   assert('CreateRequest3 parser reads CreateAsynchServicesReturn OrderID', createRequestParsed.orderId === '0');
   assert('CreateRequest3 parser no longer depends on GenerateImageResult', createRequestWrongRootParsed.returnStatus === '' && createRequestWrongRootParsed.requestId === '' && createRequestWrongRootParsed.orderId === '');
+
+  assert('GetRequestStatus parser reads GenerateImageRequestStatusReturn ReturnStatus', requestStatusParsed.returnStatus === 'Success');
+  assert('GetRequestStatus parser reads RequestId', requestStatusParsed.requestId === '189501141');
+  assert('GetRequestStatus parser reads Status', requestStatusParsed.status === 'processing');
+  assert('GetRequestStatus parser reads Message', requestStatusParsed.message === 'OK');
+  assert('GetRequestStatus parser no longer depends on GenerateImageResult', requestStatusWrongRootParsed.returnStatus === '' && requestStatusWrongRootParsed.status === '' && requestStatusWrongRootParsed.requestId === '');
+
+  assert('GetGeneratedImage parser reads GenerateImageData ReturnStatus', generatedImageParsed.returnStatus === 'Success');
+  assert('GetGeneratedImage parser reads Status', generatedImageParsed.status === 'processing');
+  assert('GetGeneratedImage parser reads Message', generatedImageParsed.message === 'OK');
+  assert('GetGeneratedImage parser reads Data', generatedImageParsed.base64Data === '');
+  assert('GetGeneratedImage parser no longer depends on GenerateImageResult', generatedImageWrongRootParsed.returnStatus === '' && generatedImageWrongRootParsed.status === '' && generatedImageWrongRootParsed.base64Data === '');
 
   assert('Grant deed parser reads ImageResult Status.Msg', grantDeedParsed.returnStatus === 'OK');
   assert('Grant deed parser reads DocStatus.Msg', grantDeedParsed.docStatus === 'OK');

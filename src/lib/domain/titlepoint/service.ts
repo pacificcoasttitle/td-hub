@@ -378,11 +378,23 @@ export async function fetchImage(
   if (!statusResult.success) {
     return { success: false, error: statusResult.error?.message ?? 'Image status check failed' };
   }
+  if (statusResult.data!.returnStatus !== 'Success') {
+    return { success: false, error: `Image status returned ${statusResult.data!.returnStatus}` };
+  }
+  if (statusResult.data!.status === 'processing') {
+    return { success: false, error: statusResult.data!.message || 'Image still processing' };
+  }
 
   // Step 3: GetGeneratedImage — download the PDF
   const imgResult = await getImage(imgReqResult.data!.requestId, oid);
   if (!imgResult.success) {
     return { success: false, error: imgResult.error?.message ?? 'Image fetch failed' };
+  }
+  if (imgResult.data!.returnStatus !== 'Success') {
+    return { success: false, error: `Image fetch returned ${imgResult.data!.returnStatus}` };
+  }
+  if (imgResult.data!.status === 'processing' || !imgResult.data!.base64Data) {
+    return { success: false, error: 'Image still processing' };
   }
 
   // Step 4: Decode base64 → upload to S3 → create document

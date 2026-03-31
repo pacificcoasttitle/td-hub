@@ -46,6 +46,30 @@ export async function parseCreateRequest3LiveResponse(xml: string) {
   };
 }
 
+export async function parseGetRequestStatusLiveResponse(xml: string) {
+  const parsed = await parseXml(xml);
+  const root = (parsed.GenerateImageRequestStatusReturn ?? {}) as Record<string, unknown>;
+
+  return {
+    returnStatus: String(root.ReturnStatus ?? ''),
+    status: String(root.Status ?? '').toLowerCase(),
+    message: String(root.Message ?? ''),
+    requestId: String(root.RequestId ?? ''),
+  };
+}
+
+export async function parseGetGeneratedImageLiveResponse(xml: string) {
+  const parsed = await parseXml(xml);
+  const root = (parsed.GenerateImageData ?? {}) as Record<string, unknown>;
+
+  return {
+    returnStatus: String(root.ReturnStatus ?? ''),
+    status: String(root.Status ?? '').toLowerCase(),
+    message: String(root.Message ?? ''),
+    base64Data: String(root.Data ?? ''),
+  };
+}
+
 export async function parseGrantDeedImageResponse(xml: string) {
   const parsed = await parseXml(xml);
   const root = (parsed.ImageResult ?? {}) as Record<string, unknown>;
@@ -269,7 +293,7 @@ export async function requestImage(
 export async function getRequestStatus(
   imgRequestId: string,
   orderId?: number,
-): Promise<VendorResult<{ status: string; returnStatus: string }>> {
+): Promise<VendorResult<{ status: string; returnStatus: string; message?: string; requestId?: string }>> {
   const cfg = getConfig();
   const requestId = `tp-${crypto.randomUUID()}`;
   const startedAt = new Date();
@@ -285,9 +309,9 @@ export async function getRequestStatus(
     for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
       const http = await sendTitlePointPost(wire.url, wire.rawBody ?? '');
 
-      let parsed: Record<string, unknown>;
+      let statusResult: Awaited<ReturnType<typeof parseGetRequestStatusLiveResponse>>;
       try {
-        parsed = await parseXml(http.body);
+        statusResult = await parseGetRequestStatusLiveResponse(http.body);
       } catch (parseErr) {
         await logRequest({
           operation: 'get_request_status',
@@ -309,11 +333,11 @@ export async function getRequestStatus(
         });
       }
 
-      const root = (parsed.GenerateImageResult ?? {}) as Record<string, unknown>;
-      const returnStatus = String(root.ReturnStatus ?? '');
-      const status = String(root.Status ?? '').toLowerCase();
+      const returnStatus = statusResult.returnStatus;
+      const status = statusResult.status;
+      const message = statusResult.message;
 
-      if (returnStatus === 'Success' && status === 'success') {
+      if (returnStatus === 'Success' && (status === 'success' || status === 'ready' || status === 'complete' || status === 'completed')) {
         await logRequest({
           operation: 'get_request_status',
           orderId,
@@ -323,12 +347,13 @@ export async function getRequestStatus(
           httpStatus: http.status,
           requestMeta: { method: wire.method, url: wire.url, rawBody: wire.rawBody ?? null, contentType: wire.contentType ?? null, imgRequestId },
           responseMeta: buildResponseMeta(http.status, http.response.contentType, http.body, {
-            parsedRoot: 'GenerateImageResult',
+            parsedRoot: 'GenerateImageRequestStatusReturn',
             returnStatus,
             status,
+            message,
           }),
         });
-        return vendorSuccess({ status, returnStatus }, {
+        return vendorSuccess({ status, returnStatus, message, requestId: statusResult.requestId }, {
           requestId,
           durationMs: Date.now() - startedAt.getTime(),
         });
@@ -349,12 +374,13 @@ export async function getRequestStatus(
         errorCategory: 'TP_IMAGE_STATUS',
         requestMeta: { method: wire.method, url: wire.url, rawBody: wire.rawBody ?? null, contentType: wire.contentType ?? null, imgRequestId },
         responseMeta: buildResponseMeta(http.status, http.response.contentType, http.body, {
-          parsedRoot: 'GenerateImageResult',
+          parsedRoot: 'GenerateImageRequestStatusReturn',
           returnStatus,
           status,
+          message,
         }),
       });
-      return vendorSuccess({ status: status || returnStatus.toLowerCase(), returnStatus }, {
+      return vendorSuccess({ status: status || returnStatus.toLowerCase(), returnStatus, message, requestId: statusResult.requestId }, {
         requestId,
         durationMs: Date.now() - startedAt.getTime(),
       });
@@ -389,9 +415,9 @@ export async function getImage(
   try {
     const http = await sendTitlePointPost(wire.url, wire.rawBody ?? '');
 
-    let parsed: Record<string, unknown>;
+    let imageResult: Awaited<ReturnType<typeof parseGetGeneratedImageLiveResponse>>;
     try {
-      parsed = await parseXml(http.body);
+      imageResult = await parseGetGeneratedImageLiveResponse(http.body);
     } catch (parseErr) {
       await logRequest({
         operation: 'get_image',
@@ -413,10 +439,10 @@ export async function getImage(
       });
     }
 
-    const root = (parsed.GenerateImageResult ?? {}) as Record<string, unknown>;
-    const returnStatus = String(root.ReturnStatus ?? '');
+    const returnStatus = imageResult.returnStatus;
+    const status = imageResult.status;
     if (returnStatus !== 'Success') {
-      const message = getErrorDescription(root, `Image generation returned ${returnStatus}`);
+      const message = imageResult.message || `Image generation returned ${returnStatus}`;
       await logRequest({
         operation: 'get_image',
         orderId,
@@ -427,8 +453,9 @@ export async function getImage(
         errorCategory: 'TP_IMAGE_ERROR',
         requestMeta: { method: wire.method, url: wire.url, rawBody: wire.rawBody ?? null, contentType: wire.contentType ?? null, imgRequestId },
         responseMeta: buildResponseMeta(http.status, http.response.contentType, http.body, {
-          parsedRoot: 'GenerateImageResult',
+          parsedRoot: 'GenerateImageData',
           returnStatus,
+          status,
         }),
       });
       return vendorError(VENDOR, 'IMAGE_FETCH_FAILED', message, {
@@ -437,8 +464,8 @@ export async function getImage(
       });
     }
 
-    const base64Data = String(root.Data ?? '');
-    if (!base64Data) {
+    const base64Data = imageResult.base64Data;
+    if (status === 'processing' || !base64Data) {
       await logRequest({
         operation: 'get_image',
         orderId,
@@ -449,11 +476,16 @@ export async function getImage(
         errorCategory: 'TP_NO_IMAGE',
         requestMeta: { method: wire.method, url: wire.url, rawBody: wire.rawBody ?? null, contentType: wire.contentType ?? null, imgRequestId },
         responseMeta: buildResponseMeta(http.status, http.response.contentType, http.body, {
-          parsedRoot: 'GenerateImageResult',
+          parsedRoot: 'GenerateImageData',
           returnStatus,
+          status,
         }),
       });
-      return vendorError(VENDOR, 'IMAGE_FETCH_FAILED', 'No image data in response', {
+      return vendorSuccess({
+        base64Data: '',
+        status: status || 'processing',
+        returnStatus,
+      }, {
         requestId,
         durationMs: Date.now() - startedAt.getTime(),
       });
@@ -461,7 +493,7 @@ export async function getImage(
 
     const response: TitlePointImageResponse = {
       base64Data,
-      status: String(root.Status ?? 'success').toLowerCase(),
+      status: status || 'success',
       returnStatus,
     };
     await logRequest({
@@ -473,8 +505,9 @@ export async function getImage(
       httpStatus: http.status,
       requestMeta: { method: wire.method, url: wire.url, rawBody: wire.rawBody ?? null, contentType: wire.contentType ?? null, imgRequestId },
       responseMeta: buildResponseMeta(http.status, http.response.contentType, http.body, {
-        parsedRoot: 'GenerateImageResult',
+        parsedRoot: 'GenerateImageData',
         returnStatus,
+        status,
         size: base64Data.length,
       }),
     });

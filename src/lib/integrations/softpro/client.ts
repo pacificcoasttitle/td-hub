@@ -87,26 +87,54 @@ async function makeRequest<T>(
     }
 
     const response = await fetch(url, fetchOptions);
-    const raw = await response.json() as SoftProResponse<T>;
+
+    let raw: SoftProResponse<T>;
+    let rawText: string | undefined;
+    try {
+      rawText = await response.text();
+      raw = JSON.parse(rawText) as SoftProResponse<T>;
+    } catch {
+      const durationMs = Date.now() - startedAt.getTime();
+      await logRequest({
+        operation,
+        orderId: options?.orderId,
+        requestId,
+        startedAt,
+        success: false,
+        httpStatus: response.status,
+        errorCategory: 'PARSE_ERROR',
+        requestMeta: { url, method, ...(options?.body ? { payload: options.body } : { queryParams: options?.queryParams }) },
+        responseMeta: { rawSnippet: (rawText ?? '').slice(0, 500) },
+      });
+      return vendorError<T>(VENDOR, 'API_ERROR', `Non-JSON response (HTTP ${response.status}): ${(rawText ?? '').slice(0, 200)}`, {
+        httpStatus: response.status, requestId, durationMs,
+      });
+    }
 
     const durationMs = Date.now() - startedAt.getTime();
+    const success = raw.Status === 200 || response.status === 200;
 
     await logRequest({
       operation,
       orderId: options?.orderId,
       requestId,
       startedAt,
-      success: raw.Status === 200,
+      success,
       httpStatus: response.status,
-      requestMeta: { url, method, queryParams: options?.queryParams },
-      responseMeta: { status: raw.Status, message: raw.Message },
+      requestMeta: { url, method, ...(options?.body ? { payload: options.body } : { queryParams: options?.queryParams }) },
+      responseMeta: success
+        ? { status: raw.Status, message: raw.Message }
+        : { status: raw.Status, message: raw.Message, rawBody: raw },
     });
 
-    if (raw.Status === 200) {
+    if (success) {
       return vendorSuccess(raw.data as T, { requestId, durationMs });
     }
 
-    return vendorError<T>(VENDOR, 'API_ERROR', raw.Message ?? 'Unknown SoftPro error', {
+    const errorMsg = raw.Message
+      || (typeof raw === 'object' ? JSON.stringify(raw).slice(0, 300) : String(raw))
+      || 'Unknown SoftPro error';
+    return vendorError<T>(VENDOR, 'API_ERROR', errorMsg, {
       httpStatus: response.status,
       requestId,
       durationMs,
@@ -122,7 +150,7 @@ async function makeRequest<T>(
       startedAt,
       success: false,
       errorCategory: 'NETWORK',
-      requestMeta: { url, method },
+      requestMeta: { url, method, ...(options?.body ? { payload: options.body } : {}) },
       responseMeta: { error: message },
     });
 
@@ -230,12 +258,15 @@ export async function getAttachedDocuments(
 }
 
 export async function uploadDocument(params: {
+  documentId: number;
   orderNumber: string;
   documentName: string;
   folderName: string;
   fileUrl: string;
 }): Promise<VendorResult<{ documentId: string }>> {
+  // Legacy payload shape: array with Id, OrderNumber, DocumentName, FileList
   const body = [{
+    Id: String(params.documentId),
     OrderNumber: params.orderNumber,
     DocumentName: params.documentName,
     FileList: [{ FolderName: params.folderName, FileURL: params.fileUrl }],
@@ -244,6 +275,7 @@ export async function uploadDocument(params: {
   return makeRequest<{ documentId: string }>('POST', SOFTPRO_ENDPOINTS.uploadDocument, {
     body,
     operation: 'upload_document',
+    orderId: undefined,
   });
 }
 

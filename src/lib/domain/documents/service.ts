@@ -1,7 +1,7 @@
 import { db } from '@/lib/db/client';
 import { documents, documentAudit, orders, documentRequests, eventOutbox } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
+import { uploadFile as s3Upload, getSignedUrl } from '@/lib/integrations/s3/client';
 import { uploadDocument as softproUpload } from '@/lib/integrations/softpro/client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -91,7 +91,8 @@ export async function deleteDocument(id: number, userId: string): Promise<void> 
 // ─── Attach to SoftPro ───────────────────────────────────────────────────────
 
 export async function attachToSoftPro(
-  documentId: number
+  documentId: number,
+  folderName?: string,
 ): Promise<{ success: boolean; error?: string }> {
   const doc = await getDocumentById(documentId);
   if (!doc) return { success: false, error: 'Document not found' };
@@ -106,14 +107,19 @@ export async function attachToSoftPro(
   if (orderRow.length === 0) return { success: false, error: 'Order not found' };
   const { fileNumber } = orderRow[0]!;
 
-  const awsPath = process.env.AWS_PATH;
-  if (!awsPath) return { success: false, error: 'AWS_PATH not configured' };
-  const fileUrl = `${awsPath}${doc.storageKey}`;
+  // SoftPro downloads the file from this URL — must be accessible.
+  // S3 objects are private by default, so generate a pre-signed URL (1 hour TTL).
+  const signedUrlResult = await getSignedUrl(doc.storageKey, 3600);
+  if (!signedUrlResult.success) {
+    return { success: false, error: signedUrlResult.error?.message ?? 'Failed to generate S3 signed URL' };
+  }
+  const fileUrl = signedUrlResult.data!;
 
   const result = await softproUpload({
+    documentId,
     orderNumber: fileNumber,
     documentName: doc.filename,
-    folderName: doc.category,
+    folderName: folderName ?? doc.category,
     fileUrl,
   });
 

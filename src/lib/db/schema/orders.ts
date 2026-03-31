@@ -157,6 +157,22 @@ export const orderExternalRefs = pgTable('order_external_refs', {
   uniqueRef: uniqueIndex('external_refs_unique_idx').on(table.orderId, table.system, table.refType),
 }));
 
+// ─── Order Notes ─────────────────────────────────────────────────────────────
+
+export const orderNotes = pgTable('order_notes', {
+  id: serial('id').primaryKey(),
+  orderId: integer('order_id').notNull().references(() => orders.id, { onDelete: 'cascade' }),
+  subject: varchar('subject', { length: 255 }),
+  body: text('body').notNull(),
+  authorName: varchar('author_name', { length: 255 }),
+  authorId: varchar('author_id', { length: 64 }).references(() => profiles.id),
+  isSyncedToSoftpro: boolean('is_synced_to_softpro').notNull().default(false),
+  softproNoteId: varchar('softpro_note_id', { length: 100 }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  orderIdx: index('order_notes_order_idx').on(table.orderId),
+}));
+
 // ─── Relations ───────────────────────────────────────────────────────────────
 
 export const ordersRelations = relations(orders, ({ one, many }) => ({
@@ -172,6 +188,7 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   parties: many(orderParties),
   statusHistory: many(orderStatusHistory),
   externalRefs: many(orderExternalRefs),
+  notes: many(orderNotes),
 }));
 
 export const orderPropertiesRelations = relations(orderProperties, ({ one }) => ({
@@ -181,4 +198,8 @@ export const orderPropertiesRelations = relations(orderProperties, ({ one }) => 
 export const orderPartiesRelations = relations(orderParties, ({ one }) => ({
   order: one(orders, { fields: [orderParties.orderId], references: [orders.id] }),
   contact: one(contacts, { fields: [orderParties.contactId], references: [contacts.id] }),
+}));
+
+export const orderNotesRelations = relations(orderNotes, ({ one }) => ({
+  order: one(orders, { fields: [orderNotes.orderId], references: [orders.id] }),
 }));

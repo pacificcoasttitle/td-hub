@@ -31,7 +31,7 @@ export function NotesModal({ open, onClose, orderId, fileNumber, address, isClie
     try {
       const res = await fetch(`${base}/notes`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note: newNote.trim() }),
+        body: JSON.stringify({ text: newNote.trim() }),
       });
       if (!res.ok) { const b = await res.json().catch(() => null); throw new Error(b?.error ?? 'Failed to add note'); }
       setNewNote('');

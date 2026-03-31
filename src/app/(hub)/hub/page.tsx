@@ -171,7 +171,7 @@ export default function HubPage() {
       {/* ─── Orders Table (checkboxes, no internal search/status) ─── */}
       <OrdersHubTable
         fetchUrl="/api/orders"
-        actions={['cpl', 'prelim', 'proposed', 'notes', 'detail']}
+        actions={['cpl', 'proposed', 'prelim', 'notes', 'detail', 'retry_tp', 'resync']}
         compact
         accentColor="#F26B2B"
         showSearch={false}

@@ -34,6 +34,14 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     type: 'boolean',
     defaultValue: 'true',
   },
+  {
+    key: 'enable_lv_with_address_apn',
+    label: 'LV With Address And APN',
+    description: 'When enabled, Legal Vesting pre-init requests include Address1 and City alongside Pin in the legacy parameter string.',
+    category: 'TitlePoint',
+    type: 'boolean',
+    defaultValue: 'true',
+  },
   // ── Email ──
   {
     key: 'open_order_confirmation_enabled',

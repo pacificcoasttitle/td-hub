@@ -2,8 +2,14 @@ import { db } from '@/lib/db/client';
 import { titlePointData, orderProperties, jobs } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { getOrderByIdSimple } from '@/lib/domain/orders/service';
-import { uploadDocument } from '@/lib/domain/documents/service';
-import { createService, getRequestSummaries, getResult } from '@/lib/integrations/titlepoint/client';
+import { uploadDocument, attachToSoftPro } from '@/lib/domain/documents/service';
+import {
+  createService,
+  getRequestSummaries,
+  getResultById3Geo,
+  getResultById3Tax,
+  getResultByIdLv,
+} from '@/lib/integrations/titlepoint/client';
 import { requestImage, getRequestStatus, getImage } from '@/lib/integrations/titlepoint/client-image';
 import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
 import type { TitlePointSearchType } from '@/lib/integrations/titlepoint/types';
@@ -164,7 +170,11 @@ export async function fetchResult(
   const resultId = (meta.resultId as string) ?? record.serviceId;
   if (!resultId) return { success: false, error: 'No resultId available' };
 
-  const result = await getResult(resultId, record.orderId ?? undefined);
+  const result = record.searchType === 'legal_vesting'
+    ? await getResultByIdLv(resultId, record.orderId ?? undefined)
+    : record.searchType === 'geo_address'
+      ? await getResultById3Geo(resultId, record.fileNumber ?? null, record.orderId ?? undefined)
+      : await getResultById3Tax(resultId, record.orderId ?? undefined);
 
   if (!result.success) {
     await db
@@ -185,7 +195,9 @@ export async function fetchResult(
     .set({
       status: 'result_ready',
       metadata: { ...existing, resultData: result.data!.data } as Record<string, unknown>,
-      fips: (result.data!.data as Record<string, unknown>).fips as string ?? record.fips,
+      fips: ((result.data!.data as Record<string, unknown>).Fips as string)
+        ?? ((result.data!.data as Record<string, unknown>).fips as string)
+        ?? record.fips,
       updatedAt: new Date(),
     })
     .where(eq(titlePointData.id, titlePointDataId));
@@ -256,6 +268,8 @@ export async function fetchImage(
         updatedAt: new Date(),
       })
       .where(eq(titlePointData.id, titlePointDataId));
+
+    try { await attachToSoftPro(uploadResult.documentId, 'Title Docs'); } catch { /* best effort */ }
 
     return { success: true, documentId: uploadResult.documentId };
   } catch (err) {

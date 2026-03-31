@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
-import { orders } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { orders, orderNotes } from '@/lib/db/schema';
+import { eq, desc } from 'drizzle-orm';
 import { addNotes } from '@/lib/integrations/softpro';
 
 const noteSchema = z.object({
+  subject: z.string().max(255).optional(),
   text: z.string().min(1).max(5000),
 });
 
@@ -42,16 +43,27 @@ export async function POST(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    const result = await addNotes(order.fileNumber, parsed.data.text);
+    const [note] = await db.insert(orderNotes).values({
+      orderId,
+      subject: parsed.data.subject ?? null,
+      body: parsed.data.text,
+      authorName: session.displayName ?? session.email,
+      authorId: session.id,
+    }).returning();
 
-    if (!result.success) {
-      return NextResponse.json(
-        { error: result.error?.message ?? 'Failed to add note' },
-        { status: 502 },
-      );
-    }
+    let synced = false;
+    try {
+      const spResult = await addNotes(order.fileNumber, parsed.data.text);
+      if (spResult.success) {
+        synced = true;
+        await db.update(orderNotes).set({ isSyncedToSoftpro: true }).where(eq(orderNotes.id, note!.id));
+      }
+    } catch { /* best effort */ }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      note: { id: note!.id, subject: note!.subject, body: note!.body, authorName: note!.authorName, createdAt: note!.createdAt, isSyncedToSoftpro: synced },
+    }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
@@ -73,10 +85,20 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
     }
 
-    // TODO: Fetch notes from SoftPro GetNotes endpoint when available.
-    // For now, return an empty array. SoftPro doesn't expose a GetNotes
-    // endpoint in the current API — notes are write-only via AddNotes.
-    return NextResponse.json({ notes: [] });
+    const rows = await db
+      .select({
+        id: orderNotes.id,
+        subject: orderNotes.subject,
+        body: orderNotes.body,
+        authorName: orderNotes.authorName,
+        createdAt: orderNotes.createdAt,
+        isSyncedToSoftpro: orderNotes.isSyncedToSoftpro,
+      })
+      .from(orderNotes)
+      .where(eq(orderNotes.orderId, orderId))
+      .orderBy(desc(orderNotes.createdAt));
+
+    return NextResponse.json({ notes: rows });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

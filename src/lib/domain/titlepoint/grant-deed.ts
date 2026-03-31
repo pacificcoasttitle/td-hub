@@ -1,7 +1,7 @@
 import { db } from '@/lib/db/client';
 import { titlePointData } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { uploadDocument } from '@/lib/domain/documents/service';
+import { uploadDocument, attachToSoftPro } from '@/lib/domain/documents/service';
 import { getDocumentsByParameters3 } from '@/lib/integrations/titlepoint/client-image';
 import { getSetting } from '@/lib/domain/settings/service';
 
@@ -49,13 +49,17 @@ function extractDeedRecords(resultData: Record<string, unknown>): DeedRecord[] {
 }
 
 function parseInstrumentDocId(instrumentNumber: string): string {
+  let normalized = instrumentNumber;
   if (instrumentNumber.includes('-')) {
     const parts = instrumentNumber.split('-');
-    return parts[parts.length - 1] ?? instrumentNumber;
+    normalized = parts[parts.length - 1] ?? instrumentNumber;
+  } else {
+    const match = instrumentNumber.match(/^\d{4}(.+)$/);
+    normalized = match?.[1] ?? instrumentNumber;
   }
-  const match = instrumentNumber.match(/^\d{4}(.+)$/);
-  if (match) return match[1]!;
-  return instrumentNumber;
+
+  const asInt = parseInt(normalized, 10);
+  return Number.isNaN(asInt) ? normalized : String(asInt);
 }
 
 function extractYear(recordedDate: string): string {
@@ -82,7 +86,7 @@ export async function fetchGrantDeed(
   const oid = lvRecord.orderId;
   const meta = (lvRecord.metadata as Record<string, unknown>) ?? {};
   const resultData = (meta.resultData as Record<string, unknown>) ?? {};
-  const fips = lvRecord.fips ?? (resultData.fips as string) ?? '';
+  const fips = lvRecord.fips ?? (resultData.Fips as string) ?? (resultData.fips as string) ?? '';
   const userId = (meta.userId as string) ?? 'system';
 
   if (!fips) {
@@ -164,6 +168,8 @@ export async function fetchGrantDeed(
       } as Record<string, unknown>,
       updatedAt: new Date(),
     }).where(eq(titlePointData.id, gdId));
+
+    try { await attachToSoftPro(uploadResult.documentId, 'Title Docs'); } catch { /* best effort */ }
 
     return { success: true, titlePointDataId: gdId, documentId: uploadResult.documentId };
   } catch (err) {

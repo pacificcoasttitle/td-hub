@@ -125,7 +125,7 @@ export async function generateCpl(
 
   // i. Optionally attach to SoftPro (best-effort, don't fail the whole operation)
   try {
-    const attachResult = await attachToSoftPro(documentId);
+    const attachResult = await attachToSoftPro(documentId, 'CPL');
     if (!attachResult.success) {
       errors.push(`SoftPro attach: ${attachResult.error ?? 'failed'}`);
     }

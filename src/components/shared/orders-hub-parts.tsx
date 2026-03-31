@@ -85,6 +85,7 @@ export interface ActionsDropdownProps {
   isClient: boolean;
   onOpenModal: (type: string) => void;
   feesHref?: string;
+  onRefresh?: () => void;
 }
 
 function MenuItem({ label, onClick, disabled, tooltip }: {
@@ -111,9 +112,10 @@ function Divider() {
 }
 
 export function ActionsDropdown({
-  orderId, hasProperty, documents, actions, isClient, onOpenModal, feesHref,
+  orderId, hasProperty, documents, actions, isClient, onOpenModal, feesHref, onRefresh,
 }: ActionsDropdownProps) {
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<'resync' | 'retry_tp' | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -133,12 +135,35 @@ export function ActionsDropdown({
 
   function act(fn: () => void) { fn(); setOpen(false); }
 
+  async function inlineAction(type: 'resync' | 'retry_tp') {
+    setBusy(type);
+    try {
+      const url = type === 'resync'
+        ? `/api/orders/${orderId}/resync`
+        : `/api/orders/${orderId}/titlepoint/retry`;
+      const res = await fetch(url, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: 'Request failed' }));
+        alert(body.error ?? 'Request failed');
+      }
+    } catch {
+      alert('Network error — please try again');
+    } finally {
+      setBusy(null);
+      setOpen(false);
+      onRefresh?.();
+    }
+  }
+
   const showCpl = actions.includes('cpl');
   const showPI = actions.includes('proposed');
   const showPrelim = actions.includes('prelim');
   const showNotes = actions.includes('notes');
   const showDetail = actions.includes('detail');
   const showFees = actions.includes('fees') && !!feesHref;
+  const showResync = actions.includes('resync');
+  const showRetryTp = actions.includes('retry_tp');
+  const hasOpsActions = showResync || showRetryTp;
 
   return (
     <div ref={ref} className="relative">
@@ -152,12 +177,10 @@ export function ActionsDropdown({
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-          {/* View Order */}
           {showDetail && <MenuItem label="View Order" onClick={() => act(() => onOpenModal('detail'))} />}
 
           {(showCpl || showPI) && showDetail && <Divider />}
 
-          {/* CPL actions */}
           {showCpl && (
             hasCpl ? (
               <>
@@ -176,7 +199,6 @@ export function ActionsDropdown({
 
           {showCpl && showPI && <Divider />}
 
-          {/* Proposed Insured actions */}
           {showPI && (
             hasPI ? (
               <>
@@ -190,10 +212,26 @@ export function ActionsDropdown({
 
           {(showPrelim || showNotes || showFees) && (showCpl || showPI) && <Divider />}
 
-          {/* Other actions */}
           {showPrelim && <MenuItem label="Find Prelim" onClick={() => act(() => onOpenModal('prelim'))} />}
           {showNotes && <MenuItem label="Order Notes" onClick={() => act(() => onOpenModal('notes'))} />}
           {showFees && <MenuItem label="Fee Estimate" onClick={() => act(() => { window.location.href = feesHref!; })} />}
+
+          {hasOpsActions && <Divider />}
+
+          {showRetryTp && (
+            <MenuItem
+              label={busy === 'retry_tp' ? 'Retrying…' : 'Retry TitlePoint'}
+              disabled={busy !== null}
+              onClick={() => inlineAction('retry_tp')}
+            />
+          )}
+          {showResync && (
+            <MenuItem
+              label={busy === 'resync' ? 'Syncing…' : 'Resync from SoftPro'}
+              disabled={busy !== null}
+              onClick={() => inlineAction('resync')}
+            />
+          )}
         </div>
       )}
     </div>

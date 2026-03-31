@@ -84,7 +84,7 @@ export async function generateProposedInsured(
       category: 'proposed_insured', description: `Proposed Insured — ${resolved.fileNumber}`, userId,
     });
 
-    attachToSoftPro(documentId).catch(() => {});
+    attachToSoftPro(documentId, 'desk-file-upload').catch(() => {});
 
     const awsPath = process.env.AWS_PATH;
     const downloadUrl = awsPath ? `${awsPath}${key}` : undefined;

@@ -104,7 +104,7 @@ export default function ClientDashboardPage() {
             <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm overflow-hidden">
               <OrdersHubTable
                 fetchUrl="/api/client/orders"
-                actions={['cpl', 'prelim', 'detail', 'fees']}
+                actions={['cpl', 'proposed', 'prelim', 'detail', 'fees']}
                 isClient
                 accentColor="#F26B2B"
                 showSearch

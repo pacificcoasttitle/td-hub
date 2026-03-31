@@ -18,10 +18,10 @@ interface OrderData {
 interface ExistingDoc { id: number; fileName: string; createdAt: string; }
 interface LenderResult { id: number; companyName: string; address?: string; city?: string; state?: string; zip?: string; }
 
-export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, address, accentColor }: {
+export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, address, isClient, accentColor }: {
   open: boolean; onClose: () => void;
   orderId: number; fileNumber: string; address: string;
-  accentColor?: string;
+  isClient?: boolean; accentColor?: string;
 }) {
   const [loading, setLoading] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -64,11 +64,13 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
     if (!open) return;
     setLoading(true); setResult(null); setLenderType('new');
 
+    const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
+    const piDocsUrl = isClient ? `${base}/proposed-insured` : `${base}/documents?category=proposed_insured`;
     Promise.all([
       fetch('/api/branches').then((r) => r.ok ? r.json() : null),
       fetch('/api/form-options').then((r) => r.ok ? r.json() : null),
-      fetch(`/api/orders/${orderId}`).then((r) => r.ok ? r.json() : null),
-      fetch(`/api/orders/${orderId}/documents?category=proposed_insured`).then((r) => r.ok ? r.json() : { documents: [] }),
+      fetch(base).then((r) => r.ok ? r.json() : null),
+      fetch(piDocsUrl).then((r) => r.ok ? r.json() : { documents: [] }),
     ]).then(([brData, formOpts, od, docData]) => {
       if (brData?.branches) setBranches(brData.branches);
       if (formOpts?.titleOfficers) {
@@ -130,7 +132,8 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
     if (!branchId) return;
     setGenerating(true); setResult(null);
     try {
-      const res = await fetch(`/api/orders/${orderId}/proposed-insured`, {
+      const piBase = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
+      const res = await fetch(`${piBase}/proposed-insured`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           branchId, titleOfficerId: titleOfficerId || undefined,
@@ -145,7 +148,8 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
       const body = await res.json();
       if (!res.ok || !body.success) throw new Error(body.error ?? 'Generation failed');
       setResult({ ok: true, docId: body.documentId });
-      const r2 = await fetch(`/api/orders/${orderId}/documents?category=proposed_insured`);
+      const piRefreshUrl = isClient ? `${piBase}/proposed-insured` : `${piBase}/documents?category=proposed_insured`;
+      const r2 = await fetch(piRefreshUrl);
       const d2 = await r2.json();
       setExistingDocs(d2.documents ?? []);
     } catch (err) {
@@ -245,7 +249,7 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
           {/* ── Result ── */}
           {result && (
             <div className={`px-4 py-3 rounded-lg text-sm ${result.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-              {result.ok ? <span>Document generated. <a href={`/api/documents/${result.docId}/download`} className="underline font-semibold text-[#F26B2B]">Download</a></span> : result.error}
+              {result.ok ? <span>Document generated. <a href={`${isClient ? '/api/client' : '/api'}/documents/${result.docId}/download`} className="underline font-semibold text-[#F26B2B]">Download</a></span> : result.error}
             </div>
           )}
 
@@ -265,7 +269,7 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
                       <p className="text-sm text-[#1A1A2E] truncate">{d.fileName}</p>
                       <p className="text-xs text-[#6B7280]">{new Date(d.createdAt).toLocaleDateString()}</p>
                     </div>
-                    <a href={`/api/documents/${d.id}/download`} className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">Download</a>
+                    <a href={`${isClient ? '/api/client' : '/api'}/documents/${d.id}/download`} className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">Download</a>
                   </div>
                 ))}
               </div>

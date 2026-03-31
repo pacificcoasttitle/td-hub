@@ -25,7 +25,7 @@ export interface HubOrder {
   documents?: OrderDocuments;
 }
 
-export type ActionType = 'cpl' | 'prelim' | 'proposed' | 'notes' | 'detail' | 'fees';
+export type ActionType = 'cpl' | 'prelim' | 'proposed' | 'notes' | 'detail' | 'fees' | 'resync' | 'retry_tp';
 type ModalType = 'cpl' | 'prelim' | 'proposed' | 'notes' | 'detail' | null;
 
 export interface OrdersHubTableProps {
@@ -255,6 +255,7 @@ export function OrdersHubTable({
                           isClient={isClient}
                           onOpenModal={(type) => handleRowAction(o, type as ModalType)}
                           feesHref={feesHrefBuilder ? feesHrefBuilder(o.id) : undefined}
+                          onRefresh={fetchOrders}
                         />
                       </div>
                     </td>

@@ -1,7 +1,7 @@
 import { db } from '@/lib/db/client';
 import { titlePointData, jobs, vendorApiLogs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { createService } from '@/lib/integrations/titlepoint/client';
+import { createServicePreOrderLv, createServicePreOrderTax } from '@/lib/integrations/titlepoint/client';
 import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
 import { fetchImage } from './service';
 import { fetchGrantDeed } from './grant-deed';
@@ -9,7 +9,7 @@ import { maybeEnqueueConfirmation } from './completion-checker';
 import { getSetting } from '@/lib/domain/settings/service';
 import type { TitlePointSearchType } from '@/lib/integrations/titlepoint/types';
 
-const SEARCH_TYPES: TitlePointSearchType[] = ['geo_address', 'tax', 'legal_vesting'];
+export const PRE_INIT_SEARCH_TYPES: TitlePointSearchType[] = ['tax', 'legal_vesting'];
 
 interface PreInitiateResult {
   sessionId: string;
@@ -24,7 +24,8 @@ export async function preInitiateSearches(property: {
   county: string;
   apn: string | null;
 }): Promise<PreInitiateResult> {
-  const sessionId = `tp_pre_${crypto.randomUUID()}`;
+  const customerRef = String(Math.floor(Math.random() * 1_000_000_000));
+  const sessionId = `tp_api_id_${customerRef}`;
 
   const shutOff = await getSetting('titlepoint_shut_off');
   if (shutOff === 'true') {
@@ -43,20 +44,23 @@ export async function preInitiateSearches(property: {
   }
 
   const searches: PreInitiateResult['searches'] = [];
+  const includeLvAddressApn = (await getSetting('enable_lv_with_address_apn')) === 'true';
 
   const results = await Promise.allSettled(
-    SEARCH_TYPES.map(async (searchType) => {
-      const result = await createService(
-        {
-          address: property.address,
-          city: property.city,
-          state: property.state,
-          county: property.county,
-          fips: resolveCaliforniaFips(property.county),
-          apn: property.apn ?? undefined,
-          searchType,
-        },
-      );
+    PRE_INIT_SEARCH_TYPES.map(async (searchType) => {
+      const createInput = {
+        address: property.address,
+        city: property.city,
+        state: property.state,
+        county: property.county,
+        fips: resolveCaliforniaFips(property.county),
+        apn: property.apn ?? undefined,
+        searchType,
+      } as const;
+
+      const result = searchType === 'tax'
+        ? await createServicePreOrderTax(createInput, customerRef)
+        : await createServicePreOrderLv(createInput, includeLvAddressApn, customerRef);
 
       if (!result.success) {
         await db.insert(titlePointData).values({
@@ -64,7 +68,7 @@ export async function preInitiateSearches(property: {
           searchType,
           status: 'failed',
           message: result.error?.message ?? 'CreateService failed',
-          metadata: { property } as Record<string, unknown>,
+          metadata: { property, customerRef } as Record<string, unknown>,
         });
         return { searchType, status: 'failed' };
       }
@@ -77,7 +81,7 @@ export async function preInitiateSearches(property: {
           requestId: tpData.requestId,
           searchType,
           status: 'pending',
-          metadata: { property, tpOrderId: tpData.orderId, userId: 'system:pre_init' } as Record<string, unknown>,
+          metadata: { property, tpOrderId: tpData.orderId, userId: 'system:pre_init', customerRef } as Record<string, unknown>,
         })
         .returning({ id: titlePointData.id });
 

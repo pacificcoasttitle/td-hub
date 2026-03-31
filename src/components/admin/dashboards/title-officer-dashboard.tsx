@@ -110,7 +110,7 @@ export function TitleOfficerDashboard({ displayName }: { displayName: string | n
       <SectionCard title="My Orders" action={{ label: 'View all →', href: '/orders' }}>
         <OrdersHubTable
           fetchUrl="/api/dashboard/title-officer/orders"
-          actions={['prelim', 'notes', 'detail']}
+          actions={['cpl', 'proposed', 'prelim', 'notes', 'detail']}
           accentColor="#C5A55A"
           showSearch
           showStatusFilter={false}

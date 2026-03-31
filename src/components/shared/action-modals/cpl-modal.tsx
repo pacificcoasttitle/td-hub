@@ -76,18 +76,18 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
 
   useEffect(() => {
     if (!open) return;
-    setLoading(true); setResult(null); setLenderType('new');
-    setTxType(''); setBranchId(null);
+    setLoading(true); setResult(null); setLenderType('new'); setTxType(''); setBranchId(null);
     setLenderCompany(''); setLenderContact(''); setAssignmentClause('');
     setLenderAddr(''); setLenderCity(''); setLenderState(''); setLenderZip('');
     setPropStreet(''); setPropCity(''); setPropState(''); setPropZip('');
     setLoanNumber(''); setLoanAmount(''); setSalesAmount(''); setBorrower('');
     setLenderExpanded(true); setPropertyExpanded(true);
-
+    const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
+    const docUrl = isClient ? `${base}/cpl` : `${base}/documents?category=cpl`;
     Promise.all([
       fetch('/api/branches').then((r) => r.ok ? r.json() : null),
-      fetch(`/api/orders/${orderId}`).then((r) => r.ok ? r.json() : null),
-      fetch(`/api/orders/${orderId}/documents?category=cpl`).then((r) => r.ok ? r.json() : { documents: [] }),
+      fetch(base).then((r) => r.ok ? r.json() : null),
+      fetch(docUrl).then((r) => r.ok ? r.json() : { documents: [] }),
     ]).then(([brData, od, docData]) => {
       if (brData?.branches) setBranches(brData.branches);
       if (docData?.documents) setExistingCpls(docData.documents);
@@ -126,7 +126,6 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
         setLenderZip(cpd.cpl_lender_zip ?? lc?.zip ?? '');
         setAssignmentClause(cpd.cpl_assignment_clause ?? lc?.assignmentClause ?? '');
 
-        // Buyer / borrower names from parties
         const buyers = (o.parties ?? [])
           .filter((p) => p.role === 'buyer')
           .map((p) => p.externalName)
@@ -154,36 +153,25 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
   }
 
   function selectLender(l: LenderResult) {
-    setLenderCompany(l.companyName ?? '');
-    setLenderAddr(l.address ?? '');
-    setLenderCity(l.city ?? '');
-    setLenderState(l.state ?? '');
-    setLenderZip(l.zip ?? '');
+    setLenderCompany(l.companyName ?? ''); setLenderAddr(l.address ?? '');
+    setLenderCity(l.city ?? ''); setLenderState(l.state ?? ''); setLenderZip(l.zip ?? '');
     setLenderSearch(''); setLenderResults([]);
   }
 
   async function generate() {
     if (!branchId) return;
-    if (!lenderCompany.trim()) {
-      setResult({ ok: false, error: 'Lender company name is required to generate a CPL.' });
-      return;
-    }
-    if (!propStreet.trim()) {
-      setResult({ ok: false, error: 'Property address is required to generate a CPL.' });
-      return;
-    }
+    if (!lenderCompany.trim()) { setResult({ ok: false, error: 'Lender company name is required to generate a CPL.' }); return; }
+    if (!propStreet.trim()) { setResult({ ok: false, error: 'Property address is required to generate a CPL.' }); return; }
     setGenerating(true); setResult(null);
     try {
-      const res = await fetch('/api/vendor-actions/cpl', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId, underwriter: 'westcor', branchId,
-          lenderCompany, lenderContact, assignmentClause,
-          lenderAddress: lenderAddr, lenderCity, lenderState, lenderZip,
-          propertyAddress: propStreet, propertyCity: propCity, propertyState: propState, propertyZip: propZip,
-          loanNumber, loanAmount, salesAmount, borrowerNames: borrower,
-        }),
-      });
+      const cplUrl = isClient ? `/api/client/orders/${orderId}/cpl` : '/api/vendor-actions/cpl';
+      const cplBody = isClient ? { underwriter: 'westcor' as const, branchId } : {
+        orderId, underwriter: 'westcor', branchId, lenderCompany, lenderContact, assignmentClause,
+        lenderAddress: lenderAddr, lenderCity, lenderState, lenderZip,
+        propertyAddress: propStreet, propertyCity: propCity, propertyState: propState, propertyZip: propZip,
+        loanNumber, loanAmount, salesAmount, borrowerNames: borrower,
+      };
+      const res = await fetch(cplUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cplBody) });
       const body = await res.json();
       if (!res.ok || !body.success) throw new Error(body.error ?? 'Generation failed');
       setResult({ ok: true, docId: body.documentId });
@@ -285,7 +273,7 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
           {/* ── Result ── */}
           {result && (
             <div className={`px-4 py-3 rounded-lg text-sm ${result.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-              {result.ok ? <span>CPL generated. <a href={`/api/documents/${result.docId}/download`} target="_blank" rel="noopener noreferrer" className="underline font-semibold text-[#F26B2B]">Download CPL</a></span> : result.error}
+              {result.ok ? <span>CPL generated. <a href={`${isClient ? '/api/client' : '/api'}/documents/${result.docId}/download`} target="_blank" rel="noopener noreferrer" className="underline font-semibold text-[#F26B2B]">Download CPL</a></span> : result.error}
             </div>
           )}
 
@@ -305,15 +293,12 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
   );
 }
 
-/* ── Collapsible Section ── */
-
 function Collapse({ title, complete, summary, expanded, onToggle, children }: {
   title: string; complete: boolean; summary: string; expanded: boolean; onToggle: () => void; children: React.ReactNode;
 }) {
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
-      <button type="button" onClick={onToggle}
-        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left">
+      <button type="button" onClick={onToggle} className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left">
         <div className="flex items-center gap-2">
           {complete && <svg className="h-4 w-4 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>}
           <span className="text-xs font-semibold uppercase tracking-wider text-[#1A1A2E]">{title}</span>

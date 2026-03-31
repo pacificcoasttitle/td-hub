@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { retryFailedSearches } from '@/lib/domain/titlepoint/service';
 
+export const maxDuration = 300;
+
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

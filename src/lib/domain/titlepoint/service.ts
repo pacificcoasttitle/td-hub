@@ -148,78 +148,84 @@ export async function initiateSearch(
 async function executePipeline(
   titlePointDataId: number,
 ): Promise<{ success: boolean; timedOut?: boolean; error?: string }> {
-  const deadline = Date.now() + PIPELINE_TIMEOUT_MS;
+  console.error('[TP-PIPELINE] Starting executePipeline for titlePointDataId:', titlePointDataId);
 
-  // ── Step 1: Poll for completion ──
-  let pollResult: Awaited<ReturnType<typeof pollSearch>> = { status: 'pending' };
+  try {
+    const deadline = Date.now() + PIPELINE_TIMEOUT_MS;
 
-  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+    // ── Step 1: Poll for completion ──
+    let pollResult: Awaited<ReturnType<typeof pollSearch>> = { status: 'pending' };
+
+    for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+      if (Date.now() > deadline) {
+        return { success: false, timedOut: true, error: 'Pipeline timeout during polling' };
+      }
+
+      console.error('[TP-PIPELINE] Step 1 pollSearch starting...');
+      pollResult = await pollSearch(titlePointDataId);
+
+      if (pollResult.status === 'success') break;
+      if (pollResult.status === 'failed') {
+        return { success: false, error: pollResult.error ?? 'Poll returned failed' };
+      }
+
+      if (attempt < POLL_MAX_ATTEMPTS - 1) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+      }
+    }
+
+    if (pollResult.status === 'pending') {
+      return { success: false, timedOut: true, error: 'Still processing after max poll attempts' };
+    }
+
+    if (pollResult.status !== 'success') {
+      return { success: false, error: pollResult.error };
+    }
+
+    // ── Step 2: Fetch result data ──
     if (Date.now() > deadline) {
-      return { success: false, timedOut: true, error: 'Pipeline timeout during polling' };
+      return { success: false, timedOut: true, error: 'Pipeline timeout before result fetch' };
     }
 
-    pollResult = await pollSearch(titlePointDataId);
-
-    if (pollResult.status === 'success') break;
-    if (pollResult.status === 'failed') {
-      return { success: false, error: pollResult.error ?? 'Poll returned failed' };
+    console.error('[TP-PIPELINE] Step 2 fetchResult starting...');
+    const resultOutcome = await fetchResult(titlePointDataId);
+    if (!resultOutcome.success) {
+      return { success: false, error: resultOutcome.error };
     }
 
-    // Still pending — wait before next attempt
-    if (attempt < POLL_MAX_ATTEMPTS - 1) {
-      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-    }
-  }
-
-  if (pollResult.status === 'pending') {
-    // Exhausted poll attempts but still processing — leave for cron
-    return { success: false, timedOut: true, error: 'Still processing after max poll attempts' };
-  }
-
-  if (pollResult.status !== 'success') {
-    return { success: false, error: pollResult.error };
-  }
-
-  // ── Step 2: Fetch result data ──
-  if (Date.now() > deadline) {
-    return { success: false, timedOut: true, error: 'Pipeline timeout before result fetch' };
-  }
-
-  const resultOutcome = await fetchResult(titlePointDataId);
-  if (!resultOutcome.success) {
-    return { success: false, error: resultOutcome.error };
-  }
-
-  // ── Step 3: Generate image + upload + SoftPro ──
-  if (Date.now() > deadline) {
-    return { success: false, timedOut: true, error: 'Pipeline timeout before image generation' };
-  }
-
-  const imageOutcome = await fetchImage(titlePointDataId);
-  if (!imageOutcome.success) {
-    return { success: false, error: imageOutcome.error };
-  }
-
-  // ── Step 4: Post-completion triggers (best-effort, don't fail pipeline) ──
-  const [record] = await db
-    .select()
-    .from(titlePointData)
-    .where(eq(titlePointData.id, titlePointDataId))
-    .limit(1);
-
-  if (record) {
-    // After LV completes, trigger Grant Deed extraction
-    if (record.searchType === 'legal_vesting') {
-      try { await fetchGrantDeed(titlePointDataId); } catch { /* best effort */ }
+    // ── Step 3: Generate image + upload + SoftPro ──
+    if (Date.now() > deadline) {
+      return { success: false, timedOut: true, error: 'Pipeline timeout before image generation' };
     }
 
-    // After any search completes, check if all three docs are ready
-    if (record.orderId) {
-      try { await maybeEnqueueConfirmation(record.orderId); } catch { /* best effort */ }
+    console.error('[TP-PIPELINE] Step 3 fetchImage starting...');
+    const imageOutcome = await fetchImage(titlePointDataId);
+    if (!imageOutcome.success) {
+      return { success: false, error: imageOutcome.error };
     }
-  }
 
-  return { success: true };
+    // ── Step 4: Post-completion triggers (best-effort, don't fail pipeline) ──
+    const [record] = await db
+      .select()
+      .from(titlePointData)
+      .where(eq(titlePointData.id, titlePointDataId))
+      .limit(1);
+
+    if (record) {
+      if (record.searchType === 'legal_vesting') {
+        try { await fetchGrantDeed(titlePointDataId); } catch { /* best effort */ }
+      }
+
+      if (record.orderId) {
+        try { await maybeEnqueueConfirmation(record.orderId); } catch { /* best effort */ }
+      }
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('[TP-PIPELINE] FAILED:', error);
+    throw error;
+  }
 }
 
 // ─── Poll Search ────────────────────────────────────────────────────────────

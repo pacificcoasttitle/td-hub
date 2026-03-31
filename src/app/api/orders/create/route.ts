@@ -4,6 +4,8 @@ import { createAndSendToSoftPro } from '@/lib/domain/orders/create-order';
 
 const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
 
+export const maxDuration = 300;
+
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

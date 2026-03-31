@@ -177,18 +177,19 @@ async function loadTitlePointData(
   const lvResult = (lvMeta.resultData as Record<string, unknown>) ?? {};
   const taxMeta = (taxRow?.metadata as Record<string, unknown>) ?? {};
   const taxResult = (taxMeta.resultData as Record<string, unknown>) ?? {};
+  const taxReport = extractObject(taxResult, 'TaxReport', 'taxReport') ?? taxResult;
 
   return {
-    legalDescription: extractString(lvResult, 'LegalDescription', 'legalDescription') ?? null,
+    legalDescription: extractString(lvResult, 'LegalDescription', 'legalDescription', 'BriefLegal', 'briefLegal') ?? null,
     vestingInformation: extractString(lvResult, 'VestingInformation', 'vestingInformation', 'Vesting') ?? null,
-    taxRateArea: extractString(taxResult, 'TaxRateArea', 'taxRateArea') ?? null,
-    useCode: extractString(taxResult, 'UseCode', 'useCode') ?? null,
-    landValue: extractString(taxResult, 'LandValue', 'landValue') ?? null,
-    improvementsValue: extractString(taxResult, 'ImprovementsValue', 'improvementsValue') ?? null,
-    taxRate: extractString(taxResult, 'TaxRate', 'taxRate') ?? null,
-    issueDate: extractString(taxResult, 'IssueDate', 'issueDate') ?? null,
-    firstInstallment: extractObject(taxResult, 'FirstInstallment', 'firstInstallment') ?? null,
-    secondInstallment: extractObject(taxResult, 'SecondInstallment', 'secondInstallment') ?? null,
+    taxRateArea: extractString(taxReport, 'TaxRateArea', 'taxRateArea') ?? null,
+    useCode: extractString(taxReport, 'UseCode', 'useCode') ?? null,
+    landValue: extractString(taxReport, 'LandValue', 'landValue', 'LandValuation', 'landValuation') ?? null,
+    improvementsValue: extractString(taxReport, 'ImprovementsValue', 'improvementsValue', 'ImprovementsValuation', 'improvementsValuation') ?? null,
+    taxRate: extractString(taxReport, 'TaxRate', 'taxRate') ?? null,
+    issueDate: extractString(taxReport, 'IssueDate', 'issueDate') ?? null,
+    firstInstallment: pickInstallment(taxReport, '1st') ?? extractObject(taxReport, 'FirstInstallment', 'firstInstallment') ?? null,
+    secondInstallment: pickInstallment(taxReport, '2nd') ?? extractObject(taxReport, 'SecondInstallment', 'secondInstallment') ?? null,
     documents: {
       lv: { status: lvRow?.status ?? 'not_started', s3Url: docUrls.legal_vesting ?? null },
       grantDeed: { status: gdRow?.status ?? 'not_started', s3Url: docUrls.grant_deed ?? null },
@@ -234,4 +235,24 @@ function extractObject(obj: Record<string, unknown>, ...keys: string[]): Record<
     if (val && typeof val === 'object' && !Array.isArray(val)) return val as Record<string, unknown>;
   }
   return null;
+}
+
+function pickInstallment(
+  taxReport: Record<string, unknown>,
+  ordinal: '1st' | '2nd',
+): Record<string, unknown> | null {
+  const installments = extractObject(taxReport, 'Installments', 'installments');
+  if (!installments) return null;
+
+  const rawItems = installments.Item ?? installments.items;
+  const items = Array.isArray(rawItems) ? rawItems : rawItems ? [rawItems] : [];
+  const match = items.find((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const number = extractString(item as Record<string, unknown>, 'Number', 'number');
+    return number === ordinal;
+  });
+
+  return match && typeof match === 'object' && !Array.isArray(match)
+    ? (match as Record<string, unknown>)
+    : null;
 }

@@ -159,6 +159,12 @@ async function loadTitlePointData(
   return {
     legalDescription: extractString(lvResult, 'LegalDescription', 'legalDescription') ?? null,
     vestingInformation: extractString(lvResult, 'VestingInformation', 'vestingInformation', 'Vesting') ?? null,
+    taxRateArea: extractString(taxResult, 'TaxRateArea', 'taxRateArea') ?? null,
+    useCode: extractString(taxResult, 'UseCode', 'useCode') ?? null,
+    landValue: extractString(taxResult, 'LandValue', 'landValue') ?? null,
+    improvementsValue: extractString(taxResult, 'ImprovementsValue', 'improvementsValue') ?? null,
+    taxRate: extractString(taxResult, 'TaxRate', 'taxRate') ?? null,
+    issueDate: extractString(taxResult, 'IssueDate', 'issueDate') ?? null,
     firstInstallment: extractObject(taxResult, 'FirstInstallment', 'firstInstallment') ?? null,
     secondInstallment: extractObject(taxResult, 'SecondInstallment', 'secondInstallment') ?? null,
     documents: {

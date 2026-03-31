@@ -26,6 +26,12 @@ export interface ConfirmationData {
   titlePoint?: {
     legalDescription?: string | null;
     vestingInformation?: string | null;
+    taxRateArea?: string | null;
+    useCode?: string | null;
+    landValue?: string | null;
+    improvementsValue?: string | null;
+    taxRate?: string | null;
+    issueDate?: string | null;
     firstInstallment?: TaxInstallment | null;
     secondInstallment?: TaxInstallment | null;
     documents?: { lv?: TpDocEntry; grantDeed?: TpDocEntry; tax?: TpDocEntry };
@@ -54,12 +60,13 @@ export function hasProcessingDocs(data: ConfirmationData): boolean {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const CARD = 'bg-white border border-gray-200 shadow-sm rounded-lg p-6';
-const H2 = 'text-lg font-semibold text-[#1A1A2E] mb-4';
+const H2 = 'text-lg font-semibold text-[#1B2A4A] mb-4';
 const LBL = 'text-xs font-medium text-[#6B7280] uppercase tracking-wider';
 const VAL = 'text-sm text-[#1A1A2E]';
 const DASH = '—';
+const SEP = 'border-b border-gray-200 pb-6 mb-6';
 
-function V({ label, value }: { label: string; value?: string | number | null }) {
+function F({ label, value }: { label: string; value?: string | number | null }) {
   return (
     <div>
       <p className={LBL}>{label}</p>
@@ -68,138 +75,158 @@ function V({ label, value }: { label: string; value?: string | number | null }) 
   );
 }
 
-// ─── Order Details Card (Left) ──────────────────────────────────────────────
+// ─── Section 2: Order Details ───────────────────────────────────────────────
 
-function OrderDetailsCard({ data }: { data: ConfirmationData }) {
+function OrderDetailsSection({ data }: { data: ConfirmationData }) {
   const tp = data.titlePoint;
   return (
-    <div className={CARD}>
-      <h2 className={H2}>Order Details</h2>
-      <p className="text-2xl font-bold text-[#1B2A4A] mb-4">{data.order.fileNumber}</p>
-      <p className="text-xs text-[#6B7280] mb-6">Created {data.order.createdAt}</p>
-      <div className="space-y-4">
-        <V label="Brief Legal Description" value={tp?.legalDescription || 'Refer to grant deed below.'} />
-        <V label="Vesting Information" value={tp?.vestingInformation || 'Refer to grant deed below.'} />
-      </div>
-      {data.opener && (
-        <div className="border-t border-gray-100 mt-5 pt-4 space-y-2">
-          <p className={LBL}>Opened By</p>
-          <p className={VAL}>{data.opener.name ?? DASH}</p>
-          <p className="text-xs text-[#6B7280]">{[data.opener.email, data.opener.phone, data.opener.company].filter(Boolean).join(' · ') || DASH}</p>
+    <div className={SEP}>
+      <div className={CARD}>
+        <h2 className={H2}>Order Details</h2>
+        <p className="text-2xl font-bold text-[#1B2A4A] mb-1">{data.order.fileNumber}</p>
+        <p className="text-xs text-[#6B7280] mb-6">Created {data.order.createdAt}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <F label="Brief Legal Description" value={tp?.legalDescription || 'Refer to grant deed below.'} />
+          <F label="Vesting Information" value={tp?.vestingInformation || 'Refer to grant deed below.'} />
         </div>
-      )}
+        {data.opener && (
+          <div className="border-t border-gray-100 mt-5 pt-4 space-y-1">
+            <p className={LBL}>Opened By</p>
+            <p className={VAL}>{data.opener.name ?? DASH}</p>
+            <p className="text-xs text-[#6B7280]">{[data.opener.email, data.opener.phone, data.opener.company].filter(Boolean).join(' · ') || DASH}</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-// ─── Tax Information Card (Right) ───────────────────────────────────────────
+// ─── Section 3: Vesting & Tax Information ───────────────────────────────────
 
-const TAX_FIELDS: { label: string; key: keyof TaxInstallment }[] = [
-  { label: 'Balance', key: 'balance' }, { label: 'Amount', key: 'amount' },
-  { label: 'Due Date', key: 'dueDate' }, { label: 'Number', key: 'number' },
-  { label: 'Payment Date', key: 'paymentDate' }, { label: 'Penalty', key: 'penalty' },
-  { label: 'Status', key: 'status' }, { label: 'Amount Paid', key: 'amountPaid' },
-  { label: 'Tax Year', key: 'taxYear' },
-];
+const STATUS_STYLE: Record<string, string> = {
+  paid: 'bg-green-100 text-green-800',
+  unpaid: 'bg-amber-100 text-amber-800',
+  delinquent: 'bg-red-100 text-red-800',
+};
+
+function statusBadge(s?: string) {
+  if (!s) return null;
+  const key = s.toLowerCase();
+  const cls = STATUS_STYLE[key] ?? 'bg-gray-100 text-gray-600';
+  return <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase ${cls}`}>{s}</span>;
+}
 
 function InstallmentCard({ title, inst }: { title: string; inst?: TaxInstallment | null }) {
+  if (!inst) return (
+    <div className="border border-gray-200 rounded-lg p-4">
+      <p className="text-sm font-semibold text-[#1A1A2E] mb-2">{title}</p>
+      <p className="text-xs text-[#9CA3AF] italic">No data found.</p>
+    </div>
+  );
   return (
     <div className="border border-gray-200 rounded-lg p-4">
       <p className="text-sm font-semibold text-[#1A1A2E] mb-3">{title}</p>
-      {inst ? (
-        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-          {TAX_FIELDS.map((f) => (
-            <div key={f.key}><p className="text-[10px] font-medium text-[#9CA3AF] uppercase">{f.label}</p><p className="text-xs text-[#1A1A2E]">{inst[f.key] ?? DASH}</p></div>
-          ))}
+      <div className="space-y-2">
+        <div className="flex justify-between text-xs"><span className="text-[#6B7280]">Amount</span><span className="text-[#1A1A2E] font-medium">{inst.amount ?? DASH}</span></div>
+        <div className="flex justify-between text-xs"><span className="text-[#6B7280]">Balance</span><span className="text-[#1A1A2E] font-medium">{inst.balance ?? DASH}</span></div>
+        <div className="flex justify-between text-xs"><span className="text-[#6B7280]">Due Date</span><span className="text-[#1A1A2E] font-medium">{inst.dueDate ?? DASH}</span></div>
+        <div className="flex justify-between text-xs items-center"><span className="text-[#6B7280]">Status</span>{statusBadge(inst.status) ?? <span className="text-[#1A1A2E] font-medium">{DASH}</span>}</div>
+      </div>
+    </div>
+  );
+}
+
+function VestingTaxSection({ data }: { data: ConfirmationData }) {
+  const tp = data.titlePoint;
+  const hasTax = tp?.taxRateArea || tp?.useCode || tp?.landValue || tp?.improvementsValue || tp?.taxRate || tp?.issueDate;
+  const hasInstallments = tp?.firstInstallment || tp?.secondInstallment;
+
+  if (!hasTax && !hasInstallments) {
+    return (
+      <div className={SEP}>
+        <h2 className={H2}>Vesting &amp; Tax Information</h2>
+        <div className={CARD}>
+          <div className="flex items-center gap-2 text-sm text-[#9CA3AF]">
+            <svg className="w-4 h-4 animate-spin text-amber-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+            Tax information pending — TitlePoint search in progress
+          </div>
         </div>
-      ) : (
-        <p className="text-xs text-[#9CA3AF] italic">No data found.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={SEP}>
+      <h2 className={H2}>Vesting &amp; Tax Information</h2>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left: Property Tax Summary */}
+        <div className={CARD}>
+          <p className="text-sm font-semibold text-[#1A1A2E] mb-4">Property Tax Summary</p>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+            <F label="Tax Rate Area" value={tp?.taxRateArea} />
+            <F label="Use Code" value={tp?.useCode} />
+            <F label="Land Value" value={tp?.landValue} />
+            <F label="Improvements Value" value={tp?.improvementsValue} />
+            <F label="Tax Rate" value={tp?.taxRate} />
+            <F label="Issue Date" value={tp?.issueDate} />
+          </div>
+        </div>
+
+        {/* Right: Installments */}
+        <div className="space-y-4">
+          <InstallmentCard title="1st Installment" inst={tp?.firstInstallment} />
+          <InstallmentCard title="2nd Installment" inst={tp?.secondInstallment} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Section 4: Title Documents ─────────────────────────────────────────────
+
+function DocCard({ doc }: { doc: DocStatus }) {
+  return (
+    <div className="border border-gray-200 rounded-lg p-4 flex flex-col items-center text-center gap-2">
+      <p className="text-sm font-semibold text-[#1A1A2E]">{doc.label}</p>
+      {doc.status === 'ready' && (
+        <>
+          <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-green-100 text-green-800">Ready</span>
+          <button
+            onClick={() => window.open(doc.url ?? '#', '_blank')}
+            className="mt-1 inline-flex items-center gap-1.5 px-4 py-2 bg-[#1B2A4A] text-white text-xs font-medium rounded-lg hover:bg-[#162240] transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            Download
+          </button>
+        </>
+      )}
+      {doc.status === 'processing' && (
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-amber-100 text-amber-800">
+          <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+          Processing...
+        </span>
+      )}
+      {doc.status === 'not_available' && (
+        <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-gray-100 text-gray-500">Not available</span>
       )}
     </div>
   );
 }
 
-function TaxInfoCard({ data }: { data: ConfirmationData }) {
-  const tp = data.titlePoint;
-  return (
-    <div className={CARD}>
-      <h2 className={H2}>Tax Information</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <InstallmentCard title="1st Installment" inst={tp?.firstInstallment} />
-        <InstallmentCard title="2nd Installment" inst={tp?.secondInstallment} />
-      </div>
-    </div>
-  );
-}
-
-// ─── Document Status Section ────────────────────────────────────────────────
-
-function DocColumn({ doc, fallbackMsg }: { doc?: DocStatus; fallbackMsg: string }) {
-  if (!doc || doc.status === 'not_available') {
-    return <p className="text-sm text-[#9CA3AF]">{fallbackMsg}</p>;
-  }
-  if (doc.status === 'processing') {
-    return (
-      <p className="text-sm text-amber-600 flex items-center gap-1.5">
-        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-        Document generating...
-      </p>
-    );
-  }
-  return (
-    <a href={doc.url ?? '#'} target="_blank" rel="noopener noreferrer"
-      className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#1B2A4A] text-white text-sm font-medium rounded-lg hover:bg-[#162240] transition-colors">
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-      Download {doc.label}
-    </a>
-  );
-}
-
-function DocumentStatusSection({ data }: { data: ConfirmationData }) {
+function TitleDocumentsSection({ data }: { data: ConfirmationData }) {
   const raw = data.titlePoint?.documents;
-  const lv = mapDocStatus(raw?.lv, 'L&V');
-  const gd = mapDocStatus(raw?.grantDeed, 'Grant Deed');
-  const tax = mapDocStatus(raw?.tax, 'Tax Document');
-
-  return (
-    <div className={CARD}>
-      <h2 className={H2}>Grant Deed Information</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div>
-          <p className={`${LBL} mb-2`}>Legal &amp; Vesting</p>
-          <DocColumn doc={lv} fallbackMsg="No legal vesting available. Our team will look for it and contact you shortly." />
-        </div>
-        <div>
-          <p className={`${LBL} mb-2`}>Grant Deed</p>
-          <DocColumn doc={gd} fallbackMsg="No grant deed available. Our team will look for it and contact you shortly." />
-        </div>
-        <div>
-          <p className={`${LBL} mb-2`}>Tax Document</p>
-          <DocColumn doc={tax} fallbackMsg="No tax document available. Our team will look for it and contact you shortly." />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Action Cards ───────────────────────────────────────────────────────────
-
-function ActionCards({ fileNumber }: { fileNumber: string }) {
-  const actions = [
-    { label: 'Generate CPL', desc: 'Create a Closing Protection Letter', href: `/hub?action=cpl&file=${fileNumber}`, accent: true },
-    { label: 'Proposed Insured', desc: 'Generate proposed insured document', href: `/hub?action=proposed&file=${fileNumber}`, accent: false },
-    { label: 'Open New Order', desc: 'Start another order', href: '/hub/new-order', accent: false },
+  const docs: DocStatus[] = [
+    mapDocStatus(raw?.lv, 'Legal & Vesting'),
+    mapDocStatus(raw?.tax, 'Tax Report'),
+    mapDocStatus(raw?.grantDeed, 'Grant Deed'),
   ];
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      {actions.map((a) => (
-        <a key={a.label} href={a.href}
-          className={`${CARD} flex flex-col items-start hover:shadow-md transition-shadow`}>
-          <p className={`text-sm font-semibold ${a.accent ? 'text-[#F26B2B]' : 'text-[#1B2A4A]'}`}>{a.label}</p>
-          <p className="text-xs text-[#6B7280] mt-1">{a.desc}</p>
-          <span className={`mt-3 text-xs font-medium ${a.accent ? 'text-[#F26B2B]' : 'text-[#1B2A4A]'}`}>Go →</span>
-        </a>
-      ))}
+    <div>
+      <h2 className={H2}>Title Documents</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {docs.map((d) => <DocCard key={d.label} doc={d} />)}
+      </div>
     </div>
   );
 }
@@ -210,11 +237,12 @@ function Skeleton() {
   const bar = (w: string) => <div className={`h-4 bg-gray-100 rounded animate-pulse ${w}`} />;
   return (
     <div className="space-y-6">
+      <div className={CARD}>{bar('w-48 mb-4')}{bar('w-32 mb-6')}{bar('w-full mb-2')}{bar('w-3/4')}</div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className={CARD}>{bar('w-48 mb-4')}{bar('w-32 mb-6')}{bar('w-full mb-2')}{bar('w-3/4')}</div>
-        <div className={CARD}>{bar('w-40 mb-4')}<div className="grid grid-cols-2 gap-4"><div>{bar('w-full h-40')}</div><div>{bar('w-full h-40')}</div></div></div>
+        <div className={CARD}>{bar('w-40 mb-4')}<div className="grid grid-cols-2 gap-4">{bar('w-full h-6')}{bar('w-full h-6')}{bar('w-full h-6')}{bar('w-full h-6')}</div></div>
+        <div className="space-y-4"><div className={CARD}>{bar('w-full h-24')}</div><div className={CARD}>{bar('w-full h-24')}</div></div>
       </div>
-      <div className={CARD}>{bar('w-48 mb-4')}<div className="grid grid-cols-3 gap-6"><div>{bar('w-full h-20')}</div><div>{bar('w-full h-20')}</div><div>{bar('w-full h-20')}</div></div></div>
+      <div className="grid grid-cols-3 gap-4"><div className={CARD}>{bar('w-full h-16')}</div><div className={CARD}>{bar('w-full h-16')}</div><div className={CARD}>{bar('w-full h-16')}</div></div>
     </div>
   );
 }
@@ -227,27 +255,26 @@ export function OrderConfirmation({ data, loading, error }: { data: Confirmation
   if (!data) return <div className={CARD}><p className="text-sm text-[#9CA3AF]">No confirmation data found.</p></div>;
 
   return (
-    <div className="space-y-6">
-      {/* Success banner */}
-      <div className="flex items-center gap-3 px-5 py-4 bg-green-50 border border-green-200 rounded-lg">
-        <svg className="h-5 w-5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-        <div>
-          <p className="text-sm font-semibold text-green-800">Order Created Successfully</p>
-          <p className="text-xs text-green-700">File {data.order.fileNumber} has been submitted and is being processed.</p>
+    <div>
+      {/* Section 1: Success Banner */}
+      <div className={SEP}>
+        <div className="flex items-center gap-3 px-5 py-4 bg-green-50 border border-green-200 rounded-lg">
+          <svg className="h-5 w-5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          <div>
+            <p className="text-sm font-semibold text-green-800">Order Created Successfully</p>
+            <p className="text-xs text-green-700">File {data.order.fileNumber} has been submitted and is being processed.</p>
+          </div>
         </div>
       </div>
 
-      {/* Two-column: Order Details + Tax Info */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <OrderDetailsCard data={data} />
-        <TaxInfoCard data={data} />
-      </div>
+      {/* Section 2: Order Details */}
+      <OrderDetailsSection data={data} />
 
-      {/* Full-width: Documents */}
-      <DocumentStatusSection data={data} />
+      {/* Section 3: Vesting & Tax Information */}
+      <VestingTaxSection data={data} />
 
-      {/* Action Cards */}
-      <ActionCards fileNumber={data.order.fileNumber} />
+      {/* Section 4: Title Documents */}
+      <TitleDocumentsSection data={data} />
     </div>
   );
 }

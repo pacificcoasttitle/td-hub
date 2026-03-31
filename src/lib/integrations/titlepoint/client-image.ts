@@ -577,9 +577,12 @@ export async function getDocumentsByParameters3(
     }
 
     const returnStatus = parsedGrantDeed.returnStatus;
+    const normalizedReturnStatus = returnStatus.trim().toLowerCase();
     const docStatus = parsedGrantDeed.docStatus.toLowerCase();
+    const returnStatusOk = normalizedReturnStatus.startsWith('ok') || normalizedReturnStatus.startsWith('success');
+    const docStatusOk = docStatus === 'ok' || docStatus === 'success';
 
-    if (docStatus !== 'ok' || returnStatus.toLowerCase() !== 'ok') {
+    if (!docStatusOk || !returnStatusOk) {
       const message = String(
         parsedGrantDeed.docStatus
         ?? returnStatus

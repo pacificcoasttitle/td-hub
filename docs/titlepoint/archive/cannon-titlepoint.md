@@ -1,3 +1,27 @@
+# ARCHIVED: superseded by `TITLEPOINT_IMPLEMENTATION_SOURCE_OF_TRUTH.md` after final live validation and implementation completion.
+
+## Why this file was archived
+
+This older standalone TitlePoint summary described the legacy PHP system at a high level.
+
+It is not safe as an active implementation document now because it:
+
+- describes legacy tables and PHP files instead of the final `td-hub` runtime
+- omits the final parser-root corrections
+- omits the inline orchestration fix
+- omits the final tax and grant deed behavior
+
+## What replaced it
+
+Use these instead:
+
+- `docs/titlepoint/TITLEPOINT_IMPLEMENTATION_SOURCE_OF_TRUTH.md`
+- `docs/titlepoint/TITLEPOINT_DEBUG_TIMELINE_2026-03.md`
+- `docs/titlepoint/TITLEPOINT_TAX_CALLS_REFERENCE.md`
+- `docs/titlepoint/TITLEPOINT_GRANT_DEED_CALL_AND_RETRIEVAL.md`
+
+---
+
 # TitlePoint (DataTrace/TPS) Integration
 
 ## Overview

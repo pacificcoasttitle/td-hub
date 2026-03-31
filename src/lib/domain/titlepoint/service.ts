@@ -16,6 +16,7 @@ import { fetchGrantDeed } from '@/lib/domain/titlepoint/grant-deed';
 import { maybeEnqueueConfirmation } from '@/lib/domain/titlepoint/completion-checker';
 import type { TitlePointSearchType } from '@/lib/integrations/titlepoint/types';
 
+// Canonical flow docs: docs/titlepoint/TITLEPOINT_IMPLEMENTATION_SOURCE_OF_TRUTH.md
 // ─── Search-type to document category mapping ───────────────────────────────
 
 const SEARCH_TYPE_DOC_CATEGORY: Record<TitlePointSearchType, string> = {

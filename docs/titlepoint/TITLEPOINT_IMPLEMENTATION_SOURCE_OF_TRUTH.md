@@ -1,180 +1,162 @@
 # TitlePoint Implementation Source Of Truth
 
-## Status
-This is the canonical implementation record for TitlePoint in `td-hub`.
+## Overview
+This is the canonical current-state document for TitlePoint in `td-hub`.
 
-It replaces the older planning/checklist/call-note docs that drifted, contradicted each other, or were invalidated by live vendor responses.
+TitlePoint is fully operational in production for:
 
-## What TitlePoint Does In `td-hub`
-TitlePoint is used to:
+- pre-init legal vesting
+- pre-init tax
+- post-order geo
+- image generation for geo, tax, and legal vesting
+- grant deed retrieval
+- S3 document storage
+- SoftPro document attachment
 
-- run pre-init property searches before order creation
-- run post-order geo search after order creation
-- retrieve legal vesting result data
-- generate PDFs for LV / tax / geo image flows
-- fetch grant deed PDFs from deed metadata found in LV results
+This document replaces old plan docs, drifted call notes, and partially correct investigation writeups. Supporting evidence lives in separate docs, but this file is the final implementation truth.
 
-## Active Flows
+## Final Working Flows
 
-| Flow | Purpose | Current transport shape |
-|---|---|---|
-| Pre-init tax | front-end tax lookup before order creation | GET + encoded query |
-| Pre-init legal vesting | front-end LV lookup before order creation | GET + encoded query |
-| Post-order geo | create geo search after order creation | POST + raw body with trailing `&` |
-| Image generation | generate/download PDFs from service IDs | POST + raw body with trailing `&` |
-| Grant deed | fetch deed PDF from normalized doc id | POST + raw body with trailing `&` |
+### Pre-init legal vesting
+- Runs before order creation.
+- Uses `CreateService4` with `GET` and an encoded query string.
+- Uses `GetRequestSummaries` to poll.
+- Uses `GetResultByID` to fetch the legal vesting result.
+- Persists LV result data for later document generation and grant deed selection.
 
-## Primary Evidence
+### Pre-init tax
+- Runs before order creation.
+- Uses `CreateService3` with `GET` and an encoded query string.
+- Uses service type `TitlePoint.Geo.Tax`.
+- Uses `GetRequestSummaries` to poll.
+- Uses `GetResultByID3` with `GET`.
+- Pre-init is tax + legal vesting only. Pre-init is not geo.
 
-- Legacy evidence pack: `docs/titlepoint/TITLEPOINT_LEGACY_EVIDENCE_PACK.md`
-- Debug / incident timeline: `docs/titlepoint/TITLEPOINT_DEBUG_TIMELINE_2026-03.md`
-- Runtime-backed contract tests: `scripts/test-titlepoint-payloads.ts`
-- Legacy PHP source snapshot in repo: `docs/titlepoint/Titlepoint-legacy.php`
+### Post-order geo
+- Runs after order creation.
+- Uses `CreateService3` with `POST` and a raw form body that ends with a trailing `&`.
+- Result retrieval is the legacy dual-call flow:
+  1. `GET` raw XML for archival
+  2. `POST` the same params for parsed handling
+- The raw XML archival step is intentional and current.
 
-## Exact Endpoint Contract Table
+### Image generation
+- Used for geo, tax, and legal vesting documents.
+- Sequence is fixed:
+  1. `CreateRequest3`
+  2. `GetRequestStatus`
+  3. `GetGeneratedImage`
+- Runtime only uploads a PDF after the image status is actually ready and base64 data is present.
+- Inline execution replaced the dead queue dependency for this workflow. The retry and create-order routes now run the working inline pipeline instead of relying on an unconsumed poll worker.
 
-| Endpoint | Flow | Method | Wire shape | Param order | Encoding / trailing `&` | Expected root | Parsed fields | Notes |
-|---|---|---|---|---|---|---|---|---|
-| `CreateService3` | Post-order geo create | `POST` | raw body | `userID,password,serviceType,parameters,department,orderNo,customerRef,company,titleOfficer,orderComment,starterRemarks,state,county` | raw body, trailing `&` | `CreateAsynchServicesReturn` | `ReturnStatus`, `RequestID`, `OrderID`, `ReturnErrors` | Live-verified 2026-03-26 |
-| `CreateService3` | Pre-init tax create | `GET` | encoded query URL | `userID,password,orderNo,customerRef,company,department,titleOfficer,orderComment,starterRemarks,serviceType,parameters,state,county` | encoded query, no trailing `&` | `CreateAsynchServicesReturn` | `ReturnStatus`, `RequestID`, `OrderID`, `ReturnErrors` | Live-verified 2026-03-26; vendor currently rejects `TitlePoint.TaxSearch` |
-| `CreateService4` | Pre-init LV create | `GET` | encoded query URL | `userID,password,orderNo,customerRef,company,department,titleOfficer,orderComment,starterRemarks,serviceType,parameters,fipsCode` | encoded query, no trailing `&` | `CreateAsynchServicesReturn` | `ReturnStatus`, `RequestID`, `OrderID`, `ReturnErrors` | Live-verified 2026-03-26 |
-| `GetRequestSummaries` | Poll search completion | `GET` | encoded query URL | `userID,password,company,department,titleOfficer,requestId,maxWaitSeconds` | encoded query, no trailing `&` | `GetRequestSummariesReturn` | `ReturnStatus`, `RequestSummaries`, `RequestSummary.Status`, `RequestSummary.Order.ID`, `Service.ID`, `ThumbNails.ResultThumbNail.ID` | Live-verified 2026-03-26 |
-| `GetResultByID` | LV result fetch | `GET` | encoded query URL | `userID,password,company,department,titleOfficer,resultID` | encoded query, no trailing `&` | `GetResultReturn` | `ReturnStatus`, `Result`, `Result.ID`, `Result.Status`, `Result.Fips`, `Result.BriefLegal`, `Result.Vesting`, `Result.Apn`, `Result.PropertyAddress`, `Result.LvDeeds.LegalAndVesting2DeedInfo` | Live-verified 2026-03-26 |
-| `GetResultByID3` | Tax result fetch | `POST` | raw body | `userID,password,company,department,titleOfficer,requestingTPXML,resultID` | raw body, trailing `&` | `ServiceResult` | `ReturnStatus`, `Result` | Legacy/sample-proven; not re-validated live in this incident |
-| `GetResultByID3` | Geo result fetch | `GET` then `POST` | GET raw XML archival, then POST raw parse call | GET: `userID,password,company,department,titleOfficer,requestingTPXML,resultID` / POST same order | GET encoded query; POST raw body with trailing `&` | GET raw XML archival + parsed POST currently expects `ServiceResult` | `ReturnStatus`, `Result` | Geo is the only dual-call result path |
-| `CreateRequest3` | Image request | `POST` | raw body | `username,password,serviceId1,serviceId2,source,clientKey1,clientKey2,sortOrder,fileType` | raw body, trailing `&` | `GenerateImageResult` | `ReturnStatus`, `RequestID`, `OrderID` | Legacy/sample-proven |
-| `GetRequestStatus` | Image polling | `POST` | raw body | `username,password,requestId` | raw body, trailing `&` | `GenerateImageResult` | `ReturnStatus`, `Status`, `Message` | Called before `GetGeneratedImage` |
-| `GetGeneratedImage` | Image fetch | `POST` | raw body | `username,password,requestId` | raw body, trailing `&` | `GenerateImageResult` | `ReturnStatus`, `Status`, `Data` | Image body is `GenerateImageResult.Data` |
-| `GetDocumentsByParameters3` | Grant deed | `POST` | raw body | `parameters,username,password,company,department,titleOfficer,pages,propertyOnly,maxPageCount,maxSizeInKB,additionalInfo,customerRef,fileType` | raw body, trailing `&` | `ImageResult` | `Status.Msg`, `Documents.DocumentResponse.DocStatus.Msg`, `Documents.DocumentResponse.Document.Body.Body` | Legacy/sample-proven |
+### Grant deed retrieval
+- Grant deed is a document retrieval flow, not a search flow.
+- It starts from the completed legal vesting result.
+- It extracts deed candidates from the LV result payload.
+- It normalizes the instrument number into the document ID used by TitlePoint.
+- It calls `GetDocumentsByParameters3`.
+- It decodes the returned PDF body and uploads that PDF as the grant deed document.
+- Failed grant deed retries now call `fetchGrantDeed()` directly from the latest completed legal vesting row. Grant deed does not go through the generic create/poll/result/image pipeline.
 
-## Proven Response Roots
+## Final Endpoint Contract Table
 
-### Live-verified on 2026-03-26
+| Endpoint | Flow | Method | Wire shape | Final runtime behavior |
+|---|---|---|---|---|
+| `CreateService4` | Pre-init legal vesting | `GET` | encoded query string | Creates the LV request before order creation |
+| `CreateService3` | Pre-init tax | `GET` | encoded query string | Creates the tax request before order creation |
+| `GetRequestSummaries` | Polling | `GET` | encoded query string | Used by pre-init and inline post-order flows |
+| `GetResultByID` | LV result fetch | `GET` | encoded query string | Used only for legal vesting |
+| `GetResultByID3` | Tax result fetch | `GET` | encoded query string | Tax flow is locked to legacy-faithful `GET` |
+| `CreateService3` | Post-order geo create | `POST` | raw `application/x-www-form-urlencoded` body with trailing `&` | Creates geo after order creation |
+| `GetResultByID3` | Geo result fetch | `GET` then `POST` | GET raw XML archival, then POST raw parse call | This dual-call flow is current and intentional |
+| `CreateRequest3` | Image request | `POST` | raw form body with trailing `&` | Starts PDF generation for geo/tax/LV |
+| `GetRequestStatus` | Image readiness poll | `POST` | raw form body with trailing `&` | Checked before `GetGeneratedImage` |
+| `GetGeneratedImage` | Image fetch | `POST` | raw form body with trailing `&` | Returns base64 PDF for geo/tax/LV |
+| `GetDocumentsByParameters3` | Grant deed retrieval | `POST` | raw form body with trailing `&` and a single `parameters` field | Returns the grant deed PDF body |
 
-- `CreateAsynchServicesReturn`
-- `GetRequestSummariesReturn`
-- `GetResultReturn`
+## Final Parser Roots Actually Used In Runtime
 
-### Legacy/sample-proven and still authoritative unless disproven live
+| Runtime path | Parser root(s) used |
+|---|---|
+| Create responses | `CreateAsynchServicesReturn` |
+| Poll responses | `GetRequestSummariesReturn` |
+| LV result fetch | `GetResultReturn` |
+| Image status | `GenerateImageRequestStatusReturn` |
+| Generated image fetch | `GenerateImageData` |
+| Grant deed document fetch | `GetDocumentReturn` with `ImageResult` fallback |
 
-- `GenerateImageResult`
-- `ImageResult`
+### Final parser-root facts
+- `CreateAsynchServicesReturn` is the live create root used in runtime.
+- `GetRequestSummariesReturn` is the live polling root used in runtime.
+- `GetResultReturn` is the live LV result root used in runtime.
+- `GenerateImageRequestStatusReturn` is the image status root used in runtime.
+- `GenerateImageData` is the generated image root used in runtime.
+- `ImageResult` remains a supported parser root for grant deed fallback compatibility.
+- `GetDocumentReturn` is the live grant deed root now used in production runtime.
 
-## Proven Live Parser Fix
+## Final Document Generation And Storage Behavior
 
-The runtime bug fixed in this pass was not transport, credentials, or routing.
+- Geo, tax, and legal vesting PDFs are generated through the image flow.
+- Grant deed PDFs are retrieved through `GetDocumentsByParameters3`.
+- All generated PDFs are uploaded through the shared document service.
+- `documents.storage_key` stores the S3 object path.
+- Document categories used in runtime are:
+  - `general` for geo
+  - `tax`
+  - `legal_vesting`
+  - `grant_deed`
+- After upload, documents are attached to SoftPro through `AddDocuments` using pre-signed S3 URLs.
 
-It was parser root drift.
+## Final Confirmation And Side-Effect Behavior
 
-The live vendor responses for:
+- `maybeEnqueueConfirmation()` only enqueues the confirmation event after all required TitlePoint document flows are completed.
+- Required completed search types are:
+  - `legal_vesting`
+  - `tax`
+  - `grant_deed`
+- `grant_deed` completion is required for the confirmation outbox event.
+- Legal vesting completion also triggers the dedicated grant deed fetch path.
 
-- `CreateService3`
-- `CreateService4`
-- `GetRequestSummaries`
-- `GetResultByID`
+## Final Behavioral Truths
 
-were being read as if they rooted at `ServiceResult`.
+- The password `#` issue was config-only and is resolved.
+- The correct environment form is `TP_PASSWORD='AlphaOmega637#'`.
+- GET wires encode the password as `%23`.
+- POST raw bodies send the literal `#`.
+- Pre-init is tax + legal vesting only.
+- Geo uses `GET` raw XML archival + `POST` parsed handling.
+- Grant deed is a document retrieval flow, not a search flow.
+- Grant deed request and parse behavior is aligned with the final runtime implementation.
+- Tax service type is locked to `TitlePoint.Geo.Tax`.
+- Inline execution replaced the dead queue dependency for the working document workflow.
 
-That was wrong for the live responses captured on 2026-03-26.
+## Key Lessons Learned
 
-The parser now reads:
+- The original blocker was not one bug. It was a chain: contract drift, env parsing, parser-root mismatch, dead queue dependency, and one bad grant deed retry path.
+- Do not treat TitlePoint like a clean, uniform API. Each endpoint has its own transport, parameter order, and parser root.
+- Live XML matters more than abstractions. Root assumptions broke real vendor responses.
+- Grant deed must stay on its own retrieval flow. It is not interchangeable with the generic search/image pipeline.
+- Old planning docs are useful as evidence only. They are not implementation truth.
 
-- `CreateAsynchServicesReturn` for create responses
-- `GetRequestSummariesReturn` for polling responses
-- `GetResultReturn` for LV result responses
+## Primary Evidence And Supporting Docs
 
-There is no fallback root chain for these paths.
+### Canonical current-state docs
+- `docs/titlepoint/TITLEPOINT_IMPLEMENTATION_SOURCE_OF_TRUTH.md`
+- `docs/titlepoint/TITLEPOINT_DEBUG_TIMELINE_2026-03.md`
+- `docs/titlepoint/TITLEPOINT_TAX_CALLS_REFERENCE.md`
+- `docs/titlepoint/TITLEPOINT_GRANT_DEED_CALL_AND_RETRIEVAL.md`
 
-## Known Vendor Behavior
+### Supporting evidence and reference docs
+- `docs/titlepoint/TITLEPOINT_LEGACY_EVIDENCE_PACK.md`
+- `scripts/test-titlepoint-payloads.ts`
 
-### Password `#` issue
-
-The `#` credential bug was configuration-side, not transport-side.
-
-- bad runtime value: `AlphaOmega637`
-- bad attempted escape: `AlphaOmega637\`
-- correct runtime value: `AlphaOmega637#`
-- working env form in this repo: `TP_PASSWORD='AlphaOmega637#'`
-
-Result:
-
-- GET wires now encode the password as `%23`
-- POST raw bodies now send literal `#`
-
-### Tax service behavior
-
-Live vendor response on 2026-03-26:
-
-- HTTP `200`
-- XML returned
-- `ReturnStatus = Failed`
-- vendor error: `The specified service type, 'TitlePoint.TaxSearch', does not correspond to an available service.`
-
-This is not a transport bug.
-This is not part of the parse-root fix.
-
-### Geo dual-call behavior
-
-Geo result retrieval is not a single request in legacy.
-
-It does:
-
-1. GET raw XML
-2. archive raw XML
-3. POST same params for parsed processing
-
-Do not collapse that flow unless live vendor validation proves it is safe.
-
-### Pre-init scope
-
-Pre-init is:
-
-- tax
-- legal vesting
-
-Pre-init is not geo.
-
-### Grant deed normalization
-
-Grant deed `INST=` normalization follows the legacy rules:
-
-- if instrument contains `-`, split and take the trailing part
-- otherwise strip the year prefix
-- cast to integer string
-
-Examples:
-
-- `20190298741` -> `298741`
-- `15-1611995` -> `1611995`
-
-## Proven Legacy Behavior vs Proven Live Behavior
-
-### Proven legacy behavior
-
-- endpoint transports and param ordering from the legacy PHP files
-- image flow sequence: `CreateRequest3 -> GetRequestStatus -> GetGeneratedImage`
-- grant deed single `parameters` field
-- geo dual-call result retrieval
-
-### Proven live behavior
-
-- credentials now reach TitlePoint intact
-- pre-init LV create reaches TitlePoint and returns XML
-- `GetRequestSummaries` reaches TitlePoint and returns XML
-- LV `GetResultByID` reaches TitlePoint and returns XML
-- geo create reaches TitlePoint and returns XML
-- live create/poll/LV-result roots differ from the old `ServiceResult` parser assumption
-
-## Open Questions / Vendor-Side Unknowns
-
-- Why the vendor currently rejects `TitlePoint.TaxSearch` for this account or environment.
-- Whether live `GetResultByID3` responses still root at `ServiceResult` for tax and geo in the current production account; this was not re-validated live in the final parser patch pass.
-- Whether image endpoints and grant deed endpoints still match their legacy/sample roots exactly in current production; they were not re-validated live in this incident after the credential fix.
-
-## Archived Docs
-
-The following docs were archived because they were useful during investigation but are not safe as active source-of-truth documents anymore:
-
-- `docs/titlepoint/archive/OUR-TITLEPOINT-CALLS.md`
+### Archived stale docs
 - `docs/titlepoint/archive/TITLEPOINT_TD_HUB_IMPLEMENTATION_CHECKLIST.md`
 - `docs/titlepoint/archive/TitlePoint Legacy Alignment Fix Plan.md`
+- `docs/titlepoint/archive/OUR-TITLEPOINT-CALLS.md`
+- `docs/titlepoint/archive/cannon-titlepoint.md`
+
+## Non-Blocking Notes
+
+- Grant deed candidate selection still depends on the deed records present in the legal vesting result and the configured vesting doc-type filter.
+- That selection behavior is not blocking the working integration. The fetch contract, parser root, retry path, storage path, and SoftPro attachment path are now working.

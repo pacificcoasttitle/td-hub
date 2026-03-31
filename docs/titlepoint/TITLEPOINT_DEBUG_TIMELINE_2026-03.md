@@ -1,200 +1,112 @@
 # TitlePoint Debug Timeline 2026-03
 
 ## Purpose
-This is the incident / forensic timeline for the March 2026 TitlePoint debugging and reconciliation work.
-
-It exists so nobody has to reconstruct this from chat history, half-correct notes, or stale planning docs.
-
-## Chronology
-
-### 2026-03-26: HTML 403 failures observed
-
-TitlePoint requests were returning HTML instead of XML.
-
-Observed symptoms:
-
-- runtime reported XML parse errors
-- `vendor_api_logs` showed HTML responses
-- the integration looked broken even when request payloads appeared close to legacy
-
-At this point the repo still contained docs and assumptions that mixed:
-
-- legacy behavior
-- td-hub behavior
-- unverified theories
-
-### 2026-03-26: "Firewall / WAF" theory identified but not proven
-
-An HTML 403 page suggested FortiWeb / WAF involvement.
-
-That was a plausible theory, but it was not yet sufficient proof of the root cause.
-
-Why it was not enough:
-
-- a bad credential can also trigger a non-XML vendor response
-- a malformed request can also produce HTML or non-standard error pages
-- the repo was not yet aligned enough with legacy to rule out contract drift
-
-Bottom line:
-
-- WAF was a hypothesis
-- not a proven root cause
-
-### 2026-03-26: Legacy drift documented
-
-The TitlePoint integration was audited against legacy PHP.
-
-Findings:
-
-- td-hub had drifted from legacy transport behavior
-- td-hub had drifted from legacy parameter ordering and naming
-- td-hub had normalized too much
-- td-hub treated different TitlePoint endpoints as if they behaved like one clean API
-
-This was wrong.
-
-### 2026-03-26: Legacy evidence extracted into one evidence pack
-
-The legacy source files and sample XML were consolidated into:
-
-- `docs/titlepoint/TITLEPOINT_LEGACY_EVIDENCE_PACK.md`
-
-This evidence pack settled the major contract questions:
-
-- pre-init is tax + LV only
-- geo create is post-order
-- geo result retrieval is GET raw XML + POST parsed
-- grant deed is one `parameters` field
-- image flow uses `GetRequestStatus` before `GetGeneratedImage`
-
-### 2026-03-26: Runtime rebuilt to match legacy request contracts
-
-td-hub request transport and ordering were brought into line with the legacy evidence.
-
-At that point:
-
-- credentials still failed
-- live vendor validation was still blocked
-
-### 2026-03-26: Real credential bug discovered
-
-The runtime password was inspected directly.
-
-Observed runtime value:
-
-- `AlphaOmega637`
-
-Expected:
-
-- `AlphaOmega637#`
-
-This proved the `#` was being lost before request construction.
-
-This was a config / env parsing problem, not a TitlePoint transport problem.
-
-### 2026-03-26: Wrong attempted env escape rejected
-
-Tried:
-
-- `TP_PASSWORD=AlphaOmega637\#`
-
-Observed runtime value:
-
-- `AlphaOmega637\`
-
-That was still wrong.
-
-### 2026-03-26: Correct env form validated
-
-Changed to:
-
-- `TP_PASSWORD='AlphaOmega637#'`
-
-Fresh runtime verification proved:
-
-- runtime password ended with `#`
-- GET wires encoded it as `%23`
-- POST raw bodies sent literal `#`
-
-This resolved the credential truncation bug.
-
-### 2026-03-26: Live vendor requests confirmed
-
-With credentials fixed, real TitlePoint requests started returning XML again.
-
-Confirmed live:
-
-- LV pre-init create returned HTTP `200` XML
-- `GetRequestSummaries` returned HTTP `200` XML
-- LV `GetResultByID` returned HTTP `200` XML
-- geo create returned HTTP `200` XML
-
-Tax pre-init also returned XML, but the vendor rejected the service type with:
-
-- `The specified service type, 'TitlePoint.TaxSearch', does not correspond to an available service.`
-
-That is vendor-side behavior, not a parser-root bug.
-
-### 2026-03-26: Live parser-root mismatch discovered
-
-Once real XML was flowing, the next bug became obvious:
-
-td-hub runtime was still reading several live responses as if they rooted at:
-
-- `ServiceResult`
-
-But the live responses were actually:
-
-- create responses -> `CreateAsynchServicesReturn`
-- request summaries -> `GetRequestSummariesReturn`
-- LV result -> `GetResultReturn`
-
-Because of that mismatch:
-
-- successful create responses were being marked failed
-- `ReturnStatus` was coming back empty in runtime
-- poll responses were being misread
-- LV result fetches were being misread
-
-### 2026-03-26: Surgical parse-root patch applied
-
-The final code patch in this incident changed only the proven live parser roots for:
-
-- create responses
-- `GetRequestSummaries`
-- LV `GetResultByID`
-
-No transport change was required for that patch.
-No request builder change was required for that patch.
-No env loader change was required for that patch.
-
-### 2026-03-26: Runtime-backed tests updated
-
-The parser patch was locked down with runtime-backed tests that now prove:
-
-- create parser reads `CreateAsynchServicesReturn`
-- poll parser reads `GetRequestSummariesReturn`
-- LV result parser reads `GetResultReturn`
-- these paths no longer depend on `ServiceResult`
-
-Final test result for the parser patch pass:
-
-- `60 passed, 0 failed`
+This is the final forensic timeline for the March 2026 TitlePoint investigation and repair work.
+
+It records what actually broke, what we proved, what false leads were ruled out, and how the integration reached its final operational state.
+
+## Timeline
+
+### 2026-03-26: Initial failure state
+- Production requests were returning HTML instead of XML.
+- Runtime surfaced XML parse errors.
+- `vendor_api_logs` showed HTML error pages instead of TitlePoint XML.
+- The integration was not yet trustworthy enough to tell whether the problem was transport, credentials, parsing, or vendor-side blocking.
+
+### 2026-03-26: False lead ruled out
+- The FortiWeb / WAF theory looked plausible because the response was HTML.
+- It was not enough proof by itself.
+- At that point a malformed request or truncated credential could still explain the same symptom.
+
+### 2026-03-26: Legacy contract extraction
+- The legacy PHP implementation was treated as the source of truth.
+- The evidence was consolidated into `docs/titlepoint/TITLEPOINT_LEGACY_EVIDENCE_PACK.md`.
+- That evidence settled the contract that mattered:
+  - pre-init is tax + legal vesting only
+  - geo create is post-order
+  - geo result is GET raw XML archival + POST parsed handling
+  - image flow is `CreateRequest3 -> GetRequestStatus -> GetGeneratedImage`
+  - grant deed uses `GetDocumentsByParameters3` with a single `parameters` field
+
+### 2026-03-26: Credential breakthrough
+- Runtime password inspection proved the environment loader was truncating `TP_PASSWORD` at `#`.
+- Wrong runtime value: `AlphaOmega637`
+- Correct value: `AlphaOmega637#`
+- The fix was configuration only: `TP_PASSWORD='AlphaOmega637#'`
+- After that:
+  - GET wires encoded `%23`
+  - POST raw bodies sent literal `#`
+  - real TitlePoint XML started coming back again
+
+### 2026-03-26: Live parser-root breakthrough
+- Once XML was flowing, the next bug was obvious: runtime parsing was reading the wrong roots.
+- Proven live roots:
+  - `CreateAsynchServicesReturn`
+  - `GetRequestSummariesReturn`
+  - `GetResultReturn`
+- Old assumptions around `ServiceResult` were wrong for the live responses we captured.
+- Fixing those roots moved the working flows forward without changing transport again.
+
+### 2026-03-26 through 2026-03-31: Tax breakthrough
+- Tax was not a generic parser problem after the credential fix.
+- Live vendor output explicitly rejected `TitlePoint.TaxSearch`.
+- The tax service type was corrected and locked to `TitlePoint.Geo.Tax`.
+- Tax result retrieval was kept legacy-faithful as `GetResultByID3` over `GET`.
+- The tax flow is now operational and no longer an open contract debate.
+
+### 2026-03-31: Image-stage breakthrough
+- The pipeline then failed at image readiness because runtime still expected the wrong roots for image status and image data.
+- The working runtime roots were corrected to:
+  - `GenerateImageRequestStatusReturn`
+  - `GenerateImageData`
+- Readiness checks were added so upload only happens after the vendor reports ready and actual image data exists.
+
+### 2026-03-31: Dead queue dependency removed
+- The repo was creating `titlepoint.poll` jobs but production was not consuming them.
+- That left rows stuck in `pending` and `processing`.
+- The working fix was to run the create/poll/result/image pipeline inline in the request path and use the jobs table for observability instead of as the primary execution engine.
+- This replaced the dead queue dependency for the working workflow.
+
+### 2026-03-31: Grant deed fetch breakthrough
+- Grant deed was confirmed to be a different kind of flow:
+  - not a search flow
+  - not an image-generation flow
+  - a document retrieval flow based on LV deed metadata
+- The live vendor response for `GetDocumentsByParameters3` used `GetDocumentReturn`.
+- Runtime grant deed parsing was updated to accept `GetDocumentReturn` with `ImageResult` kept as fallback.
+
+### 2026-03-31: Grant deed retry-path bug found and fixed
+- A later failure showed `grant_deed` retries were being routed through the generic create/poll/result/image pipeline.
+- That produced the wrong document under the `grant_deed` category.
+- The final fix was narrow:
+  - `grant_deed` retries now bypass `initiateSearch()`
+  - retries use `fetchGrantDeed()` directly from the latest completed LV row
+  - the generic inline pipeline now refuses to run `grant_deed`
+
+### Final operational state
+- Pre-init legal vesting works.
+- Pre-init tax works.
+- Post-order geo works.
+- Geo, tax, and legal vesting PDF generation works.
+- Grant deed retrieval works through the dedicated document-retrieval path.
+- Generated documents upload to S3 and attach to SoftPro.
+- Confirmation queuing is intentionally gated on completed `legal_vesting`, `tax`, and `grant_deed`.
 
 ## Final Takeaways
-
-- The initial HTML failure was real, but "WAF" alone was not enough proof.
-- The first fully proven production bug was the truncated password.
-- After credentials were fixed, the next fully proven production bug was parser-root drift.
-- The TitlePoint problem was not one thing. It was a chain:
+- The failure chain was real and layered:
   - contract drift
   - credential truncation
   - parser-root mismatch
+  - dead queue dependency
+  - wrong retry routing for grant deed
+- The fix was not one big rewrite. It was a sequence of small, proven corrections backed by legacy evidence and live runtime behavior.
+- TitlePoint should be maintained as endpoint-specific flows, not as one abstract “clean” client.
 
-## Canonical Follow-up Reference
-
-For the current implementation record, use:
-
+## Canonical Current-State Reference
 - `docs/titlepoint/TITLEPOINT_IMPLEMENTATION_SOURCE_OF_TRUTH.md`
 
-Do not use the archived planning/call-note docs as active implementation truth.
+## Supporting Evidence
+- `docs/titlepoint/TITLEPOINT_LEGACY_EVIDENCE_PACK.md`
+- `docs/titlepoint/TITLEPOINT_TAX_CALLS_REFERENCE.md`
+- `docs/titlepoint/TITLEPOINT_GRANT_DEED_CALL_AND_RETRIEVAL.md`
+- `scripts/test-titlepoint-payloads.ts`

@@ -72,7 +72,7 @@ export async function parseGetGeneratedImageLiveResponse(xml: string) {
 
 export async function parseGrantDeedImageResponse(xml: string) {
   const parsed = await parseXml(xml);
-  const root = (parsed.ImageResult ?? {}) as Record<string, unknown>;
+  const root = (parsed.GetDocumentReturn ?? parsed.ImageResult ?? {}) as Record<string, unknown>;
 
   return {
     returnStatus: String(readPath(root, 'Status', 'Msg') ?? ''),

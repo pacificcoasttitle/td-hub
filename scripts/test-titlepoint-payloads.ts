@@ -360,7 +360,7 @@ console.log('\n6. Live root parser assertions');
   <Data>BAD</Data>
 </GenerateImageResult>`;
   const grantDeedXml = `<?xml version="1.0" encoding="utf-8"?>
-<ImageResult xmlns="http://titlepoint.com/ws/">
+<GetDocumentReturn xmlns="http://www.TitlePoint.com">
   <Status>
     <Msg>OK</Msg>
   </Status>
@@ -376,7 +376,7 @@ console.log('\n6. Live root parser assertions');
       </Document>
     </DocumentResponse>
   </Documents>
-</ImageResult>`;
+</GetDocumentReturn>`;
   const grantDeedWrongRootXml = `<?xml version="1.0" encoding="utf-8"?>
 <GenerateImageResult xmlns="http://www.TitlePoint.com">
   <ReturnStatus>Success</ReturnStatus>
@@ -435,7 +435,7 @@ console.log('\n6. Live root parser assertions');
   assert('GetGeneratedImage parser reads Data', generatedImageParsed.base64Data === '');
   assert('GetGeneratedImage parser no longer depends on GenerateImageResult', generatedImageWrongRootParsed.returnStatus === '' && generatedImageWrongRootParsed.status === '' && generatedImageWrongRootParsed.base64Data === '');
 
-  assert('Grant deed parser reads ImageResult Status.Msg', grantDeedParsed.returnStatus === 'OK');
+  assert('Grant deed parser reads GetDocumentReturn Status.Msg', grantDeedParsed.returnStatus === 'OK');
   assert('Grant deed parser reads DocStatus.Msg', grantDeedParsed.docStatus === 'OK');
   assert('Grant deed parser reads PDF body path', grantDeedParsed.base64Data === 'JVBERi0xLjQ=');
   assert('Grant deed parser no longer depends on GenerateImageResult', grantDeedWrongRootParsed.returnStatus === '' && grantDeedWrongRootParsed.docStatus === '' && grantDeedWrongRootParsed.base64Data === '');

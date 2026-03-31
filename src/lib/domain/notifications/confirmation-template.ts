@@ -1,11 +1,15 @@
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hub.pctitle.com';
 const FINCEN_URL = process.env.FINCEN_CHECK_URL ?? 'https://hub.pctitle.com/fincen-check';
 
-const PCT_NAVY = '#1a365d';
-const PCT_GOLD = '#d4a739';
-const TEXT_GRAY = '#4a5568';
-const BORDER_GRAY = '#e2e8f0';
-const BG_LIGHT = '#f7fafc';
+const PCT_NAVY = '#1B2A4A';
+const PCT_ORANGE = '#F26B2B';
+const TEXT_PRIMARY = '#1B2A4A';
+const TEXT_MUTED = '#526174';
+const BORDER_NAVY = '#1B2A4A';
+const BORDER_SOFT = '#D7DDE5';
+const BG_LIGHT = '#F8F9FA';
+const CARD_BG = '#FFFFFF';
+const ORANGE_TINT = '#FFF4EE';
 
 export interface ConfirmationParty {
   name: string | null;
@@ -61,21 +65,26 @@ function esc(str: string): string {
 
 function row(label: string, value: string): string {
   return `<tr>
-    <td style="padding:8px 12px;font-size:13px;color:#718096;border-bottom:1px solid ${BORDER_GRAY};">${label}</td>
-    <td style="padding:8px 12px;font-size:13px;font-weight:600;color:${PCT_NAVY};border-bottom:1px solid ${BORDER_GRAY};">${esc(value)}</td>
+    <td style="padding:10px 14px;font-size:13px;color:${TEXT_MUTED};border-bottom:1px solid ${BORDER_SOFT};width:38%;">${label}</td>
+    <td style="padding:10px 14px;font-size:13px;font-weight:600;color:${TEXT_PRIMARY};border-bottom:1px solid ${BORDER_SOFT};">${esc(value)}</td>
   </tr>`;
 }
 
 function table(rows: string): string {
-  return `<table width="100%" cellpadding="0" cellspacing="0" style="background:${BG_LIGHT};border-radius:6px;margin:8px 0 16px;border:1px solid ${BORDER_GRAY};">${rows}</table>`;
+  return `<table width="100%" cellpadding="0" cellspacing="0" style="background:${CARD_BG};border-radius:10px;margin:0;border:1px solid ${BORDER_SOFT};">${rows}</table>`;
 }
 
 function section(title: string, content: string): string {
-  return `<h3 style="color:${PCT_NAVY};margin:24px 0 4px;font-size:15px;border-bottom:2px solid ${PCT_GOLD};padding-bottom:4px;">${title}</h3>${content}`;
+  return `<div style="background:${CARD_BG};border:1px solid ${BORDER_NAVY};border-radius:12px;padding:18px 18px 16px;margin:0 0 18px;">
+    <h3 style="color:${PCT_NAVY};margin:0 0 12px;font-size:15px;font-weight:700;border-bottom:3px solid ${PCT_ORANGE};padding-bottom:8px;">${title}</h3>
+    ${content}
+  </div>`;
 }
 
 function btn(text: string, href: string): string {
-  return `<td style="background:${PCT_NAVY};border-radius:6px;padding:10px 20px;"><a href="${href}" style="color:#fff;text-decoration:none;font-size:13px;font-weight:600;">${text}</a></td>`;
+  return `<td style="background:${PCT_ORANGE};border:1px solid ${PCT_ORANGE};border-radius:8px;padding:12px 18px;">
+    <a href="${href}" style="color:#FFFFFF;text-decoration:none;font-size:13px;font-weight:700;display:block;">${text}</a>
+  </td>`;
 }
 
 function partyBlock(label: string, p: ConfirmationParty | null | undefined): string {
@@ -109,10 +118,10 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
   let fincenHtml = '';
   if (isPurchase) {
     fincenHtml = `
-    <div style="background:#fffbeb;border:1px solid #f6e05e;border-radius:6px;padding:16px;margin:0 0 20px;">
-      <h3 style="color:#744210;margin:0 0 8px;font-size:15px;">FinCEN Reporting Quick Check</h3>
-      <p style="margin:0 0 8px;font-size:13px;color:#744210;">Sales Price: <strong>${esc(data.salesPrice ?? 'N/A')}</strong></p>
-      <ul style="margin:0 0 12px;padding-left:20px;font-size:13px;color:#744210;">
+    <div style="background:${ORANGE_TINT};border:1px solid ${PCT_ORANGE};border-radius:12px;padding:18px;margin:0 0 18px;">
+      <h3 style="color:${PCT_NAVY};margin:0 0 8px;font-size:15px;font-weight:700;">FinCEN Reporting Quick Check</h3>
+      <p style="margin:0 0 8px;font-size:13px;color:${TEXT_PRIMARY};">Sales Price: <strong>${esc(data.salesPrice ?? 'N/A')}</strong></p>
+      <ul style="margin:0 0 14px;padding-left:20px;font-size:13px;color:${TEXT_PRIMARY};">
         <li>Is this an all-cash or wire-financed transaction?</li>
         <li>Is the buyer a legal entity or trust?</li>
       </ul>
@@ -124,10 +133,16 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
 
   // Document note
   const docHtml = data.hasDocuments
-    ? `<p style="margin:8px 0;font-size:13px;"><strong>Attached:</strong> Legal and Vesting, Recent Grant Deed, Tax Roll</p>`
+    ? `<div style="background:${CARD_BG};border:1px solid ${BORDER_SOFT};border-left:4px solid ${PCT_ORANGE};border-radius:12px;padding:14px 16px;margin:0 0 18px;">
+        <p style="margin:0;font-size:13px;color:${TEXT_PRIMARY};"><strong>Attached:</strong> Legal and Vesting, Recent Grant Deed, Tax Roll</p>
+      </div>`
     : data.isTitlePointActive
-      ? `<p style="margin:8px 0;font-size:13px;color:#718096;">Documents are being generated and will be available shortly.</p>`
-      : `<p style="margin:8px 0;font-size:13px;color:#718096;">TitlePoint is currently offline. Documents will be available when service resumes.</p>`;
+      ? `<div style="background:${CARD_BG};border:1px solid ${BORDER_SOFT};border-left:4px solid ${PCT_ORANGE};border-radius:12px;padding:14px 16px;margin:0 0 18px;">
+          <p style="margin:0;font-size:13px;color:${TEXT_MUTED};">Documents are being generated and will be available shortly.</p>
+        </div>`
+      : `<div style="background:${CARD_BG};border:1px solid ${BORDER_SOFT};border-left:4px solid ${PCT_ORANGE};border-radius:12px;padding:14px 16px;margin:0 0 18px;">
+          <p style="margin:0;font-size:13px;color:${TEXT_MUTED};">TitlePoint is currently offline. Documents will be available when service resumes.</p>
+        </div>`;
 
   // Action buttons
   let actionBtns = '';
@@ -135,7 +150,7 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
   if (!hideGenerateFees) btnCells.push(btn('Generate Fees', `${APP_URL}/orders/${encodeURIComponent(fn)}/fees`));
   btnCells.push(btn('Generate Proposed', `${APP_URL}/orders/${encodeURIComponent(fn)}/proposed`));
   btnCells.push(btn('Generate CPL', `${APP_URL}/orders/${encodeURIComponent(fn)}/cpl`));
-  actionBtns = `<table cellpadding="0" cellspacing="0" style="margin:16px 0;"><tr>${btnCells.map((b) => b + '<td width="8"></td>').join('')}</tr></table>`;
+  actionBtns = `<table cellpadding="0" cellspacing="0" style="margin:0 0 18px;"><tr>${btnCells.map((b) => b + '<td width="8"></td>').join('')}</tr></table>`;
 
   // Opener section
   let openerHtml = '';
@@ -210,9 +225,11 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
   ].join('');
 
   const body = `
-    <h2 style="color:${PCT_NAVY};margin:0 0 4px;font-size:22px;">Title Order Opened!</h2>
-    <p style="margin:0 0 4px;font-size:14px;">Order Details Below</p>
-    <p style="margin:0 0 16px;font-size:18px;font-weight:700;color:${PCT_NAVY};">Order # ${esc(fn)}</p>
+    <div style="background:${PCT_NAVY};border-radius:14px;padding:24px;margin:0 0 20px;">
+      <h2 style="color:#FFFFFF;margin:0 0 6px;font-size:26px;font-weight:700;">Title Order Opened!</h2>
+      <p style="margin:0 0 6px;font-size:14px;color:#D7DDE5;">Pacific Coast Title has opened a new order.</p>
+      <p style="margin:0;font-size:18px;font-weight:700;color:#FFFFFF;">Order # ${esc(fn)}</p>
+    </div>
     ${fincenHtml}${docHtml}${actionBtns}${openerHtml}${propHtml}${taxHtml}${sellerHtml}${txHtml}${partyHtml}
     <table cellpadding="0" cellspacing="0" style="margin:24px 0;"><tr>
       ${btn('View Order in Portal', orderUrl)}
@@ -229,18 +246,18 @@ function layout(title: string, body: string): string {
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/></head>
 <body style="margin:0;padding:0;background:${BG_LIGHT};font-family:Arial,Helvetica,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:${BG_LIGHT};padding:24px 0;"><tr><td align="center">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${CARD_BG};border-radius:16px;overflow:hidden;border:1px solid ${BORDER_SOFT};">
   <tr><td style="background:${PCT_NAVY};padding:20px 32px;">
     <table width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td style="color:#fff;font-size:20px;font-weight:bold;letter-spacing:.5px;">Pacific Coast Title</td>
-      <td align="right" style="color:${PCT_GOLD};font-size:12px;text-transform:uppercase;letter-spacing:1px;">${esc(title)}</td>
+      <td style="color:#FFFFFF;font-size:20px;font-weight:bold;letter-spacing:.5px;">Pacific Coast Title</td>
+      <td align="right" style="color:${PCT_ORANGE};font-size:12px;text-transform:uppercase;letter-spacing:1px;">${esc(title)}</td>
     </tr></table>
   </td></tr>
-  <tr><td style="padding:32px;color:${TEXT_GRAY};font-size:15px;line-height:1.6;">${body}</td></tr>
-  <tr><td style="padding:0 32px 24px;border-top:1px solid ${BORDER_GRAY};">
-    <p style="font-size:12px;color:#a0aec0;margin:16px 0 0;">
+  <tr><td style="padding:32px;color:${TEXT_MUTED};font-size:15px;line-height:1.6;">${body}</td></tr>
+  <tr><td style="padding:0 32px 24px;border-top:1px solid ${BORDER_SOFT};">
+    <p style="font-size:12px;color:${TEXT_MUTED};margin:16px 0 0;">
       Pacific Coast Title Company &bull; Automated notification<br/>
-      <a href="${APP_URL}" style="color:${PCT_GOLD};text-decoration:none;">hub.pctitle.com</a>
+      <a href="${APP_URL}" style="color:${PCT_ORANGE};text-decoration:none;">hub.pctitle.com</a>
     </p>
   </td></tr>
 </table>

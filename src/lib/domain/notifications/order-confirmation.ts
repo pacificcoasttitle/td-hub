@@ -3,7 +3,7 @@ import {
   orders, orderProperties, orderParties, contacts,
   profiles, documents, titlePointData, vendorApiLogs,
 } from '@/lib/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, desc } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { sendEmail, type SendGridAttachment } from '@/lib/integrations/sendgrid/client';
 import { downloadFile } from '@/lib/integrations/s3/client';
@@ -91,6 +91,7 @@ export async function handleOrderConfirmation(
   const opener = await loadOpener(row.createdBy);
   const recipientEmails = await loadRecipientEmails(orderId, row, partyRows);
   const taxData = await loadTaxData(orderId);
+  const legalDescription = await loadLegalDescription(orderId, row.propLegal);
   const tpShutOff = (await getSetting('titlepoint_shut_off')) === 'true';
 
   const attachments = await buildAttachments(orderId, noDocuments);
@@ -103,7 +104,7 @@ export async function handleOrderConfirmation(
     salesPrice: row.salesPrice,
     loanAmount: row.loanAmount,
     opener,
-    property: { address: row.propAddress, city: row.propCity, zip: row.propZip, county: row.propCounty, apn: row.propApn, legalDescription: row.propLegal },
+    property: { address: row.propAddress, city: row.propCity, zip: row.propZip, county: row.propCounty, apn: row.propApn, legalDescription },
     taxData,
     seller: { primary: row.propPrimaryOwner, secondary: row.propSecondaryOwner },
     parties: { buyerAgent: toParty('buyer_agent'), listingAgent: toParty('listing_agent'), lender: toParty('lender'), escrow: toParty('escrow_company') },
@@ -178,7 +179,12 @@ async function loadRecipientEmails(
 async function loadTaxData(orderId: number): Promise<ConfirmationTaxData | null> {
   const [taxRow] = await db.select({ metadata: titlePointData.metadata })
     .from(titlePointData)
-    .where(and(eq(titlePointData.orderId, orderId), eq(titlePointData.searchType, 'tax')))
+    .where(and(
+      eq(titlePointData.orderId, orderId),
+      eq(titlePointData.searchType, 'tax'),
+      eq(titlePointData.status, 'completed'),
+    ))
+    .orderBy(desc(titlePointData.createdAt), desc(titlePointData.id))
     .limit(1);
   if (!taxRow) return null;
 
@@ -192,20 +198,57 @@ async function loadTaxData(orderId: number): Promise<ConfirmationTaxData | null>
     for (const k of keys) { const v = o[k]; if (v && typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>; }
     return null;
   };
+  const report = obj(rd, 'TaxReport', 'taxReport') ?? rd;
+  const pickInstallment = (source: Record<string, unknown>, ordinal: '1st' | '2nd') => {
+    const installments = obj(source, 'Installments', 'installments');
+    if (!installments) return null;
+    const rawItems = installments.Item ?? installments.items;
+    const items = Array.isArray(rawItems) ? rawItems : rawItems ? [rawItems] : [];
+    const match = items.find((item) => {
+      if (!item || typeof item !== 'object') return false;
+      const number = str(item as Record<string, unknown>, 'Number', 'number');
+      return number === ordinal;
+    });
+    return match && typeof match === 'object' && !Array.isArray(match)
+      ? (match as Record<string, unknown>)
+      : null;
+  };
 
   return {
-    taxRateArea: str(rd, 'TaxRateArea', 'taxRateArea'),
-    useCode: str(rd, 'UseCode', 'useCode'),
-    regionCode: str(rd, 'RegionCode', 'regionCode'),
-    floodZone: str(rd, 'FloodZone', 'floodZone'),
-    zoningCode: str(rd, 'ZoningCode', 'zoningCode'),
-    taxRate: str(rd, 'TaxRate', 'taxRate'),
-    issueDate: str(rd, 'IssueDate', 'issueDate'),
-    landValue: str(rd, 'LandValue', 'landValue'),
-    improvementsValue: str(rd, 'ImprovementsValue', 'improvementsValue'),
-    firstInstallment: obj(rd, 'FirstInstallment', 'firstInstallment') as ConfirmationTaxData['firstInstallment'],
-    secondInstallment: obj(rd, 'SecondInstallment', 'secondInstallment') as ConfirmationTaxData['secondInstallment'],
+    taxRateArea: str(report, 'TaxRateArea', 'taxRateArea'),
+    useCode: str(report, 'UseCode', 'useCode'),
+    regionCode: str(report, 'RegionCode', 'regionCode'),
+    floodZone: str(report, 'FloodZone', 'floodZone'),
+    zoningCode: str(report, 'ZoningCode', 'zoningCode'),
+    taxRate: str(report, 'TaxRate', 'taxRate'),
+    issueDate: str(report, 'IssueDate', 'issueDate'),
+    landValue: str(report, 'LandValue', 'landValue', 'LandValuation', 'landValuation'),
+    improvementsValue: str(report, 'ImprovementsValue', 'improvementsValue', 'ImprovementsValuation', 'improvementsValuation'),
+    firstInstallment: (pickInstallment(report, '1st') ?? obj(report, 'FirstInstallment', 'firstInstallment')) as ConfirmationTaxData['firstInstallment'],
+    secondInstallment: (pickInstallment(report, '2nd') ?? obj(report, 'SecondInstallment', 'secondInstallment')) as ConfirmationTaxData['secondInstallment'],
   };
+}
+
+async function loadLegalDescription(orderId: number, fallback: string | null): Promise<string | null> {
+  const [lvRow] = await db.select({ metadata: titlePointData.metadata })
+    .from(titlePointData)
+    .where(and(
+      eq(titlePointData.orderId, orderId),
+      eq(titlePointData.searchType, 'legal_vesting'),
+      eq(titlePointData.status, 'completed'),
+    ))
+    .orderBy(desc(titlePointData.createdAt), desc(titlePointData.id))
+    .limit(1);
+
+  if (!lvRow) return fallback;
+
+  const meta = (lvRow.metadata as Record<string, unknown>) ?? {};
+  const result = (meta.resultData as Record<string, unknown>) ?? {};
+  for (const key of ['BriefLegal', 'briefLegal', 'LegalDescription', 'legalDescription']) {
+    const value = result[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return fallback;
 }
 
 async function buildAttachments(orderId: number, noDocuments: boolean): Promise<SendGridAttachment[]> {

@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { titlePointData, orderProperties, jobs } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { getOrderByIdSimple } from '@/lib/domain/orders/service';
 import { uploadDocument, attachToSoftPro } from '@/lib/domain/documents/service';
 import {
@@ -151,6 +151,16 @@ async function executePipeline(
   console.error('[TP-PIPELINE] Starting executePipeline for titlePointDataId:', titlePointDataId);
 
   try {
+    const [initialRecord] = await db
+      .select()
+      .from(titlePointData)
+      .where(eq(titlePointData.id, titlePointDataId))
+      .limit(1);
+
+    if (initialRecord?.searchType === 'grant_deed') {
+      return { success: false, error: 'Grant deed must use fetchGrantDeed, not the generic pipeline' };
+    }
+
     const deadline = Date.now() + PIPELINE_TIMEOUT_MS;
 
     // ── Step 1: Poll for completion ──
@@ -476,6 +486,37 @@ export async function retryFailedSearches(
       .update(titlePointData)
       .set({ status: 'superseded', message: 'Retrying...', updatedAt: new Date() })
       .where(eq(titlePointData.id, row.id));
+
+    if (searchType === 'grant_deed') {
+      const [lvRow] = await db
+        .select({ id: titlePointData.id })
+        .from(titlePointData)
+        .where(
+          and(
+            eq(titlePointData.orderId, orderId),
+            eq(titlePointData.searchType, 'legal_vesting'),
+            eq(titlePointData.status, 'completed'),
+          )
+        )
+        .orderBy(desc(titlePointData.updatedAt), desc(titlePointData.id))
+        .limit(1);
+
+      if (!lvRow) {
+        console.warn(`[TP-GRANT-DEED] Skipping retry for order ${orderId}: no completed legal_vesting row found`);
+        results.push({ searchType, status: 'skipped', error: 'No completed legal_vesting row found' });
+        continue;
+      }
+
+      const grantResult = await fetchGrantDeed(lvRow.id);
+      if (grantResult.success) {
+        retried++;
+        results.push({ searchType, status: 'completed' });
+      } else {
+        failed++;
+        results.push({ searchType, status: 'failed', error: grantResult.error });
+      }
+      continue;
+    }
 
     // initiateSearch now runs the full pipeline inline
     const initResult = await initiateSearch(orderId, searchType, userId);

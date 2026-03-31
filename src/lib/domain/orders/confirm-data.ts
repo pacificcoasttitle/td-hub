@@ -143,13 +143,35 @@ async function loadTitlePointData(
     searchType: titlePointData.searchType,
     status: titlePointData.status,
     metadata: titlePointData.metadata,
+    createdAt: titlePointData.createdAt,
   })
     .from(titlePointData)
     .where(eq(titlePointData.orderId, orderId));
 
-  const lvRow = tpRows.find((r) => r.searchType === 'legal_vesting');
-  const taxRow = tpRows.find((r) => r.searchType === 'tax');
-  const gdRow = tpRows.find((r) => r.searchType === 'grant_deed');
+  const latestByType = new Map<string, (typeof tpRows)[number]>();
+  for (const row of tpRows) {
+    if (!row.searchType) continue;
+
+    const current = latestByType.get(row.searchType);
+    if (!current) {
+      latestByType.set(row.searchType, row);
+      continue;
+    }
+
+    const rowCompleted = row.status === 'completed';
+    const currentCompleted = current.status === 'completed';
+    if (rowCompleted && !currentCompleted) {
+      latestByType.set(row.searchType, row);
+      continue;
+    }
+    if (rowCompleted === currentCompleted && row.createdAt > current.createdAt) {
+      latestByType.set(row.searchType, row);
+    }
+  }
+
+  const lvRow = latestByType.get('legal_vesting');
+  const taxRow = latestByType.get('tax');
+  const gdRow = latestByType.get('grant_deed');
 
   const lvMeta = (lvRow?.metadata as Record<string, unknown>) ?? {};
   const lvResult = (lvMeta.resultData as Record<string, unknown>) ?? {};

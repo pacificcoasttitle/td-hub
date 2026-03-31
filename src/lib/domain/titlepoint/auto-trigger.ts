@@ -1,5 +1,5 @@
 import { db } from '@/lib/db/client';
-import { jobs, vendorApiLogs } from '@/lib/db/schema';
+import { vendorApiLogs } from '@/lib/db/schema';
 import { initiateSearch } from './service';
 import { getSetting } from '@/lib/domain/settings/service';
 import type { TitlePointSearchType } from '@/lib/integrations/titlepoint/types';
@@ -21,13 +21,16 @@ interface AutoTriggerResult {
 
 /**
  * Fire-and-forget TitlePoint searches after order creation.
- * Initiates Geo, Tax, and Legal Vesting searches in parallel.
+ * Initiates Geo, Tax, and Legal Vesting searches sequentially.
+ * Each initiateSearch() now runs the full pipeline inline
+ * (poll → result → image → upload → softpro) so no separate
+ * job queue is needed.
  * Respects the titlepoint_shut_off admin setting.
  * Failures are logged but never propagated to the caller.
  */
 export async function autoTriggerTitlePoint(
   orderId: number,
-  property: PropertyData,
+  _property: PropertyData,
 ): Promise<AutoTriggerResult> {
   const shutOff = await getSetting('titlepoint_shut_off');
   if (shutOff === 'true') {
@@ -48,34 +51,21 @@ export async function autoTriggerTitlePoint(
 
   const searchTypes: TitlePointSearchType[] = ['geo_address', 'tax', 'legal_vesting'];
 
-  const results = await Promise.allSettled(
-    searchTypes.map(async (searchType) => {
-      const result = await initiateSearch(orderId, searchType, 'system:auto');
-      if (!result.success) {
-        throw new Error(result.error ?? `${searchType} initiation failed`);
-      }
-      if (result.titlePointDataId) {
-        await enqueuePoll(result.titlePointDataId);
-      }
-      return result;
-    })
-  );
-
   let initiated = 0;
   let failed = 0;
-  for (const r of results) {
-    if (r.status === 'fulfilled') initiated++;
-    else failed++;
+
+  for (const searchType of searchTypes) {
+    try {
+      const result = await initiateSearch(orderId, searchType, 'system:auto');
+      if (result.success) {
+        initiated++;
+      } else {
+        failed++;
+      }
+    } catch {
+      failed++;
+    }
   }
 
   return { initiated, failed };
-}
-
-async function enqueuePoll(titlePointDataId: number): Promise<void> {
-  await db.insert(jobs).values({
-    jobType: 'titlepoint.poll',
-    payload: { titlePointDataId } as Record<string, unknown>,
-    status: 'queued',
-    nextRetryAt: new Date(Date.now() + 30_000),
-  });
 }

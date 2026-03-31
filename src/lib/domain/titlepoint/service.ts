@@ -12,6 +12,8 @@ import {
 } from '@/lib/integrations/titlepoint/client';
 import { requestImage, getRequestStatus, getImage } from '@/lib/integrations/titlepoint/client-image';
 import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
+import { fetchGrantDeed } from '@/lib/domain/titlepoint/grant-deed';
+import { maybeEnqueueConfirmation } from '@/lib/domain/titlepoint/completion-checker';
 import type { TitlePointSearchType } from '@/lib/integrations/titlepoint/types';
 
 // ─── Search-type to document category mapping ───────────────────────────────
@@ -23,7 +25,14 @@ const SEARCH_TYPE_DOC_CATEGORY: Record<TitlePointSearchType, string> = {
   tax: 'tax',
 };
 
+const POLL_MAX_ATTEMPTS = 3;
+const POLL_INTERVAL_MS = 5_000;
+const PIPELINE_TIMEOUT_MS = 60_000;
+
 // ─── Initiate Search ────────────────────────────────────────────────────────
+// After successful createService, executes the full pipeline INLINE:
+//   poll → result → image → upload → softpro
+// Falls back to leaving a job row for a future cron if pipeline times out.
 
 export async function initiateSearch(
   orderId: number,
@@ -76,12 +85,141 @@ export async function initiateSearch(
       fileNumber: order.fileNumber,
       requestId: tpData.requestId,
       searchType,
-      status: 'pending',
+      status: 'processing',
       metadata: { userId, tpOrderId: tpData.orderId } as Record<string, unknown>,
     })
     .returning({ id: titlePointData.id });
 
-  return { success: true, titlePointDataId: record!.id };
+  const tpDataId = record!.id;
+
+  // Insert job row for observability — will be marked completed after inline execution
+  const [jobRow] = await db
+    .insert(jobs)
+    .values({
+      jobType: 'titlepoint.poll',
+      orderId,
+      payload: { titlePointDataId: tpDataId } as Record<string, unknown>,
+      status: 'running',
+    })
+    .returning({ id: jobs.id });
+
+  // Execute full pipeline inline
+  const pipelineResult = await executePipeline(tpDataId);
+
+  // Mark job based on outcome
+  if (pipelineResult.success) {
+    await db.update(jobs).set({
+      status: 'completed',
+      endedAt: new Date(),
+      attempts: 1,
+    }).where(eq(jobs.id, jobRow!.id));
+  } else if (pipelineResult.timedOut) {
+    // Timed out — leave job as queued for future cron pickup
+    await db.update(jobs).set({
+      status: 'queued',
+      nextRetryAt: new Date(Date.now() + 30_000),
+    }).where(eq(jobs.id, jobRow!.id));
+  } else {
+    await db.update(jobs).set({
+      status: 'failed',
+      error: pipelineResult.error,
+      endedAt: new Date(),
+      attempts: 1,
+    }).where(eq(jobs.id, jobRow!.id));
+  }
+
+  return {
+    success: pipelineResult.success,
+    titlePointDataId: tpDataId,
+    error: pipelineResult.error,
+  };
+}
+
+// ─── Execute Pipeline (inline) ──────────────────────────────────────────────
+// Runs the full TitlePoint lifecycle after CreateService:
+//   1. Poll GetRequestSummaries (up to 3 attempts, 5s apart)
+//   2. Fetch result via GetResultByID3 (or GetResultByID for LV)
+//   3. Generate image (CreateRequest3 → GetRequestStatus → GetGeneratedImage)
+//   4. Upload PDF to S3, create documents row
+//   5. Attach to SoftPro (best effort)
+//   6. Update title_point_data to 'completed'
+// If the whole thing takes >60s, returns { timedOut: true } for cron fallback.
+
+async function executePipeline(
+  titlePointDataId: number,
+): Promise<{ success: boolean; timedOut?: boolean; error?: string }> {
+  const deadline = Date.now() + PIPELINE_TIMEOUT_MS;
+
+  // ── Step 1: Poll for completion ──
+  let pollResult: Awaited<ReturnType<typeof pollSearch>> = { status: 'pending' };
+
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+    if (Date.now() > deadline) {
+      return { success: false, timedOut: true, error: 'Pipeline timeout during polling' };
+    }
+
+    pollResult = await pollSearch(titlePointDataId);
+
+    if (pollResult.status === 'success') break;
+    if (pollResult.status === 'failed') {
+      return { success: false, error: pollResult.error ?? 'Poll returned failed' };
+    }
+
+    // Still pending — wait before next attempt
+    if (attempt < POLL_MAX_ATTEMPTS - 1) {
+      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+    }
+  }
+
+  if (pollResult.status === 'pending') {
+    // Exhausted poll attempts but still processing — leave for cron
+    return { success: false, timedOut: true, error: 'Still processing after max poll attempts' };
+  }
+
+  if (pollResult.status !== 'success') {
+    return { success: false, error: pollResult.error };
+  }
+
+  // ── Step 2: Fetch result data ──
+  if (Date.now() > deadline) {
+    return { success: false, timedOut: true, error: 'Pipeline timeout before result fetch' };
+  }
+
+  const resultOutcome = await fetchResult(titlePointDataId);
+  if (!resultOutcome.success) {
+    return { success: false, error: resultOutcome.error };
+  }
+
+  // ── Step 3: Generate image + upload + SoftPro ──
+  if (Date.now() > deadline) {
+    return { success: false, timedOut: true, error: 'Pipeline timeout before image generation' };
+  }
+
+  const imageOutcome = await fetchImage(titlePointDataId);
+  if (!imageOutcome.success) {
+    return { success: false, error: imageOutcome.error };
+  }
+
+  // ── Step 4: Post-completion triggers (best-effort, don't fail pipeline) ──
+  const [record] = await db
+    .select()
+    .from(titlePointData)
+    .where(eq(titlePointData.id, titlePointDataId))
+    .limit(1);
+
+  if (record) {
+    // After LV completes, trigger Grant Deed extraction
+    if (record.searchType === 'legal_vesting') {
+      try { await fetchGrantDeed(titlePointDataId); } catch { /* best effort */ }
+    }
+
+    // After any search completes, check if all three docs are ready
+    if (record.orderId) {
+      try { await maybeEnqueueConfirmation(record.orderId); } catch { /* best effort */ }
+    }
+  }
+
+  return { success: true };
 }
 
 // ─── Poll Search ────────────────────────────────────────────────────────────
@@ -137,7 +275,6 @@ export async function pollSearch(
     return { status: 'failed', error: summary.message };
   }
 
-  // success — store first serviceId + resultId (resultId is needed for GetResultByID3)
   const serviceId = summary.serviceIds[0] ?? null;
   const resultId = summary.resultIds[0] ?? null;
   await db
@@ -288,6 +425,8 @@ export async function fetchImage(
 }
 
 // ─── Retry Failed Searches ──────────────────────────────────────────────────
+// Same pattern as initiateSearch: re-creates the search, then executes the
+// full pipeline inline instead of just enqueuing a job.
 
 export async function retryFailedSearches(
   orderId: number,
@@ -314,23 +453,18 @@ export async function retryFailedSearches(
   for (const row of failedRows) {
     const searchType = (row.searchType ?? 'geo_address') as TitlePointSearchType;
 
+    // Mark old row as superseded before re-initiating
+    await db
+      .update(titlePointData)
+      .set({ status: 'superseded', message: 'Retrying...', updatedAt: new Date() })
+      .where(eq(titlePointData.id, row.id));
+
+    // initiateSearch now runs the full pipeline inline
     const initResult = await initiateSearch(orderId, searchType, userId);
 
-    if (initResult.success && initResult.titlePointDataId) {
-      await db.insert(jobs).values({
-        jobType: 'titlepoint.poll',
-        payload: { titlePointDataId: initResult.titlePointDataId } as Record<string, unknown>,
-        status: 'queued',
-        nextRetryAt: new Date(Date.now() + 30_000),
-      });
-
-      await db
-        .update(titlePointData)
-        .set({ status: 'superseded', message: `Retried — new record #${initResult.titlePointDataId}`, updatedAt: new Date() })
-        .where(eq(titlePointData.id, row.id));
-
+    if (initResult.success) {
       retried++;
-      results.push({ searchType, status: 'retried' });
+      results.push({ searchType, status: 'completed' });
     } else {
       failed++;
       results.push({ searchType, status: 'failed', error: initResult.error });

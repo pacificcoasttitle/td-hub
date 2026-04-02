@@ -7,7 +7,7 @@ interface Upload {
   documentName: string | null;
   orderNumber: string | null;
   createdAt: string;
-  synced: boolean;
+  isSynced: boolean;
   publicUrl: string | null;
 }
 
@@ -95,8 +95,8 @@ export function UploadHistory({ refreshKey }: Props) {
                 <td className="px-4 py-3 text-[#1A1A2E]">{r.orderNumber ?? '—'}</td>
                 <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{fmtDate(r.createdAt)}</td>
                 <td className="px-4 py-3">
-                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${r.synced ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                    {r.synced ? '✅ Synced' : '❌ Failed'}
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${r.isSynced ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                    {r.isSynced ? '✅ Synced' : '❌ Failed'}
                   </span>
                 </td>
                 <td className="px-4 py-3">

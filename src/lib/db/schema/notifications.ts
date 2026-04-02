@@ -1,0 +1,44 @@
+import {
+  pgTable, serial, varchar, text, boolean, integer, timestamp, jsonb, index,
+} from 'drizzle-orm/pg-core';
+import { orders } from './orders';
+
+export const notificationTypes = pgTable('notification_types', {
+  id: serial('id').primaryKey(),
+  slug: varchar('slug', { length: 100 }).unique().notNull(),
+  displayName: varchar('display_name', { length: 255 }).notNull(),
+  description: text('description'),
+  channels: text('channels').array().notNull().default(['{email}']),
+  isEnabled: boolean('is_enabled').notNull().default(true),
+  recipientRoles: text('recipient_roles').array(),
+  internalCc: text('internal_cc').array(),
+  templateId: varchar('template_id', { length: 100 }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  slugIdx: index('notification_types_slug_idx').on(table.slug),
+}));
+
+export const notificationLogs = pgTable('notification_logs', {
+  id: serial('id').primaryKey(),
+  eventType: varchar('event_type', { length: 100 }).notNull(),
+  orderId: integer('order_id').references(() => orders.id),
+  channel: varchar('channel', { length: 20 }).notNull(),
+  recipientEmail: varchar('recipient_email', { length: 255 }),
+  recipientPhone: varchar('recipient_phone', { length: 50 }),
+  recipientName: varchar('recipient_name', { length: 255 }),
+  recipientRole: varchar('recipient_role', { length: 100 }),
+  subject: varchar('subject', { length: 500 }),
+  templateUsed: varchar('template_used', { length: 100 }),
+  status: varchar('status', { length: 50 }).notNull().default('pending'),
+  provider: varchar('provider', { length: 50 }),
+  providerId: varchar('provider_id', { length: 255 }),
+  errorMessage: text('error_message'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  sentAt: timestamp('sent_at'),
+}, (table) => ({
+  orderIdx: index('notification_logs_order_idx').on(table.orderId),
+  typeIdx: index('notification_logs_type_idx').on(table.eventType),
+  statusIdx: index('notification_logs_status_idx').on(table.status),
+}));

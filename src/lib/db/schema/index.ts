@@ -6,3 +6,4 @@ export * from './integrations';
 export * from './jobs';
 export * from './admin';
 export * from './title-production';
+export * from './notifications';

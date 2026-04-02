@@ -35,6 +35,24 @@ interface ClosedOrder {
   property: { address: string | null; city: string | null; state: string | null } | null;
 }
 
+// ─── Normalizer (API field names → component field names) ───────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeRep(entry: any): RepPerformance {
+  return {
+    repId: entry.contactId ?? entry.repId,
+    repName: entry.salesRep ?? entry.repName,
+    mtdClosed: entry.mtdClosed ?? 0,
+    mtdRevenue: entry.mtdRevenue ?? null,
+    mtdOpens: entry.mtdOpens ?? entry.opens ?? 0,
+    priorMonthRevenue: entry.priorRevenue ?? entry.priorMonthRevenue ?? null,
+    purchase: entry.purchaseCount ?? entry.purchase ?? 0,
+    refinance: entry.refiCount ?? entry.refinance ?? 0,
+    escrow: entry.escrowCount ?? entry.escrow ?? 0,
+    tsg: entry.tsgCount ?? entry.tsg ?? 0,
+  };
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function ManagerDashboard() {
@@ -61,9 +79,9 @@ export function ManagerDashboard() {
     ])
       .then(([s, r, b, c]) => {
         setStats(s);
-        setReps(r.reps ?? []);
+        setReps((r.leaderboard ?? r.reps ?? []).map(normalizeRep));
         setBranches((b.branches ?? []).sort((a: BranchStat, b: BranchStat) => (b.openOrders + b.closedOrders) - (a.openOrders + a.closedOrders)));
-        setClosings(c.orders ?? []);
+        setClosings(c.closings ?? c.orders ?? []);
       })
       .catch((e) => { if (e.name !== 'AbortError') setError(e.message); })
       .finally(() => setLoading(false));

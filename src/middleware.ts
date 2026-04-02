@@ -33,16 +33,20 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Job routes: check JOB_RUNNER_SECRET Bearer token
+  // Job routes: check JOB_RUNNER_SECRET or CRON_SECRET Bearer token
   if (isJobRoute(pathname)) {
-    const secret = process.env.JOB_RUNNER_SECRET;
-    if (!secret) {
-      return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
-    }
     const authHeader = req.headers.get('authorization');
-    if (authHeader === `Bearer ${secret}`) {
+
+    const jobSecret = process.env.JOB_RUNNER_SECRET;
+    if (jobSecret && authHeader === `Bearer ${jobSecret}`) {
       return NextResponse.next();
     }
+
+    const cronSecret = process.env.CRON_SECRET;
+    if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
+      return NextResponse.next();
+    }
+
     // Fall through to Supabase session check — admins can also access job routes
   }
 

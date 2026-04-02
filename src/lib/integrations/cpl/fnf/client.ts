@@ -14,6 +14,22 @@ import type { FnfBranchInfo, FnfGenerateCplParams } from './soap';
 
 const VENDOR = 'fnf';
 
+type FnfAgentApiItem = {
+  agentNumber: string;
+  agentStatus?: string;
+  agentAccountType?: string;
+  isDbaName?: boolean;
+  underwriterCode: string;
+  underwriter?: string;
+  locationAddress1?: string;
+  locationCity?: string;
+  locationStateCode?: string;
+  locationZipCode?: string;
+  locationPhoneNumber?: string;
+};
+
+type FnfBranchRow = typeof cplBranches.$inferSelect;
+
 function getConfig() {
   const vendorUrl = process.env.FNF_VENDOR_URL;
   if (!vendorUrl) return null;
@@ -47,15 +63,17 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function loadBranch(branchId: number): Promise<FnfBranchInfo> {
-  const [row] = await db
-    .select()
-    .from(cplBranches)
-    .where(and(eq(cplBranches.id, branchId), eq(cplBranches.isActive, true)))
-    .limit(1);
+function isPlaceholderFnfClup(value: string): boolean {
+  const normalized = value.trim().toUpperCase();
+  return normalized.startsWith('PCT-CW-') || normalized.startsWith('FNF-');
+}
 
-  if (!row) throw new Error(`FNF branch ${branchId} not found or inactive`);
+function isLiveFnfRow(row: FnfBranchRow): boolean {
+  const meta = row.metadata as Record<string, unknown> | null;
+  return meta?.source === 'fnf_agent_api';
+}
 
+function toFnfBranchInfo(row: FnfBranchRow): FnfBranchInfo {
   return {
     agentNumber: row.branchCode ?? '',
     underwriterCode: row.underwriterCode ?? '',
@@ -65,6 +83,245 @@ async function loadBranch(branchId: number): Promise<FnfBranchInfo> {
     zip: row.zip ?? '',
     phone: row.phone ?? '',
   };
+}
+
+async function loadBranch(branchId: number): Promise<FnfBranchInfo> {
+  const [row] = await db
+    .select()
+    .from(cplBranches)
+    .where(and(
+      eq(cplBranches.id, branchId),
+      eq(cplBranches.underwriter, 'fnf'),
+      eq(cplBranches.isActive, true),
+    ))
+    .limit(1);
+
+  if (!row) throw new Error(`FNF branch ${branchId} not found or inactive`);
+
+  if (!isLiveFnfRow(row)) {
+    throw new Error('FNF branch selection is not sourced from a valid live FNF agent record. Refresh branches and select a vendor-backed FNF agent.');
+  }
+
+  if (!row.branchCode || isPlaceholderFnfClup(row.branchCode)) {
+    throw new Error('FNF CLUP is missing or placeholder-like. Select a valid live FNF/Commonwealth agent before retrying.');
+  }
+
+  if (!row.underwriterCode) {
+    throw new Error('FNF underwriter code is missing on the selected live agent record.');
+  }
+
+  return toFnfBranchInfo(row);
+}
+
+async function fetchAgentsFromApi(cfg: NonNullable<ReturnType<typeof getConfig>>, orderId?: number): Promise<FnfAgentApiItem[]> {
+  const requestId = `fnf-agents-${crypto.randomUUID()}`;
+  const startedAt = new Date();
+
+  const vendorToken = await getVendorToken(cfg);
+  const userToken = await getUserToken(cfg, vendorToken);
+  const url = `${cfg.userUrl}agents/CPL/CA`;
+
+  let response: Response;
+  let rawText = '';
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${userToken}`,
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+    rawText = await response.text();
+  } catch (err) {
+    await logRequest({
+      operation: 'get_agent_list',
+      orderId,
+      requestId,
+      startedAt,
+      success: false,
+      errorCategory: 'NETWORK',
+      meta: { error: err instanceof Error ? err.message : 'Failed to fetch FNF agent list' },
+    });
+    throw new Error(`FNF agent list fetch failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+  }
+
+  if (!response.ok) {
+    await logRequest({
+      operation: 'get_agent_list',
+      orderId,
+      requestId,
+      startedAt,
+      success: false,
+      httpStatus: response.status,
+      errorCategory: 'HTTP_ERROR',
+      meta: { rawSnippet: rawText.slice(0, 500) },
+    });
+    throw new Error(`FNF agent list request failed: HTTP ${response.status}`);
+  }
+
+  let agents: unknown;
+  try {
+    agents = JSON.parse(rawText);
+  } catch {
+    await logRequest({
+      operation: 'get_agent_list',
+      orderId,
+      requestId,
+      startedAt,
+      success: false,
+      httpStatus: response.status,
+      errorCategory: 'PARSE_ERROR',
+      meta: { rawSnippet: rawText.slice(0, 500) },
+    });
+    throw new Error('FNF agent list returned invalid JSON');
+  }
+
+  if (!Array.isArray(agents)) {
+    await logRequest({
+      operation: 'get_agent_list',
+      orderId,
+      requestId,
+      startedAt,
+      success: false,
+      httpStatus: response.status,
+      errorCategory: 'INVALID_RESPONSE',
+      meta: { rawSnippet: rawText.slice(0, 500) },
+    });
+    throw new Error('FNF agent list returned an unexpected response shape');
+  }
+
+  await logRequest({
+    operation: 'get_agent_list',
+    orderId,
+    requestId,
+    startedAt,
+    success: true,
+    httpStatus: response.status,
+    meta: { count: agents.length },
+  });
+
+  return agents as FnfAgentApiItem[];
+}
+
+function buildFnfDisplayCode(agent: FnfAgentApiItem): string {
+  const city = (agent.locationCity ?? '').trim();
+  const underwriterCode = (agent.underwriterCode ?? '').trim();
+  return [underwriterCode, city].filter(Boolean).join(' - ');
+}
+
+function buildFnfDisplayName(agent: FnfAgentApiItem): string {
+  return (agent.locationCity ?? '').trim() || agent.agentNumber;
+}
+
+async function syncLiveFnfBranches(orderId?: number): Promise<FnfBranchRow[]> {
+  const cfg = getConfig();
+  if (!cfg) {
+    throw new Error('FNF environment variables are not configured');
+  }
+
+  const agents = await fetchAgentsFromApi(cfg, orderId);
+  const validAgents = agents.filter((agent) =>
+    Boolean(agent.agentNumber?.trim()) &&
+    Boolean(agent.underwriterCode?.trim()) &&
+    !isPlaceholderFnfClup(agent.agentNumber)
+  );
+
+  if (validAgents.length === 0) {
+    throw new Error('FNF agent feed returned no valid live CPL agent records');
+  }
+
+  for (const agent of validAgents) {
+    const existing = await db
+      .select()
+      .from(cplBranches)
+      .where(and(
+        eq(cplBranches.underwriter, 'fnf'),
+        eq(cplBranches.branchCode, agent.agentNumber),
+      ))
+      .limit(1);
+
+    const values = {
+      underwriter: 'fnf' as const,
+      branchCode: agent.agentNumber,
+      branchName: buildFnfDisplayName(agent),
+      agencyName: agent.underwriter ?? 'FNF / Commonwealth',
+      address: agent.locationAddress1 ?? '',
+      city: agent.locationCity ?? '',
+      state: agent.locationStateCode ?? 'CA',
+      zip: agent.locationZipCode ?? '',
+      phone: agent.locationPhoneNumber ?? '',
+      underwriterCode: agent.underwriterCode,
+      isActive: true,
+      metadata: {
+        source: 'fnf_agent_api',
+        agentStatus: agent.agentStatus ?? null,
+        agentAccountType: agent.agentAccountType ?? null,
+        isDbaName: agent.isDbaName ?? null,
+        locationCity: agent.locationCity ?? null,
+        displayCode: buildFnfDisplayCode(agent),
+      } as Record<string, unknown>,
+      updatedAt: new Date(),
+    };
+
+    if (existing[0]) {
+      await db
+        .update(cplBranches)
+        .set(values)
+        .where(eq(cplBranches.id, existing[0].id));
+    } else {
+      await db.insert(cplBranches).values({
+        ...values,
+        createdAt: new Date(),
+      });
+    }
+  }
+
+  return db
+    .select()
+    .from(cplBranches)
+    .where(and(eq(cplBranches.underwriter, 'fnf'), eq(cplBranches.isActive, true)))
+    .orderBy(asc(cplBranches.city), asc(cplBranches.branchName));
+}
+
+export async function getLiveFnfBranchOptions(orderId?: number): Promise<Array<{
+  id: number;
+  code: string;
+  name: string;
+  underwriter: 'fnf';
+  underwriterCode: string;
+  agencyName: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  phone: string;
+}>> {
+  const rows = await syncLiveFnfBranches(orderId);
+
+  return rows
+    .filter((row) =>
+      isLiveFnfRow(row) &&
+      Boolean(row.branchCode) &&
+      !isPlaceholderFnfClup(row.branchCode ?? '') &&
+      Boolean(row.underwriterCode)
+    )
+    .map((row) => {
+      const meta = row.metadata as Record<string, unknown> | null;
+      return {
+        id: row.id,
+        code: String(meta?.displayCode ?? row.underwriterCode ?? 'FNF'),
+        name: row.branchName ?? row.city ?? row.branchCode ?? '',
+        underwriter: 'fnf',
+        underwriterCode: row.underwriterCode ?? '',
+        agencyName: row.agencyName ?? '',
+        address: row.address ?? '',
+        city: row.city ?? '',
+        state: row.state ?? '',
+        zip: row.zip ?? '',
+        phone: row.phone ?? '',
+      };
+    });
 }
 
 async function getExistingDocumentId(orderId: number): Promise<string | null> {
@@ -248,22 +505,16 @@ export const fnfAdapter: CplAdapter = {
       return vendorSuccess(MOCK_BRANCHES, { requestId: rid, durationMs });
     }
 
-    const rows = await db
-      .select()
-      .from(cplBranches)
-      .where(and(eq(cplBranches.underwriter, 'fnf'), eq(cplBranches.isActive, true)))
-      .orderBy(asc(cplBranches.branchName));
-
-    const branches: CplBranch[] = rows.map((r) => ({
-      branchCode: r.branchCode ?? '',
-      branchName: r.branchName ?? '',
-      agencyName: r.agencyName ?? '',
-      address: r.address ?? '',
-      city: r.city ?? '',
-      state: r.state ?? '',
-      zip: r.zip ?? '',
-      phone: r.phone ?? '',
-      underwriterCode: r.underwriterCode ?? '',
+    const branches: CplBranch[] = (await getLiveFnfBranchOptions()).map((r) => ({
+      branchCode: r.code,
+      branchName: r.name,
+      agencyName: r.agencyName,
+      address: r.address,
+      city: r.city,
+      state: r.state,
+      zip: r.zip,
+      phone: r.phone,
+      underwriterCode: r.underwriterCode,
     }));
 
     const durationMs = Date.now() - s;

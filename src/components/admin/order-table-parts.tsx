@@ -14,7 +14,7 @@ export interface OrderProperty {
 
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 
-export const COL_COUNT = 10;
+export const COL_COUNT = 11;
 
 /* ── Actions Dropdown ──────────────────────────────────────────────────────── */
 

@@ -18,6 +18,7 @@ export interface Order {
   salesRepId: number | null;
   salesRepName?: string | null;
   createdByName?: string | null;
+  source?: string | null;
   emailStatus?: string | null;
   dupOverride?: boolean | null;
   openedAt: string;
@@ -34,6 +35,17 @@ export interface OrderListResponse {
 export const PAGE_SIZE = 25;
 
 /* ── Constants ─────────────────────────────────────────────────────────────── */
+
+const SOURCE_STYLES: Record<string, string> = {
+  manual_entry: 'bg-blue-50 text-blue-700',
+  softpro_sync: 'bg-gray-100 text-gray-600',
+  web_form:     'bg-purple-50 text-purple-700',
+};
+
+function fmtSource(s: string | null | undefined) {
+  if (!s) return null;
+  return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
 
 const EMAIL_COLORS: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-600',
@@ -78,6 +90,7 @@ export function OrderTable({
                 <TH>Product</TH>
                 <TH>Sales Rep</TH>
                 <TH>Created By</TH>
+                <TH>Source</TH>
                 <TH>Email</TH>
                 <TH className="text-center">Dup Override</TH>
                 <TH className="text-center w-20">Actions</TH>
@@ -192,6 +205,13 @@ function OrderRow({ order, rowNum, onClick, onAction }: {
       <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{order.productType ?? '—'}</td>
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.salesRepName ?? '—'}</td>
       <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{order.createdByName ?? '—'}</td>
+      <td className="px-4 py-3 whitespace-nowrap">
+        {order.source ? (
+          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${SOURCE_STYLES[order.source] ?? 'bg-gray-100 text-gray-600'}`}>
+            {fmtSource(order.source)}
+          </span>
+        ) : <span className="text-[#9CA3AF]">—</span>}
+      </td>
       <td className="px-4 py-3 whitespace-nowrap">
         <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${emailColor}`}>
           {emailSt === 'none' ? '—' : emailSt}

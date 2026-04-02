@@ -2,9 +2,18 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, vendorApiLogs } from '@/lib/db/schema';
-import { sql, eq, and, gte, like, desc } from 'drizzle-orm';
+import { sql, eq, and } from 'drizzle-orm';
 
 const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
+
+function toIsoOrNull(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
 
 export async function GET() {
   const session = await getSession();
@@ -27,17 +36,18 @@ export async function GET() {
       .from(orders);
 
     const [syncLog] = await db
-      .select({ createdAt: vendorApiLogs.createdAt })
+      .select({
+        lastSyncAt: sql<Date | string | null>`max(${vendorApiLogs.createdAt})`,
+      })
       .from(vendorApiLogs)
       .where(
         and(
           eq(vendorApiLogs.vendor, 'softpro'),
-          like(vendorApiLogs.operation, '%sync%'),
           eq(vendorApiLogs.success, true),
         )
-      )
-      .orderBy(desc(vendorApiLogs.createdAt))
-      .limit(1);
+      );
+
+    const lastSyncAt = toIsoOrNull(syncLog?.lastSyncAt);
 
     return NextResponse.json({
       totalOrders: Number(counts?.totalOrders ?? 0),
@@ -45,7 +55,8 @@ export async function GET() {
       inProcess: Number(counts?.inProcessOrders ?? 0),
       closedThisMonth: Number(counts?.closedThisMonth ?? 0),
       canceled: Number(counts?.canceledOrders ?? 0),
-      lastSynced: syncLog?.createdAt?.toISOString() ?? null,
+      lastSyncAt,
+      lastSynced: lastSyncAt,
     });
   } catch (err) {
     return NextResponse.json(

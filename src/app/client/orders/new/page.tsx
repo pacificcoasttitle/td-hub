@@ -47,7 +47,14 @@ export default function ClientNewOrderPage() {
   const prevTxType = useRef<string>('');
 
   useEffect(() => {
-    fetch('/api/client/profile').then((r) => r.ok ? r.json() : null).then((d) => setProfile(d)).catch(() => {});
+    fetch('/api/client/profile').then((r) => r.ok ? r.json() : null).then((d) => {
+      if (!d) return;
+      setProfile(d);
+      const repId = d.companySalesRepId;
+      const toId = d.companyTitleOfficerId;
+      if (repId) setTransaction(prev => prev.salesRep ? prev : { ...prev, salesRep: String(repId) });
+      if (toId) setTransaction(prev => prev.titleOfficer ? prev : { ...prev, titleOfficer: String(toId) });
+    }).catch(() => {});
   }, []);
 
   function next() { if (step < 5) setStep((step + 1) as Step); }

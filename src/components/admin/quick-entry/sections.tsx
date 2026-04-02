@@ -219,7 +219,6 @@ export function TransactionSection({ s }: { s: QuickEntryState }) {
             <input className={IN} value={s.orderType} onChange={(e) => s.setOrderType(e.target.value)} />
           )}
         </div>
-        <div><label className={FL}>Escrow Number</label><input className={IN} value={s.escrowNumber} onChange={(e) => s.setEscrowNumber(e.target.value)} placeholder="Optional" /></div>
       </div>
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div>
@@ -232,6 +231,7 @@ export function TransactionSection({ s }: { s: QuickEntryState }) {
           ) : (
             <input className={IN} value={s.salesRep} onChange={(e) => s.setSalesRep(e.target.value)} />
           )}
+          {s.repAutoFilled && s.clientCompanyName && <p className="text-xs text-green-600 italic mt-1">From {s.clientCompanyName}</p>}
         </div>
         <div>
           <label className={FL}>Title Officer</label>
@@ -243,7 +243,22 @@ export function TransactionSection({ s }: { s: QuickEntryState }) {
           ) : (
             <input className={IN} value={s.titleOfficer} onChange={(e) => s.setTitleOfficer(e.target.value)} />
           )}
+          {s.toAutoFilled && s.clientCompanyName && <p className="text-xs text-green-600 italic mt-1">From {s.clientCompanyName}</p>}
         </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label className={FL}>Underwriter</label>
+          {s.formOpts?.underwriters?.length ? (
+            <select value={s.underwriter} onChange={(e) => s.setUnderwriter(e.target.value)} className={SEL}>
+              <option value="">Select…</option>
+              {s.formOpts.underwriters.map((u) => <option key={u.code} value={u.code}>{u.name}</option>)}
+            </select>
+          ) : (
+            <input className={IN} value={s.underwriter} onChange={(e) => s.setUnderwriter(e.target.value)} placeholder="WC / CW" />
+          )}
+        </div>
+        <div><label className={FL}>Escrow Number</label><input className={IN} value={s.escrowNumber} onChange={(e) => s.setEscrowNumber(e.target.value)} placeholder="Optional" /></div>
       </div>
 
       {/* Purchase: Sales Amount + Loan Amount */}

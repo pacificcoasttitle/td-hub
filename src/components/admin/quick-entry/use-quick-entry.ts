@@ -1,13 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ClientContact } from '@/components/admin/client-selector';
 import type { ParsedAddress } from '@/components/ui/address-autocomplete';
 import type { SiteXPropertyResult } from '@/components/shared/property-confirm-modal';
 import { EP, EC, type Person, type FormOptions } from './types';
 
+function deriveUW(product: string): string {
+  return product.toLowerCase().trim() === 'full alta' ? 'CW' : 'WC';
+}
+
 export function useQuickEntry() {
-  const [client, setClient] = useState<ClientContact | null>(null);
+  const [client, setClientRaw] = useState<ClientContact | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingAddress, setPendingAddress] = useState<ParsedAddress | null>(null);
   const [noMatchMsg, setNoMatchMsg] = useState('');
@@ -35,8 +39,9 @@ export function useQuickEntry() {
   const [txType, setTxType] = useState('');
   const [productType, setProductType] = useState('');
   const [orderType, setOrderType] = useState('');
-  const [salesRep, setSalesRep] = useState('');
-  const [titleOfficer, setTitleOfficer] = useState('');
+  const [salesRep, setSalesRepRaw] = useState('');
+  const [titleOfficer, setTitleOfficerRaw] = useState('');
+  const [underwriter, setUnderwriterRaw] = useState('');
   const [escrowNumber, setEscrowNumber] = useState('');
   const [salesAmount, setSalesAmount] = useState('');
   const [loanNumber, setLoanNumber] = useState('');
@@ -60,6 +65,12 @@ export function useQuickEntry() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ type: 'success' | 'error'; message: string; orderId?: number; fileNumber?: string } | null>(null);
 
+  // Auto-fill tracking
+  const [repAutoFilled, setRepAutoFilled] = useState(false);
+  const [toAutoFilled, setToAutoFilled] = useState(false);
+  const [uwManual, setUwManual] = useState(false);
+  const [clientCompanyName, setClientCompanyName] = useState('');
+
   useEffect(() => {
     fetch('/api/form-options')
       .then((r) => r.ok ? r.json() : null)
@@ -73,10 +84,47 @@ export function useQuickEntry() {
           salesReps: toOpt(d.salesReps),
           titleOfficers: toOpt(d.titleOfficers),
           escrowOfficers: toOpt(d.escrowOfficers),
+          underwriters: d.underwriters ?? [],
         });
       })
       .catch(() => {});
   }, []);
+
+  // Auto-derive underwriter from product type (unless user manually overrode)
+  const prevProduct = useRef(productType);
+  useEffect(() => {
+    if (productType !== prevProduct.current) {
+      prevProduct.current = productType;
+      if (!uwManual) setUnderwriterRaw(deriveUW(productType));
+    }
+  }, [productType, uwManual]);
+
+  // ─── Client selection with officer auto-fill ─────────────────────────────
+
+  function setClient(c: ClientContact | null) {
+    setClientRaw(c);
+    if (!c) {
+      if (repAutoFilled) { setSalesRepRaw(''); setRepAutoFilled(false); }
+      if (toAutoFilled) { setTitleOfficerRaw(''); setToAutoFilled(false); }
+      setClientCompanyName('');
+      return;
+    }
+    setClientCompanyName(c.companyName ?? '');
+    if (c.companySalesRepId != null && (!salesRep || repAutoFilled)) {
+      setSalesRepRaw(String(c.companySalesRepId));
+      setRepAutoFilled(true);
+    }
+    if (c.companyTitleOfficerId != null && (!titleOfficer || toAutoFilled)) {
+      setTitleOfficerRaw(String(c.companyTitleOfficerId));
+      setToAutoFilled(true);
+    }
+  }
+
+  function setSalesRep(v: string) { setSalesRepRaw(v); setRepAutoFilled(false); }
+  function setTitleOfficer(v: string) { setTitleOfficerRaw(v); setToAutoFilled(false); }
+  function setUnderwriter(v: string) { setUnderwriterRaw(v); setUwManual(true); }
+
+  // ─── Property helpers ────────────────────────────────────────────────────
 
   function parseOwnerName(raw: string): Person {
     const parts = raw.split(' ').filter(Boolean);
@@ -93,25 +141,11 @@ export function useQuickEntry() {
     const isRefi = txType === 'Refinance' || txType === 'Equity';
 
     if (isRefi) {
-      if (p.primaryOwner) {
-        setBorrower(parseOwnerName(p.primaryOwner));
-        setBorrowerSiteX(true);
-      }
-      if (p.secondaryOwner) {
-        setSecBorrower(parseOwnerName(p.secondaryOwner));
-        setHasSecBorrower(true);
-        setBorrowerSiteX(true);
-      }
+      if (p.primaryOwner) { setBorrower(parseOwnerName(p.primaryOwner)); setBorrowerSiteX(true); }
+      if (p.secondaryOwner) { setSecBorrower(parseOwnerName(p.secondaryOwner)); setHasSecBorrower(true); setBorrowerSiteX(true); }
     } else {
-      if (p.primaryOwner) {
-        setSellerPrimary(parseOwnerName(p.primaryOwner));
-        setSellerSiteX(true);
-      }
-      if (p.secondaryOwner) {
-        setSellerSecondary(parseOwnerName(p.secondaryOwner));
-        setHasSecondarySeller(true);
-        setSellerSiteX(true);
-      }
+      if (p.primaryOwner) { setSellerPrimary(parseOwnerName(p.primaryOwner)); setSellerSiteX(true); }
+      if (p.secondaryOwner) { setSellerSecondary(parseOwnerName(p.secondaryOwner)); setHasSecondarySeller(true); setSellerSiteX(true); }
     }
   }
 
@@ -175,6 +209,8 @@ export function useQuickEntry() {
     }
   }
 
+  // ─── Submit ──────────────────────────────────────────────────────────────
+
   async function handleSubmit() {
     setSubmitting(true);
     setResult(null);
@@ -190,46 +226,32 @@ export function useQuickEntry() {
         orderType: orderType || 'Title only',
         isRushOrder: false,
         property: {
-          address: street,
-          city: city || 'Unknown',
-          state: state || 'CA',
-          zip: zip || '00000',
-          apn: apn || undefined,
-          legalDescription: legalDesc || undefined,
-          county: county || undefined,
+          address: street, city: city || 'Unknown', state: state || 'CA', zip: zip || '00000',
+          apn: apn || undefined, legalDescription: legalDesc || undefined, county: county || undefined,
         },
         seller: {
-          firstName: sellerPrimary.firstName || 'TBD',
-          middleName: sellerPrimary.middleName || undefined,
-          lastName: sellerPrimary.lastName || 'TBD',
+          firstName: sellerPrimary.firstName || 'TBD', middleName: sellerPrimary.middleName || undefined, lastName: sellerPrimary.lastName || 'TBD',
           secondaryFirstName: hasSecondarySeller ? sellerSecondary.firstName || undefined : undefined,
           secondaryMiddleName: hasSecondarySeller ? sellerSecondary.middleName || undefined : undefined,
           secondaryLastName: hasSecondarySeller ? sellerSecondary.lastName || undefined : undefined,
-          isOrganization: sellerIsOrg,
-          organizationType: sellerIsOrg ? (sellerOrgType || undefined) : undefined,
+          isOrganization: sellerIsOrg, organizationType: sellerIsOrg ? (sellerOrgType || undefined) : undefined,
         },
         buyer: {
-          firstName: borrower.firstName || 'TBD',
-          middleName: borrower.middleName || undefined,
-          lastName: borrower.lastName || 'TBD',
+          firstName: borrower.firstName || 'TBD', middleName: borrower.middleName || undefined, lastName: borrower.lastName || 'TBD',
           secondaryFirstName: hasSecBorrower ? secBorrower.firstName || undefined : undefined,
           secondaryMiddleName: hasSecBorrower ? secBorrower.middleName || undefined : undefined,
           secondaryLastName: hasSecBorrower ? secBorrower.lastName || undefined : undefined,
-          isOrganization: borrowerIsOrg,
-          organizationType: borrowerOrgType || undefined,
+          isOrganization: borrowerIsOrg, organizationType: borrowerOrgType || undefined,
         },
         transaction: {
-          type: txType || 'Purchase',
-          product: productType || 'Residential Resale',
+          type: txType || 'Purchase', product: productType || 'Residential Resale',
           escrowNumber: escrowNumber || undefined,
-          salesAmount: num(salesAmount),
-          loanNumber: loanNumber || undefined,
-          loanAmount: num(loanAmount),
-          coverageAmount: num(coverageAmount),
+          salesAmount: num(salesAmount), loanNumber: loanNumber || undefined,
+          loanAmount: num(loanAmount), coverageAmount: num(coverageAmount),
           branchCode: 'PCT',
-          salesRep: salesRep || undefined,
-          titleOfficer: titleOfficer || undefined,
+          salesRep: salesRep || undefined, titleOfficer: titleOfficer || undefined,
           escrowOfficer: escrowOfficer || undefined,
+          underwriterCode: underwriter || undefined,
         },
         contacts: {
           buyerAgent: hasContact(buyerAgent) ? { name: buyerAgent.name, email: buyerAgent.email || undefined, phone: buyerAgent.phone || undefined, companyName: buyerAgent.company || undefined } : undefined,
@@ -270,6 +292,7 @@ export function useQuickEntry() {
     borrowerSiteX,
     txType, setTxType, productType, setProductType, orderType, setOrderType,
     salesRep, setSalesRep, titleOfficer, setTitleOfficer,
+    underwriter, setUnderwriter,
     escrowNumber, setEscrowNumber, salesAmount, setSalesAmount,
     loanNumber, setLoanNumber, loanAmount, setLoanAmount, coverageAmount, setCoverageAmount,
     borrower, setBorrower, secBorrower, setSecBorrower,
@@ -280,6 +303,7 @@ export function useQuickEntry() {
     escrowOfficer, setEscrowOfficer,
     deliverableEmails, setDeliverableEmails,
     formOpts, submitting, result, setResult,
+    repAutoFilled, toAutoFilled, clientCompanyName,
     handleAddressSelect, handleSearchClick, handleConfirm, handleApnSearch, handleSubmit,
   };
 }

@@ -111,7 +111,7 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
   const county = input.property.county ?? sitexData?.county ?? '';
   const fips = sitexData?.fips ?? resolveCaliforniaFips(county) ?? null;
 
-  const uwCode = resolveUnderwriterCode(input.transaction.product);
+  const uwCode = input.transaction.underwriterCode || resolveUnderwriterCode(input.transaction.product);
   input.transaction.underwriterCode = uwCode;
 
   let underwriterId: number | null = null;

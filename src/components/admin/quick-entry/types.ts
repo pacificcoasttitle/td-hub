@@ -2,12 +2,15 @@ export interface Person { firstName: string; middleName: string; lastName: strin
 export interface PartyContact { name: string; email: string; phone: string; company: string; }
 export interface FormOption { value: string; label: string; }
 
+export interface Underwriter { code: string; name: string }
+
 export interface FormOptions {
   productTypes: FormOption[];
   orderTypes: FormOption[];
   salesReps: FormOption[];
   titleOfficers: FormOption[];
   escrowOfficers: FormOption[];
+  underwriters: Underwriter[];
 }
 
 export const EP: Person = { firstName: '', middleName: '', lastName: '' };

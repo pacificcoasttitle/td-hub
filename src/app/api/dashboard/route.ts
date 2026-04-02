@@ -16,7 +16,7 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
   const [orderStats, jobStats, recentOrderRows] = await Promise.all([
     safeQuery(async () => {
@@ -75,8 +75,9 @@ export async function GET() {
     [] as Array<{ id: number; fileNumber: string; operationalStatus: string; transactionType: string | null; openedAt: Date; closedAt: Date | null; address: string | null; city: string | null; state: string | null; county: string | null }>),
   ]);
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const todayDate = new Date();
+  todayDate.setHours(0, 0, 0, 0);
+  const today = todayDate.toISOString();
 
   const [webhookStats, docStats, lastSoftproSync] = await Promise.all([
     safeQuery(async () => {

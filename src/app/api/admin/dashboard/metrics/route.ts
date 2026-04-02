@@ -23,7 +23,7 @@ export async function GET() {
 
   try {
     const now = new Date();
-    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
     const [counts] = await db
       .select({

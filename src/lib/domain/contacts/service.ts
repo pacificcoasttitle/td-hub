@@ -102,12 +102,13 @@ export async function getContacts(params: ContactListParams = {}): Promise<Conta
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
   function buildOrderBy() {
-    const dir = params.sortDir === 'asc' ? asc : desc;
+    const d = params.sortDir === 'asc' ? 'ASC' : 'DESC';
+    const nl = params.sortDir === 'asc' ? 'NULLS LAST' : 'NULLS FIRST';
     switch (params.sortField) {
-      case 'firstName': return dir(contacts.firstName);
-      case 'lastName': return dir(contacts.lastName);
-      case 'fullName': return dir(contacts.fullName);
-      case 'email': return dir(contacts.email);
+      case 'firstName': return sql`${contacts.firstName} ${sql.raw(d)} ${sql.raw(nl)}`;
+      case 'lastName': return sql`${contacts.lastName} ${sql.raw(d)} ${sql.raw(nl)}`;
+      case 'fullName': return sql`${contacts.fullName} ${sql.raw(d)} ${sql.raw(nl)}`;
+      case 'email': return sql`${contacts.email} ${sql.raw(d)} ${sql.raw(nl)}`;
       default: return desc(contacts.createdAt);
     }
   }

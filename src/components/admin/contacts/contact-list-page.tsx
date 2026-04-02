@@ -130,13 +130,6 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
           <p className="text-sm text-[#6B7280] mt-1">{subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
-          {showManagerColumn && (
-            <button onClick={() => { const first = contacts.find((c) => isManager(c)); if (first) openMgrModal(first); }}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 bg-white text-[#1A1A2E] rounded-lg hover:bg-gray-50 transition-colors">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-              Manage Teams
-            </button>
-          )}
           <SyncButton endpoint="/api/contacts/sync" userType={SYNC_USER_TYPE[typeFilter]} onSuccess={fetchContacts} />
           {!readOnly && (
             <button onClick={() => { setEditContact(null); setModalOpen(true); }}
@@ -185,6 +178,7 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Source</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Status</th>
                   {!readOnly && <th className="px-4 py-3 w-16" />}
+                  {readOnly && showManagerColumn && <th className="px-4 py-3 w-40" />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -198,7 +192,7 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-gray-900">{cName(c)}</span>
                         {showManagerColumn && isManager(c) && (
-                          <span className="bg-[#1B2A4A] text-white text-xs px-2 py-0.5 rounded-full font-medium">
+                          <span className="bg-[#F26B2B] text-white text-xs px-2 py-0.5 rounded-full font-medium">
                             Manager{(c.managedRepCount ?? 0) > 0 ? ` (${c.managedRepCount} rep${c.managedRepCount !== 1 ? 's' : ''})` : ''}
                           </span>
                         )}
@@ -243,10 +237,17 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
                         {togglingMgr === c.id ? (
                           <span className="text-xs text-[#6B7280]">…</span>
                         ) : isManager(c) ? (
-                          <button onClick={() => toggleManager(c, false)}
-                            className="text-xs text-red-600 hover:text-red-800 font-medium opacity-0 group-hover:opacity-100 transition-all">
-                            Remove Manager
-                          </button>
+                          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                            <button onClick={() => openMgrModal(c)}
+                              className="text-xs text-[#F26B2B] hover:text-[#E05A1A] font-medium">
+                              Assign Reps
+                            </button>
+                            <span className="text-gray-300">|</span>
+                            <button onClick={() => toggleManager(c, false)}
+                              className="text-xs text-red-600 hover:text-red-800 font-medium">
+                              Remove Manager
+                            </button>
+                          </div>
                         ) : (
                           <button onClick={() => toggleManager(c, true)}
                             className="text-xs text-[#1B2A4A] hover:text-[#F26B2B] font-medium opacity-0 group-hover:opacity-100 transition-all">

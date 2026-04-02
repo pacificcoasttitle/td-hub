@@ -56,6 +56,7 @@ export function ManagerAssignModal({ open, managerId, managerName, onClose, onSu
   const grouped = useMemo(() => {
     const available = allReps
       .filter((r) => r.id !== managerId)
+      .filter((r) => !r.managerId || r.managerId === managerId)
       .filter((r) => {
         if (!filter) return true;
         const q = filter.toLowerCase();
@@ -119,11 +120,6 @@ export function ManagerAssignModal({ open, managerId, managerName, onClose, onSu
                       <span className="text-sm text-[#1A1A2E] block">{repName(r)}</span>
                       {r.email && <span className="text-xs text-[#9CA3AF] block truncate">{r.email}</span>}
                     </div>
-                    {r.managerId && r.managerId !== managerId && (
-                      <span className="text-[10px] text-[#9CA3AF] ml-auto shrink-0 mt-0.5">
-                        Under: {allReps.find((m) => m.id === r.managerId)?.fullName ?? `#${r.managerId}`}
-                      </span>
-                    )}
                   </label>
                 ))}
               </div>
@@ -131,6 +127,7 @@ export function ManagerAssignModal({ open, managerId, managerName, onClose, onSu
           ))}
         </div>
 
+        <p className="px-8 pb-2 text-[10px] text-[#9CA3AF] italic">Reps assigned to other managers are hidden. Reassign them from their current manager first.</p>
         <div className="px-8 py-5 border-t border-gray-200 flex items-center justify-between">
           <span className="text-sm text-[#6B7280]">{selected.size} rep{selected.size !== 1 ? 's' : ''} selected</span>
           <div className="flex items-center gap-2">

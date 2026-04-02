@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import {
   orders, orderProperties, orderParties, contacts,
   profiles, documents, titlePointData, vendorApiLogs,
+  notificationLogs,
 } from '@/lib/db/schema';
 import { eq, and, inArray, desc } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -135,6 +136,29 @@ export async function handleOrderConfirmation(
 
   const status = result.success ? 'sent' : 'failed';
   await db.update(orders).set({ emailStatus: status, updatedAt: new Date() }).where(eq(orders.id, orderId));
+
+  try {
+    const allRecipients = [
+      ...finalTo.map((e) => ({ email: e, recipientRole: 'to' })),
+      ...finalCc.map((e) => ({ email: e, recipientRole: 'cc' })),
+    ];
+    for (const r of allRecipients) {
+      await db.insert(notificationLogs).values({
+        eventType: 'order.confirmation',
+        orderId,
+        channel: 'email',
+        recipientEmail: r.email,
+        recipientRole: r.recipientRole,
+        subject,
+        status,
+        provider: 'sendgrid',
+        providerId: result.data?.messageId ?? null,
+        errorMessage: result.error?.message ?? null,
+        sentAt: result.success ? new Date() : null,
+      });
+    }
+  } catch { /* notification logging must never break the send flow */ }
+
   if (!result.success) throw new Error(result.error?.message ?? 'Email send failed');
 }
 

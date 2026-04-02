@@ -10,7 +10,7 @@ import {
   documentReceivedTemplate,
   type OrderEmailData,
 } from './templates';
-import { handleOrderConfirmation } from './order-confirmation';
+import { dispatchNotification } from './dispatch';
 
 const MAX_FAIL_COUNT = 5;
 
@@ -82,7 +82,7 @@ async function dispatchEvent(
   if (eventType === 'order.closed') {
     await handleOrderClosed(orderId);
   } else if (eventType === 'order.confirmation') {
-    await handleOrderConfirmation(orderId, payload);
+    await dispatchNotification({ eventType, orderId, data: payload ?? {} });
   } else if (eventType.startsWith('order.milestone.')) {
     const milestone = eventType.replace('order.milestone.', '');
     await handleMilestoneNotification(orderId, milestone);

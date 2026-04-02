@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
-import { contacts } from '@/lib/db/schema';
+import { contacts, profiles } from '@/lib/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 
 const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin'];
@@ -13,6 +13,10 @@ const setManagerSchema = z.object({
 
 const assignRepsSchema = z.object({
   repIds: z.array(z.number().int().positive()),
+});
+
+const toggleManagerSchema = z.object({
+  isManager: z.boolean(),
 });
 
 export async function PATCH(
@@ -69,7 +73,31 @@ export async function PATCH(
     return NextResponse.json({ success: true, contactId, managerId: setParsed.data.managerId });
   }
 
-  return NextResponse.json({ error: 'Invalid body — provide { managerId } or { repIds }' }, { status: 400 });
+  const toggleParsed = toggleManagerSchema.safeParse(body);
+  if (toggleParsed.success) {
+    const [contact] = await db.select({ id: contacts.id })
+      .from(contacts).where(eq(contacts.id, contactId)).limit(1);
+    if (!contact) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+
+    const newRole = toggleParsed.data.isManager ? 'sales_manager' : 'sales_rep';
+    await db.update(profiles).set({ role: newRole, updatedAt: new Date() })
+      .where(eq(profiles.contactId, contactId));
+
+    let unassignedCount = 0;
+    if (!toggleParsed.data.isManager) {
+      const repsToUnassign = await db.select({ id: contacts.id })
+        .from(contacts).where(and(eq(contacts.managerId, contactId), eq(contacts.isSalesRep, true)));
+      unassignedCount = repsToUnassign.length;
+      if (unassignedCount > 0) {
+        await db.update(contacts).set({ managerId: null, updatedAt: new Date() })
+          .where(and(eq(contacts.managerId, contactId), eq(contacts.isSalesRep, true)));
+      }
+    }
+
+    return NextResponse.json({ success: true, contactId, isManager: toggleParsed.data.isManager, unassignedCount });
+  }
+
+  return NextResponse.json({ error: 'Invalid body — provide { managerId }, { repIds }, or { isManager }' }, { status: 400 });
 }
 
 export async function GET(

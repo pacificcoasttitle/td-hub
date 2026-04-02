@@ -3,15 +3,15 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
+import { handleSignOut } from '@/lib/security/sign-out';
 
 const NAV = [
   { label: 'Orders', href: '/hub' },
   { label: 'New Order', href: '/hub/new-order' },
 ];
 
-export function HubHeader({ displayName, signOutAction }: {
+export function HubHeader({ displayName }: {
   displayName: string;
-  signOutAction: () => Promise<void>;
 }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -58,11 +58,9 @@ export function HubHeader({ displayName, signOutAction }: {
               <Link href="/dashboard" className="block px-3 py-2 text-xs text-[#1A1A2E] hover:bg-gray-50">
                 Admin Dashboard
               </Link>
-              <form action={signOutAction}>
-                <button type="submit" className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50">
-                  Sign Out
-                </button>
-              </form>
+              <button onClick={handleSignOut} className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50">
+                Sign Out
+              </button>
             </div>
           </>
         )}

@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/security/auth';
-import { createSupabaseServer } from '@/lib/security/supabase-server';
 import { HubHeader } from '@/components/admin/hub/hub-header';
 
 export const dynamic = 'force-dynamic';
@@ -12,19 +11,9 @@ export default async function HubLayout({ children }: { children: React.ReactNod
   if (!session) redirect('/login');
   if (!HUB_ROLES.includes(session.role)) redirect('/dashboard');
 
-  async function handleSignOut() {
-    'use server';
-    const supabase = await createSupabaseServer();
-    await supabase.auth.signOut();
-    redirect('/login');
-  }
-
   return (
     <div className="h-screen flex flex-col bg-[#F8F9FA]">
-      <HubHeader
-        displayName={session.displayName ?? session.email}
-        signOutAction={handleSignOut}
-      />
+      <HubHeader displayName={session.displayName ?? session.email} />
       <main className="flex-1 overflow-y-auto">{children}</main>
     </div>
   );

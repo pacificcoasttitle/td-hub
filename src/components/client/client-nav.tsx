@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { handleSignOut } from '@/lib/security/sign-out';
 
 /* ─── Desktop Nav Items ────────────────────────────────────────────────────── */
 const NAV_ITEMS = [
@@ -37,10 +38,9 @@ const MOBILE_TABS = [
 /* ─── Portal Header ────────────────────────────────────────────────────────── */
 interface PortalHeaderProps {
   displayName: string;
-  signOutAction: () => void;
 }
 
-export function PortalHeader({ displayName, signOutAction }: PortalHeaderProps) {
+export function PortalHeader({ displayName }: PortalHeaderProps) {
   const pathname = usePathname();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -91,11 +91,9 @@ export function PortalHeader({ displayName, signOutAction }: PortalHeaderProps) 
             </button>
             {dropdownOpen && (
               <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg border border-[#E5E7EB] shadow-lg py-1 z-50">
-                <form action={signOutAction}>
-                  <button type="submit" className="w-full text-left px-4 py-2.5 text-sm text-[#DC2626] hover:bg-[#FEF2F2] transition-colors">
-                    Sign Out
-                  </button>
-                </form>
+                <button onClick={handleSignOut} className="w-full text-left px-4 py-2.5 text-sm text-[#DC2626] hover:bg-[#FEF2F2] transition-colors">
+                  Sign Out
+                </button>
               </div>
             )}
           </div>

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { handleSignOut } from '@/lib/security/sign-out';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -150,10 +151,17 @@ export function SidebarNav({ allowedPaths, displayName, role }: SidebarNavProps)
         })}
       </nav>
 
-      {/* User info */}
+      {/* User info + Sign Out */}
       <div className="px-4 py-4 border-t border-white/10">
         <p className="text-white text-sm font-medium truncate">{displayName}</p>
         <p className="text-white/50 text-xs mt-0.5 capitalize">{role.replace(/_/g, ' ')}</p>
+        <button onClick={handleSignOut}
+          className="mt-3 flex items-center gap-2 text-sm text-white/40 hover:text-white transition-colors">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3-3l3-3m0 0l-3-3m3 3H9" />
+          </svg>
+          Sign Out
+        </button>
       </div>
     </aside>
   );

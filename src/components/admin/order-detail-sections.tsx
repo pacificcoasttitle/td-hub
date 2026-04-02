@@ -125,15 +125,15 @@ export function PartiesSection({ parties }: { parties: OrderDetail['parties'] })
         <PartyCard label="Lender" party={parties.lender} />
         <PartyCard label="Listing Agent" party={parties.listingAgent} />
         <div className="space-y-4">
-          <PartyCard label="Title Company" party={parties.titleCompany} nameOnly />
-          <PartyCard label="Underwriter" party={parties.underwriter} nameOnly />
+          <PartyCard label="Title Company" party={parties.titleCompany} />
+          <PartyCard label="Underwriter" party={parties.underwriter} />
         </div>
       </div>
     </Section>
   );
 }
 
-function PartyCard({ label, party, isOrg, nameOnly }: { label: string; party: Party | null; isOrg?: boolean; nameOnly?: boolean }) {
+function PartyCard({ label, party, isOrg }: { label: string; party: Party | null; isOrg?: boolean }) {
   const name = party
     ? (party.name || [party.firstName, party.lastName].filter(Boolean).join(' ') || '—')
     : '—';
@@ -144,7 +144,7 @@ function PartyCard({ label, party, isOrg, nameOnly }: { label: string; party: Pa
         {isOrg && <span className="text-[10px] font-medium px-1.5 py-0 rounded bg-amber-100 text-amber-700">Organization</span>}
       </div>
       <Val>{name}</Val>
-      {!nameOnly && party && (
+      {party && (
         <div className="text-xs text-gray-500 mt-0.5 space-y-px">
           {party.email && <div>{party.email}</div>}
           {party.phone && <div>{party.phone}</div>}

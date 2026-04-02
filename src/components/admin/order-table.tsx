@@ -36,15 +36,17 @@ export const PAGE_SIZE = 25;
 
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 
+const SOURCE_LABELS: Record<string, string> = {
+  manual_entry: 'TD Hub',
+  softpro_sync: 'SoftPro',
+};
 const SOURCE_STYLES: Record<string, string> = {
-  manual_entry: 'bg-blue-50 text-blue-700',
-  softpro_sync: 'bg-gray-100 text-gray-600',
-  web_form:     'bg-purple-50 text-purple-700',
+  manual_entry: 'bg-orange-100 text-orange-800',
+  softpro_sync: 'bg-blue-100 text-blue-800',
 };
 
-function fmtSource(s: string | null | undefined) {
-  if (!s) return null;
-  return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+function fmtSource(s: string) {
+  return SOURCE_LABELS[s] ?? s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 const EMAIL_COLORS: Record<string, string> = {

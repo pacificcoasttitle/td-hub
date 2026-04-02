@@ -100,7 +100,13 @@ export default function CompaniesPage() {
   }
 
   function openOfficers(c: Company) {
-    setOfficerTarget({ companyId: c.id, companyName: c.name, salesRepId: c.salesRepId, titleOfficerId: c.titleOfficerId, loanUnderwriter: c.loanUnderwriter, salesUnderwriter: c.salesUnderwriter });
+    setOfficerTarget({
+      companyId: c.id, companyName: c.name,
+      address: c.address1, city: c.city, state: c.state, zip: c.zip,
+      phone: c.phone, email: c.email,
+      salesRepId: c.salesRepId, titleOfficerId: c.titleOfficerId,
+      loanUnderwriter: c.loanUnderwriter, salesUnderwriter: c.salesUnderwriter,
+    });
   }
 
   function resolveName(id: number | null, list: StaffOption[]): string {

@@ -17,24 +17,33 @@ interface Props {
   managerName: string;
   onClose: () => void;
   onSuccess: () => void;
-  allReps: Rep[];
 }
 
 function repName(r: Rep) {
   return r.fullName || [r.firstName, r.lastName].filter(Boolean).join(' ') || `Rep #${r.id}`;
 }
 
-export function ManagerAssignModal({ open, managerId, managerName, onClose, onSuccess, allReps }: Props) {
+export function ManagerAssignModal({ open, managerId, managerName, onClose, onSuccess }: Props) {
+  const [allReps, setAllReps] = useState<Rep[]>([]);
+  const [loadingReps, setLoadingReps] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState('');
 
   useEffect(() => {
-    if (open) {
-      setSelected(new Set(allReps.filter((r) => r.managerId === managerId && r.id !== managerId).map((r) => r.id)));
-      setFilter('');
-    }
-  }, [open, managerId, allReps]);
+    if (!open) return;
+    setFilter('');
+    setLoadingReps(true);
+    fetch('/api/contacts?type=sales_rep&pageSize=500&active=true&sort=firstName&order=asc')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        const reps: Rep[] = d?.contacts ?? [];
+        setAllReps(reps);
+        setSelected(new Set(reps.filter(r => r.managerId === managerId && r.id !== managerId).map(r => r.id)));
+      })
+      .catch(() => setAllReps([]))
+      .finally(() => setLoadingReps(false));
+  }, [open, managerId]);
 
   const toggle = useCallback((id: number) => {
     setSelected((prev) => {
@@ -94,7 +103,9 @@ export function ManagerAssignModal({ open, managerId, managerName, onClose, onSu
         </div>
 
         <div className="flex-1 overflow-y-auto px-8 pb-4">
-          {grouped.length === 0 ? (
+          {loadingReps ? (
+            <p className="text-sm text-[#6B7280] text-center py-8">Loading reps…</p>
+          ) : grouped.length === 0 ? (
             <p className="text-sm text-[#6B7280] text-center py-8">{filter ? 'No matching reps' : 'No other sales reps available'}</p>
           ) : grouped.map(([letter, reps]) => (
             <div key={letter} className="mt-3">
@@ -124,7 +135,7 @@ export function ManagerAssignModal({ open, managerId, managerName, onClose, onSu
           <span className="text-sm text-[#6B7280]">{selected.size} rep{selected.size !== 1 ? 's' : ''} selected</span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-[#6B7280] hover:text-[#1A1A2E] transition-colors">Cancel</button>
-            <button onClick={save} disabled={saving}
+            <button onClick={save} disabled={saving || loadingReps}
               className="px-5 py-2 text-sm font-medium bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] disabled:opacity-50 transition-colors">
               {saving ? 'Saving…' : 'Save Assignments'}
             </button>

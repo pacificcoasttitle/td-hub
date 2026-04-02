@@ -7,6 +7,12 @@ interface StaffOption { id: number; name: string }
 export interface OfficerTarget {
   companyId: number;
   companyName: string;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  phone: string | null;
+  email: string | null;
   salesRepId: number | null;
   titleOfficerId: number | null;
   loanUnderwriter: string | null;
@@ -79,15 +85,24 @@ export function CompanyOfficerModal({ open, target, salesReps, titleOfficers, on
     ? titleOfficers.filter(s => s.name.toLowerCase().includes(toFilter.toLowerCase()))
     : titleOfficers;
 
+  const addressLine = [target.address, target.city, [target.state, target.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        {/* Read-only company summary */}
         <div className="px-8 py-5 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-[#1B2A4A]">Assign Officers</h2>
-          <p className="text-sm text-[#6B7280] mt-1">{target.companyName}</p>
+          <h2 className="text-lg font-semibold text-[#1B2A4A]">{target.companyName}</h2>
+          {addressLine && <p className="text-sm text-[#6B7280] mt-1">{addressLine}</p>}
+          {(target.phone || target.email) && (
+            <p className="text-sm text-[#6B7280]">{[target.phone, target.email].filter(Boolean).join(' · ')}</p>
+          )}
+          <p className="text-xs text-gray-400 italic mt-1.5">Synced from SoftPro</p>
         </div>
 
         <div className="px-8 py-6 space-y-5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Officer Assignments</p>
+
           {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">{error}</div>}
 
           <div>

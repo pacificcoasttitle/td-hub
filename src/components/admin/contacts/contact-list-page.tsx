@@ -24,6 +24,7 @@ interface Contact {
   managerId?: number | null;
   managerName?: string | null;
   managedRepCount?: number;
+  profileRole?: string | null;
 }
 
 interface Props {
@@ -67,7 +68,7 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
     const id = ++fetchCount.current;
     setLoading(true);
     setError(null);
-    const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), active: activeFilter });
+    const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), active: activeFilter, sort: 'firstName', order: 'asc' });
     if (typeFilter) p.set('type', typeFilter);
     if (search) p.set('search', search);
     fetch(`/api/contacts?${p}`)
@@ -119,7 +120,7 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
-  const isManager = (c: Contact) => (c.managedRepCount ?? 0) > 0;
+  const isManager = (c: Contact) => (c.managedRepCount ?? 0) > 0 || c.profileRole === 'sales_manager';
 
   return (
     <div className="p-6">
@@ -197,7 +198,9 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-gray-900">{cName(c)}</span>
                         {showManagerColumn && isManager(c) && (
-                          <span className="bg-[#1B2A4A] text-white text-xs px-2 py-0.5 rounded-full font-medium">Manager</span>
+                          <span className="bg-[#1B2A4A] text-white text-xs px-2 py-0.5 rounded-full font-medium">
+                            Manager{(c.managedRepCount ?? 0) > 0 ? ` (${c.managedRepCount} rep${c.managedRepCount !== 1 ? 's' : ''})` : ''}
+                          </span>
                         )}
                       </div>
                     </td>
@@ -288,7 +291,7 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
       )}
       {showManagerColumn && mgrTarget && (
         <ManagerAssignModal open={mgrModalOpen} managerId={mgrTarget.id} managerName={mgrTarget.name}
-          onClose={() => setMgrModalOpen(false)} onSuccess={fetchContacts} allReps={contacts} />
+          onClose={() => setMgrModalOpen(false)} onSuccess={fetchContacts} />
       )}
     </div>
   );

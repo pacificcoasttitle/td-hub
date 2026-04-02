@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { getContacts } from '@/lib/domain/contacts/service';
 import { db } from '@/lib/db/client';
-import { contacts } from '@/lib/db/schema';
+import { contacts, profiles } from '@/lib/db/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { createUser } from '@/lib/integrations/softpro';
 import { ALL_CONTACT_TYPES, INTERNAL_TYPES } from '@/lib/domain/contacts/contact-constants';
@@ -12,11 +12,13 @@ const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin'];
 
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
-  pageSize: z.coerce.number().min(1).max(100).default(25),
+  pageSize: z.coerce.number().min(1).max(500).default(25),
   search: z.string().optional(),
   role: z.string().optional(),
   type: z.string().optional(),
   active: z.string().optional(),
+  sort: z.string().optional(),
+  order: z.enum(['asc', 'desc']).optional(),
 });
 
 const USER_TYPE_ROLES: Record<string, string[]> = {
@@ -67,6 +69,8 @@ export async function GET(req: NextRequest) {
       ...params,
       role: params.role ?? params.type,
       active: params.active === 'true' ? true : params.active === 'false' ? false : undefined,
+      sortField: params.sort,
+      sortDir: params.order,
     });
 
     const effectiveType = params.type ?? params.role;
@@ -74,7 +78,7 @@ export async function GET(req: NextRequest) {
       const pageIds = result.contacts.map((c) => c.id);
       const mgrIds = result.contacts.map((c) => c.managerId).filter((v): v is number => v != null);
 
-      const [managers, managedCounts] = await Promise.all([
+      const [managers, managedCounts, profileRows] = await Promise.all([
         mgrIds.length > 0
           ? db.select({ id: contacts.id, fullName: contacts.fullName }).from(contacts).where(inArray(contacts.id, mgrIds))
           : Promise.resolve([]),
@@ -82,15 +86,20 @@ export async function GET(req: NextRequest) {
           .from(contacts)
           .where(and(inArray(contacts.managerId, pageIds), eq(contacts.isSalesRep, true)))
           .groupBy(contacts.managerId),
+        db.select({ contactId: profiles.contactId, role: profiles.role })
+          .from(profiles)
+          .where(inArray(profiles.contactId, pageIds)),
       ]);
 
       const mgrMap = Object.fromEntries(managers.map((m) => [m.id, m.fullName]));
       const countMap = Object.fromEntries(managedCounts.map((r) => [r.managerId!, Number(r.count)]));
+      const roleMap = Object.fromEntries(profileRows.filter(r => r.contactId != null).map(r => [r.contactId!, r.role]));
 
       const enriched = result.contacts.map((c) => ({
         ...c,
         managerName: c.managerId ? (mgrMap[c.managerId] ?? null) : null,
         managedRepCount: countMap[c.id] ?? 0,
+        profileRole: roleMap[c.id] ?? null,
       }));
 
       return NextResponse.json({ ...result, contacts: enriched });

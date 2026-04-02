@@ -38,6 +38,8 @@ export interface ContactListParams {
   search?: string;
   role?: string;
   active?: boolean;
+  sortField?: string;
+  sortDir?: 'asc' | 'desc';
 }
 
 export interface ContactListResult {
@@ -99,9 +101,20 @@ export async function getContacts(params: ContactListParams = {}): Promise<Conta
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
+  function buildOrderBy() {
+    const dir = params.sortDir === 'asc' ? asc : desc;
+    switch (params.sortField) {
+      case 'firstName': return dir(contacts.firstName);
+      case 'lastName': return dir(contacts.lastName);
+      case 'fullName': return dir(contacts.fullName);
+      case 'email': return dir(contacts.email);
+      default: return desc(contacts.createdAt);
+    }
+  }
+
   const [rows, countResult] = await Promise.all([
     db.select().from(contacts).where(where)
-      .orderBy(desc(contacts.createdAt))
+      .orderBy(buildOrderBy())
       .limit(pageSize).offset(offset),
     db.select({ count: sql<number>`count(*)` }).from(contacts).where(where),
   ]);

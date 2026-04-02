@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SettingsPanel } from '@/components/admin/SettingsPanel';
 
@@ -12,20 +12,10 @@ interface Branch {
   isActive: boolean;
 }
 
-interface NotificationTemplate {
-  id: number;
-  name: string;
-  eventType: string;
-  subject: string;
-  bodyHtml: string;
-  isActive: boolean;
-}
-
-type TabKey = 'branches' | 'templates' | 'system';
+type TabKey = 'branches' | 'system';
 
 const TABS: [TabKey, string][] = [
   ['branches', 'Branches'],
-  ['templates', 'Notification Templates'],
   ['system', 'System Settings'],
 ];
 
@@ -56,7 +46,6 @@ export default function SettingsPage() {
         </nav>
       </div>
       {activeTab === 'branches' && <BranchesTab />}
-      {activeTab === 'templates' && <NotificationTemplatesTab />}
       {activeTab === 'system' && <SystemSettingsTab />}
     </div>
   );
@@ -121,153 +110,6 @@ function BranchesTab() {
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-/* ── Notification Templates Tab ────────────────────────────────────────────── */
-
-function NotificationTemplatesTab() {
-  const [templates, setTemplates] = useState<NotificationTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<NotificationTemplate | null>(null);
-
-  useEffect(() => {
-    fetch('/api/admin/notification-templates')
-      .then(r => { if (!r.ok) throw new Error(`Failed (${r.status})`); return r.json(); })
-      .then(d => setTemplates(d.templates ?? []))
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  return (
-    <>
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        {error ? (
-          <div className="p-8 text-center"><p className="text-red-600 font-medium">{error}</p></div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50/60">
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Name</th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Event Type</th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Subject</th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Active</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {loading
-                  ? Array.from({ length: 5 }).map((_, i) => (
-                      <tr key={i}>{Array.from({ length: 4 }).map((__, j) => (
-                        <td key={j} className="px-4 py-3"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" /></td>
-                      ))}</tr>
-                    ))
-                  : templates.map((t) => (
-                      <tr key={t.id} onClick={() => setSelected(t)}
-                        className="hover:bg-gray-50 cursor-pointer transition-colors">
-                        <td className="px-4 py-3 font-medium text-[#1A1A2E]">{t.name}</td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className="inline-flex px-2 py-0.5 bg-gray-100 rounded text-xs font-medium text-[#4B5563]">{t.eventType}</span>
-                        </td>
-                        <td className="px-4 py-3 text-[#4B5563] max-w-[300px] truncate">{t.subject}</td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className={`inline-flex items-center gap-1.5 text-xs ${t.isActive ? 'text-green-700' : 'text-gray-400'}`}>
-                            <span className={`h-2 w-2 rounded-full ${t.isActive ? 'bg-green-500' : 'bg-gray-300'}`} />
-                            {t.isActive ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-              </tbody>
-            </table>
-            {!loading && templates.length === 0 && (
-              <div className="p-12 text-center">
-                <p className="text-[#1A1A2E] font-medium">No notification templates</p>
-                <p className="text-sm text-[#6B7280] mt-1">Templates will appear here once configured.</p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {selected && <TemplatePreviewModal template={selected} onClose={() => setSelected(null)} />}
-    </>
-  );
-}
-
-/* ── Template Preview Modal ────────────────────────────────────────────────── */
-
-function TemplatePreviewModal({ template, onClose }: { template: NotificationTemplate; onClose: () => void }) {
-  const [showPreview, setShowPreview] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between shrink-0">
-          <div>
-            <h2 className="text-lg font-semibold text-[#1A1A2E]">{template.name}</h2>
-            <span className="inline-flex px-2 py-0.5 bg-gray-100 rounded text-xs font-medium text-[#4B5563] mt-1">{template.eventType}</span>
-          </div>
-          <button onClick={onClose} className="text-[#6B7280] hover:text-[#1A1A2E]">
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        <div className="p-6 overflow-y-auto flex-1 space-y-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-1">Subject</p>
-            <p className="text-sm text-[#1A1A2E] bg-gray-50 px-3 py-2 rounded-lg border border-gray-200 font-mono">{template.subject}</p>
-          </div>
-
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-1">Status</p>
-            <span className={`inline-flex items-center gap-1.5 text-xs ${template.isActive ? 'text-green-700' : 'text-gray-400'}`}>
-              <span className={`h-2 w-2 rounded-full ${template.isActive ? 'bg-green-500' : 'bg-gray-300'}`} />
-              {template.isActive ? 'Active' : 'Inactive'}
-            </span>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Email Body</p>
-              <button onClick={() => setShowPreview(!showPreview)}
-                className="text-xs font-medium text-[#1B2A4A] hover:text-[#243658]">
-                {showPreview ? 'Hide Preview' : 'Preview HTML'}
-              </button>
-            </div>
-            {showPreview ? (
-              <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-                <iframe
-                  ref={iframeRef}
-                  srcDoc={template.bodyHtml}
-                  title="Template preview"
-                  sandbox=""
-                  className="w-full h-80 border-0"
-                />
-              </div>
-            ) : (
-              <pre className="text-xs text-[#1A1A2E] bg-gray-50 border border-gray-200 rounded-lg p-4 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono">
-                {template.bodyHtml || 'No HTML body'}
-              </pre>
-            )}
-          </div>
-
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-            <p className="text-xs text-amber-700">
-              Variables like <code className="font-mono bg-amber-100 px-1 rounded">{'{firstName}'}</code>, <code className="font-mono bg-amber-100 px-1 rounded">{'{fileNumber}'}</code> will be replaced with actual values when the email is sent.
-            </p>
-          </div>
-        </div>
-
-        <div className="px-6 py-4 border-t border-gray-200 shrink-0">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-medium border border-gray-200 text-[#4B5563] rounded-lg hover:bg-gray-50 transition-colors">
-            Close
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

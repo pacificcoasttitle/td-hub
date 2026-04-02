@@ -75,9 +75,8 @@ export async function GET() {
     [] as Array<{ id: number; fileNumber: string; operationalStatus: string; transactionType: string | null; openedAt: Date; closedAt: Date | null; address: string | null; city: string | null; state: string | null; county: string | null }>),
   ]);
 
-  const todayDate = new Date();
-  todayDate.setHours(0, 0, 0, 0);
-  const today = todayDate.toISOString();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
   const [webhookStats, docStats, lastSoftproSync] = await Promise.all([
     safeQuery(async () => {

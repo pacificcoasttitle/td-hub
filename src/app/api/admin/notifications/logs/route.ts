@@ -36,8 +36,8 @@ export async function GET(req: NextRequest) {
   const conditions: SQL[] = [];
   if (eventType) conditions.push(eq(notificationLogs.eventType, eventType));
   if (status) conditions.push(eq(notificationLogs.status, status));
-  if (dateFrom) conditions.push(gte(notificationLogs.createdAt, new Date(dateFrom).toISOString()));
-  if (dateTo) conditions.push(lte(notificationLogs.createdAt, new Date(dateTo).toISOString()));
+  if (dateFrom) conditions.push(gte(notificationLogs.createdAt, new Date(dateFrom)));
+  if (dateTo) conditions.push(lte(notificationLogs.createdAt, new Date(dateTo)));
   if (orderId) conditions.push(eq(notificationLogs.orderId, orderId));
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;

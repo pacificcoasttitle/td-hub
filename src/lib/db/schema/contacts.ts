@@ -22,7 +22,7 @@ export const branches = pgTable('branches', {
 // ─── Profiles ────────────────────────────────────────────────────────────────
 
 export const profileRoleEnum = pgEnum('profile_role', [
-  'super_admin', 'admin', 'cs_admin',
+  'super_admin', 'admin', 'cs_admin', 'sales_manager',
   'sales_rep', 'title_officer', 'escrow_officer',
   'open_order_team',
   'client',
@@ -109,10 +109,13 @@ export const contacts = pgTable('contacts', {
   isNewUser: boolean('is_new_user').notNull().default(false),
   isMailNotification: boolean('is_mail_notification').notNull().default(false),
 
+  managerId: integer('manager_id'),
+
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (table) => ({
+  managerIdx: index('contacts_manager_idx').on(table.managerId),
   lookupCodeIdx: index('contacts_lookup_code_idx').on(table.softproLookupCode),
   lookupCodeNewIdx: index('contacts_lookup_code_new_idx').on(table.lookupCode),
   flookupCodeIdx: index('contacts_flookup_code_idx').on(table.flookupCode),

@@ -4,6 +4,7 @@ import { getSession } from '@/lib/security/auth';
 import { getContacts } from '@/lib/domain/contacts/service';
 import { db } from '@/lib/db/client';
 import { contacts } from '@/lib/db/schema';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { createUser } from '@/lib/integrations/softpro';
 import { ALL_CONTACT_TYPES, INTERNAL_TYPES } from '@/lib/domain/contacts/contact-constants';
 
@@ -67,6 +68,33 @@ export async function GET(req: NextRequest) {
       role: params.role ?? params.type,
       active: params.active === 'true' ? true : params.active === 'false' ? false : undefined,
     });
+
+    const effectiveType = params.type ?? params.role;
+    if (effectiveType === 'sales_rep' && result.contacts.length > 0) {
+      const pageIds = result.contacts.map((c) => c.id);
+      const mgrIds = result.contacts.map((c) => c.managerId).filter((v): v is number => v != null);
+
+      const [managers, managedCounts] = await Promise.all([
+        mgrIds.length > 0
+          ? db.select({ id: contacts.id, fullName: contacts.fullName }).from(contacts).where(inArray(contacts.id, mgrIds))
+          : Promise.resolve([]),
+        db.select({ managerId: contacts.managerId, count: sql<number>`count(*)` })
+          .from(contacts)
+          .where(and(inArray(contacts.managerId, pageIds), eq(contacts.isSalesRep, true)))
+          .groupBy(contacts.managerId),
+      ]);
+
+      const mgrMap = Object.fromEntries(managers.map((m) => [m.id, m.fullName]));
+      const countMap = Object.fromEntries(managedCounts.map((r) => [r.managerId!, Number(r.count)]));
+
+      const enriched = result.contacts.map((c) => ({
+        ...c,
+        managerName: c.managerId ? (mgrMap[c.managerId] ?? null) : null,
+        managedRepCount: countMap[c.id] ?? 0,
+      }));
+
+      return NextResponse.json({ ...result, contacts: enriched });
+    }
 
     return NextResponse.json(result);
   } catch (err) {

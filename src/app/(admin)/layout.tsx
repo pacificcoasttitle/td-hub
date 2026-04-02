@@ -8,6 +8,7 @@ const NAV_BY_ROLE: Record<string, string[]> = {
   super_admin: ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs', '/settings', '/users'],
   admin:       ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs', '/settings', '/users'],
   cs_admin:    ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs'],
+  sales_manager: ['/dashboard', '/orders', '/contacts'],
   sales_rep:   ['/dashboard', '/orders', '/contacts'],
   title_officer:   ['/dashboard', '/orders', '/documents'],
   escrow_officer:  ['/dashboard', '/orders', '/documents'],

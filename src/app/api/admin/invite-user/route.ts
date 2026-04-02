@@ -12,7 +12,7 @@ const bodySchema = z.object({
   email: z.string().email(),
   displayName: z.string().min(1),
   role: z.enum([
-    'super_admin', 'admin', 'cs_admin',
+    'super_admin', 'admin', 'cs_admin', 'sales_manager',
     'sales_rep', 'title_officer', 'escrow_officer',
     'open_order_team', 'client',
   ]),

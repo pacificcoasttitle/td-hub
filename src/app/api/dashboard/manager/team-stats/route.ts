@@ -2,23 +2,32 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders } from '@/lib/db/schema';
-import { sql, and, eq, SQL } from 'drizzle-orm';
+import { sql, and, eq, inArray, SQL } from 'drizzle-orm';
 import { getLeaderboard } from '@/lib/integrations/managers-report';
+import { getManagedRepIds } from '@/lib/domain/contacts/managed-reps';
 
-const ADMIN_ROLES = ['super_admin', 'admin'];
+const ALLOWED_ROLES = ['super_admin', 'admin', 'sales_manager'];
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!ADMIN_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!ALLOWED_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const branchParam = req.nextUrl.searchParams.get('branch');
   const branchId = branchParam ? Number(branchParam) : null;
-
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
   const conditions: SQL[] = [];
   if (branchId) conditions.push(eq(orders.branchId, branchId));
+
+  if (session.role === 'sales_manager' && session.contactId) {
+    const repIds = await getManagedRepIds(session.contactId);
+    if (repIds.length === 0) {
+      return NextResponse.json({ totalOpen: 0, totalClosedThisMonth: 0, teamPipelineValue: 0, teamRevenue: null });
+    }
+    conditions.push(inArray(orders.salesRepId, repIds));
+  }
+
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
   const [result] = await db.select({

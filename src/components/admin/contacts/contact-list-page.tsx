@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SyncButton } from './sync-button';
 import { ContactFormModal, type ContactRecord } from './contact-form-modal';
+import { ManagerAssignModal } from './manager-assign-modal';
 
 interface Contact {
   id: number;
@@ -20,6 +21,9 @@ interface Contact {
   state: string | null;
   licenseNo: string | null;
   contactType?: string | null;
+  managerId?: number | null;
+  managerName?: string | null;
+  managedRepCount?: number;
 }
 
 interface Props {
@@ -27,6 +31,7 @@ interface Props {
   subtitle: string;
   typeFilter: string;
   showCompanyColumn?: boolean;
+  showManagerColumn?: boolean;
 }
 
 const SYNC_USER_TYPE: Record<string, string> = {
@@ -41,7 +46,7 @@ const SYNC_USER_TYPE: Record<string, string> = {
 
 const PAGE_SIZE = 25;
 
-export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn = true }: Props) {
+export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn = true, showManagerColumn = false }: Props) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -53,6 +58,8 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editContact, setEditContact] = useState<ContactRecord | null>(null);
+  const [mgrModalOpen, setMgrModalOpen] = useState(false);
+  const [mgrTarget, setMgrTarget] = useState<{ id: number; name: string } | null>(null);
   const debRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const fetchCount = useRef(0);
 
@@ -93,8 +100,14 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
     setModalOpen(true);
   }
 
+  function openMgrModal(c: Contact) {
+    const n = c.fullName || [c.firstName, c.lastName].filter(Boolean).join(' ') || '—';
+    setMgrTarget({ id: c.id, name: n });
+    setMgrModalOpen(true);
+  }
+
   const totalPages = Math.ceil(total / PAGE_SIZE);
-  const colCount = showCompanyColumn ? 7 : 6;
+  const colCount = (showCompanyColumn ? 7 : 6) + (showManagerColumn ? 1 : 0);
 
   return (
     <div className="p-6">
@@ -104,6 +117,16 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
           <p className="text-sm text-[#6B7280] mt-1">{subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
+          {showManagerColumn && (
+            <button onClick={() => {
+              const first = contacts.find((c) => (c.managedRepCount ?? 0) > 0);
+              if (first) openMgrModal(first);
+            }}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 bg-white text-[#1A1A2E] rounded-lg hover:bg-gray-50 transition-colors">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              Manage Teams
+            </button>
+          )}
           <SyncButton endpoint="/api/contacts/sync" userType={SYNC_USER_TYPE[typeFilter]} onSuccess={fetchContacts} />
           <button onClick={openCreate}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] transition-colors">
@@ -144,6 +167,7 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
                   {showCompanyColumn && <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Company</th>}
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Email</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Phone</th>
+                  {showManagerColumn && <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Manager</th>}
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Source</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Status</th>
                   <th className="px-4 py-3 w-16" />
@@ -162,6 +186,19 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
                       {showCompanyColumn && <td className="px-4 py-3 text-[#1A1A2E] max-w-[180px] truncate">{c.companyName ?? '—'}</td>}
                       <td className="px-4 py-3 text-[#6B7280] max-w-[200px] truncate">{c.email ?? '—'}</td>
                       <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{c.phone ?? c.cell ?? '—'}</td>
+                      {showManagerColumn && (
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm text-[#6B7280]">{c.managerName ?? '—'}</span>
+                            {(c.managedRepCount ?? 0) > 0 && (
+                              <button onClick={() => openMgrModal(c)} title="Manage team"
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#1B2A4A]/10 text-[#1B2A4A] text-xs font-medium hover:bg-[#1B2A4A]/20 transition-colors">
+                                {c.managedRepCount} rep{c.managedRepCount !== 1 ? 's' : ''}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${c.sourceSystem === 'softpro' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
                           {c.sourceSystem === 'softpro' ? 'SoftPro' : 'Manual'}
@@ -211,6 +248,10 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
 
       <ContactFormModal open={modalOpen} onClose={() => setModalOpen(false)} onSuccess={fetchContacts}
         contact={editContact} defaultType={typeFilter} />
+      {showManagerColumn && mgrTarget && (
+        <ManagerAssignModal open={mgrModalOpen} managerId={mgrTarget.id} managerName={mgrTarget.name}
+          onClose={() => setMgrModalOpen(false)} onSuccess={fetchContacts} allReps={contacts} />
+      )}
     </div>
   );
 }

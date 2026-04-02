@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { contacts, companies } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, or } from 'drizzle-orm';
 import { getLookupTable, getSalesReps } from '@/lib/integrations/softpro';
 import type { SoftProLookupItem } from '@/lib/integrations/softpro';
 
@@ -102,10 +102,13 @@ async function syncTitleOfficers(items: SyncRow[]): Promise<SyncContactsResult> 
 
     try {
       const [existing] = await db.select({ id: contacts.id })
-        .from(contacts).where(eq(contacts.closerExaminer, examiner)).limit(1);
+        .from(contacts)
+        .where(or(eq(contacts.closerExaminer, examiner), eq(contacts.softproLookupCode, examiner)))
+        .limit(1);
 
       const vals = {
         closerExaminer: examiner,
+        softproLookupCode: examiner,
         officeLookupCode: str(item, 'Office LookupCode'),
         lookupCode: str(item, 'Office LookupCode'),
         officerName: str(item, 'Officer Name'),
@@ -145,10 +148,13 @@ async function syncEscrowOfficers(items: SyncRow[]): Promise<SyncContactsResult>
 
     try {
       const [existing] = await db.select({ id: contacts.id })
-        .from(contacts).where(eq(contacts.closerExaminer, examiner)).limit(1);
+        .from(contacts)
+        .where(or(eq(contacts.closerExaminer, examiner), eq(contacts.softproLookupCode, examiner)))
+        .limit(1);
 
       const vals = {
         closerExaminer: examiner,
+        softproLookupCode: examiner,
         officeLookupCode: str(item, 'Office LookupCode'),
         lookupCode: str(item, 'Office LookupCode'),
         officerName: str(item, 'Officer Name'),

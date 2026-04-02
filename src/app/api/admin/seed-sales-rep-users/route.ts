@@ -5,10 +5,14 @@ import { db } from '@/lib/db/client';
 import { contacts, profiles } from '@/lib/db/schema';
 import { eq, and, isNotNull } from 'drizzle-orm';
 
-export async function POST() {
-  const session = await getSession();
-  if (!session || !['super_admin', 'admin'].includes(session.role)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function POST(req: Request) {
+  const cronSecret = req.headers.get('x-cron-secret');
+  const validCron = cronSecret && cronSecret === process.env.CRON_SECRET;
+  if (!validCron) {
+    const session = await getSession();
+    if (!session || !['super_admin', 'admin'].includes(session.role)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
   }
 
   const reps = await db

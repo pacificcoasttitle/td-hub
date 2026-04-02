@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
-import { contacts, profiles } from '@/lib/db/schema';
+import { contacts, companies, profiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 export async function GET() {
@@ -37,11 +37,26 @@ export async function GET() {
           city: contacts.city,
           state: contacts.state,
           zip: contacts.zip,
+          flookupCode: contacts.flookupCode,
         })
         .from(contacts)
         .where(eq(contacts.id, profile.contactId))
         .limit(1);
       contact = row ?? null;
+    }
+
+    let companyOfficers: { companySalesRepId: number | null; companyTitleOfficerId: number | null; companyLoanUnderwriter: string | null; companySalesUnderwriter: string | null } = {
+      companySalesRepId: null, companyTitleOfficerId: null, companyLoanUnderwriter: null, companySalesUnderwriter: null,
+    };
+    if (contact?.flookupCode) {
+      const [co] = await db
+        .select({ salesRepId: companies.salesRepId, titleOfficerId: companies.titleOfficerId, loanUnderwriter: companies.loanUnderwriter, salesUnderwriter: companies.salesUnderwriter })
+        .from(companies)
+        .where(eq(companies.lookupCode, contact.flookupCode))
+        .limit(1);
+      if (co) {
+        companyOfficers = { companySalesRepId: co.salesRepId, companyTitleOfficerId: co.titleOfficerId, companyLoanUnderwriter: co.loanUnderwriter, companySalesUnderwriter: co.salesUnderwriter };
+      }
     }
 
     return NextResponse.json({
@@ -53,7 +68,8 @@ export async function GET() {
         branchId: profile.branchId,
         contactId: profile.contactId,
       },
-      contact,
+      contact: contact ? { id: contact.id, firstName: contact.firstName, lastName: contact.lastName, fullName: contact.fullName, companyName: contact.companyName, email: contact.email, phone: contact.phone, cell: contact.cell, address1: contact.address1, city: contact.city, state: contact.state, zip: contact.zip } : null,
+      ...companyOfficers,
     });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

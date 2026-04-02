@@ -20,20 +20,20 @@ export async function GET() {
   }
 
   try {
-    const startOfToday = new Date();
-    startOfToday.setUTCHours(0, 0, 0, 0);
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     const [vendorStats, recentErrors] = await Promise.all([
       db.select({
         vendor: vendorApiLogs.vendor,
         total: sql<number>`count(*)`,
-        successes: sql<number>`count(*) filter (where ${vendorApiLogs.success} = true)`,
-        errors: sql<number>`count(*) filter (where ${vendorApiLogs.success} = false)`,
-        avgDurationMs: sql<number>`round(avg(extract(epoch from (${vendorApiLogs.endedAt} - ${vendorApiLogs.startedAt})) * 1000))`,
+        successCount: sql<number>`count(case when ${vendorApiLogs.success} then 1 end)`,
+        errorCount: sql<number>`count(case when not ${vendorApiLogs.success} then 1 end)`,
+        avgResponseMs: sql<number>`coalesce(round(avg(extract(epoch from (${vendorApiLogs.endedAt} - ${vendorApiLogs.startedAt})) * 1000)), 0)`,
       })
         .from(vendorApiLogs)
-        .where(gte(vendorApiLogs.createdAt, startOfToday))
-        .groupBy(vendorApiLogs.vendor),
+        .where(gte(vendorApiLogs.createdAt, since))
+        .groupBy(vendorApiLogs.vendor)
+        .orderBy(sql`count(*) desc`),
 
       db.select({
         id: vendorApiLogs.id,
@@ -46,7 +46,7 @@ export async function GET() {
       })
         .from(vendorApiLogs)
         .where(and(
-          gte(vendorApiLogs.createdAt, startOfToday),
+          gte(vendorApiLogs.createdAt, since),
           eq(vendorApiLogs.success, false),
         ))
         .orderBy(desc(vendorApiLogs.id))
@@ -54,13 +54,12 @@ export async function GET() {
     ]);
 
     const result = {
-      date: startOfToday.toISOString().slice(0, 10),
       vendors: vendorStats.map((v) => ({
         vendor: v.vendor,
         total: Number(v.total),
-        successes: Number(v.successes),
-        errors: Number(v.errors),
-        avgDurationMs: v.avgDurationMs ? Number(v.avgDurationMs) : null,
+        successCount: Number(v.successCount),
+        errorCount: Number(v.errorCount),
+        avgResponseMs: Number(v.avgResponseMs),
       })),
       recentErrors,
     };

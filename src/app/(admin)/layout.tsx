@@ -5,8 +5,8 @@ import { SidebarNav } from '@/components/admin/sidebar-nav';
 export const dynamic = 'force-dynamic';
 
 const NAV_BY_ROLE: Record<string, string[]> = {
-  super_admin: ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs', '/settings', '/users'],
-  admin:       ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs', '/settings', '/users'],
+  super_admin: ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs', '/settings', '/notifications', '/users'],
+  admin:       ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs', '/settings', '/notifications', '/users'],
   cs_admin:    ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs'],
   sales_manager: ['/dashboard', '/orders', '/contacts'],
   sales_rep:   ['/dashboard', '/orders', '/contacts'],

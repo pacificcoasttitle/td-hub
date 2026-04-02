@@ -13,17 +13,8 @@ function getAppUrl(): string {
   return configured.replace(/\/$/, '');
 }
 
-function toPermanentUrl(id: number, publicUrl: string | null): string {
-  if (!publicUrl) {
-    return `${getAppUrl()}/api/title-production/uploads/${id}/file`;
-  }
-  if (publicUrl.startsWith('http://') || publicUrl.startsWith('https://')) {
-    return publicUrl;
-  }
-  if (publicUrl.startsWith('/')) {
-    return `${getAppUrl()}${publicUrl}`;
-  }
-  return `${getAppUrl()}/${publicUrl}`;
+function toPermanentUrl(id: number): string {
+  return `${getAppUrl()}/api/title-production/uploads/${id}/file`;
 }
 
 const querySchema = z.object({
@@ -83,7 +74,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     uploads: uploads.map((upload) => ({
       ...upload,
-      publicUrl: toPermanentUrl(upload.id, upload.publicUrl),
+      publicUrl: toPermanentUrl(upload.id),
     })),
     total,
     page,

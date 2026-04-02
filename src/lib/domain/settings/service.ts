@@ -88,6 +88,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
 ];
 
 const REGISTRY_MAP = new Map(SETTINGS_REGISTRY.map((s) => [s.key, s]));
+let _seedPromise: Promise<void> | null = null;
 
 // ─── In-Memory Cache (60s TTL) ─────────────────────────────────────────────
 
@@ -101,6 +102,8 @@ function isCacheValid(): boolean {
 
 async function loadCache(): Promise<Map<string, string>> {
   if (isCacheValid()) return _cache!;
+
+  await ensureSettingsSeeded();
 
   const rows = await db.select({ key: settings.key, value: settings.value }).from(settings);
   const map = new Map<string, string>();
@@ -122,6 +125,46 @@ function valueToString(v: unknown): string {
   if (typeof v === 'string') return v;
   if (typeof v === 'boolean' || typeof v === 'number') return String(v);
   return JSON.stringify(v);
+}
+
+function parseValueForStorage(def: SettingDef, value: string): string | boolean | number {
+  if (def.type === 'boolean') {
+    return value.toLowerCase() === 'true';
+  }
+  if (def.type === 'number') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return value;
+}
+
+async function ensureSettingsSeeded(): Promise<void> {
+  if (_seedPromise) {
+    await _seedPromise;
+    return;
+  }
+
+  _seedPromise = (async () => {
+    const existingRows = await db.select({ key: settings.key }).from(settings);
+    const existingKeys = new Set(existingRows.map((row) => row.key));
+    const missingDefs = SETTINGS_REGISTRY.filter((def) => !existingKeys.has(def.key));
+
+    if (missingDefs.length === 0) return;
+
+    await db.insert(settings).values(
+      missingDefs.map((def) => ({
+        key: def.key,
+        value: parseValueForStorage(def, def.defaultValue),
+        description: def.description,
+      })),
+    );
+  })();
+
+  try {
+    await _seedPromise;
+  } finally {
+    _seedPromise = null;
+  }
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -175,6 +218,7 @@ export async function getAllSettings(): Promise<SettingRow[]> {
 export async function updateSetting(key: string, value: string): Promise<void> {
   const def = REGISTRY_MAP.get(key);
   if (!def) throw new Error(`Unknown setting key: ${key}`);
+  const parsedValue = parseValueForStorage(def, value);
 
   const [existing] = await db
     .select({ id: settings.id })
@@ -185,12 +229,12 @@ export async function updateSetting(key: string, value: string): Promise<void> {
   if (existing) {
     await db
       .update(settings)
-      .set({ value, updatedAt: new Date() })
+      .set({ value: parsedValue, updatedAt: new Date() })
       .where(eq(settings.key, key));
   } else {
     await db.insert(settings).values({
       key,
-      value,
+      value: parsedValue,
       description: def.description,
     });
   }

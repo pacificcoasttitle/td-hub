@@ -158,7 +158,7 @@ export function SalesRepDashboard({ displayName }: { displayName: string | null 
       <SectionCard title="My Recent Orders" action={{ label: 'View all my orders →', href: '/orders' }}>
         <OrdersHubTable
           fetchUrl="/api/dashboard/sales-rep/orders"
-          actions={['detail', 'notes']}
+          actions={['cpl', 'prelim', 'notes', 'detail']}
           accentColor="#C5A55A"
           showSearch
           showStatusFilter={false}

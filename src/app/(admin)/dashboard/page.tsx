@@ -19,6 +19,7 @@ export default async function DashboardPage({
   if (!session) redirect('/login');
 
   if (session.role === 'client') redirect('/client/orders');
+  if (session.role === 'title_production') redirect('/title-production');
 
   const isAdmin = ADMIN_ROLES.includes(session.role);
   const isSalesManager = session.role === 'sales_manager';

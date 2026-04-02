@@ -17,6 +17,19 @@ export default function LoginPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
+  async function resolveRedirect(): Promise<string> {
+    try {
+      const r = await fetch('/api/auth/session');
+      if (r.ok) {
+        const { role } = await r.json();
+        if (role === 'client') return '/client/dashboard';
+        if (role === 'open_order_team') return '/hub';
+        if (role === 'title_production') return '/title-production';
+      }
+    } catch { /* fall through */ }
+    return '/dashboard';
+  }
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setError('');
@@ -33,7 +46,8 @@ export default function LoginPage() {
       return;
     }
 
-    router.push('/dashboard');
+    const dest = await resolveRedirect();
+    router.push(dest);
     router.refresh();
   }
 

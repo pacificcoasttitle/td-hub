@@ -1,8 +1,38 @@
 import { parseStringPromise } from 'xml2js';
+import { db } from '@/lib/db/client';
+import { vendorApiLogs } from '@/lib/db/schema';
 import type { CplForm } from '../types';
 
 const TIMEOUT_MS = 20_000;
 const CPL_TIMEOUT_MS = 30_000;
+
+async function logSoapExchange(params: {
+  operation: string; orderId?: number;
+  soapAction: string; requestEnvelope: string;
+  httpStatus?: number; responseBody?: string;
+  success: boolean; errorCategory?: string;
+}) {
+  try {
+    await db.insert(vendorApiLogs).values({
+      vendor: 'fnf',
+      operation: params.operation,
+      orderId: params.orderId ?? null,
+      requestId: `fnf-soap-${crypto.randomUUID()}`,
+      startedAt: new Date(),
+      endedAt: new Date(),
+      success: params.success,
+      httpStatus: params.httpStatus ?? null,
+      errorCategory: params.errorCategory ?? null,
+      requestMeta: {
+        soapAction: params.soapAction,
+        requestEnvelope: params.requestEnvelope.slice(0, 1000),
+      } as Record<string, unknown>,
+      responseMeta: params.responseBody
+        ? { responseBody: params.responseBody.slice(0, 1000) } as Record<string, unknown>
+        : null,
+    });
+  } catch { /* logging must not break the main flow */ }
+}
 
 // Namespaces — exact match to legacy Fnf.php
 const NS_SOAP = 'http://schemas.xmlsoap.org/soap/envelope/';
@@ -176,6 +206,7 @@ export async function getCplForms(
   branch: FnfBranchInfo,
   fileNumber: string,
   state: string,
+  orderId?: number,
 ): Promise<CplForm[]> {
   const envelope = buildGetCplListEnvelope({
     agentNumber: branch.agentNumber,
@@ -183,6 +214,13 @@ export async function getCplForms(
     fileNumber,
     state: state || 'CA',
     underwriterCode: branch.underwriterCode,
+  });
+
+  // Log BEFORE the call so crashes are visible
+  await logSoapExchange({
+    operation: 'get_cpl_list_request', orderId,
+    soapAction: 'GetCPLList', requestEnvelope: envelope,
+    success: true,
   });
 
   const res = await fetch(`${cfg.cplUrl}v3/CPLManagement.svc`, {
@@ -199,10 +237,22 @@ export async function getCplForms(
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    await logSoapExchange({
+      operation: 'get_cpl_list', orderId,
+      soapAction: 'GetCPLList', requestEnvelope: envelope,
+      httpStatus: res.status, responseBody: text,
+      success: false, errorCategory: 'HTTP_ERROR',
+    });
     throw new Error(`FNF GetCPLList failed: HTTP ${res.status} — ${text.slice(0, 300)}`);
   }
 
   const xml = await res.text();
+  await logSoapExchange({
+    operation: 'get_cpl_list', orderId,
+    soapAction: 'GetCPLList', requestEnvelope: envelope,
+    httpStatus: res.status, responseBody: xml,
+    success: true,
+  });
   const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
 
   // Legacy path: s:Envelope → s:Body → GetCPLListResponse → UnderwriterStateCPLs → a:UnderwriterStateCPL
@@ -226,10 +276,18 @@ export async function generateCplSoap(
   cfg: { cplUrl: string; clientId: string },
   vendorToken: string,
   params: FnfGenerateCplParams,
+  orderId?: number,
 ): Promise<{ pdf: string; cplId: string; cplNumber: string; documentId: string }> {
   const isEdit = !!params.documentId;
   const envelope = buildGenerateCplEnvelope(params);
   const soapAction = isEdit ? 'EditCPL' : 'CreateCPL';
+
+  // Log BEFORE the call
+  await logSoapExchange({
+    operation: `${soapAction.toLowerCase()}_request`, orderId,
+    soapAction, requestEnvelope: envelope,
+    success: true,
+  });
 
   const res = await fetch(`${cfg.cplUrl}v3/CPLManagement.svc`, {
     method: 'POST',
@@ -245,10 +303,23 @@ export async function generateCplSoap(
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    await logSoapExchange({
+      operation: soapAction.toLowerCase(), orderId,
+      soapAction, requestEnvelope: envelope,
+      httpStatus: res.status, responseBody: text,
+      success: false, errorCategory: 'HTTP_ERROR',
+    });
     throw new Error(`FNF ${soapAction} failed: HTTP ${res.status} — ${text.slice(0, 300)}`);
   }
 
   const xml = await res.text();
+  // Log response (truncated — PDF base64 can be huge)
+  await logSoapExchange({
+    operation: soapAction.toLowerCase(), orderId,
+    soapAction, requestEnvelope: envelope,
+    httpStatus: res.status, responseBody: xml,
+    success: true,
+  });
   const parsed = await parseStringPromise(xml, { explicitArray: false, ignoreAttrs: true });
 
   // Legacy path: s:Envelope → s:Body → GenerateCPLResponse → CPLLetters → a:CPLLetter

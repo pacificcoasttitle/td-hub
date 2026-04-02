@@ -3,10 +3,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { ModalShell } from './modal-shell';
 
-interface Branch { id: number; code: string; name: string; }
+type Underwriter = 'westcor' | 'fnf';
+
+interface CplBranch { id: number; code: string; name: string; underwriter: string; underwriterCode: string; }
 
 interface OrderApiResponse {
   transactionType?: string | null;
+  productType?: string | null;
+  underwriterId?: number | null;
   branchId?: number | null;
   salesPrice?: string | null;
   loanAmount?: string | null;
@@ -25,18 +29,42 @@ interface OrderApiResponse {
     assignmentClause?: string | null;
   } | null;
   cplData?: Record<string, string>;
+  underwriter?: { name?: string; lookupCode?: string } | null;
 }
 
 interface ExistingCpl { id: number; fileName: string; createdAt: string; }
 interface LenderResult { id: number; companyName: string; address?: string; city?: string; state?: string; zip?: string; }
 
-export function CplModal({ open, onClose, orderId, fileNumber, address, isClient, accentColor }: {
+const UNDERWRITER_LABELS: Record<Underwriter, string> = {
+  westcor: 'Westcor',
+  fnf: 'FNF / Commonwealth',
+};
+
+/**
+ * Auto-detect underwriter from order data:
+ *   Full ALTA product type → fnf (Commonwealth)
+ *   CW underwriter company → fnf (Commonwealth)
+ *   Everything else → westcor
+ */
+function detectUnderwriter(order: OrderApiResponse): Underwriter {
+  const product = (order.productType ?? '').toLowerCase();
+  if (product === 'full alta') return 'fnf';
+
+  const uwName = (order.underwriter?.name ?? '').toUpperCase();
+  const uwCode = (order.underwriter?.lookupCode ?? '').toUpperCase();
+  if (uwName === 'CW' || uwCode === 'CW') return 'fnf';
+
+  return 'westcor';
+}
+
+export function CplModal({ open, onClose, orderId, fileNumber, address, isClient }: {
   open: boolean; onClose: () => void;
   orderId: number; fileNumber: string; address: string;
   isClient?: boolean; accentColor?: string;
 }) {
   const [loading, setLoading] = useState(false);
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [underwriter, setUnderwriter] = useState<Underwriter>('westcor');
+  const [branches, setBranches] = useState<CplBranch[]>([]);
   const [branchId, setBranchId] = useState<number | null>(null);
   const [txType, setTxType] = useState('');
   const [existingCpls, setExistingCpls] = useState<ExistingCpl[]>([]);
@@ -74,6 +102,21 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
   const [lenderExpanded, setLenderExpanded] = useState(true);
   const [propertyExpanded, setPropertyExpanded] = useState(true);
 
+  // Load branches when underwriter changes
+  useEffect(() => {
+    if (!open) return;
+    fetch(`/api/cpl-branches?underwriter=${underwriter}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        const list: CplBranch[] = d?.branches ?? [];
+        setBranches(list);
+        if (list.length > 0 && !list.some((b) => b.id === branchId)) {
+          setBranchId(null);
+        }
+      })
+      .catch(() => setBranches([]));
+  }, [open, underwriter]);
+
   useEffect(() => {
     if (!open) return;
     setLoading(true); setResult(null); setLenderType('new'); setTxType(''); setBranchId(null);
@@ -85,16 +128,18 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
     const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
     const docUrl = isClient ? `${base}/cpl` : `${base}/documents?category=cpl`;
     Promise.all([
-      fetch('/api/branches').then((r) => r.ok ? r.json() : null),
       fetch(base).then((r) => r.ok ? r.json() : null),
       fetch(docUrl).then((r) => r.ok ? r.json() : { documents: [] }),
-    ]).then(([brData, od, docData]) => {
-      if (brData?.branches) setBranches(brData.branches);
+    ]).then(([od, docData]) => {
       if (docData?.documents) setExistingCpls(docData.documents);
 
       if (od) {
         const o = od as OrderApiResponse;
         const cpd = o.cplData ?? {};
+
+        // Auto-detect underwriter from order data
+        const detected = detectUnderwriter(o);
+        setUnderwriter(detected);
 
         // Branch: prefer saved CPL branch, then order branch
         const savedBranch = cpd.cpl_branch_id ? Number(cpd.cpl_branch_id) : null;
@@ -106,7 +151,6 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
         setLoanAmount(o.loanAmount ?? '');
         setLoanNumber(cpd.cpl_loan_number ?? '');
 
-        // Property (nested object)
         const prop = o.property;
         if (prop) {
           setPropStreet(prop.address ?? '');
@@ -115,7 +159,6 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
           setPropZip(prop.zip ?? '');
         }
 
-        // Lender: CPL saved data > contacts join > party fallback
         const lc = o.lenderContact;
         const lenderParty = o.parties?.find((p) => p.role === 'lender');
         setLenderCompany(lc?.companyName ?? lenderParty?.externalCompany ?? '');
@@ -133,7 +176,6 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
           .join(', ');
         setBorrower(buyers);
 
-        // Collapse sections that already have data
         setLenderExpanded(!(lc?.companyName ?? lenderParty?.externalCompany));
         setPropertyExpanded(!prop?.address);
       }
@@ -165,15 +207,15 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
     setGenerating(true); setResult(null);
     try {
       const cplUrl = isClient ? `/api/client/orders/${orderId}/cpl` : '/api/vendor-actions/cpl';
-      const cplBody = isClient ? { underwriter: 'westcor' as const, branchId } : {
-        orderId, underwriter: 'westcor', branchId, lenderCompany, lenderContact, assignmentClause,
+      const cplBody = isClient ? { underwriter, branchId } : {
+        orderId, underwriter, branchId, lenderCompany, lenderContact, assignmentClause,
         lenderAddress: lenderAddr, lenderCity, lenderState, lenderZip,
         propertyAddress: propStreet, propertyCity: propCity, propertyState: propState, propertyZip: propZip,
         loanNumber, loanAmount, salesAmount, borrowerNames: borrower,
       };
       const res = await fetch(cplUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cplBody) });
       const body = await res.json();
-      if (!res.ok || !body.success) throw new Error(body.error ?? 'Generation failed');
+      if (!res.ok || !body.success) throw new Error(body.error ?? body.details?.[0] ?? 'Generation failed');
       setResult({ ok: true, docId: body.documentId });
     } catch (err) {
       setResult({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
@@ -260,14 +302,28 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
             </div>
           </Section>
 
-          {/* ── Branch ── */}
-          <Section label="Branch">
-            <select value={branchId ?? ''} onChange={(e) => setBranchId(e.target.value ? Number(e.target.value) : null)}
-              className="w-full h-11 px-3 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20">
-              <option value="">Select branch…</option>
-              {branches.map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}
-            </select>
-            <p className="text-[11px] text-[#9CA3AF] mt-1">Underwriter: Westcor (default)</p>
+          {/* ── Underwriter + Branch ── */}
+          <Section label="Underwriter & Branch">
+            <div className="space-y-3">
+              <div className="flex gap-4">
+                {(Object.keys(UNDERWRITER_LABELS) as Underwriter[]).map((uw) => (
+                  <label key={uw} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                    <input type="radio" name="underwriter" checked={underwriter === uw}
+                      onChange={() => { setUnderwriter(uw); setBranchId(null); }}
+                      className="accent-[#F26B2B]" />
+                    {UNDERWRITER_LABELS[uw]}
+                  </label>
+                ))}
+              </div>
+              <select value={branchId ?? ''} onChange={(e) => setBranchId(e.target.value ? Number(e.target.value) : null)}
+                className="w-full h-11 px-3 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20">
+                <option value="">Select branch…</option>
+                {branches.map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}
+              </select>
+              {branches.length === 0 && !loading && (
+                <p className="text-[11px] text-amber-600">No branches configured for {UNDERWRITER_LABELS[underwriter]}. Contact admin.</p>
+              )}
+            </div>
           </Section>
 
           {/* ── Result ── */}

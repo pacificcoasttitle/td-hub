@@ -132,7 +132,7 @@ export const fnfAdapter: CplAdapter = {
       const propCounty = input.propertyOverrides?.county ?? prop?.county ?? '';
 
       // Step 4: GetCPLList
-      const forms = await getCplForms(cfg, vendorToken, branch, orderDetail.fileNumber, propState);
+      const forms = await getCplForms(cfg, vendorToken, branch, orderDetail.fileNumber, propState, input.orderId);
       await logRequest({
         operation: 'get_cpl_list', orderId: input.orderId, requestId, startedAt: new Date(),
         success: true, meta: { formCount: forms.length, forms: forms.map((f) => f.name) },
@@ -177,7 +177,7 @@ export const fnfAdapter: CplAdapter = {
       const isEdit = !!existingDocId;
 
       try {
-        result = await generateCplSoap(cfg, vendorToken, soapParams);
+        result = await generateCplSoap(cfg, vendorToken, soapParams, input.orderId);
         await logRequest({
           operation: isEdit ? 'edit_cpl' : 'create_cpl',
           orderId: input.orderId, requestId, startedAt: new Date(),
@@ -191,7 +191,7 @@ export const fnfAdapter: CplAdapter = {
             success: false, errorCategory: 'EDIT_EMPTY', meta: { fallbackToCreate: true },
           });
           soapParams.documentId = null;
-          result = await generateCplSoap(cfg, vendorToken, soapParams);
+          result = await generateCplSoap(cfg, vendorToken, soapParams, input.orderId);
           await logRequest({
             operation: 'create_cpl', orderId: input.orderId, requestId, startedAt: new Date(),
             success: true, meta: { formName, documentId: result.documentId, cplId: result.cplId, fallbackFromEdit: true },

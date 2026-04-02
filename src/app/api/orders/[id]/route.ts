@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { getOrderById } from '@/lib/domain/orders/service';
 import { db } from '@/lib/db/client';
-import { contacts, orderExternalRefs } from '@/lib/db/schema';
+import { contacts, companies, orderExternalRefs } from '@/lib/db/schema';
 import { eq, and, like } from 'drizzle-orm';
 
 export async function GET(
@@ -47,6 +47,17 @@ export async function GET(
       lenderContact = lc ?? null;
     }
 
+    // Resolve underwriter company for CPL auto-detection
+    let underwriterCompany: { name: string; lookupCode: string } | null = null;
+    if (order.underwriterId) {
+      const [uw] = await db
+        .select({ name: companies.name, lookupCode: companies.lookupCode })
+        .from(companies)
+        .where(eq(companies.id, order.underwriterId))
+        .limit(1);
+      if (uw) underwriterCompany = { name: uw.name, lookupCode: uw.lookupCode ?? '' };
+    }
+
     // Load CPL-specific saved data from external refs
     const cplRefRows = await db
       .select({ refType: orderExternalRefs.refType, refValue: orderExternalRefs.refValue })
@@ -63,7 +74,7 @@ export async function GET(
       cplData[row.refType] = row.refValue;
     }
 
-    return NextResponse.json({ ...order, lenderContact, cplData });
+    return NextResponse.json({ ...order, lenderContact, cplData, underwriter: underwriterCompany });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

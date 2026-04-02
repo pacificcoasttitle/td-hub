@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client';
 import { orders, documents, titlePointData, orderStatusHistory } from '@/lib/db/schema';
 import { eq, and, asc, sql } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrder } from '@/lib/security/client-scope';
 
 interface Milestone {
   name: string;
@@ -25,6 +26,11 @@ export async function GET(
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    const allowed = await canAccessOrder(session.id, orderId);
+    if (!allowed) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const [order] = await db

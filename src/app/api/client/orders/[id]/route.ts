@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client';
 import { orders, orderProperties, documents } from '@/lib/db/schema';
 import { eq, desc, and } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrder } from '@/lib/security/client-scope';
 
 export async function GET(
   _req: NextRequest,
@@ -18,6 +19,11 @@ export async function GET(
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    const allowed = await canAccessOrder(session.id, orderId);
+    if (!allowed) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const result = await db

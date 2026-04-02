@@ -4,6 +4,7 @@ import { db } from '@/lib/db/client';
 import { orders, documentRequests } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrder } from '@/lib/security/client-scope';
 
 const createSchema = z.object({
   requestType: z.string().min(1).max(100),
@@ -26,6 +27,11 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
     }
 
+    const allowed = await canAccessOrder(session.id, orderId);
+    if (!allowed) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
     const [order] = await db
       .select({ id: orders.id })
       .from(orders)
@@ -33,7 +39,7 @@ export async function POST(
       .limit(1);
 
     if (!order) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const body = await req.json().catch(() => null);
@@ -69,6 +75,11 @@ export async function GET(
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    const allowed = await canAccessOrder(session.id, orderId);
+    if (!allowed) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const rows = await db

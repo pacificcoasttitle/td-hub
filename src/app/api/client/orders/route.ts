@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { orders, orderProperties } from '@/lib/db/schema';
-import { eq, desc, sql, ilike, or, and, SQL } from 'drizzle-orm';
+import { eq, desc, sql, ilike, or, and, inArray, SQL } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
+import { getAccessibleOrderIds } from '@/lib/security/client-scope';
 
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
@@ -23,11 +24,16 @@ export async function GET(req: NextRequest) {
     const params = querySchema.parse(rawParams);
     const offset = (params.page - 1) * params.pageSize;
 
+    const accessibleIds = await getAccessibleOrderIds(session.id);
+    if (Array.isArray(accessibleIds) && accessibleIds.length === 0) {
+      return NextResponse.json({ orders: [], total: 0, page: params.page, pageSize: params.pageSize });
+    }
+
     const conditions: SQL[] = [];
 
-    // TODO: Builder agent — scope to orders this client has access to
-    // For now, all authenticated users see all orders. Once party-based
-    // scoping is implemented, filter by orders where user is a linked party.
+    if (Array.isArray(accessibleIds)) {
+      conditions.push(inArray(orders.id, accessibleIds));
+    }
 
     if (params.status) {
       conditions.push(eq(orders.operationalStatus, params.status as typeof orders.operationalStatus.enumValues[number]));

@@ -34,7 +34,7 @@ export function ManagerAssignModal({ open, managerId, managerName, onClose, onSu
     if (!open) return;
     setFilter('');
     setLoadingReps(true);
-    fetch('/api/contacts?type=sales_rep&pageSize=500&active=true&sort=firstName&order=asc')
+    fetch('/api/contacts?type=sales_rep&pageSize=500&active=true&sort=fullName&order=asc')
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         const reps: Rep[] = d?.contacts ?? [];

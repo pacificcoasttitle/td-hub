@@ -68,7 +68,7 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
     const id = ++fetchCount.current;
     setLoading(true);
     setError(null);
-    const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), active: activeFilter, sort: 'firstName', order: 'asc' });
+    const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), active: activeFilter, sort: 'fullName', order: 'asc' });
     if (typeFilter) p.set('type', typeFilter);
     if (search) p.set('search', search);
     fetch(`/api/contacts?${p}`)

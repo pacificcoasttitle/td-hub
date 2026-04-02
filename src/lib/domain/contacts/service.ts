@@ -109,7 +109,7 @@ export async function getContacts(params: ContactListParams = {}): Promise<Conta
       case 'lastName': return sql`${contacts.lastName} ${sql.raw(d)} ${sql.raw(nl)}`;
       case 'fullName': return sql`${contacts.fullName} ${sql.raw(d)} ${sql.raw(nl)}`;
       case 'email': return sql`${contacts.email} ${sql.raw(d)} ${sql.raw(nl)}`;
-      default: return desc(contacts.createdAt);
+      default: return sql`${contacts.fullName} ASC NULLS LAST`;
     }
   }
 

@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CompanySyncAllButton } from '@/components/admin/contacts/company-sync-all-button';
 import { CompanyFormModal, type CompanyRecord } from '@/components/admin/contacts/company-form-modal';
+import { CompanyOfficerModal, type OfficerTarget } from '@/components/admin/contacts/company-officer-modal';
 
-interface StaffOption { id: number; name: string; }
+interface StaffOption { id: number; name: string }
 
 interface Company {
   id: number;
@@ -29,8 +30,11 @@ type SortField = 'name' | 'companyType' | 'city' | 'createdAt';
 type SortDir = 'asc' | 'desc';
 
 const PAGE_SIZE = 25;
-const TYPE_OPTS = [{ value: '', label: 'All Types' }, { value: 'escrow_company', label: 'Escrow Company' }, { value: 'lender', label: 'Lender' }, { value: 'mortgage_broker', label: 'Mortgage Broker' }, { value: 'selling_agent', label: 'Selling Agent' }, { value: 'underwriter', label: 'Underwriter' }];
-const SEL = 'h-8 px-1.5 border border-gray-200 rounded text-xs bg-white focus:outline-none focus:border-[#1B2A4A] min-w-[120px] max-w-[160px] truncate';
+const TYPE_OPTS = [
+  { value: '', label: 'All Types' }, { value: 'escrow_company', label: 'Escrow Company' },
+  { value: 'lender', label: 'Lender' }, { value: 'mortgage_broker', label: 'Mortgage Broker' },
+  { value: 'selling_agent', label: 'Selling Agent' }, { value: 'underwriter', label: 'Underwriter' },
+];
 
 export default function CompaniesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -47,7 +51,7 @@ export default function CompaniesPage() {
   const [staff, setStaff] = useState<{ salesReps: StaffOption[]; titleOfficers: StaffOption[] }>({ salesReps: [], titleOfficers: [] });
   const [modalOpen, setModalOpen] = useState(false);
   const [editCompany, setEditCompany] = useState<CompanyRecord | null>(null);
-  const [patchMsg, setPatchMsg] = useState<Record<number, string>>({});
+  const [officerTarget, setOfficerTarget] = useState<OfficerTarget | null>(null);
   const debRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const fetchCompanies = useCallback(() => {
@@ -62,13 +66,18 @@ export default function CompaniesPage() {
       .finally(() => setLoading(false));
   }, [page, search, typeFilter, activeFilter, sortField, sortDir]);
 
+  useEffect(() => { fetchCompanies(); }, [fetchCompanies]);
+
+  useEffect(() => {
+    fetch('/api/staff/list')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setStaff({ salesReps: d.salesReps ?? [], titleOfficers: d.titleOfficers ?? [] }); })
+      .catch(() => {});
+  }, []);
+
   function toggleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDir('asc');
-    }
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortField(field); setSortDir('asc'); }
     setPage(1);
   }
 
@@ -79,36 +88,10 @@ export default function CompaniesPage() {
       : <svg className="h-3 w-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>;
   }
 
-  useEffect(() => { fetchCompanies(); }, [fetchCompanies]);
-
-  useEffect(() => {
-    fetch('/api/staff/list')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) setStaff({ salesReps: d.salesReps ?? [], titleOfficers: d.titleOfficers ?? [] }); })
-      .catch(() => {});
-  }, []);
-
   function handleSearch(v: string) {
     setSearchInput(v);
     clearTimeout(debRef.current);
     debRef.current = setTimeout(() => { setSearch(v); setPage(1); }, 300);
-  }
-
-  async function patchCompany(id: number, field: string, value: string | number | null) {
-    setPatchMsg(m => ({ ...m, [id]: 'Saving…' }));
-    try {
-      const res = await fetch(`/api/companies/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: value }),
-      });
-      if (!res.ok) throw new Error('Failed');
-      setCompanies(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
-      setPatchMsg(m => ({ ...m, [id]: '✓' }));
-    } catch {
-      setPatchMsg(m => ({ ...m, [id]: 'Error' }));
-    }
-    setTimeout(() => setPatchMsg(m => { const n = { ...m }; delete n[id]; return n; }), 2000);
   }
 
   function openEdit(c: Company) {
@@ -116,11 +99,20 @@ export default function CompaniesPage() {
     setModalOpen(true);
   }
 
+  function openOfficers(c: Company) {
+    setOfficerTarget({ companyId: c.id, companyName: c.name, salesRepId: c.salesRepId, titleOfficerId: c.titleOfficerId, loanUnderwriter: c.loanUnderwriter, salesUnderwriter: c.salesUnderwriter });
+  }
+
+  function resolveName(id: number | null, list: StaffOption[]): string {
+    if (!id) return '—';
+    return list.find(s => s.id === id)?.name ?? '—';
+  }
+
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-1">
         <div>
           <h1 className="text-2xl font-semibold text-[#1A1A2E]">Companies</h1>
           <p className="text-sm text-[#6B7280] mt-1">Company directory with assignment management</p>
@@ -134,6 +126,7 @@ export default function CompaniesPage() {
           </button>
         </div>
       </div>
+      <p className="text-sm text-gray-400 italic mb-4">Officer assignments auto-fill the open order form when a client from this company opens an order.</p>
 
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <div className="relative flex-1 max-w-sm">
@@ -166,59 +159,21 @@ export default function CompaniesPage() {
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280] cursor-pointer select-none group/th" onClick={() => toggleSort('companyType')}>
                     <span className="inline-flex items-center">Type<SortIcon field="companyType" /></span>
                   </th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280] cursor-pointer select-none group/th" onClick={() => toggleSort('city')}>
-                    <span className="inline-flex items-center">Address<SortIcon field="city" /></span>
-                  </th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Sales Rep</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Title Officer</th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Loan UW</th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Sales UW</th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Deliverables</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Status</th>
-                  <th className="px-4 py-3 w-12" />
+                  <th className="px-4 py-3 w-20" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {loading ? Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i}>{Array.from({ length: 10 }).map((_, j) => <td key={j} className="px-4 py-3"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" /></td>)}</tr>
+                  <tr key={i}>{Array.from({ length: 6 }).map((__, j) => <td key={j} className="px-4 py-3"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" /></td>)}</tr>
                 )) : companies.length > 0 ? companies.map(co => (
                   <tr key={co.id} className="hover:bg-gray-50 transition-colors group">
-                    <td className="px-4 py-3 font-medium text-[#1A1A2E] whitespace-nowrap">{co.name}</td>
-                    <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap text-xs">{co.companyType ?? '—'}</td>
-                    <td className="px-4 py-3 text-[#6B7280] max-w-[260px] truncate">{[co.address1, co.city, [co.state, co.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ') || '—'}</td>
-                    <td className="px-4 py-2">
-                      <select className={SEL} value={co.salesRepId ?? ''}
-                        onChange={e => patchCompany(co.id, 'salesRepId', e.target.value ? Number(e.target.value) : null)}>
-                        <option value="">—</option>
-                        {staff.salesReps.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-4 py-2">
-                      <select className={SEL} value={co.titleOfficerId ?? ''}
-                        onChange={e => patchCompany(co.id, 'titleOfficerId', e.target.value ? Number(e.target.value) : null)}>
-                        <option value="">—</option>
-                        {staff.titleOfficers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-4 py-2">
-                      <input className="h-8 px-2 border border-gray-200 rounded text-xs w-28 focus:outline-none focus:border-[#1B2A4A]"
-                        value={co.loanUnderwriter ?? ''} placeholder="—"
-                        onBlur={e => { if (e.target.value !== (co.loanUnderwriter ?? '')) patchCompany(co.id, 'loanUnderwriter', e.target.value || null); }}
-                        onChange={e => setCompanies(prev => prev.map(c => c.id === co.id ? { ...c, loanUnderwriter: e.target.value } : c))} />
-                    </td>
-                    <td className="px-4 py-2">
-                      <input className="h-8 px-2 border border-gray-200 rounded text-xs w-28 focus:outline-none focus:border-[#1B2A4A]"
-                        value={co.salesUnderwriter ?? ''} placeholder="—"
-                        onBlur={e => { if (e.target.value !== (co.salesUnderwriter ?? '')) patchCompany(co.id, 'salesUnderwriter', e.target.value || null); }}
-                        onChange={e => setCompanies(prev => prev.map(c => c.id === co.id ? { ...c, salesUnderwriter: e.target.value } : c))} />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {co.deliverableEmails && co.deliverableEmails.length > 0 ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px] font-semibold" title={co.deliverableEmails.join(', ')}>
-                          {co.deliverableEmails.length} email{co.deliverableEmails.length !== 1 ? 's' : ''}
-                        </span>
-                      ) : <span className="text-[#9CA3AF] text-xs">—</span>}
-                    </td>
+                    <td className="px-4 py-3 font-medium text-[#1A1A2E] whitespace-nowrap max-w-[240px] truncate">{co.name}</td>
+                    <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap text-xs">{co.companyType?.replace(/_/g, ' ') ?? '—'}</td>
+                    <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap text-xs max-w-[160px] truncate">{resolveName(co.salesRepId, staff.salesReps)}</td>
+                    <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap text-xs max-w-[160px] truncate">{resolveName(co.titleOfficerId, staff.titleOfficers)}</td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5 text-xs">
                         <span className={`h-2 w-2 rounded-full ${co.isActive ? 'bg-green-500' : 'bg-gray-300'}`} />
@@ -226,11 +181,13 @@ export default function CompaniesPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => openEdit(co)} className="opacity-0 group-hover:opacity-100 text-[#6B7280] hover:text-[#1B2A4A] transition-all" title="Edit">
+                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
+                        <button onClick={() => openOfficers(co)} title="Assign Officers" className="text-[#F26B2B] hover:text-[#E05A1A]">
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        </button>
+                        <button onClick={() => openEdit(co)} title="Edit" className="text-[#6B7280] hover:text-[#1B2A4A]">
                           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                         </button>
-                        {patchMsg[co.id] && <span className="text-[10px] text-[#6B7280]">{patchMsg[co.id]}</span>}
                       </div>
                     </td>
                   </tr>
@@ -253,6 +210,14 @@ export default function CompaniesPage() {
       </div>
 
       <CompanyFormModal open={modalOpen} onClose={() => setModalOpen(false)} onSuccess={fetchCompanies} company={editCompany} />
+      <CompanyOfficerModal
+        open={!!officerTarget}
+        target={officerTarget}
+        salesReps={staff.salesReps}
+        titleOfficers={staff.titleOfficers}
+        onClose={() => setOfficerTarget(null)}
+        onSuccess={fetchCompanies}
+      />
     </div>
   );
 }

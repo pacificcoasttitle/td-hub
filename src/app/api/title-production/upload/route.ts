@@ -23,6 +23,12 @@ function isPdfFile(file: File): boolean {
   return lowerName.endsWith('.pdf') && contentType === 'application/pdf';
 }
 
+function getAppUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (!configured) return 'https://td-hub.vercel.app';
+  return configured.replace(/\/$/, '');
+}
+
 async function logRouteEvent(params: {
   requestId: string;
   operation: string;
@@ -142,24 +148,6 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        const signedUrlResult = await getSignedUrl(storageKey, 3600);
-        if (!signedUrlResult.success) {
-          const syncError = signedUrlResult.error?.message ?? 'Failed to generate S3 signed URL';
-          results.push({ filename, publicUrl: '', synced: false, syncError });
-
-          await logRouteEvent({
-            requestId,
-            operation: 'signed_url_failed',
-            success: false,
-            errorCategory: 'S3_PRESIGN',
-            requestMeta: { orderNumber, documentName, filename, storageKey },
-            responseMeta: { error: syncError },
-          });
-          continue;
-        }
-
-        const publicUrl = signedUrlResult.data!;
-
         const [uploadRow] = await db
           .insert(titleProductionUploads)
           .values({
@@ -167,17 +155,50 @@ export async function POST(req: NextRequest) {
             documentName,
             filename,
             storageKey,
-            publicUrl,
+            publicUrl: null,
             uploadedBy: session.id,
           })
           .returning({ id: titleProductionUploads.id });
+
+        const permanentUrl = `${getAppUrl()}/api/title-production/uploads/${uploadRow!.id}/file`;
+
+        await db
+          .update(titleProductionUploads)
+          .set({ publicUrl: permanentUrl })
+          .where(eq(titleProductionUploads.id, uploadRow!.id));
+
+        const signedUrlResult = await getSignedUrl(storageKey, 24 * 60 * 60);
+        if (!signedUrlResult.success) {
+          const syncError = signedUrlResult.error?.message ?? 'Failed to generate S3 signed URL';
+          await db
+            .update(titleProductionUploads)
+            .set({
+              isSynced: false,
+              syncReason: syncError,
+            })
+            .where(eq(titleProductionUploads.id, uploadRow!.id));
+
+          results.push({ filename, publicUrl: permanentUrl, synced: false, syncError });
+
+          await logRouteEvent({
+            requestId,
+            operation: 'signed_url_failed',
+            success: false,
+            errorCategory: 'S3_PRESIGN',
+            requestMeta: { orderNumber, documentName, filename, storageKey, uploadRowId: uploadRow!.id },
+            responseMeta: { error: syncError },
+          });
+          continue;
+        }
+
+        const softproFileUrl = signedUrlResult.data!;
 
         const softproResult = await softproUpload({
           documentId: uploadRow!.id,
           orderNumber,
           documentName,
           folderName: 'desk-file-upload',
-          fileUrl: publicUrl,
+          fileUrl: softproFileUrl,
         });
 
         let vendorLogId: number | null = null;
@@ -201,14 +222,14 @@ export async function POST(req: NextRequest) {
             })
             .where(eq(titleProductionUploads.id, uploadRow!.id));
 
-          results.push({ filename, publicUrl, synced: true });
+          results.push({ filename, publicUrl: permanentUrl, synced: true });
 
           await logRouteEvent({
             requestId,
             operation: 'file_uploaded',
             success: true,
             requestMeta: { orderNumber, documentName, filename, storageKey, uploadRowId: uploadRow!.id },
-            responseMeta: { publicUrl, synced: true, vendorLogId },
+            responseMeta: { publicUrl: permanentUrl, synced: true, vendorLogId },
           });
           continue;
         }
@@ -223,7 +244,7 @@ export async function POST(req: NextRequest) {
           })
           .where(eq(titleProductionUploads.id, uploadRow!.id));
 
-        results.push({ filename, publicUrl, synced: false, syncError });
+        results.push({ filename, publicUrl: permanentUrl, synced: false, syncError });
 
         await logRouteEvent({
           requestId,
@@ -231,7 +252,7 @@ export async function POST(req: NextRequest) {
           success: false,
           errorCategory: 'SOFTPRO_UPLOAD',
           requestMeta: { orderNumber, documentName, filename, storageKey, uploadRowId: uploadRow!.id },
-          responseMeta: { publicUrl, syncError, vendorLogId, softproRequestId: softproResult.requestId },
+          responseMeta: { publicUrl: permanentUrl, syncError, vendorLogId, softproRequestId: softproResult.requestId },
         });
       } catch (err) {
         const syncError = err instanceof Error ? err.message : 'Upload failed';

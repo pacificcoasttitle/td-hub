@@ -56,7 +56,11 @@ export function UploadForm({ onSuccess }: Props) {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? `Upload failed (${res.status})`);
 
-      setResults(body?.results ?? files.map(f => ({ name: f.name, ok: true })));
+      setResults(body?.results?.map((r: { filename?: string; name?: string; synced?: boolean; ok?: boolean; syncError?: string; error?: string }) => ({
+        name: r.filename ?? r.name ?? 'Unknown',
+        ok: r.synced ?? r.ok ?? true,
+        error: r.syncError ?? r.error,
+      })) ?? files.map(f => ({ name: f.name, ok: true })));
       setOrderNumber('');
       setDocName('');
       setFiles([]);

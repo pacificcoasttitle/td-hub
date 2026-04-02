@@ -12,6 +12,10 @@ export interface ClientContact {
   contactType?: string | null;
   clientLookupCode?: string | null;
   companyLookupCode?: string | null;
+  companySalesRepId?: number | null;
+  companyTitleOfficerId?: number | null;
+  companyLoanUnderwriter?: string | null;
+  companySalesUnderwriter?: string | null;
 }
 
 interface ClientSelectorProps {

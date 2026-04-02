@@ -105,7 +105,11 @@ export async function GET(req: NextRequest) {
         co.address1 AS company_address,
         co.city AS company_city,
         co.state AS company_state,
-        co.zip AS company_zip
+        co.zip AS company_zip,
+        co.sales_rep_id AS company_sales_rep_id,
+        co.title_officer_id AS company_title_officer_id,
+        co.loan_underwriter AS company_loan_underwriter,
+        co.sales_underwriter AS company_sales_underwriter
       FROM contacts c
       LEFT JOIN companies co ON c.flookup_code = co.lookup_code AND c.flookup_code IS NOT NULL
       WHERE ${searchCondition}
@@ -150,6 +154,10 @@ export async function GET(req: NextRequest) {
         clientType,
         contactType: clientType,
         type: clientType,
+        companySalesRepId: (r.company_sales_rep_id as number) ?? null,
+        companyTitleOfficerId: (r.company_title_officer_id as number) ?? null,
+        companyLoanUnderwriter: (r.company_loan_underwriter as string) ?? null,
+        companySalesUnderwriter: (r.company_sales_underwriter as string) ?? null,
       };
     });
 

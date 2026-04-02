@@ -14,7 +14,7 @@ const bodySchema = z.object({
   role: z.enum([
     'super_admin', 'admin', 'cs_admin', 'sales_manager',
     'sales_rep', 'title_officer', 'escrow_officer',
-    'open_order_team', 'client',
+    'open_order_team', 'title_production', 'client',
   ]),
   branchId: z.number().int().positive().optional(),
   contactId: z.number().int().positive().optional(),

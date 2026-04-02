@@ -13,6 +13,7 @@ const NAV_BY_ROLE: Record<string, string[]> = {
   title_officer:   ['/dashboard', '/orders', '/documents'],
   escrow_officer:  ['/dashboard', '/orders', '/documents'],
   open_order_team: ['/hub', '/orders', '/contacts'],
+  title_production: ['/title-production'],
 };
 
 const ALLOWED_ROLES = Object.keys(NAV_BY_ROLE);

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
-import { orders, jobs, orderProperties } from '@/lib/db/schema';
-import { eq, sql, desc, count } from 'drizzle-orm';
+import { orders, jobs, orderProperties, eventOutbox, documents, vendorApiLogs } from '@/lib/db/schema';
+import { eq, sql, desc, count, gte, and, isNotNull } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,21 +75,55 @@ export async function GET() {
     [] as Array<{ id: number; fileNumber: string; operationalStatus: string; transactionType: string | null; openedAt: Date; closedAt: Date | null; address: string | null; city: string | null; state: string | null; county: string | null }>),
   ]);
 
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const [webhookStats, docStats, lastSoftproSync] = await Promise.all([
+    safeQuery(async () => {
+      const [totalResult, failedResult, latestResult] = await Promise.all([
+        db.select({ value: sql<number>`count(*)` }).from(eventOutbox).where(gte(eventOutbox.createdAt, today)),
+        db.select({ value: sql<number>`count(*)` }).from(eventOutbox).where(and(gte(eventOutbox.createdAt, today), sql`${eventOutbox.failCount} > 0`)),
+        db.select({ createdAt: eventOutbox.createdAt }).from(eventOutbox).orderBy(desc(eventOutbox.createdAt)).limit(1),
+      ]);
+      return {
+        todayCount: Number(totalResult[0]?.value ?? 0),
+        latestAt: latestResult[0]?.createdAt?.toISOString() ?? null,
+        failedToday: Number(failedResult[0]?.value ?? 0),
+      };
+    }, { todayCount: 0, latestAt: null as string | null, failedToday: 0 }),
+
+    safeQuery(async () => {
+      const [uploadedResult, failedResult] = await Promise.all([
+        db.select({ value: sql<number>`count(*)` }).from(documents).where(and(gte(documents.createdAt, today), eq(documents.status, 'active'))),
+        db.select({ value: sql<number>`count(*)` }).from(documents).where(and(gte(documents.createdAt, today), eq(documents.isSyncedToSoftpro, false), isNotNull(documents.softproSyncError))),
+      ]);
+      return {
+        uploaded: Number(uploadedResult[0]?.value ?? 0),
+        attachFailures: Number(failedResult[0]?.value ?? 0),
+      };
+    }, { uploaded: 0, attachFailures: 0 }),
+
+    safeQuery(async () => {
+      const [row] = await db.select({ createdAt: vendorApiLogs.createdAt })
+        .from(vendorApiLogs)
+        .where(and(eq(vendorApiLogs.vendor, 'softpro'), eq(vendorApiLogs.success, true)))
+        .orderBy(desc(vendorApiLogs.createdAt))
+        .limit(1);
+      return row?.createdAt?.toISOString() ?? null;
+    }, null as string | null),
+  ]);
+
   return NextResponse.json({
     stats: {
       ...orderStats,
-      lastSyncAt: jobStats.lastSyncAt,
+      lastSyncAt: lastSoftproSync ?? jobStats.lastSyncAt,
     },
-    webhooks: {
-      todayCount: 0,
-      latestAt: null,
-      failedToday: 0,
-    },
+    webhooks: webhookStats,
     systemHealth: {
       lastSync: jobStats.lastSync,
       failedJobs: jobStats.failedJobs,
-      documentsUploadedToday: 0,
-      documentAttachFailuresToday: 0,
+      documentsUploadedToday: docStats.uploaded,
+      documentAttachFailuresToday: docStats.attachFailures,
     },
     recentOrders: recentOrderRows.map((row) => ({
       id: row.id,

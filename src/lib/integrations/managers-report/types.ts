@@ -74,3 +74,55 @@ export interface LeaderboardResponse {
   totalReps: number;
   leaderboard: LeaderboardEntry[];
 }
+
+// ─── Closings (GET /api/td/closings) ────────────────────────────────────────
+
+export interface ClosingsEntry {
+  fileNumber: string;
+  salesRepName: string;
+  closedDate: string;
+  address: string;
+  city: string;
+  state: string;
+  revenue: number;
+}
+
+export interface ClosingsResponse {
+  month: string;
+  closings: ClosingsEntry[];
+}
+
+// ─── Production History (GET /api/td/production-history) ─────────────────────
+
+export interface ProductionMonth {
+  month: number;
+  monthName: string;
+  openings: number;
+  closings: number;
+  revenue: number;
+  closingRatio: number;
+}
+
+export interface ProductionHistoryResponse {
+  year: number;
+  months: ProductionMonth[];
+}
+
+// ─── Trends (GET /api/td/trends) ────────────────────────────────────────────
+
+export interface TrendMonth {
+  month: number;
+  openings: number;
+  closings: number;
+  revenue: number;
+}
+
+export interface TrendYear {
+  year: number;
+  months: TrendMonth[];
+}
+
+export interface TrendsResponse {
+  currentYear: TrendYear;
+  priorYear: TrendYear;
+}

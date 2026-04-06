@@ -1,7 +1,7 @@
 import { VendorResult, VendorHealthResult, vendorSuccess, vendorError } from '../types';
 import { db } from '@/lib/db/client';
 import { vendorApiLogs } from '@/lib/db/schema';
-import type { RepFigures, LeaderboardResponse } from './types';
+import type { RepFigures, LeaderboardResponse, ClosingsResponse, ProductionHistoryResponse, TrendsResponse } from './types';
 
 const VENDOR = 'managers_report';
 const TIMEOUT_MS = 15_000;
@@ -96,6 +96,40 @@ export async function getLeaderboard(
   if (limit) params.limit = String(limit);
   return makeRequest<LeaderboardResponse>('/api/td/leaderboard', 'get_leaderboard', params);
 }
+
+export async function getClosings(
+  month?: number,
+  year?: number,
+  repName?: string,
+): Promise<VendorResult<ClosingsResponse>> {
+  const params: Record<string, string> = {};
+  if (month) params.month = String(month);
+  if (year) params.year = String(year);
+  if (repName) params.repName = repName;
+  return makeRequest<ClosingsResponse>('/api/td/closings', 'get_closings', params);
+}
+
+export async function getProductionHistory(
+  year?: number,
+  repName?: string,
+): Promise<VendorResult<ProductionHistoryResponse>> {
+  const params: Record<string, string> = {};
+  if (year) params.year = String(year);
+  if (repName) params.repName = repName;
+  return makeRequest<ProductionHistoryResponse>('/api/td/production-history', 'get_production_history', params);
+}
+
+export async function getTrends(
+  repName?: string,
+): Promise<VendorResult<TrendsResponse>> {
+  const params: Record<string, string> = {};
+  if (repName) params.repName = repName;
+  return makeRequest<TrendsResponse>('/api/td/trends', 'get_trends', params);
+}
+
+// Usage: const closings = await getClosings(4, 2026);
+// Usage: const history = await getProductionHistory(2026, 'Smith, Jane');
+// Usage: const trends = await getTrends('Smith, Jane');
 
 export async function healthCheck(): Promise<VendorHealthResult> {
   const start = Date.now();

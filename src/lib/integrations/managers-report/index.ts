@@ -23,6 +23,33 @@ export async function getLeaderboard(month?: string, limit?: number) {
   return client.getLeaderboard(month, limit);
 }
 
+export async function getClosings(month?: number, year?: number, repName?: string) {
+  if (useMock) {
+    const mock = await import('./mock');
+    return mock.getClosings(month, year, repName);
+  }
+  const client = await import('./client');
+  return client.getClosings(month, year, repName);
+}
+
+export async function getProductionHistory(year?: number, repName?: string) {
+  if (useMock) {
+    const mock = await import('./mock');
+    return mock.getProductionHistory(year, repName);
+  }
+  const client = await import('./client');
+  return client.getProductionHistory(year, repName);
+}
+
+export async function getTrends(repName?: string) {
+  if (useMock) {
+    const mock = await import('./mock');
+    return mock.getTrends(repName);
+  }
+  const client = await import('./client');
+  return client.getTrends(repName);
+}
+
 export async function healthCheck() {
   if (useMock) {
     const mock = await import('./mock');

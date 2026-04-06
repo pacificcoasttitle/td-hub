@@ -58,8 +58,8 @@ const SLUG_TEMPLATES: Record<string, () => TemplateResult> = {
   'order.milestone.recording':    () => milestoneRecordingTemplate(SAMPLE_ORDER),
   'order.milestone.disbursement': () => milestoneDisbursementTemplate(SAMPLE_ORDER),
   'order.document.received':      () => documentReceivedTemplate({ ...SAMPLE_ORDER, category: 'CPL' }),
-  'prelim.summary':               () => documentReceivedTemplate({ ...SAMPLE_ORDER, category: 'Preliminary Report' }),
-  'policy.delivery':              () => documentReceivedTemplate({ ...SAMPLE_ORDER, category: 'Title Policy' }),
+  'prelim.summary':               () => documentReceivedTemplate({ fileNumber: '20003483-GLT', address: '123 Main St, Los Angeles, CA', category: 'prelim' }),
+  'policy.delivery':              () => documentReceivedTemplate({ fileNumber: '20003483-GLT', address: '123 Main St, Los Angeles, CA', category: 'policy' }),
 };
 
 export async function GET(

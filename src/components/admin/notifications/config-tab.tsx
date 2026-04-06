@@ -29,7 +29,7 @@ export function ConfigTab() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<NotificationType | null>(null);
   const [previewing, setPreviewing] = useState<NotificationType | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const fetchTypes = useCallback(() => {
     setLoading(true);
@@ -42,9 +42,9 @@ export function ConfigTab() {
 
   useEffect(() => { fetchTypes(); }, [fetchTypes]);
 
-  function showToast(msg: string) {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2500);
+  function showToast(message: string, type: 'success' | 'error') {
+    setToast({ message, type });
+    if (type === 'success') setTimeout(() => setToast(null), 3000);
   }
 
   async function quickToggle(slug: string, enabled: boolean) {
@@ -57,13 +57,13 @@ export function ConfigTab() {
       });
       if (!res.ok) {
         setTypes(prev => prev.map(t => t.slug === slug ? { ...t, isEnabled: !enabled } : t));
-        showToast('Failed to update — reverted');
+        showToast('Failed to update notification', 'error');
       } else {
-        showToast(enabled ? 'Notification enabled' : 'Notification disabled');
+        showToast('Notification updated', 'success');
       }
     } catch {
       setTypes(prev => prev.map(t => t.slug === slug ? { ...t, isEnabled: !enabled } : t));
-      showToast('Failed to update — reverted');
+      showToast('Failed to update notification', 'error');
     }
   }
 
@@ -151,8 +151,13 @@ export function ConfigTab() {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 bg-[#1B2A4A] text-white text-sm font-medium rounded-lg shadow-lg animate-fade-in">
-          {toast}
+        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-2.5 text-white text-sm font-medium rounded-lg shadow-lg ${
+          toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+        }`}>
+          <span>{toast.message}</span>
+          {toast.type === 'error' && (
+            <button onClick={() => setToast(null)} className="ml-1 text-white/70 hover:text-white">✕</button>
+          )}
         </div>
       )}
     </>

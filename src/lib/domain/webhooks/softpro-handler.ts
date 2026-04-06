@@ -3,7 +3,7 @@ import { db } from '@/lib/db/client';
 import { documents, documentAudit, orders, orderStatusHistory, eventOutbox, vendorApiLogs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
-import { analyzePrelim } from '@/lib/domain/tessa/service';
+import { analyzePrelim } from '@/lib/tessa';
 import { getSetting } from '@/lib/domain/settings/service';
 
 // ─── Zod Schemas ────────────────────────────────────────────────────────────
@@ -169,7 +169,15 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
         payload: { documentId, category: 'prelim', fileNumber: order.fileNumber } as Record<string, unknown>,
       });
 
-      try { analyzePrelim(documentId); } catch { /* fire and forget */ }
+      analyzePrelim({
+        orderId: order.id,
+        documentId,
+        fileNumber: order.fileNumber,
+        pdfUrl: url,
+        triggeredBy: 'webhook',
+      }).catch(err => {
+        console.error('[TESSA] Webhook-triggered analysis failed:', err);
+      });
 
       processed++;
     } catch (err) {

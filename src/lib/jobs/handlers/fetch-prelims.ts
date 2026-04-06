@@ -3,7 +3,7 @@ import { orders, documents, documentAudit } from '@/lib/db/schema';
 import { sql, and } from 'drizzle-orm';
 import { getAttachedDocuments } from '@/lib/integrations/softpro';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
-import { analyzePrelim } from '@/lib/domain/tessa/service';
+import { analyzePrelim } from '@/lib/tessa';
 
 export interface FetchPrelimsResult {
   total: number;
@@ -94,7 +94,15 @@ export async function fetchPrelimsForOrder(
         meta: { source: 'softpro_fetch', sourceUrl: url, storageKey, sizeBytes: buffer.length } as Record<string, unknown>,
       });
 
-      try { analyzePrelim(doc!.id); } catch { /* fire and forget */ }
+      analyzePrelim({
+        orderId,
+        documentId: doc!.id,
+        fileNumber,
+        pdfUrl: url,
+        triggeredBy: 'cron',
+      }).catch(err => {
+        console.error('[TESSA] Cron-triggered analysis failed:', err);
+      });
 
       stored++;
     } catch { /* per-URL failure doesn't stop the batch */ }

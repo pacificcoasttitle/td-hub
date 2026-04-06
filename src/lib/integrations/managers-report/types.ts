@@ -149,6 +149,7 @@ export interface ClientEntry {
   lastCloseDate: string;
   firstDealDate: string;
   isNewThisYear: boolean;
+  isRepeat: boolean;
   monthlyDeals: number[];
 }
 

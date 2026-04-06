@@ -102,20 +102,21 @@ export async function getTrends(_repName?: string): Promise<VendorResult<TrendsR
 const MOCK_CLIENT_SUMMARY: ClientSummaryResponse = {
   year: new Date().getFullYear(),
   totals: {
-    totalClients: 9, repeatClients: 6, newClients: 3,
-    topClientRevenue: 18500, avgDealsPerClient: 3.2,
-    totalRevenue: 82400, totalDeals: 29,
+    totalClients: 10, repeatClients: 5, newClients: 3,
+    topClientRevenue: 89500, avgDealsPerClient: 3.5,
+    totalRevenue: 278600, totalDeals: 35,
   },
   clients: [
-    { clientName: 'Rivera & Associates', companyName: 'Rivera Realty', deals: 6, revenue: 18500, lastCloseDate: '2026-03-15', firstDealDate: '2024-06-10', isNewThisYear: false, monthlyDeals: [1, 0, 2, 1, 0, 1, 0, 0, 1, 0, 0, 0] },
-    { clientName: 'Karen Wu', companyName: 'Pinnacle Lending', deals: 5, revenue: 14200, lastCloseDate: '2026-03-22', firstDealDate: '2025-01-18', isNewThisYear: false, monthlyDeals: [1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0] },
-    { clientName: 'James Thornton', companyName: 'Thornton Group', deals: 4, revenue: 12800, lastCloseDate: '2026-02-28', firstDealDate: '2025-04-03', isNewThisYear: false, monthlyDeals: [0, 2, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0] },
-    { clientName: 'Priya Patel', companyName: 'Summit Mortgage', deals: 3, revenue: 9600, lastCloseDate: '2026-03-10', firstDealDate: '2024-11-20', isNewThisYear: false, monthlyDeals: [1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0] },
-    { clientName: 'David Ochoa', companyName: 'Pacific Edge Realty', deals: 3, revenue: 8400, lastCloseDate: '2026-03-05', firstDealDate: '2026-01-12', isNewThisYear: true, monthlyDeals: [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
-    { clientName: 'Lisa Nakamura', companyName: 'Golden State Escrow', deals: 2, revenue: 5800, lastCloseDate: '2026-02-14', firstDealDate: '2025-08-05', isNewThisYear: false, monthlyDeals: [0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0] },
-    { clientName: 'Marco Diaz', companyName: 'Diaz Home Loans', deals: 2, revenue: 5200, lastCloseDate: '2026-01-30', firstDealDate: '2025-09-22', isNewThisYear: false, monthlyDeals: [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
-    { clientName: 'Sarah Kim', companyName: 'Bright Future Lending', deals: 2, revenue: 4600, lastCloseDate: '2026-03-18', firstDealDate: '2026-02-01', isNewThisYear: true, monthlyDeals: [0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
-    { clientName: 'Tom Bradley', companyName: 'Bradley & Co', deals: 2, revenue: 3300, lastCloseDate: '2026-03-01', firstDealDate: '2026-01-20', isNewThisYear: true, monthlyDeals: [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Rivera & Associates', companyName: 'Rivera Realty', deals: 8, revenue: 89500, lastCloseDate: '2026-03-28', firstDealDate: '2024-06-10', isNewThisYear: false, isRepeat: true, monthlyDeals: [2, 1, 3, 1, 0, 1, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Karen Wu', companyName: 'Pinnacle Lending', deals: 5, revenue: 42200, lastCloseDate: '2026-03-22', firstDealDate: '2025-01-18', isNewThisYear: false, isRepeat: true, monthlyDeals: [1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0] },
+    { clientName: 'James Thornton', companyName: 'Thornton Group', deals: 4, revenue: 34800, lastCloseDate: '2026-02-28', firstDealDate: '2025-04-03', isNewThisYear: false, isRepeat: true, monthlyDeals: [0, 2, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Priya Patel', companyName: 'Summit Mortgage', deals: 3, revenue: 27600, lastCloseDate: '2026-03-10', firstDealDate: '2024-11-20', isNewThisYear: false, isRepeat: true, monthlyDeals: [1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'David Ochoa', companyName: 'Pacific Edge Realty', deals: 3, revenue: 22400, lastCloseDate: '2026-03-05', firstDealDate: '2026-01-12', isNewThisYear: true, isRepeat: false, monthlyDeals: [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Lisa Nakamura', companyName: 'Golden State Escrow', deals: 3, revenue: 18800, lastCloseDate: '2026-02-14', firstDealDate: '2025-08-05', isNewThisYear: false, isRepeat: true, monthlyDeals: [0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Marco Diaz', companyName: 'Diaz Home Loans', deals: 2, revenue: 15200, lastCloseDate: '2026-01-30', firstDealDate: '2025-09-22', isNewThisYear: false, isRepeat: false, monthlyDeals: [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Sarah Kim', companyName: 'Bright Future Lending', deals: 3, revenue: 12600, lastCloseDate: '2026-03-18', firstDealDate: '2026-02-01', isNewThisYear: true, isRepeat: false, monthlyDeals: [0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Tom Bradley', companyName: 'Bradley & Co', deals: 2, revenue: 8200, lastCloseDate: '2025-11-15', firstDealDate: '2025-07-20', isNewThisYear: false, isRepeat: false, monthlyDeals: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Ana Gutierrez', companyName: 'Sunset Escrow', deals: 2, revenue: 7300, lastCloseDate: '2025-12-01', firstDealDate: '2026-03-10', isNewThisYear: true, isRepeat: false, monthlyDeals: [0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
   ],
 };
 

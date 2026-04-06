@@ -230,10 +230,15 @@ export async function getOrders(params: {
 
 export async function getOrderDetails(params: {
   dateFrom: string;
-  dateTo: string;
+  dateTo?: string;
+  orderNumber?: string;
 }): Promise<VendorResult<SoftProOrderDetailItem[]>> {
   return makeRequest<SoftProOrderDetailItem[]>('GET', SOFTPRO_ENDPOINTS.getOrderDetails, {
-    queryParams: { DateFrom: params.dateFrom, DateTo: params.dateTo },
+    queryParams: {
+      DateFrom: params.dateFrom,
+      DateTo: params.dateTo ?? '',
+      OrderNumber: params.orderNumber ?? '',
+    },
     operation: 'get_order_details',
     timeoutMs: 120_000,
   });

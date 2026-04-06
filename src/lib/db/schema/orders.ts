@@ -68,6 +68,12 @@ export const orders = pgTable('orders', {
 
   dupOverride: boolean('dup_override').notNull().default(false),
   emailStatus: varchar('email_status', { length: 20 }).notNull().default('pending'),
+
+  lenderPolicySent: boolean('lender_policy_sent').notNull().default(false),
+  ownerPolicySent: boolean('owner_policy_sent').notNull().default(false),
+  supplementStatementSent: boolean('supplement_statement_sent').notNull().default(false),
+  recordingConfirmationSent: boolean('recording_confirmation_sent').notNull().default(false),
+
   createdBy: varchar('created_by', { length: 64 }).references(() => profiles.id),
 
   createdAt: timestamp('created_at').notNull().defaultNow(),

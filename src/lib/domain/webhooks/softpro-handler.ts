@@ -180,6 +180,24 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
   return { success: errors.length === 0, processed, errors };
 }
 
+// ─── Policy Classification ──────────────────────────────────────────────────
+
+type PolicySubType = 'lender_policy' | 'owner_policy' | 'supplement' | 'policy';
+
+function classifyPolicyDocument(fileName: string): PolicySubType {
+  const lower = fileName.toLowerCase();
+  if (lower.includes('supplement')) return 'supplement';
+  if (lower.includes('policy') && lower.includes('lender')) return 'lender_policy';
+  if (lower.includes('policy')) return 'owner_policy';
+  return 'policy';
+}
+
+const SENT_FLAG_MAP: Partial<Record<PolicySubType, 'lenderPolicySent' | 'ownerPolicySent' | 'supplementStatementSent'>> = {
+  lender_policy: 'lenderPolicySent',
+  owner_policy: 'ownerPolicySent',
+  supplement: 'supplementStatementSent',
+};
+
 // ─── Policy Handler ─────────────────────────────────────────────────────────
 
 export async function handlePolicyWebhook(payload: PolicyPayload): Promise<WebhookResult> {
@@ -188,11 +206,23 @@ export async function handlePolicyWebhook(payload: PolicyPayload): Promise<Webho
     return { success: false, processed: 0, errors: [`Order not found: ${payload.OrderNumber}`] };
   }
 
+  const [orderFlags] = await db
+    .select({
+      lenderPolicySent: orders.lenderPolicySent,
+      ownerPolicySent: orders.ownerPolicySent,
+      supplementStatementSent: orders.supplementStatementSent,
+    })
+    .from(orders)
+    .where(eq(orders.id, order.id))
+    .limit(1);
+
   let processed = 0;
   const errors: string[] = [];
 
   for (const item of payload.data) {
     try {
+      const subType = classifyPolicyDocument(item.FileName);
+
       const { buffer } = await downloadFromUrl(item.FileUrl);
       const { documentId } = await storeDocument({
         orderId: order.id,
@@ -203,11 +233,23 @@ export async function handlePolicyWebhook(payload: PolicyPayload): Promise<Webho
         sourceUrl: item.FileUrl,
       });
 
-      await db.insert(eventOutbox).values({
-        eventType: 'order.document.received',
-        orderId: order.id,
-        payload: { documentId, category: 'policy', fileNumber: order.fileNumber } as Record<string, unknown>,
-      });
+      const flagKey = SENT_FLAG_MAP[subType];
+      if (flagKey && orderFlags?.[flagKey] === true) {
+        try {
+          await db.insert(vendorApiLogs).values({
+            vendor: 'softpro', operation: 'policy_outbox_skipped', orderId: order.id,
+            requestId: crypto.randomUUID(), startedAt: new Date(), endedAt: new Date(),
+            success: true,
+            requestMeta: { reason: `${String(flagKey)} already true`, subType, fileName: item.FileName } as Record<string, unknown>,
+          });
+        } catch { /* logging must not break the flow */ }
+      } else {
+        await db.insert(eventOutbox).values({
+          eventType: 'order.document.received',
+          orderId: order.id,
+          payload: { documentId, category: 'policy', subType, fileNumber: order.fileNumber } as Record<string, unknown>,
+        });
+      }
 
       processed++;
     } catch (err) {

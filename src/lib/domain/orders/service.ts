@@ -75,12 +75,16 @@ const SORT_COLUMNS = {
   operationalStatus: orders.operationalStatus,
 } as const;
 
-export async function getOrders(params: OrderListParams = {}): Promise<OrderListResult> {
+export async function getOrders(params: OrderListParams = {}, scopeFilter?: SQL | null): Promise<OrderListResult> {
   const page = params.page ?? 1;
   const pageSize = params.pageSize ?? 25;
   const offset = (page - 1) * pageSize;
 
   const conditions: SQL[] = [];
+
+  if (scopeFilter) {
+    conditions.push(scopeFilter);
+  }
 
   if (params.status) {
     conditions.push(eq(orders.operationalStatus, params.status as typeof orders.operationalStatus.enumValues[number]));

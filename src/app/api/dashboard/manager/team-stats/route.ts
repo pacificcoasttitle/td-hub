@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
-import { orders } from '@/lib/db/schema';
+import { orders, contacts } from '@/lib/db/schema';
 import { sql, and, eq, inArray, SQL } from 'drizzle-orm';
 import { getLeaderboard } from '@/lib/integrations/managers-report';
 import { getManagedRepIds } from '@/lib/domain/contacts/managed-reps';
+import { contactNameToReportName } from '@/lib/domain/contacts/name-mapping';
 
 const ALLOWED_ROLES = ['super_admin', 'admin', 'sales_manager'];
 
@@ -41,7 +42,20 @@ export async function GET(req: NextRequest) {
     try {
       const lb = await getLeaderboard();
       if (lb.success && lb.data) {
-        teamRevenue = lb.data.leaderboard.reduce((sum, e) => sum + e.mtdRevenue, 0);
+        let entries = lb.data.leaderboard;
+
+        if (session.role === 'sales_manager' && session.contactId) {
+          const repIds = await getManagedRepIds(session.contactId);
+          const allIds = [session.contactId, ...repIds];
+          const repNames = await db.select({ fullName: contacts.fullName }).from(contacts)
+            .where(inArray(contacts.id, allIds));
+          const nameSet = new Set(
+            repNames.map((r) => contactNameToReportName(r.fullName)?.toLowerCase()).filter(Boolean),
+          );
+          entries = entries.filter((e) => nameSet.has(e.salesRep.toLowerCase()));
+        }
+
+        teamRevenue = entries.reduce((sum, e) => sum + e.mtdRevenue, 0);
       }
     } catch { /* non-blocking */ }
 

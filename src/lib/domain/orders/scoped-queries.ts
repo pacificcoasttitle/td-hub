@@ -60,7 +60,7 @@ export async function getScopedStats(
   scopeColumn: ScopeColumn,
   contactId: number,
 ): Promise<ScopedStats> {
-  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
   const where = eq(scopeColumn, contactId);
 
   const [result] = await db.select({

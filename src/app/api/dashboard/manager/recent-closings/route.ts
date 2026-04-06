@@ -25,10 +25,13 @@ export async function GET(req: NextRequest) {
 
   const rows = await db
     .select({
+      id: orders.id,
       fileNumber: orders.fileNumber,
       closedAt: orders.closedAt,
-      address: orderProperties.fullAddress,
       salesRepName: contacts.fullName,
+      address: orderProperties.address,
+      city: orderProperties.city,
+      state: orderProperties.state,
     })
     .from(orders)
     .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
@@ -37,5 +40,17 @@ export async function GET(req: NextRequest) {
     .orderBy(desc(orders.closedAt))
     .limit(limit);
 
-  return NextResponse.json({ closings: rows });
+  const closings = rows.map((r) => ({
+    id: String(r.id),
+    fileNumber: r.fileNumber,
+    salesRepName: r.salesRepName ?? '',
+    closedAt: r.closedAt?.toISOString() ?? '',
+    property: {
+      address: r.address ?? '',
+      city: r.city ?? '',
+      state: r.state ?? '',
+    },
+  }));
+
+  return NextResponse.json({ closings });
 }

@@ -136,10 +136,11 @@ export function DashboardContent({ displayName, role }: Props) {
           <SectionCard title="MTD Production Breakdown">
             {mtd ? (
               <div className="p-5 space-y-3">
-                <ProdBar label="Purchase" count={mtd.purchase} total={mtd.closed} />
-                <ProdBar label="Refinance" count={mtd.refinance} total={mtd.closed} />
-                <ProdBar label="Escrow" count={mtd.escrow} total={mtd.closed} />
-                <ProdBar label="TSG" count={mtd.tsg} total={mtd.closed} />
+                <ProdBar label="Purchase" count={mtd.purchase} revenue={mtd.purchaseRevenue} total={mtd.closed} />
+                <ProdBar label="Refinance" count={mtd.refinance} revenue={mtd.refinanceRevenue} total={mtd.closed} />
+                <ProdBar label="Escrow" count={mtd.escrow} revenue={mtd.escrowRevenue} total={mtd.closed} />
+                <ProdBar label="TSG" count={mtd.tsg} revenue={mtd.tsgRevenue} total={mtd.closed} />
+                <RevenueSplit mtd={mtd} />
               </div>
             ) : (
               <div className="p-5 text-sm text-gray-500">Data not available yet.</div>
@@ -241,17 +242,44 @@ function Mini({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ProdBar({ label, count, total }: { label: string; count: number; total: number }) {
+function ProdBar({ label, count, revenue, total }: {
+  label: string; count: number; revenue?: number; total: number;
+}) {
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
         <span className="text-sm text-gray-900 font-medium">{label}</span>
-        <span className="text-xs text-gray-500">{count} orders</span>
+        <span className="flex items-center gap-2 text-xs text-gray-500">
+          <span>{count} orders</span>
+          {!!revenue && revenue > 0 && (
+            <>
+              <span className="text-gray-300">·</span>
+              <span>{formatCurrency(revenue)}</span>
+            </>
+          )}
+        </span>
       </div>
       <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
         <div className="h-full bg-[#1B2A4A] rounded-full transition-all" style={{ width: `${pct}%` }} />
       </div>
+    </div>
+  );
+}
+
+function RevenueSplit({ mtd }: { mtd: SalesDashboardStats['mtd'] }) {
+  if (!mtd) return null;
+  const total = (mtd.purchaseRevenue || 0) + (mtd.refinanceRevenue || 0)
+    + (mtd.escrowRevenue || 0) + (mtd.tsgRevenue || 0);
+  if (total <= 0) return null;
+  const pPct = Math.round(((mtd.purchaseRevenue || 0) / total) * 100);
+  const rPct = Math.round(((mtd.refinanceRevenue || 0) / total) * 100);
+  return (
+    <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-100">
+      <span className="text-xs text-gray-500">Revenue Split:</span>
+      <span className="text-xs font-medium text-gray-700">Purchase {formatCurrency(mtd.purchaseRevenue)} ({pPct}%)</span>
+      <span className="text-xs text-gray-300">|</span>
+      <span className="text-xs font-medium text-gray-700">Refinance {formatCurrency(mtd.refinanceRevenue)} ({rPct}%)</span>
     </div>
   );
 }

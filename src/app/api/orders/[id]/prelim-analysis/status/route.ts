@@ -26,24 +26,28 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
   }
 
-  const [row] = await db
-    .select({
-      id: prelimAnalyses.id,
-      status: prelimAnalyses.status,
-      errorMessage: prelimAnalyses.errorMessage,
-    })
-    .from(prelimAnalyses)
-    .where(eq(prelimAnalyses.orderId, orderId))
-    .orderBy(desc(prelimAnalyses.createdAt))
-    .limit(1);
+  try {
+    const [row] = await db
+      .select({
+        id: prelimAnalyses.id,
+        status: prelimAnalyses.status,
+        errorMessage: prelimAnalyses.errorMessage,
+      })
+      .from(prelimAnalyses)
+      .where(eq(prelimAnalyses.orderId, orderId))
+      .orderBy(desc(prelimAnalyses.createdAt))
+      .limit(1);
 
-  if (!row) {
-    return NextResponse.json({ error: 'No analysis found for this order' }, { status: 404 });
+    if (!row) {
+      return NextResponse.json({ error: 'No analysis found for this order' }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      analysisId: row.id,
+      status: row.status,
+      error: row.errorMessage,
+    });
+  } catch {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-
-  return NextResponse.json({
-    analysisId: row.id,
-    status: row.status,
-    error: row.errorMessage,
-  });
 }

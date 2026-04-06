@@ -84,7 +84,7 @@ export async function POST(
   } catch (err) {
     console.error('[TESSA] Manual analysis failed:', err);
     return NextResponse.json(
-      { error: 'Analysis failed', message: err instanceof Error ? err.message : 'Unknown error' },
+      { error: 'Analysis failed', ...(process.env.NODE_ENV === 'development' && { detail: err instanceof Error ? err.message : 'Unknown error' }) },
       { status: 500 },
     );
   }

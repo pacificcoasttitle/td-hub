@@ -43,6 +43,13 @@
       "when": 1774112364931,
       "tag": "0005_modern_maelstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1775513973029,
+      "tag": "0006_silly_blizzard",
+      "breakpoints": true
     }
   ]
 }

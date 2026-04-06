@@ -121,25 +121,29 @@ export function DashboardContent({ displayName, role }: Props) {
           Array.from({ length: 4 }).map((_, i) => <MetricCardSkeleton key={i} />)
         ) : stats ? (
           <>
-            <div className="min-h-[120px]">
+            <div className="h-full">
               <MetricCard label="Open Orders" value={stats.openOrders.toLocaleString()} accent="bg-blue-500" />
             </div>
             <button type="button" onClick={() => setClosingsOpen(true)}
-              className="group text-left cursor-pointer rounded-lg hover:shadow-md transition-shadow min-h-[120px]">
-              <MetricCard label="Closed This Month" value={(mtd?.closed ?? stats.closedThisMonth).toLocaleString()} accent="bg-green-500" />
-              <span className="block text-xs text-transparent group-hover:text-blue-500 transition-colors -mt-3 pb-2 px-5">View details →</span>
+              className="group text-left cursor-pointer rounded-lg hover:shadow-md transition-shadow h-full w-full flex flex-col">
+              <div className="flex-1">
+                <MetricCard label="Closed This Month" value={(mtd?.closed ?? stats.closedThisMonth).toLocaleString()} accent="bg-green-500" />
+              </div>
+              <span className="block text-xs text-transparent group-hover:text-blue-500 transition-colors px-5 pb-2">View details →</span>
             </button>
             <button type="button" onClick={() => setClosingsOpen(true)}
-              className="group text-left cursor-pointer rounded-lg hover:shadow-md transition-shadow min-h-[120px]">
-              <MetricCard
-                label="MTD Revenue"
-                value={mtd ? formatCurrency(mtd.revenue) : '—'}
-                sub={mtd ? `${mtd.closed} orders closed` : undefined}
-                accent="bg-[#F26B2B]"
-              />
-              <span className="block text-xs text-transparent group-hover:text-blue-500 transition-colors -mt-3 pb-2 px-5">View details →</span>
+              className="group text-left cursor-pointer rounded-lg hover:shadow-md transition-shadow h-full w-full flex flex-col">
+              <div className="flex-1">
+                <MetricCard
+                  label="MTD Revenue"
+                  value={mtd ? formatCurrency(mtd.revenue) : '—'}
+                  sub={mtd ? `${mtd.closed} orders closed` : undefined}
+                  accent="bg-[#F26B2B]"
+                />
+              </div>
+              <span className="block text-xs text-transparent group-hover:text-blue-500 transition-colors px-5 pb-2">View details →</span>
             </button>
-            <div className="min-h-[120px]">
+            <div className="h-full">
               <MetricCard
                 label="Ranking"
                 value={ranking ? `#${ranking.position}` : '—'}

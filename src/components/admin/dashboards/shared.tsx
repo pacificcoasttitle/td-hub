@@ -54,7 +54,7 @@ export function MetricCard({
   label: string; value: string; sub?: string; accent: string;
 }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 relative overflow-hidden">
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 relative overflow-hidden h-full">
       <div className={`absolute top-0 left-0 w-1 h-full ${accent}`} />
       <p className="text-xs font-medium uppercase tracking-wider text-[#6B7280]">{label}</p>
       <p className="text-2xl font-semibold text-[#1A1A2E] mt-1">{value}</p>

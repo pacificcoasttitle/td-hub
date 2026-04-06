@@ -4,24 +4,31 @@ import { orders } from '@/lib/db/schema';
 import { getScopedStats } from '@/lib/domain/orders/scoped-queries';
 import { getRepFigures } from '@/lib/integrations/managers-report';
 import { contactNameToReportName } from '@/lib/domain/contacts/name-mapping';
-import type { RepFigures } from '@/lib/integrations/managers-report/types';
+import type { RepFigures, MtdBreakdown } from '@/lib/integrations/managers-report/types';
 
 const ALLOWED_ROLES = ['sales_rep', 'super_admin', 'admin', 'cs_admin'];
+
+function extractCount(v: MtdBreakdown): number {
+  return typeof v === 'number' ? v : v.count;
+}
+
+function extractRevenue(v: MtdBreakdown): number {
+  return typeof v === 'number' ? v : v.revenue;
+}
 
 function mapRepFigures(f: RepFigures) {
   return {
     mtd: {
       revenue: f.mtd.revenue,
       closed: f.mtd.closed,
-      purchase: f.mtd.purchase,
-      refinance: f.mtd.refinance,
-      escrow: f.mtd.escrow,
-      tsg: f.mtd.tsg,
-      // TODO: Managers Report API does not provide per-type revenue breakdowns yet
-      purchaseRevenue: 0,
-      refinanceRevenue: 0,
-      escrowRevenue: 0,
-      tsgRevenue: 0,
+      purchase: extractCount(f.mtd.purchase),
+      refinance: extractCount(f.mtd.refinance),
+      escrow: extractCount(f.mtd.escrow),
+      tsg: extractCount(f.mtd.tsg),
+      purchaseRevenue: extractRevenue(f.mtd.purchase),
+      refinanceRevenue: extractRevenue(f.mtd.refinance),
+      escrowRevenue: extractRevenue(f.mtd.escrow),
+      tsgRevenue: extractRevenue(f.mtd.tsg),
     },
     yesterday: {
       closed: f.yesterday.closed,

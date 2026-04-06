@@ -7,14 +7,16 @@ export interface RepDaySnapshot {
   opens: number;
 }
 
+export type MtdBreakdown = number | { count: number; revenue: number };
+
 export interface RepMtdFigures {
   closed: number;
   revenue: number;
   opens: number;
-  purchase: number;
-  refinance: number;
-  escrow: number;
-  tsg: number;
+  purchase: MtdBreakdown;
+  refinance: MtdBreakdown;
+  escrow: MtdBreakdown;
+  tsg: MtdBreakdown;
 }
 
 export interface RepPriorFigures {

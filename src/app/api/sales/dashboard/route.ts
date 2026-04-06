@@ -4,21 +4,29 @@ import { orders } from '@/lib/db/schema';
 import { getScopedStats, getScopedOrders } from '@/lib/domain/orders/scoped-queries';
 import { getRepFigures } from '@/lib/integrations/managers-report';
 import { validateSalesAccess, SalesAccessError } from '../_helpers/validate-access';
-import type { RepFigures } from '@/lib/integrations/managers-report/types';
+import type { RepFigures, MtdBreakdown } from '@/lib/integrations/managers-report/types';
+
+function extractCount(v: MtdBreakdown): number {
+  return typeof v === 'number' ? v : v.count;
+}
+
+function extractRevenue(v: MtdBreakdown): number {
+  return typeof v === 'number' ? v : v.revenue;
+}
 
 function mapRepFigures(f: RepFigures) {
   return {
     mtd: {
       revenue: f.mtd.revenue,
       closed: f.mtd.closed,
-      purchase: f.mtd.purchase,
-      refinance: f.mtd.refinance,
-      escrow: f.mtd.escrow,
-      tsg: f.mtd.tsg,
-      purchaseRevenue: 0,
-      refinanceRevenue: 0,
-      escrowRevenue: 0,
-      tsgRevenue: 0,
+      purchase: extractCount(f.mtd.purchase),
+      refinance: extractCount(f.mtd.refinance),
+      escrow: extractCount(f.mtd.escrow),
+      tsg: extractCount(f.mtd.tsg),
+      purchaseRevenue: extractRevenue(f.mtd.purchase),
+      refinanceRevenue: extractRevenue(f.mtd.refinance),
+      escrowRevenue: extractRevenue(f.mtd.escrow),
+      tsgRevenue: extractRevenue(f.mtd.tsg),
     },
     yesterday: { closed: f.yesterday.closed, revenue: f.yesterday.revenue, opens: f.yesterday.opens },
     prior: { closed: f.prior.closed, revenue: f.prior.revenue },

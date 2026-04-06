@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ reps: filtered });
   } catch (err) {
     return NextResponse.json(
-      { error: 'Failed to load ranking', detail: err instanceof Error ? err.message : 'Unknown' },
+      { error: 'Internal server error', ...(process.env.NODE_ENV === 'development' && { detail: err instanceof Error ? err.message : 'Unknown' }) },
       { status: 500 },
     );
   }

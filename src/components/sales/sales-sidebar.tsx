@@ -120,6 +120,7 @@ export function SalesSidebar({ role, userName }: Props) {
       {/* Mobile trigger */}
       <div className="md:hidden fixed top-3 left-3 z-50">
         <button onClick={() => setMobileOpen(true)}
+          aria-label="Open menu"
           className="p-2 rounded-lg bg-[#1B2A4A] text-white shadow-lg">
           <Menu className="h-5 w-5" />
         </button>
@@ -130,6 +131,7 @@ export function SalesSidebar({ role, userName }: Props) {
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div className="relative h-full">{sidebar}</div>
           <button onClick={() => setMobileOpen(false)}
+            aria-label="Close menu"
             className="absolute top-3 right-3 p-2 text-white/80 hover:text-white z-50">
             <X className="h-5 w-5" />
           </button>

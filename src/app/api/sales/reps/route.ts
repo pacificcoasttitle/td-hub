@@ -33,7 +33,7 @@ export async function GET() {
     return NextResponse.json({ reps });
   } catch (err) {
     return NextResponse.json(
-      { error: 'Failed to load reps', detail: err instanceof Error ? err.message : 'Unknown' },
+      { error: 'Internal server error', ...(process.env.NODE_ENV === 'development' && { detail: err instanceof Error ? err.message : 'Unknown' }) },
       { status: 500 },
     );
   }

@@ -7,3 +7,4 @@ export * from './jobs';
 export * from './admin';
 export * from './title-production';
 export * from './notifications';
+export * from './tessa';

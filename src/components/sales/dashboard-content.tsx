@@ -116,33 +116,37 @@ export function DashboardContent({ displayName, role }: Props) {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch mb-6">
         {loading ? (
           Array.from({ length: 4 }).map((_, i) => <MetricCardSkeleton key={i} />)
         ) : stats ? (
           <>
-            <MetricCard label="Open Orders" value={stats.openOrders.toLocaleString()} accent="bg-blue-500" />
+            <div className="min-h-[120px]">
+              <MetricCard label="Open Orders" value={stats.openOrders.toLocaleString()} accent="bg-blue-500" />
+            </div>
             <button type="button" onClick={() => setClosingsOpen(true)}
-              className="group text-left cursor-pointer rounded-lg hover:shadow-md transition-shadow">
+              className="group text-left cursor-pointer rounded-lg hover:shadow-md transition-shadow min-h-[120px]">
               <MetricCard label="Closed This Month" value={(mtd?.closed ?? stats.closedThisMonth).toLocaleString()} accent="bg-green-500" />
-              <span className="block text-xs text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity -mt-3 pb-2 px-5">View details →</span>
+              <span className="block text-xs text-transparent group-hover:text-blue-500 transition-colors -mt-3 pb-2 px-5">View details →</span>
             </button>
             <button type="button" onClick={() => setClosingsOpen(true)}
-              className="group text-left cursor-pointer rounded-lg hover:shadow-md transition-shadow">
+              className="group text-left cursor-pointer rounded-lg hover:shadow-md transition-shadow min-h-[120px]">
               <MetricCard
                 label="MTD Revenue"
                 value={mtd ? formatCurrency(mtd.revenue) : '—'}
                 sub={mtd ? `${mtd.closed} orders closed` : undefined}
                 accent="bg-[#F26B2B]"
               />
-              <span className="block text-xs text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity -mt-3 pb-2 px-5">View details →</span>
+              <span className="block text-xs text-transparent group-hover:text-blue-500 transition-colors -mt-3 pb-2 px-5">View details →</span>
             </button>
-            <MetricCard
-              label="Ranking"
-              value={ranking ? `#${ranking.position}` : '—'}
-              sub={ranking ? `of ${ranking.totalReps} reps` : undefined}
-              accent="bg-[#1B2A4A]"
-            />
+            <div className="min-h-[120px]">
+              <MetricCard
+                label="Ranking"
+                value={ranking ? `#${ranking.position}` : '—'}
+                sub={ranking ? `of ${ranking.totalReps} reps` : undefined}
+                accent="bg-[#1B2A4A]"
+              />
+            </div>
           </>
         ) : null}
       </div>

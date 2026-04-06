@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { documents, documentAudit, orders, orderStatusHistory, eventOutbox } from '@/lib/db/schema';
+import { documents, documentAudit, orders, orderStatusHistory, eventOutbox, vendorApiLogs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
 import { analyzePrelim } from '@/lib/domain/tessa/service';
+import { getSetting } from '@/lib/domain/settings/service';
 
 // ─── Zod Schemas ────────────────────────────────────────────────────────────
 
@@ -135,6 +136,18 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
     return { success: false, processed: 0, errors: [`Order not found: ${payload.OrderNumber}`] };
   }
 
+  if ((await getSetting('prelim_summary_shut_off')) === 'true') {
+    try {
+      await db.insert(vendorApiLogs).values({
+        vendor: 'softpro', operation: 'prelim_webhook_skipped', orderId: order.id,
+        requestId: crypto.randomUUID(), startedAt: new Date(), endedAt: new Date(),
+        success: true,
+        requestMeta: { reason: 'prelim_summary_shut_off', orderNumber: payload.OrderNumber } as Record<string, unknown>,
+      });
+    } catch { /* logging must not break the flow */ }
+    return { success: true, processed: 0, errors: [] };
+  }
+
   let processed = 0;
   const errors: string[] = [];
 
@@ -218,6 +231,27 @@ export async function handleMilestoneWebhook(payload: MilestonePayload): Promise
   const notes = mapped
     ? `${mapped.label}: ${payload.Status} (task ${payload.Id})`
     : `Task ${payload.Id}: ${payload.Status}`;
+
+  const shutoffKey = statusLabel === 'recording_confirmation'
+    ? 'recording_confirmation_shut_off'
+    : statusLabel === 'disbursement'
+      ? 'disburse_funds_shut_off'
+      : null;
+
+  if (shutoffKey && (await getSetting(shutoffKey)) === 'true') {
+    try {
+      await db.insert(orderStatusHistory).values({
+        orderId: order.id, status: statusLabel, source: 'webhook', notes,
+      });
+      await db.insert(vendorApiLogs).values({
+        vendor: 'softpro', operation: 'milestone_webhook_skipped', orderId: order.id,
+        requestId: crypto.randomUUID(), startedAt: new Date(), endedAt: new Date(),
+        success: true,
+        requestMeta: { reason: shutoffKey, milestone: statusLabel, orderNumber: payload.OrderNumber } as Record<string, unknown>,
+      });
+    } catch { /* logging must not break the flow */ }
+    return { success: true, processed: 1, errors: [] };
+  }
 
   try {
     await db.insert(orderStatusHistory).values({

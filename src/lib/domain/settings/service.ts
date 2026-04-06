@@ -67,6 +67,31 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     type: 'boolean',
     defaultValue: 'true',
   },
+  // ── Notification Shutoffs ──
+  {
+    key: 'prelim_summary_shut_off',
+    label: 'Prelim Summary Shut Off',
+    description: 'When enabled, prelim summary webhooks are received but not processed.',
+    category: 'Notifications',
+    type: 'boolean',
+    defaultValue: 'false',
+  },
+  {
+    key: 'recording_confirmation_shut_off',
+    label: 'Recording Confirmation Shut Off',
+    description: 'When enabled, recording confirmation milestones are logged but no SMS/email sent.',
+    category: 'Notifications',
+    type: 'boolean',
+    defaultValue: 'false',
+  },
+  {
+    key: 'disburse_funds_shut_off',
+    label: 'Disburse Funds Shut Off',
+    description: 'When enabled, disbursement milestones are logged but no SMS/email sent.',
+    category: 'Notifications',
+    type: 'boolean',
+    defaultValue: 'false',
+  },
   // ── SiteX ──
   {
     key: 'sitex_environment',

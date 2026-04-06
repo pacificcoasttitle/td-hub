@@ -23,7 +23,7 @@ function isApiRoute(pathname: string): boolean {
 }
 
 function isProtectedPage(pathname: string): boolean {
-  return pathname.startsWith('/admin') || pathname.startsWith('/client');
+  return pathname.startsWith('/admin') || pathname.startsWith('/client') || pathname.startsWith('/sales');
 }
 
 export async function middleware(req: NextRequest) {

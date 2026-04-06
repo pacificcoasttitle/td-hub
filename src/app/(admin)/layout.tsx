@@ -8,8 +8,6 @@ const NAV_BY_ROLE: Record<string, string[]> = {
   super_admin: ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs', '/settings', '/notifications', '/users'],
   admin:       ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs', '/settings', '/notifications', '/users'],
   cs_admin:    ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs'],
-  sales_manager: ['/dashboard', '/orders', '/contacts'],
-  sales_rep:   ['/dashboard', '/orders', '/contacts'],
   title_officer:   ['/dashboard', '/orders', '/documents'],
   escrow_officer:  ['/dashboard', '/orders', '/documents'],
   open_order_team: ['/hub', '/orders', '/contacts'],
@@ -22,6 +20,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const session = await getSession();
   if (!session) redirect('/login');
   if (session.role === 'client') redirect('/client/orders');
+  if (session.role === 'sales_rep' || session.role === 'sales_manager') redirect('/sales/dashboard');
   if (!ALLOWED_ROLES.includes(session.role)) redirect('/login');
 
   const allowedPaths = NAV_BY_ROLE[session.role] ?? [];

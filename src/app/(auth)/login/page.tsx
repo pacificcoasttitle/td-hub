@@ -25,6 +25,8 @@ export default function LoginPage() {
         if (role === 'client') return '/client/dashboard';
         if (role === 'open_order_team') return '/hub';
         if (role === 'title_production') return '/title-production';
+        if (role === 'sales_rep') return '/sales/dashboard';
+        if (role === 'sales_manager') return '/sales/dashboard';
       }
     } catch { /* fall through */ }
     return '/dashboard';

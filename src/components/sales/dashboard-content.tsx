@@ -5,6 +5,7 @@ import {
   MetricCard, MetricCardSkeleton, SectionCard, formatCurrency,
 } from '@/components/admin/dashboards/shared';
 import { PrelimModal, DetailModal } from '@/components/shared/action-modals';
+import { TessaPrelimResultsModal } from '@/components/tessa/TessaPrelimResultsModal';
 import { RepSelector } from './rep-selector';
 import { ClosingsDrilldownModal } from './closings-drilldown-modal';
 import { OrderActions } from './order-actions';
@@ -36,6 +37,7 @@ export function DashboardContent({ displayName, role }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [closingsOpen, setClosingsOpen] = useState(false);
   const [prelimOrder, setPrelimOrder] = useState<SalesOrder | null>(null);
+  const [tessaOrder, setTessaOrder] = useState<SalesOrder | null>(null);
   const [detailOrder, setDetailOrder] = useState<SalesOrder | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -52,10 +54,8 @@ export function DashboardContent({ displayName, role }: Props) {
         setPrelimOrder(order);
         break;
       case 'prelim_summary':
-        showToast('Prelim Summary coming soon');
-        break;
       case 'regenerate_summary':
-        showToast('Regenerate Summary coming soon');
+        setTessaOrder(order);
         break;
       case 'view_contacts':
         setDetailOrder(order);
@@ -295,6 +295,13 @@ export function DashboardContent({ displayName, role }: Props) {
           address={fmtAddr(detailOrder)}
         />
       )}
+
+      <TessaPrelimResultsModal
+        isOpen={!!tessaOrder}
+        onClose={() => setTessaOrder(null)}
+        orderId={tessaOrder?.id ?? 0}
+        fileNumber={tessaOrder?.fileNumber ?? ''}
+      />
 
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#1B2A4A] text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg">

@@ -1,4 +1,5 @@
 export { TessaPrelimResults } from './TessaPrelimResults'
+export { TessaPrelimResultsModal } from './TessaPrelimResultsModal'
 export { TessaComplexityScore } from './TessaComplexityScore'
 export { TessaSectionCard } from './TessaSectionCard'
 export { TessaSeverityBadge } from './TessaSeverityBadge'

@@ -58,6 +58,8 @@ const SLUG_TEMPLATES: Record<string, () => TemplateResult> = {
   'order.milestone.recording':    () => milestoneRecordingTemplate(SAMPLE_ORDER),
   'order.milestone.disbursement': () => milestoneDisbursementTemplate(SAMPLE_ORDER),
   'order.document.received':      () => documentReceivedTemplate({ ...SAMPLE_ORDER, category: 'CPL' }),
+  'prelim.summary':               () => documentReceivedTemplate({ ...SAMPLE_ORDER, category: 'Preliminary Report' }),
+  'policy.delivery':              () => documentReceivedTemplate({ ...SAMPLE_ORDER, category: 'Title Policy' }),
 };
 
 export async function GET(

@@ -29,6 +29,7 @@ export function ConfigTab() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<NotificationType | null>(null);
   const [previewing, setPreviewing] = useState<NotificationType | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const fetchTypes = useCallback(() => {
     setLoading(true);
@@ -41,6 +42,11 @@ export function ConfigTab() {
 
   useEffect(() => { fetchTypes(); }, [fetchTypes]);
 
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
+  }
+
   async function quickToggle(slug: string, enabled: boolean) {
     setTypes(prev => prev.map(t => t.slug === slug ? { ...t, isEnabled: enabled } : t));
     try {
@@ -49,9 +55,15 @@ export function ConfigTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isEnabled: enabled }),
       });
-      if (!res.ok) setTypes(prev => prev.map(t => t.slug === slug ? { ...t, isEnabled: !enabled } : t));
+      if (!res.ok) {
+        setTypes(prev => prev.map(t => t.slug === slug ? { ...t, isEnabled: !enabled } : t));
+        showToast('Failed to update — reverted');
+      } else {
+        showToast(enabled ? 'Notification enabled' : 'Notification disabled');
+      }
     } catch {
       setTypes(prev => prev.map(t => t.slug === slug ? { ...t, isEnabled: !enabled } : t));
+      showToast('Failed to update — reverted');
     }
   }
 
@@ -136,6 +148,12 @@ export function ConfigTab() {
           displayName={previewing.displayName}
           onClose={() => setPreviewing(null)}
         />
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 bg-[#1B2A4A] text-white text-sm font-medium rounded-lg shadow-lg animate-fade-in">
+          {toast}
+        </div>
       )}
     </>
   );

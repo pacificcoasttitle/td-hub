@@ -1,6 +1,6 @@
 import { vendorSuccess } from '../types';
 import type { VendorResult, VendorHealthResult } from '../types';
-import type { RepFigures, LeaderboardResponse, ClosingsResponse, ProductionHistoryResponse, TrendsResponse } from './types';
+import type { RepFigures, LeaderboardResponse, ClosingsResponse, ProductionHistoryResponse, TrendsResponse, ClientSummaryResponse } from './types';
 
 const MOCK_MONTH = new Date().toISOString().slice(0, 7);
 const PRIOR = (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); })();
@@ -97,6 +97,30 @@ export async function getProductionHistory(_year?: number, _repName?: string): P
 
 export async function getTrends(_repName?: string): Promise<VendorResult<TrendsResponse>> {
   return vendorSuccess(MOCK_TRENDS, { requestId: `mock-${crypto.randomUUID()}`, durationMs: 0 });
+}
+
+const MOCK_CLIENT_SUMMARY: ClientSummaryResponse = {
+  year: new Date().getFullYear(),
+  totals: {
+    totalClients: 9, repeatClients: 6, newClients: 3,
+    topClientRevenue: 18500, avgDealsPerClient: 3.2,
+    totalRevenue: 82400, totalDeals: 29,
+  },
+  clients: [
+    { clientName: 'Rivera & Associates', companyName: 'Rivera Realty', deals: 6, revenue: 18500, lastCloseDate: '2026-03-15', firstDealDate: '2024-06-10', isNewThisYear: false, monthlyDeals: [1, 0, 2, 1, 0, 1, 0, 0, 1, 0, 0, 0] },
+    { clientName: 'Karen Wu', companyName: 'Pinnacle Lending', deals: 5, revenue: 14200, lastCloseDate: '2026-03-22', firstDealDate: '2025-01-18', isNewThisYear: false, monthlyDeals: [1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0] },
+    { clientName: 'James Thornton', companyName: 'Thornton Group', deals: 4, revenue: 12800, lastCloseDate: '2026-02-28', firstDealDate: '2025-04-03', isNewThisYear: false, monthlyDeals: [0, 2, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Priya Patel', companyName: 'Summit Mortgage', deals: 3, revenue: 9600, lastCloseDate: '2026-03-10', firstDealDate: '2024-11-20', isNewThisYear: false, monthlyDeals: [1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'David Ochoa', companyName: 'Pacific Edge Realty', deals: 3, revenue: 8400, lastCloseDate: '2026-03-05', firstDealDate: '2026-01-12', isNewThisYear: true, monthlyDeals: [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Lisa Nakamura', companyName: 'Golden State Escrow', deals: 2, revenue: 5800, lastCloseDate: '2026-02-14', firstDealDate: '2025-08-05', isNewThisYear: false, monthlyDeals: [0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Marco Diaz', companyName: 'Diaz Home Loans', deals: 2, revenue: 5200, lastCloseDate: '2026-01-30', firstDealDate: '2025-09-22', isNewThisYear: false, monthlyDeals: [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Sarah Kim', companyName: 'Bright Future Lending', deals: 2, revenue: 4600, lastCloseDate: '2026-03-18', firstDealDate: '2026-02-01', isNewThisYear: true, monthlyDeals: [0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { clientName: 'Tom Bradley', companyName: 'Bradley & Co', deals: 2, revenue: 3300, lastCloseDate: '2026-03-01', firstDealDate: '2026-01-20', isNewThisYear: true, monthlyDeals: [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+  ],
+};
+
+export async function getClientSummary(_year?: number, _repName?: string): Promise<VendorResult<ClientSummaryResponse>> {
+  return vendorSuccess(MOCK_CLIENT_SUMMARY, { requestId: `mock-${crypto.randomUUID()}`, durationMs: 0 });
 }
 
 export async function healthCheck(): Promise<VendorHealthResult> {

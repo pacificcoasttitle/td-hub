@@ -50,6 +50,15 @@ export async function getTrends(repName?: string) {
   return client.getTrends(repName);
 }
 
+export async function getClientSummary(year: number, repName?: string) {
+  if (useMock) {
+    const mock = await import('./mock');
+    return mock.getClientSummary(year, repName);
+  }
+  const client = await import('./client');
+  return client.getClientSummary(year, repName);
+}
+
 export async function healthCheck() {
   if (useMock) {
     const mock = await import('./mock');

@@ -1,7 +1,7 @@
 import { VendorResult, VendorHealthResult, vendorSuccess, vendorError } from '../types';
 import { db } from '@/lib/db/client';
 import { vendorApiLogs } from '@/lib/db/schema';
-import type { RepFigures, LeaderboardResponse, ClosingsResponse, ProductionHistoryResponse, TrendsResponse } from './types';
+import type { RepFigures, LeaderboardResponse, ClosingsResponse, ProductionHistoryResponse, TrendsResponse, ClientSummaryResponse } from './types';
 
 const VENDOR = 'managers_report';
 const TIMEOUT_MS = 15_000;
@@ -127,9 +127,14 @@ export async function getTrends(
   return makeRequest<TrendsResponse>('/api/td/trends', 'get_trends', params);
 }
 
-// Usage: const closings = await getClosings(4, 2026);
-// Usage: const history = await getProductionHistory(2026, 'Smith, Jane');
-// Usage: const trends = await getTrends('Smith, Jane');
+export async function getClientSummary(
+  year: number,
+  repName?: string,
+): Promise<VendorResult<ClientSummaryResponse>> {
+  const params: Record<string, string> = { year: String(year) };
+  if (repName) params.repName = repName;
+  return makeRequest<ClientSummaryResponse>('/api/td/client-summary', 'get_client_summary', params);
+}
 
 export async function healthCheck(): Promise<VendorHealthResult> {
   const start = Date.now();

@@ -128,3 +128,32 @@ export interface TrendsResponse {
   currentYear: TrendYear;
   priorYear: TrendYear;
 }
+
+// ─── Client Summary (GET /api/td/client-summary) ────────────────────────────
+
+export interface ClientSummaryTotals {
+  totalClients: number;
+  repeatClients: number;
+  newClients: number;
+  topClientRevenue: number;
+  avgDealsPerClient: number;
+  totalRevenue: number;
+  totalDeals: number;
+}
+
+export interface ClientEntry {
+  clientName: string;
+  companyName: string;
+  deals: number;
+  revenue: number;
+  lastCloseDate: string;
+  firstDealDate: string;
+  isNewThisYear: boolean;
+  monthlyDeals: number[];
+}
+
+export interface ClientSummaryResponse {
+  year: number;
+  totals: ClientSummaryTotals;
+  clients: ClientEntry[];
+}

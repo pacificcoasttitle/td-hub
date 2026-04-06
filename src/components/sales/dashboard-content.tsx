@@ -5,6 +5,7 @@ import {
   MetricCard, MetricCardSkeleton, SectionCard, formatCurrency,
 } from '@/components/admin/dashboards/shared';
 import { RepSelector } from './rep-selector';
+import { ClosingsDrilldownModal } from './closings-drilldown-modal';
 import type { SalesDashboardStats, SalesOrder } from './types';
 
 interface Props {
@@ -30,6 +31,7 @@ export function DashboardContent({ displayName, role }: Props) {
   const [stats, setStats] = useState<SalesDashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [closingsOpen, setClosingsOpen] = useState(false);
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -84,13 +86,21 @@ export function DashboardContent({ displayName, role }: Props) {
         ) : stats ? (
           <>
             <MetricCard label="Open Orders" value={stats.openOrders.toLocaleString()} accent="bg-blue-500" />
-            <MetricCard label="Closed This Month" value={(mtd?.closed ?? stats.closedThisMonth).toLocaleString()} accent="bg-green-500" />
-            <MetricCard
-              label="MTD Revenue"
-              value={mtd ? formatCurrency(mtd.revenue) : '—'}
-              sub={mtd ? `${mtd.closed} orders closed` : undefined}
-              accent="bg-[#F26B2B]"
-            />
+            <button type="button" onClick={() => setClosingsOpen(true)}
+              className="group text-left cursor-pointer rounded-lg hover:shadow-md transition-shadow">
+              <MetricCard label="Closed This Month" value={(mtd?.closed ?? stats.closedThisMonth).toLocaleString()} accent="bg-green-500" />
+              <span className="block text-xs text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity -mt-3 pb-2 px-5">View details →</span>
+            </button>
+            <button type="button" onClick={() => setClosingsOpen(true)}
+              className="group text-left cursor-pointer rounded-lg hover:shadow-md transition-shadow">
+              <MetricCard
+                label="MTD Revenue"
+                value={mtd ? formatCurrency(mtd.revenue) : '—'}
+                sub={mtd ? `${mtd.closed} orders closed` : undefined}
+                accent="bg-[#F26B2B]"
+              />
+              <span className="block text-xs text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity -mt-3 pb-2 px-5">View details →</span>
+            </button>
             <MetricCard
               label="Ranking"
               value={ranking ? `#${ranking.position}` : '—'}
@@ -210,6 +220,14 @@ export function DashboardContent({ displayName, role }: Props) {
           )}
         </div>
       </SectionCard>
+
+      <ClosingsDrilldownModal
+        isOpen={closingsOpen}
+        onClose={() => setClosingsOpen(false)}
+        month={NOW.getMonth() + 1}
+        year={NOW.getFullYear()}
+        repId={repId}
+      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { db } from '@/lib/db/client';
-import { notificationTypes, notificationLogs, orders, orderProperties } from '@/lib/db/schema';
+import { notificationTypes, notificationLogs, orders, orderProperties, contacts } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { resolveRecipients, type Recipient } from './recipients';
 import { sendEmail } from '@/lib/integrations/sendgrid/client';
@@ -179,10 +179,11 @@ async function handleConfirmationDispatch(
 async function handleGenericDispatch(
   params: DispatchParams,
   notifType: typeof notificationTypes.$inferSelect,
+  preResolvedRecipients?: Recipient[],
 ): Promise<DispatchResult> {
   const { eventType, orderId, data, overrideTo } = params;
   const channels = notifType.channels ?? ['email'];
-  const recipients = await resolveRecipients(orderId, notifType.recipientRoles, notifType.internalCc);
+  const recipients = preResolvedRecipients ?? await resolveRecipients(orderId, notifType.recipientRoles, notifType.internalCc);
 
   if (recipients.length === 0 && !overrideTo) {
     return { sent: 0, failed: 0, skipped: false, logs: [] };
@@ -267,16 +268,53 @@ async function handleMilestoneDispatch(
     : milestoneRecordingTemplate(orderData);
 
   const label = milestone.replace(/_/g, ' ');
+  const enrichedData = {
+    ...params.data,
+    subject: template.subject,
+    html: template.html,
+    smsBody: `PCT Hub: Order ${orderData.fileNumber} — ${label} confirmed.`,
+  };
 
-  return handleGenericDispatch({
-    ...params,
-    data: {
-      ...params.data,
-      subject: template.subject,
-      html: template.html,
-      smsBody: `PCT Hub: Order ${orderData.fileNumber} — ${label} confirmed.`,
-    },
-  }, notifType);
+  const recipients = await resolveRecipients(params.orderId, notifType.recipientRoles, notifType.internalCc);
+
+  const prefField = milestone === 'recording_confirmation'
+    ? 'notifyRecordingConfirm' as const
+    : milestone === 'disbursement'
+      ? 'notifyDisburseFunds' as const
+      : null;
+
+  let filtered = recipients;
+  if (prefField) {
+    const [orderRow] = await db
+      .select({ salesRepId: orders.salesRepId })
+      .from(orders)
+      .where(eq(orders.id, params.orderId))
+      .limit(1);
+
+    if (orderRow?.salesRepId) {
+      const [rep] = await db
+        .select({ pref: contacts[prefField] })
+        .from(contacts)
+        .where(eq(contacts.id, orderRow.salesRepId))
+        .limit(1);
+
+      if (rep && rep.pref === false) {
+        filtered = recipients.filter((r) => r.role !== 'sales_rep');
+        try {
+          await insertNotificationLog({
+            eventType: params.eventType,
+            orderId: params.orderId,
+            channel: 'sms',
+            status: 'skipped',
+            recipientRole: 'sales_rep',
+            metadata: { reason: 'recipient_opted_out', preference: prefField },
+          });
+        } catch { /* logging must not block */ }
+      }
+    }
+  }
+
+  return handleGenericDispatch({ ...params, data: enrichedData }, notifType, filtered);
 }
 
 // ─── Document dispatch ──────────────────────────────────────────────────────

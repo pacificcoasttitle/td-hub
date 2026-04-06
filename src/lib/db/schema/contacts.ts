@@ -112,6 +112,9 @@ export const contacts = pgTable('contacts', {
 
   managerId: integer('manager_id'),
 
+  notifyRecordingConfirm: boolean('notify_recording_confirm').notNull().default(true),
+  notifyDisburseFunds: boolean('notify_disburse_funds').notNull().default(true),
+
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

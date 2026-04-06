@@ -75,21 +75,10 @@ export async function processOutboxEvents(): Promise<ProcessOutboxResult> {
 async function dispatchEvent(
   eventType: string,
   orderId: number | null,
-  payload: Record<string, unknown> | null
+  payload: Record<string, unknown> | null,
 ): Promise<void> {
   if (!orderId) return;
-
-  if (eventType === 'order.closed') {
-    await handleOrderClosed(orderId);
-  } else if (eventType === 'order.confirmation') {
-    await dispatchNotification({ eventType, orderId, data: payload ?? {} });
-  } else if (eventType.startsWith('order.milestone.')) {
-    const milestone = eventType.replace('order.milestone.', '');
-    await handleMilestoneNotification(orderId, milestone);
-  } else if (eventType === 'order.document.received') {
-    const category = (payload?.category as string) ?? 'general';
-    await handleDocumentReceived(orderId, category);
-  }
+  await dispatchNotification({ eventType, orderId, data: payload ?? {} });
 }
 
 // ─── Load Order Context ─────────────────────────────────────────────────────
@@ -166,8 +155,12 @@ function dedupe(emails: string[]): string[] {
   return [...new Set(emails)];
 }
 
-// ─── Order Closed ───────────────────────────────────────────────────────────
+// ─── DEPRECATED: Old direct-send handlers ───────────────────────────────────
+// These functions bypass admin controls (notification_types.isEnabled, channels,
+// recipientRoles) and notification_logs. All events now route through
+// dispatchNotification() in dispatch.ts. Kept for reference until verified.
 
+/** @deprecated Use dispatchNotification({ eventType: 'order.closed', ... }) */
 async function handleOrderClosed(orderId: number): Promise<void> {
   const ctx = await loadContext(orderId);
   const toEmails = emailsForRoles(ctx.targets, ['escrow_company', 'listing_agent', 'buyer_agent']);
@@ -180,8 +173,7 @@ async function handleOrderClosed(orderId: number): Promise<void> {
   await sendEmail({ to: recipients, subject, html });
 }
 
-// ─── Milestone ──────────────────────────────────────────────────────────────
-
+/** @deprecated Use dispatchNotification({ eventType: 'order.milestone.*', ... }) */
 async function handleMilestoneNotification(orderId: number, milestone: string): Promise<void> {
   const ctx = await loadContext(orderId);
   const data = toEmailData(ctx);
@@ -205,8 +197,7 @@ async function handleMilestoneNotification(orderId: number, milestone: string): 
   await sendEmail({ to: recipients, subject: template.subject, html: template.html });
 }
 
-// ─── Document Received ──────────────────────────────────────────────────────
-
+/** @deprecated Use dispatchNotification({ eventType: 'order.document.received', ... }) */
 async function handleDocumentReceived(orderId: number, category: string): Promise<void> {
   const ctx = await loadContext(orderId);
   const toEmails = emailsForRoles(ctx.targets, ['escrow_company', 'lender', 'buyer_agent', 'listing_agent']);

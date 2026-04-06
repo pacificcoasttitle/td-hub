@@ -1,10 +1,17 @@
 import { db } from '@/lib/db/client';
-import { notificationTypes, notificationLogs } from '@/lib/db/schema';
+import { notificationTypes, notificationLogs, orders, orderProperties } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { resolveRecipients, type Recipient } from './recipients';
 import { sendEmail } from '@/lib/integrations/sendgrid/client';
 import { sendSms } from '@/lib/integrations/twilio/client';
 import { handleOrderConfirmation } from './order-confirmation';
+import {
+  orderClosedTemplate,
+  milestoneRecordingTemplate,
+  milestoneDisbursementTemplate,
+  documentReceivedTemplate,
+  type OrderEmailData,
+} from './templates';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -70,15 +77,55 @@ export async function insertNotificationLog(entry: {
   return row.id;
 }
 
+// ─── Slug mapping ──────────────────────────────────────────────────────────
+
+function mapEventToSlug(eventType: string, data?: Record<string, unknown>): string {
+  if (eventType === 'order.confirmation') return 'order.confirmation';
+  if (eventType === 'order.milestone.recording_confirmation') return 'recording.confirmation';
+  if (eventType === 'order.milestone.disbursement') return 'funds.disbursed';
+  if (eventType === 'order.closed') return 'order.closed';
+  if (eventType === 'order.document.received') {
+    const cat = (data?.category as string) ?? '';
+    if (cat === 'prelim') return 'prelim.summary';
+    if (cat === 'policy' || cat === 'supplement') return 'policy.delivery';
+    return 'document.ready';
+  }
+  return eventType;
+}
+
+// ─── Order data for template rendering ──────────────────────────────────────
+
+async function loadOrderEmailData(orderId: number): Promise<OrderEmailData> {
+  const [row] = await db
+    .select({
+      fileNumber: orders.fileNumber,
+      closedAt: orders.closedAt,
+      address: orderProperties.fullAddress,
+    })
+    .from(orders)
+    .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (!row) throw new Error(`Order ${orderId} not found`);
+  return {
+    fileNumber: row.fileNumber,
+    address: row.address,
+    closingDate: row.closedAt?.toLocaleDateString('en-US') ?? null,
+  };
+}
+
 // ─── Main dispatch ──────────────────────────────────────────────────────────
 
 export async function dispatchNotification(params: DispatchParams): Promise<DispatchResult> {
   const { eventType, orderId, data, overrideTo } = params;
 
+  const slug = mapEventToSlug(eventType, data);
+
   const [notifType] = await db
     .select()
     .from(notificationTypes)
-    .where(eq(notificationTypes.slug, eventType))
+    .where(eq(notificationTypes.slug, slug))
     .limit(1);
 
   if (!notifType || !notifType.isEnabled) {
@@ -86,7 +133,7 @@ export async function dispatchNotification(params: DispatchParams): Promise<Disp
       try {
         await insertNotificationLog({
           eventType, orderId, channel: 'skip', status: 'skipped',
-          metadata: { reason: 'notification_type_disabled' },
+          metadata: { reason: 'notification_type_disabled', slug },
         });
       } catch { /* logging failure should not block */ }
     }
@@ -95,6 +142,18 @@ export async function dispatchNotification(params: DispatchParams): Promise<Disp
 
   if (eventType === 'order.confirmation') {
     return handleConfirmationDispatch(orderId, data, overrideTo);
+  }
+
+  if (eventType.startsWith('order.milestone.')) {
+    return handleMilestoneDispatch(params, notifType);
+  }
+
+  if (eventType === 'order.document.received') {
+    return handleDocumentDispatch(params, notifType);
+  }
+
+  if (eventType === 'order.closed') {
+    return handleOrderClosedDispatch(params, notifType);
   }
 
   return handleGenericDispatch(params, notifType);
@@ -192,4 +251,71 @@ async function handleGenericDispatch(
   }
 
   return { sent, failed, skipped: false, logs };
+}
+
+// ─── Milestone dispatch (recording_confirmation, disbursement) ──────────────
+
+async function handleMilestoneDispatch(
+  params: DispatchParams,
+  notifType: typeof notificationTypes.$inferSelect,
+): Promise<DispatchResult> {
+  const milestone = params.eventType.replace('order.milestone.', '');
+  const orderData = await loadOrderEmailData(params.orderId);
+
+  const template = milestone === 'disbursement'
+    ? milestoneDisbursementTemplate(orderData)
+    : milestoneRecordingTemplate(orderData);
+
+  const label = milestone.replace(/_/g, ' ');
+
+  return handleGenericDispatch({
+    ...params,
+    data: {
+      ...params.data,
+      subject: template.subject,
+      html: template.html,
+      smsBody: `PCT Hub: Order ${orderData.fileNumber} — ${label} confirmed.`,
+    },
+  }, notifType);
+}
+
+// ─── Document dispatch ──────────────────────────────────────────────────────
+
+async function handleDocumentDispatch(
+  params: DispatchParams,
+  notifType: typeof notificationTypes.$inferSelect,
+): Promise<DispatchResult> {
+  const category = (params.data.category as string) ?? 'general';
+  const orderData = await loadOrderEmailData(params.orderId);
+  const { subject, html } = documentReceivedTemplate({ ...orderData, category });
+
+  return handleGenericDispatch({
+    ...params,
+    data: {
+      ...params.data,
+      subject,
+      html,
+      smsBody: `PCT Hub: New ${category} document for Order ${orderData.fileNumber}`,
+    },
+  }, notifType);
+}
+
+// ─── Order closed dispatch ──────────────────────────────────────────────────
+
+async function handleOrderClosedDispatch(
+  params: DispatchParams,
+  notifType: typeof notificationTypes.$inferSelect,
+): Promise<DispatchResult> {
+  const orderData = await loadOrderEmailData(params.orderId);
+  const { subject, html } = orderClosedTemplate(orderData);
+
+  return handleGenericDispatch({
+    ...params,
+    data: {
+      ...params.data,
+      subject,
+      html,
+      smsBody: `PCT Hub: Order ${orderData.fileNumber} has been closed.`,
+    },
+  }, notifType);
 }

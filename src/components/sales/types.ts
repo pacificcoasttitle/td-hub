@@ -28,6 +28,7 @@ export interface SalesOrder {
   address: string | null;
   city: string | null;
   state: string | null;
+  hasPrelim?: boolean;
 }
 
 export interface SalesRep {

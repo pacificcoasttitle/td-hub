@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
-import { orders } from '@/lib/db/schema';
+import { db } from '@/lib/db/client';
+import { orders, documents } from '@/lib/db/schema';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { getScopedStats, getScopedOrders } from '@/lib/domain/orders/scoped-queries';
 import { getRepFigures } from '@/lib/integrations/managers-report';
 import { validateSalesAccess, SalesAccessError } from '../_helpers/validate-access';
@@ -63,6 +65,26 @@ export async function GET(req: NextRequest) {
       }
     } catch { /* MR API failure is non-blocking */ }
 
+    // Enrich orders with prelim availability
+    const orderIds = ordersResult.orders.map(o => o.id);
+    let prelimSet = new Set<number>();
+    if (orderIds.length > 0) {
+      const prelimRows = await db
+        .selectDistinct({ orderId: documents.orderId })
+        .from(documents)
+        .where(and(
+          inArray(documents.orderId, orderIds),
+          eq(documents.category, 'prelim'),
+          eq(documents.status, 'active'),
+        ));
+      prelimSet = new Set(prelimRows.map(r => r.orderId));
+    }
+
+    const enrichedOrders = ordersResult.orders.map(o => ({
+      ...o,
+      hasPrelim: prelimSet.has(o.id),
+    }));
+
     return NextResponse.json({
       openOrders: stats.open,
       closedThisMonth: stats.closedThisMonth,
@@ -74,7 +96,7 @@ export async function GET(req: NextRequest) {
       ranking: repFigures?.ranking ?? null,
       closingRatio: repFigures?.closingRatio ?? null,
       projected: repFigures?.projected ?? null,
-      orders: ordersResult.orders,
+      orders: enrichedOrders,
       ordersTotal: ordersResult.total,
       ordersPage: ordersResult.page,
       ordersPageSize: ordersResult.pageSize,

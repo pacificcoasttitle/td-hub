@@ -4,8 +4,11 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   MetricCard, MetricCardSkeleton, SectionCard, formatCurrency,
 } from '@/components/admin/dashboards/shared';
+import { PrelimModal, DetailModal } from '@/components/shared/action-modals';
 import { RepSelector } from './rep-selector';
 import { ClosingsDrilldownModal } from './closings-drilldown-modal';
+import { OrderActions } from './order-actions';
+import type { SalesAction } from './order-actions';
 import type { SalesDashboardStats, SalesOrder } from './types';
 
 interface Props {
@@ -32,6 +35,39 @@ export function DashboardContent({ displayName, role }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [closingsOpen, setClosingsOpen] = useState(false);
+  const [prelimOrder, setPrelimOrder] = useState<SalesOrder | null>(null);
+  const [detailOrder, setDetailOrder] = useState<SalesOrder | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  }
+
+  function handleOrderAction(action: SalesAction, order: SalesOrder) {
+    switch (action) {
+      case 'review_prelim':
+      case 'update_prelim':
+      case 'get_prelim_doc':
+        setPrelimOrder(order);
+        break;
+      case 'prelim_summary':
+        showToast('Prelim Summary coming soon');
+        break;
+      case 'regenerate_summary':
+        showToast('Regenerate Summary coming soon');
+        break;
+      case 'view_contacts':
+        setDetailOrder(order);
+        break;
+      case 'view_invoice':
+        showToast('View Invoice coming soon');
+        break;
+      case 'view_detail':
+        setDetailOrder(order);
+        break;
+    }
+  }
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -190,8 +226,8 @@ export function DashboardContent({ displayName, role }: Props) {
                 <th className="text-left px-5 py-2.5 font-medium text-gray-500">File #</th>
                 <th className="text-left px-5 py-2.5 font-medium text-gray-500">Address</th>
                 <th className="text-left px-5 py-2.5 font-medium text-gray-500">Status</th>
-                <th className="text-left px-5 py-2.5 font-medium text-gray-500">Type</th>
                 <th className="text-left px-5 py-2.5 font-medium text-gray-500">Opened</th>
+                <th className="text-right px-5 py-2.5 font-medium text-gray-500">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -203,15 +239,17 @@ export function DashboardContent({ displayName, role }: Props) {
                   ))
                 : stats?.orders.slice(0, 10).map(o => (
                     <tr key={o.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-5 py-3 font-medium text-[#1B2A4A] whitespace-nowrap">{o.fileNumber}</td>
-                      <td className="px-5 py-3 text-gray-900 max-w-[220px] truncate">{fmtAddr(o)}</td>
+                      <td className="px-5 py-3 font-medium text-blue-600 whitespace-nowrap">{o.fileNumber}</td>
+                      <td className="px-5 py-3 text-gray-900 max-w-[200px] truncate">{fmtAddr(o)}</td>
                       <td className="px-5 py-3 whitespace-nowrap">
                         <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize bg-gray-100 text-gray-700">
                           {(o.operationalStatus ?? '—').replace(/_/g, ' ')}
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-gray-500 capitalize whitespace-nowrap">{o.transactionType ?? '—'}</td>
                       <td className="px-5 py-3 text-gray-500 whitespace-nowrap">{fmtDate(o.openedAt)}</td>
+                      <td className="px-5 py-3 text-right">
+                        <OrderActions order={o} onAction={handleOrderAction} />
+                      </td>
                     </tr>
                   ))}
             </tbody>
@@ -229,6 +267,32 @@ export function DashboardContent({ displayName, role }: Props) {
         year={NOW.getFullYear()}
         repId={repId}
       />
+
+      {prelimOrder && (
+        <PrelimModal
+          open
+          onClose={() => setPrelimOrder(null)}
+          orderId={prelimOrder.id}
+          fileNumber={prelimOrder.fileNumber}
+          address={fmtAddr(prelimOrder)}
+        />
+      )}
+
+      {detailOrder && (
+        <DetailModal
+          open
+          onClose={() => setDetailOrder(null)}
+          orderId={detailOrder.id}
+          fileNumber={detailOrder.fileNumber}
+          address={fmtAddr(detailOrder)}
+        />
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#1B2A4A] text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

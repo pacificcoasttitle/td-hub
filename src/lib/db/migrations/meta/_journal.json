@@ -50,6 +50,13 @@
       "when": 1775513973029,
       "tag": "0006_silly_blizzard",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1775583519913,
+      "tag": "0007_polite_otto_octavius",
+      "breakpoints": true
     }
   ]
 }

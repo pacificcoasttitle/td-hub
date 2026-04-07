@@ -26,17 +26,21 @@ export async function GET(
 
   const { slug } = await params;
 
-  const row = await db
-    .select()
-    .from(notificationTypes)
-    .where(eq(notificationTypes.slug, slug))
-    .limit(1);
+  try {
+    const row = await db
+      .select()
+      .from(notificationTypes)
+      .where(eq(notificationTypes.slug, slug))
+      .limit(1);
 
-  if (!row[0]) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    if (!row[0]) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(row[0]);
+  } catch {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-
-  return NextResponse.json(row[0]);
 }
 
 export async function PATCH(
@@ -60,21 +64,25 @@ export async function PATCH(
     return NextResponse.json({ error: 'Validation failed', details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const existing = await db
-    .select({ id: notificationTypes.id })
-    .from(notificationTypes)
-    .where(eq(notificationTypes.slug, slug))
-    .limit(1);
+  try {
+    const existing = await db
+      .select({ id: notificationTypes.id })
+      .from(notificationTypes)
+      .where(eq(notificationTypes.slug, slug))
+      .limit(1);
 
-  if (!existing[0]) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    if (!existing[0]) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
+    const updated = await db
+      .update(notificationTypes)
+      .set({ ...parsed.data, updatedAt: new Date() })
+      .where(eq(notificationTypes.slug, slug))
+      .returning();
+
+    return NextResponse.json(updated[0]);
+  } catch {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-
-  const updated = await db
-    .update(notificationTypes)
-    .set({ ...parsed.data, updatedAt: new Date() })
-    .where(eq(notificationTypes.slug, slug))
-    .returning();
-
-  return NextResponse.json(updated[0]);
 }

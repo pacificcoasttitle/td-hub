@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { orders, orderProperties, documents } from '@/lib/db/schema';
-import { eq, desc, sql, and, gte, SQL, count as drizzleCount } from 'drizzle-orm';
+import { eq, desc, sql, and, gte, SQL, count as drizzleCount, inArray } from 'drizzle-orm';
 
 type ScopeColumn = typeof orders.salesRepId | typeof orders.titleOfficerId | typeof orders.escrowOfficerId;
 
@@ -9,9 +9,21 @@ type ScopeColumn = typeof orders.salesRepId | typeof orders.titleOfficerId | typ
 export interface ScopedOrderListParams {
   scopeColumn: ScopeColumn;
   contactId: number;
+  /** When set (non-empty), scope to any of these contact IDs instead of contactId alone (e.g. manager + team). */
+  contactIds?: number[];
   page?: number;
   pageSize?: number;
   status?: string;
+}
+
+function scopeWhereClause(
+  scopeColumn: ScopeColumn,
+  contactId: number,
+  contactIds?: number[],
+) {
+  return contactIds && contactIds.length > 0
+    ? inArray(scopeColumn, contactIds)
+    : eq(scopeColumn, contactId);
 }
 
 export async function getScopedOrders(params: ScopedOrderListParams) {
@@ -19,7 +31,9 @@ export async function getScopedOrders(params: ScopedOrderListParams) {
   const pageSize = params.pageSize ?? 25;
   const offset = (page - 1) * pageSize;
 
-  const conditions: SQL[] = [eq(params.scopeColumn, params.contactId)];
+  const conditions: SQL[] = [
+    scopeWhereClause(params.scopeColumn, params.contactId, params.contactIds),
+  ];
   if (params.status) {
     conditions.push(eq(orders.operationalStatus, params.status as typeof orders.operationalStatus.enumValues[number]));
   }
@@ -59,9 +73,10 @@ export interface ScopedStats {
 export async function getScopedStats(
   scopeColumn: ScopeColumn,
   contactId: number,
+  options?: { contactIds?: number[] },
 ): Promise<ScopedStats> {
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-  const where = eq(scopeColumn, contactId);
+  const where = scopeWhereClause(scopeColumn, contactId, options?.contactIds);
 
   const [result] = await db.select({
     assigned: sql<number>`count(*)`,

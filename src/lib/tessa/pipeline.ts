@@ -105,12 +105,17 @@ export async function analyzePrelim(
     // (g) LLM extraction call
     const rawExtraction = await callExtraction(pdfText, JSON.stringify(facts));
 
+    // Audit trail: persist raw LLM output before guardrails
+    await updateRow(analysisId, {
+      rawExtractionJson: rawExtraction as unknown as Record<string, unknown>,
+      extractionModel: 'claude-sonnet-4-20250514',
+    });
+
     // (h) Guardrails: validate and repair
     extraction = validateAndRepairExtraction(rawExtraction, facts);
 
     await updateRow(analysisId, {
       extractionJson: extraction as unknown as Record<string, unknown>,
-      extractionModel: 'claude-sonnet-4-20250514',
     });
   } catch (err) {
     await updateRow(analysisId, {

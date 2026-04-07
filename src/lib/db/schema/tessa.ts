@@ -19,6 +19,8 @@ export const prelimAnalyses = pgTable('prelim_analyses', {
 
   factsJson: jsonb('facts_json'),
   extractionJson: jsonb('extraction_json'),
+  /** LLM output before guardrails (audit trail). */
+  rawExtractionJson: jsonb('raw_extraction_json'),
   summaryText: text('summary_text'),
 
   complexityScore: integer('complexity_score'),

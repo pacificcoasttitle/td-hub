@@ -1,0 +1,1 @@
+ALTER TABLE "prelim_analyses" ADD COLUMN "raw_extraction_json" jsonb;

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, orderProperties } from '@/lib/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import { getClosings } from '@/lib/integrations/managers-report';
 import { validateSalesAccess, SalesAccessError } from '../_helpers/validate-access';
 
@@ -17,6 +17,11 @@ export async function GET(req: NextRequest) {
 
   try {
     const access = await validateSalesAccess(session, repId);
+
+    const teamIds: number[] =
+      access.role === 'sales_manager' && !repId
+        ? (access.managedRepIds ?? [access.contactId])
+        : [access.contactId];
 
     // Try Managers Report API first
     try {
@@ -46,7 +51,7 @@ export async function GET(req: NextRequest) {
       .from(orders)
       .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
       .where(and(
-        eq(orders.salesRepId, access.contactId),
+        inArray(orders.salesRepId, teamIds),
         sql`${orders.closedAt} IS NOT NULL`,
         sql`EXTRACT(MONTH FROM ${orders.closedAt}) = ${month}`,
         sql`EXTRACT(YEAR FROM ${orders.closedAt}) = ${year}`,
@@ -67,7 +72,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
     return NextResponse.json(
-      { error: 'Failed to load closings', detail: err instanceof Error ? err.message : 'Unknown' },
+      {
+        error: 'Failed to load closings',
+        ...(process.env.NODE_ENV === 'development' && {
+          detail: err instanceof Error ? err.message : 'Unknown',
+        }),
+      },
       { status: 500 },
     );
   }

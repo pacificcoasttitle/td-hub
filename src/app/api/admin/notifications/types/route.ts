@@ -12,10 +12,14 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const types = await db
-    .select()
-    .from(notificationTypes)
-    .orderBy(asc(notificationTypes.displayName));
+  try {
+    const types = await db
+      .select()
+      .from(notificationTypes)
+      .orderBy(asc(notificationTypes.displayName));
 
-  return NextResponse.json({ types });
+    return NextResponse.json({ types });
+  } catch {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

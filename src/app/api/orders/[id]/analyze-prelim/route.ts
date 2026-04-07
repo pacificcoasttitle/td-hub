@@ -3,7 +3,6 @@ import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, documents, prelimAnalyses } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { getSignedUrl } from '@/lib/integrations/s3/client';
 import { analyzePrelim } from '@/lib/tessa';
 
 const ALLOWED_ROLES = [
@@ -66,17 +65,12 @@ export async function POST(
     }
   }
 
-  const signedUrlResult = await getSignedUrl(doc.storageKey, 3600);
-  if (!signedUrlResult.success || !signedUrlResult.data) {
-    return NextResponse.json({ error: 'Failed to generate PDF access URL' }, { status: 500 });
-  }
-
   try {
     const result = await analyzePrelim({
       orderId: order.id,
       documentId: doc.id,
       fileNumber: order.fileNumber,
-      pdfUrl: signedUrlResult.data,
+      storageKey: doc.storageKey,
       triggeredBy: 'manual',
     });
 

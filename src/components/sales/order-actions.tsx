@@ -17,15 +17,15 @@ export function OrderActions({ order, onAction }: Props) {
   const hasPrelim = !!order.hasPrelim;
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-1 items-end">
       {hasPrelim ? (
-        <>
+        <div className="flex items-center gap-1">
           <button onClick={() => onAction('review_prelim', order)}
-            className="bg-green-600 text-white text-xs px-3 py-1 rounded hover:bg-green-700 transition-colors whitespace-nowrap">
+            className="bg-green-600 text-white text-[11px] px-2 py-1 rounded hover:bg-green-700 transition-colors whitespace-nowrap">
             Review Prelim
           </button>
           <button onClick={() => onAction('prelim_summary', order)}
-            className="bg-blue-600 text-white text-xs px-3 py-1 rounded hover:bg-blue-700 transition-colors whitespace-nowrap">
+            className="bg-blue-600 text-white text-[11px] px-2 py-1 rounded hover:bg-blue-700 transition-colors whitespace-nowrap">
             Prelim Summary
           </button>
           <Dots>
@@ -34,10 +34,10 @@ export function OrderActions({ order, onAction }: Props) {
             <MenuItem onClick={() => onAction('view_invoice', order)}>View Invoice</MenuItem>
             <MenuItem onClick={() => onAction('regenerate_summary', order)}>Regenerate Summary</MenuItem>
           </Dots>
-        </>
+        </div>
       ) : (
-        <>
-          <span className="bg-blue-100 text-blue-700 text-xs px-3 py-1 rounded font-medium whitespace-nowrap">
+        <div className="flex items-center gap-1">
+          <span className="bg-blue-100 text-blue-700 text-[11px] px-2 py-1 rounded font-medium whitespace-nowrap">
             Not Ready
           </span>
           <Dots>
@@ -45,7 +45,7 @@ export function OrderActions({ order, onAction }: Props) {
             <MenuItem onClick={() => onAction('view_contacts', order)}>View Contacts</MenuItem>
             <MenuItem onClick={() => onAction('view_invoice', order)}>View Invoice</MenuItem>
           </Dots>
-        </>
+        </div>
       )}
     </div>
   );

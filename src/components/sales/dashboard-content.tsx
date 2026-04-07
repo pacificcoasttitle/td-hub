@@ -32,6 +32,8 @@ function fmtDate(iso: string | null): string {
 export function DashboardContent({ displayName, role }: Props) {
   const [repId, setRepId] = useState<number | null>(null);
   const [stats, setStats] = useState<SalesDashboardStats | null>(null);
+  const [ordersTotal, setOrdersTotal] = useState(0);
+  const [ordersPage, setOrdersPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [closingsOpen, setClosingsOpen] = useState(false);
@@ -71,15 +73,16 @@ export function DashboardContent({ displayName, role }: Props) {
   const fetchData = useCallback(() => {
     setLoading(true);
     setError(null);
-    const url = repId
-      ? `/api/sales/dashboard?repId=${repId}`
-      : '/api/sales/dashboard';
-    fetch(url)
+    const params = new URLSearchParams({ pageSize: '10', page: String(ordersPage) });
+    if (repId) params.set('repId', String(repId));
+    fetch(`/api/sales/dashboard?${params}`)
       .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
-      .then(d => setStats(d))
+      .then(d => { setStats(d); setOrdersTotal(d.ordersTotal ?? 0); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, [repId]);
+  }, [repId, ordersPage]);
+
+  useEffect(() => { setOrdersPage(1); }, [repId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -115,7 +118,14 @@ export function DashboardContent({ displayName, role }: Props) {
 
       <SectionCard title="Recent Orders" action={{ label: 'View all orders →', href: '/sales/orders' }}>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '110px' }} />
+              <col />
+              <col style={{ width: '80px' }} />
+              <col style={{ width: '85px' }} />
+              <col style={{ width: '140px' }} />
+            </colgroup>
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/60">
                 <th className="text-left px-5 py-2.5 font-medium text-gray-500">File #</th>
@@ -132,27 +142,53 @@ export function DashboardContent({ displayName, role }: Props) {
                       <td key={j} className="px-5 py-3"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" /></td>
                     ))}</tr>
                   ))
-                : stats?.orders.slice(0, 10).map(o => (
-                    <tr key={o.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-5 py-3 font-medium text-blue-600 whitespace-nowrap">{o.fileNumber}</td>
-                      <td className="px-5 py-3 text-gray-900 max-w-[200px] truncate">{fmtAddr(o)}</td>
-                      <td className="px-5 py-3 whitespace-nowrap">
-                        <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize bg-gray-100 text-gray-700">
-                          {(o.operationalStatus ?? '—').replace(/_/g, ' ')}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-gray-500 whitespace-nowrap">{fmtDate(o.openedAt)}</td>
-                      <td className="px-5 py-3 text-right">
-                        <OrderActions order={o} onAction={handleOrderAction} />
-                      </td>
-                    </tr>
-                  ))}
+                : stats?.orders.map(o => {
+                    const addr = fmtAddr(o);
+                    return (
+                      <tr key={o.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-5 py-3 font-medium text-blue-600 whitespace-nowrap">{o.fileNumber}</td>
+                        <td className="px-4 py-3 text-gray-900 truncate" title={addr}>{addr}</td>
+                        <td className="px-5 py-3 whitespace-nowrap">
+                          <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize bg-gray-100 text-gray-700">
+                            {(o.operationalStatus ?? '—').replace(/_/g, ' ')}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-gray-500 whitespace-nowrap">{fmtDate(o.openedAt)}</td>
+                        <td className="px-2 py-3 text-right">
+                          <OrderActions order={o} onAction={handleOrderAction} />
+                        </td>
+                      </tr>
+                    );
+                  })}
             </tbody>
           </table>
           {!loading && (!stats?.orders || stats.orders.length === 0) && (
             <div className="p-8 text-center"><p className="text-sm text-gray-500">No orders found.</p></div>
           )}
         </div>
+        {!loading && ordersTotal > 0 && (
+          <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 text-sm text-gray-500">
+            <span>
+              Showing {((ordersPage - 1) * 10) + 1}–{Math.min(ordersPage * 10, ordersTotal)} of {ordersTotal}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setOrdersPage(p => Math.max(1, p - 1))}
+                disabled={ordersPage === 1}
+                className="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setOrdersPage(p => p + 1)}
+                disabled={ordersPage * 10 >= ordersTotal}
+                className="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </SectionCard>
 
       <ClosingsDrilldownModal

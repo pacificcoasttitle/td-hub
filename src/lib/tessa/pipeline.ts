@@ -8,6 +8,7 @@
 import { db } from '@/lib/db/client';
 import { prelimAnalyses } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { downloadFile as s3Download } from '@/lib/integrations/s3/client';
 import { extractPdfText } from './pdf-extract';
 import { computeFacts } from './tessa-pre-parser';
 import { callExtraction, callSummary } from './ai-client';
@@ -19,7 +20,10 @@ export interface AnalyzePrelimParams {
   orderId: number;
   documentId: number;
   fileNumber: string;
-  pdfUrl: string;
+  /** S3 storage key — preferred path (direct IAM download). */
+  storageKey?: string;
+  /** HTTP URL fallback (signed URL or external URL). */
+  pdfUrl?: string;
   triggeredBy: 'webhook' | 'cron' | 'manual';
 }
 
@@ -38,7 +42,17 @@ async function updateRow(
   }).where(eq(prelimAnalyses.id, id));
 }
 
-async function downloadPdf(url: string): Promise<Buffer> {
+async function downloadPdfByKey(storageKey: string): Promise<Buffer> {
+  console.log(`[TESSA] Downloading PDF from S3 key: ${storageKey}`);
+  const result = await s3Download(storageKey);
+  if (!result.success || !result.data) {
+    throw new Error(`S3 download failed for key ${storageKey}: ${result.error?.message ?? 'unknown'}`);
+  }
+  return result.data;
+}
+
+async function downloadPdfByUrl(url: string): Promise<Buffer> {
+  console.log(`[TESSA] Downloading PDF from URL: ${url.substring(0, 80)}...`);
   const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`PDF download failed: HTTP ${response.status}`);
   const arrayBuffer = await response.arrayBuffer();
@@ -76,8 +90,13 @@ export async function analyzePrelim(
   let extraction: ExtractedAnalysis | undefined;
 
   try {
-    // (b) Download PDF from S3
-    const pdfBuffer = await downloadPdf(params.pdfUrl);
+    // (b) Download PDF — prefer S3 direct, fall back to HTTP URL
+    if (!params.storageKey && !params.pdfUrl) {
+      throw new Error('Either storageKey or pdfUrl must be provided');
+    }
+    const pdfBuffer = params.storageKey
+      ? await downloadPdfByKey(params.storageKey)
+      : await downloadPdfByUrl(params.pdfUrl!);
 
     // (c) Update status to 'extracting'
     await updateRow(analysisId, { status: 'extracting' });

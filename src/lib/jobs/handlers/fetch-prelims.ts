@@ -99,7 +99,7 @@ export async function fetchPrelimsForOrder(
           orderId,
           documentId: doc!.id,
           fileNumber,
-          pdfUrl: url,
+          storageKey,
           triggeredBy: 'cron',
         });
       } catch (err) {

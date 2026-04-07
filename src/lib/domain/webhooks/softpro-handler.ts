@@ -81,7 +81,7 @@ async function storeDocument(params: {
   filename: string;
   category: 'prelim' | 'policy';
   sourceUrl: string;
-}): Promise<{ documentId: number }> {
+}): Promise<{ documentId: number; storageKey: string }> {
   const ts = Date.now();
   const storageKey = `${params.category}/${params.fileNumber}/${ts}_${params.filename}`;
 
@@ -125,7 +125,7 @@ async function storeDocument(params: {
     } as Record<string, unknown>,
   });
 
-  return { documentId: doc!.id };
+  return { documentId: doc!.id, storageKey };
 }
 
 // ─── Prelim Handler ─────────────────────────────────────────────────────────
@@ -154,7 +154,7 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
   for (const url of payload.data) {
     try {
       const { buffer, filename } = await downloadFromUrl(url);
-      const { documentId } = await storeDocument({
+      const { documentId, storageKey } = await storeDocument({
         orderId: order.id,
         fileNumber: order.fileNumber,
         buffer,
@@ -173,7 +173,7 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
         orderId: order.id,
         documentId,
         fileNumber: order.fileNumber,
-        pdfUrl: url,
+        storageKey,
         triggeredBy: 'webhook',
       }).catch(err => {
         console.error('[TESSA] Webhook-triggered analysis failed:', err);

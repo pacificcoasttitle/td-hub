@@ -50,16 +50,12 @@ export async function GET(req: NextRequest) {
   try {
     const access = await validateSalesAccess(session, repId);
 
-    // Hub DB: managers with no rep filter see the full team. MR API (getRepFigures) stays personal — no team aggregate.
-    const teamIds =
-      access.role === 'sales_manager' && !repId ? access.managedRepIds : undefined;
-
+    // "My Stats" = personal. Specific rep = that rep. Team view is on Daily/Ranking pages.
     const [stats, ordersResult] = await Promise.all([
-      getScopedStats(orders.salesRepId, access.contactId, { contactIds: teamIds }),
+      getScopedStats(orders.salesRepId, access.contactId),
       getScopedOrders({
         scopeColumn: orders.salesRepId,
         contactId: access.contactId,
-        contactIds: teamIds,
         page,
         pageSize,
         status,

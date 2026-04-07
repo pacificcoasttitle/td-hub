@@ -18,10 +18,7 @@ export async function GET(req: NextRequest) {
   try {
     const access = await validateSalesAccess(session, repId);
 
-    const teamIds: number[] =
-      access.role === 'sales_manager' && !repId
-        ? (access.managedRepIds ?? [access.contactId])
-        : [access.contactId];
+    const teamIds: number[] = [access.contactId];
 
     // Try Managers Report API first
     try {

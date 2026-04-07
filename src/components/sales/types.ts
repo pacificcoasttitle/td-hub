@@ -24,11 +24,15 @@ export interface SalesOrder {
   fileNumber: string;
   operationalStatus: string | null;
   transactionType: string | null;
+  productType?: string | null;
+  orderType?: string | null;
   openedAt: string | null;
   address: string | null;
   city: string | null;
   state: string | null;
   hasPrelim?: boolean;
+  /** Assigned sales rep display name (list queries that join contacts). */
+  salesRepName?: string | null;
 }
 
 export interface SalesRep {

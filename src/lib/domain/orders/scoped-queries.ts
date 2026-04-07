@@ -1,10 +1,13 @@
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, documents } from '@/lib/db/schema';
-import { eq, desc, sql, and, gte, SQL, count as drizzleCount, inArray } from 'drizzle-orm';
+import { orders, orderProperties, documents, contacts } from '@/lib/db/schema';
+import { eq, desc, sql, and, SQL, inArray, or, ilike } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 type ScopeColumn = typeof orders.salesRepId | typeof orders.titleOfficerId | typeof orders.escrowOfficerId;
 
 // ─── Scoped Order List ──────────────────────────────────────────────────────
+
+const salesRepContact = alias(contacts, 'sales_rep_contact');
 
 export interface ScopedOrderListParams {
   scopeColumn: ScopeColumn;
@@ -14,6 +17,8 @@ export interface ScopedOrderListParams {
   page?: number;
   pageSize?: number;
   status?: string;
+  /** Case-insensitive match on file number or property address fields. */
+  search?: string;
 }
 
 function scopeWhereClause(
@@ -37,7 +42,22 @@ export async function getScopedOrders(params: ScopedOrderListParams) {
   if (params.status) {
     conditions.push(eq(orders.operationalStatus, params.status as typeof orders.operationalStatus.enumValues[number]));
   }
+  const q = params.search?.trim();
+  if (q) {
+    const safe = q.replace(/[%_]/g, '');
+    if (safe.length > 0) {
+      const pat = `%${safe}%`;
+      conditions.push(or(
+        ilike(orders.fileNumber, pat),
+        ilike(orderProperties.address, pat),
+        ilike(orderProperties.fullAddress, pat),
+      )!);
+    }
+  }
   const where = and(...conditions);
+
+  const orderJoin = eq(orders.id, orderProperties.orderId);
+  const repJoin = eq(orders.salesRepId, salesRepContact.id);
 
   const [rows, countResult] = await Promise.all([
     db.select({
@@ -48,14 +68,19 @@ export async function getScopedOrders(params: ScopedOrderListParams) {
       closedAt: orders.closedAt, completedAt: orders.completedAt,
       address: orderProperties.address, city: orderProperties.city,
       state: orderProperties.state, fullAddress: orderProperties.fullAddress,
+      salesRepName: salesRepContact.fullName,
     })
       .from(orders)
-      .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
+      .leftJoin(orderProperties, orderJoin)
+      .leftJoin(salesRepContact, repJoin)
       .where(where)
       .orderBy(desc(orders.openedAt))
       .limit(pageSize)
       .offset(offset),
-    db.select({ total: sql<number>`count(*)` }).from(orders).where(where),
+    db.select({ total: sql<number>`count(distinct ${orders.id})` })
+      .from(orders)
+      .leftJoin(orderProperties, orderJoin)
+      .where(where),
   ]);
 
   return { orders: rows, total: Number(countResult[0]?.total ?? 0), page, pageSize };

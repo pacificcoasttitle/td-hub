@@ -1,19 +1,17 @@
-'use client';
+import { redirect } from 'next/navigation';
+import { getSession } from '@/lib/security/auth';
+import { SalesOrdersClient } from '@/components/sales/sales-orders-client';
 
-import { OrdersHubTable } from '@/components/shared/orders-hub-table';
+export const dynamic = 'force-dynamic';
 
-export default function SalesOrdersPage() {
+const SALES_ROLES = ['sales_rep', 'sales_manager'];
+
+export default async function SalesOrdersPage() {
+  const session = await getSession();
+  if (!session) redirect('/login');
+  if (!SALES_ROLES.includes(session.role)) redirect('/dashboard');
+
   return (
-    <div>
-      <h1 className="text-xl font-bold text-gray-900 mb-6">Orders</h1>
-      <OrdersHubTable
-        fetchUrl="/api/orders"
-        actions={['cpl', 'prelim', 'notes', 'detail']}
-        showSearch
-        showStatusFilter
-        pageSize={25}
-        accentColor="#F26B2B"
-      />
-    </div>
+    <SalesOrdersClient role={session.role as 'sales_rep' | 'sales_manager'} />
   );
 }

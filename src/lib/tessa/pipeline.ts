@@ -48,6 +48,11 @@ async function downloadPdf(url: string): Promise<Buffer> {
 export async function analyzePrelim(
   params: AnalyzePrelimParams,
 ): Promise<AnalyzePrelimResult> {
+  console.log(
+    `[TESSA] Starting analysis for order ${params.orderId}, doc ${params.documentId}, trigger: ${params.triggeredBy}`,
+  );
+  const startedAt = Date.now();
+
   // (a) Create row with status 'pending'
   const [row] = await db.insert(prelimAnalyses).values({
     orderId: params.orderId,
@@ -58,6 +63,13 @@ export async function analyzePrelim(
   }).returning({ id: prelimAnalyses.id });
 
   const analysisId = row!.id;
+  console.log(`[TESSA] Created analysis row ${analysisId} for order ${params.orderId}`);
+
+  const finish = (status: 'complete' | 'failed') => {
+    console.log(
+      `[TESSA] Analysis ${analysisId} for order ${params.orderId}: ${status}, took ${Date.now() - startedAt}ms`,
+    );
+  };
 
   let pdfText: string | undefined;
   let facts: PrelimFacts | undefined;
@@ -95,6 +107,7 @@ export async function analyzePrelim(
       errorMessage: err instanceof Error ? err.message : String(err),
       errorStep: 'computing_facts',
     });
+    finish('failed');
     return { analysisId, status: 'failed' };
   }
 
@@ -124,6 +137,7 @@ export async function analyzePrelim(
       errorStep: 'analyzing',
       factsJson: facts as unknown as Record<string, unknown>,
     });
+    finish('failed');
     return { analysisId, status: 'failed' };
   }
 
@@ -164,6 +178,7 @@ export async function analyzePrelim(
       completedAt: new Date(),
     });
 
+    finish('complete');
     return { analysisId, status: 'complete' };
   } catch (err) {
     // (n) Partial results preserved — mark as failed at summarizing step
@@ -172,6 +187,7 @@ export async function analyzePrelim(
       errorMessage: err instanceof Error ? err.message : String(err),
       errorStep: 'summarizing',
     });
+    finish('failed');
     return { analysisId, status: 'failed' };
   }
 }

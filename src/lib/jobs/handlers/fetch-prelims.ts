@@ -94,15 +94,18 @@ export async function fetchPrelimsForOrder(
         meta: { source: 'softpro_fetch', sourceUrl: url, storageKey, sizeBytes: buffer.length } as Record<string, unknown>,
       });
 
-      analyzePrelim({
-        orderId,
-        documentId: doc!.id,
-        fileNumber,
-        pdfUrl: url,
-        triggeredBy: 'cron',
-      }).catch(err => {
+      try {
+        await analyzePrelim({
+          orderId,
+          documentId: doc!.id,
+          fileNumber,
+          pdfUrl: url,
+          triggeredBy: 'cron',
+        });
+      } catch (err) {
         console.error('[TESSA] Cron-triggered analysis failed:', err);
-      });
+        // Continue processing other prelims / URLs
+      }
 
       stored++;
     } catch { /* per-URL failure doesn't stop the batch */ }

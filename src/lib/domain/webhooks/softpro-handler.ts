@@ -169,7 +169,7 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
         payload: { documentId, category: 'prelim', fileNumber: order.fileNumber } as Record<string, unknown>,
       });
 
-      analyzePrelim({
+      const analysisPromise = analyzePrelim({
         orderId: order.id,
         documentId,
         fileNumber: order.fileNumber,
@@ -178,6 +178,16 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
       }).catch(err => {
         console.error('[TESSA] Webhook-triggered analysis failed:', err);
       });
+
+      try {
+        const nextServer = await import('next/server');
+        const waitUntil = (nextServer as { waitUntil?: (p: Promise<unknown>) => void }).waitUntil;
+        if (typeof waitUntil === 'function') {
+          waitUntil(analysisPromise);
+        }
+      } catch {
+        /* next/server or waitUntil unavailable — promise runs best-effort */
+      }
 
       processed++;
     } catch (err) {

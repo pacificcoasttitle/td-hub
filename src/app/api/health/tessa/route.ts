@@ -6,11 +6,69 @@ import { sql, eq, gte, and } from 'drizzle-orm';
 import { S3Client, HeadBucketCommand } from '@aws-sdk/client-s3';
 
 const ADMIN_ROLES = ['super_admin', 'admin'];
+const PRELIM_ANALYSES_REQUIRED_COLUMNS = [
+  'id',
+  'order_id',
+  'document_id',
+  'file_number',
+  'status',
+  'triggered_by',
+  'pdf_text',
+  'pdf_char_count',
+  'facts_json',
+  'extraction_json',
+  'raw_extraction_json',
+  'summary_text',
+  'complexity_score',
+  'complexity_level',
+  'complexity_reasons',
+  'requirement_count',
+  'blocker_count',
+  'lien_count',
+  'tax_count',
+  'tax_default_count',
+  'other_finding_count',
+  'foreclosure_detected',
+  'extraction_model',
+  'summary_model',
+  'error_message',
+  'error_step',
+  'error_type',
+  'created_at',
+  'updated_at',
+  'completed_at',
+] as const;
 
 interface Check {
   ok: boolean;
   detail: string;
   errors?: string[];
+}
+
+async function assertRequiredColumns(tableName: string, required: readonly string[]) {
+  const rows = await db.execute<{ column_name: string }>(
+    sql`
+      select column_name
+      from information_schema.columns
+      where table_name = ${tableName}
+      order by ordinal_position
+    `,
+  );
+
+  const liveColumns = rows.map((row) => row.column_name);
+  const liveSet = new Set(liveColumns);
+  const requiredSet = new Set(required);
+
+  const missingColumns = required.filter((column) => !liveSet.has(column));
+  const extraColumns = liveColumns.filter((column) => !requiredSet.has(column));
+
+  return {
+    table: tableName,
+    liveColumns,
+    missingColumns,
+    extraColumns,
+    columnCount: liveColumns.length,
+  };
 }
 
 export async function GET() {
@@ -21,16 +79,50 @@ export async function GET() {
 
   const checks: Record<string, Check> = {};
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  let schemaMeta: {
+    table: string;
+    liveColumns: string[];
+    missingColumns: readonly string[];
+    extraColumns: string[];
+    columnCount: number;
+  } | null = null;
 
   // 1. Schema check
   try {
-    const [row] = await db.execute<{ count: string }>(
-      sql`select count(*)::int as count from information_schema.columns where table_name = 'prelim_analyses'`,
-    );
-    const cols = Number((row as Record<string, unknown>)?.count ?? 0);
-    checks.schema = { ok: cols > 0, detail: cols > 0 ? `prelim_analyses table has ${cols} columns` : 'prelim_analyses table not found' };
+    const schemaCheck = await assertRequiredColumns('prelim_analyses', PRELIM_ANALYSES_REQUIRED_COLUMNS);
+    schemaMeta = schemaCheck;
+
+    if (schemaCheck.missingColumns.length > 0) {
+      console.error('[TESSA Health] Schema drift detected', {
+        table: 'prelim_analyses',
+        missingColumns: schemaCheck.missingColumns,
+        extraColumns: schemaCheck.extraColumns,
+        liveColumns: schemaCheck.liveColumns,
+      });
+
+      return NextResponse.json({
+        ok: false,
+        table: 'prelim_analyses',
+        missingColumns: schemaCheck.missingColumns,
+        extraColumns: schemaCheck.extraColumns,
+        columnCount: schemaCheck.columnCount,
+        error: 'TESSA schema drift detected',
+      }, { status: 500 });
+    }
+
+    checks.schema = {
+      ok: true,
+      detail: `prelim_analyses schema OK (${schemaCheck.columnCount} columns validated)`,
+    };
   } catch (err) {
-    checks.schema = { ok: false, detail: `Schema check failed: ${err instanceof Error ? err.message : 'Unknown'}` };
+    return NextResponse.json({
+      ok: false,
+      table: 'prelim_analyses',
+      missingColumns: PRELIM_ANALYSES_REQUIRED_COLUMNS,
+      extraColumns: [],
+      columnCount: 0,
+      error: `TESSA schema check failed: ${err instanceof Error ? err.message : 'Unknown'}`,
+    }, { status: 500 });
   }
 
   // 2. Anthropic key
@@ -158,5 +250,14 @@ export async function GET() {
     status = 'degraded';
   }
 
-  return NextResponse.json({ status, checks, stats });
+  return NextResponse.json({
+    ok: true,
+    table: 'prelim_analyses',
+    missingColumns: [],
+    extraColumns: schemaMeta?.extraColumns ?? [],
+    columnCount: schemaMeta?.columnCount ?? 0,
+    status,
+    checks,
+    stats,
+  });
 }

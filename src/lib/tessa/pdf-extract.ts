@@ -1,4 +1,4 @@
-import pdf from 'pdf-parse';
+import pdf from 'pdf-parse/lib/pdf-parse';
 
 const MAX_CHARS = 50_000;
 const MIN_CHARS = 100;

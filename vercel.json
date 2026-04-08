@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/jobs/run?name=softpro.enrich_orders",
-      "schedule": "15 * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/jobs/run?name=softpro.fetch_prelims",

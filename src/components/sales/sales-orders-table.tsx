@@ -25,9 +25,9 @@ interface Props {
   onAction: (action: SalesAction, order: SalesOrder) => void;
 }
 
-const thCls = 'text-left px-5 py-2.5 font-medium text-gray-500 border-r border-gray-200';
+const thCls = 'text-left px-5 py-2.5 font-medium text-gray-500 border-r border-gray-100';
 const thLast = 'text-right px-5 py-2.5 font-medium text-gray-500';
-const tdBr = 'border-r border-gray-200';
+const tdBr = 'border-r border-gray-100';
 
 export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
   const showRep = role === 'sales_manager';

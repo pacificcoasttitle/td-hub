@@ -49,6 +49,17 @@ function fmtSource(s: string) {
   return SOURCE_LABELS[s] ?? s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function fmtOpenedDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yy = String(d.getFullYear()).slice(-2);
+    return `${mm}/${dd}/${yy}`;
+  } catch { return '—'; }
+}
+
 const EMAIL_COLORS: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-600',
   sent:    'bg-green-100 text-green-800',
@@ -95,6 +106,7 @@ export function OrderTable({
                 <TH>Source</TH>
                 <TH>Email</TH>
                 <TH className="text-center">Dup Override</TH>
+                <TH>Opened</TH>
                 <TH className="text-center w-20">Actions</TH>
               </tr>
             </thead>
@@ -232,6 +244,7 @@ function OrderRow({ order, rowNum, onClick, onAction }: {
           )}
         </button>
       </td>
+      <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap tabular-nums">{fmtOpenedDate(order.openedAt)}</td>
       <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
         <ActionsDropdown
           onDetails={() => onAction('details')}

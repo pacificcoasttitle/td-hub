@@ -95,6 +95,13 @@ function EnrichButton() {
   );
 }
 
+const SORT_OPTIONS = [
+  { label: 'Newest first', sortBy: 'openedAt', sortDir: 'desc' },
+  { label: 'Oldest first', sortBy: 'openedAt', sortDir: 'asc' },
+  { label: 'File number', sortBy: 'fileNumber', sortDir: 'asc' },
+  { label: 'Status', sortBy: 'operationalStatus', sortDir: 'asc' },
+] as const;
+
 export default function OrdersPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -102,6 +109,12 @@ export default function OrdersPage() {
   const currentPage = Number(searchParams.get('page') ?? '1');
   const currentStatus = searchParams.get('status') ?? '';
   const currentSearch = searchParams.get('search') ?? '';
+  const currentSortBy = searchParams.get('sortBy') ?? 'openedAt';
+  const currentSortDir = searchParams.get('sortDir') ?? 'desc';
+
+  const sortIdx = SORT_OPTIONS.findIndex(
+    o => o.sortBy === currentSortBy && o.sortDir === currentSortDir,
+  );
 
   const [data, setData] = useState<OrderListResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,25 +123,36 @@ export default function OrdersPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const buildUrl = useCallback(
-    (overrides: { page?: number; status?: string; search?: string }) => {
+    (overrides: { page?: number; status?: string; search?: string; sortBy?: string; sortDir?: string }) => {
       const params = new URLSearchParams();
       const page = overrides.page ?? currentPage;
       const status = overrides.status ?? currentStatus;
       const search = overrides.search ?? currentSearch;
+      const sortBy = overrides.sortBy ?? currentSortBy;
+      const sortDir = overrides.sortDir ?? currentSortDir;
       if (page > 1) params.set('page', String(page));
       if (status) params.set('status', status);
       if (search) params.set('search', search);
+      if (sortBy !== 'openedAt' || sortDir !== 'desc') {
+        params.set('sortBy', sortBy);
+        params.set('sortDir', sortDir);
+      }
       const qs = params.toString();
       return qs ? `/orders?${qs}` : '/orders';
     },
-    [currentPage, currentStatus, currentSearch],
+    [currentPage, currentStatus, currentSearch, currentSortBy, currentSortDir],
   );
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    const apiParams = new URLSearchParams({ page: String(currentPage), pageSize: String(PAGE_SIZE) });
+    const apiParams = new URLSearchParams({
+      page: String(currentPage),
+      pageSize: String(PAGE_SIZE),
+      sortBy: currentSortBy,
+      sortDir: currentSortDir,
+    });
     if (currentStatus) apiParams.set('status', currentStatus);
     if (currentSearch) apiParams.set('search', currentSearch);
     fetch(`/api/orders?${apiParams}`, { signal: controller.signal })
@@ -137,12 +161,18 @@ export default function OrdersPage() {
       .catch((err) => { if (err.name !== 'AbortError') setError(err.message); })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [currentPage, currentStatus, currentSearch]);
+  }, [currentPage, currentStatus, currentSearch, currentSortBy, currentSortDir]);
 
   function handleSearchChange(value: string) {
     setSearchInput(value);
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => { router.push(buildUrl({ search: value, page: 1 })); }, 300);
+  }
+
+  function handleSortChange(idx: number) {
+    const opt = SORT_OPTIONS[idx];
+    if (!opt) return;
+    router.push(buildUrl({ sortBy: opt.sortBy, sortDir: opt.sortDir, page: 1 }));
   }
 
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
@@ -168,6 +198,19 @@ export default function OrdersPage() {
         currentStatus={currentStatus}
         onStatusChange={(status) => router.push(buildUrl({ status, page: 1 }))}
       />
+
+      <div className="flex items-center gap-2 mb-4 -mt-2">
+        <span className="text-sm text-[#6B7280]">Sort:</span>
+        <select
+          value={sortIdx >= 0 ? sortIdx : 0}
+          onChange={(e) => handleSortChange(Number(e.target.value))}
+          className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] bg-white focus:outline-none focus:ring-2 focus:ring-[#C5A55A]/40 focus:border-[#C5A55A]"
+        >
+          {SORT_OPTIONS.map((opt, i) => (
+            <option key={i} value={i}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
 
       <OrderTable
         orders={data?.orders}

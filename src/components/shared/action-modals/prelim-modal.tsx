@@ -5,10 +5,36 @@ import { ModalShell } from './modal-shell';
 
 interface PrelimDoc { id: number; fileName: string; createdAt: string; }
 
-export function PrelimModal({ open, onClose, orderId, fileNumber, address, isClient, accentColor }: {
+function normalizeDocs(raw: Record<string, unknown>[]): PrelimDoc[] {
+  return raw
+    .filter((d: Record<string, unknown>) => !d.category || d.category === 'prelim')
+    .map((d: Record<string, unknown>) => ({
+      id: d.id as number,
+      fileName: (d.fileName ?? d.filename ?? d.originalFilename ?? 'Document') as string,
+      createdAt: d.createdAt as string,
+    }));
+}
+
+/** Fetch prelim docs list and open the first one in a new tab. Returns true if opened. */
+export async function openPrelimInNewTab(orderId: number): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/orders/${orderId}/documents?category=prelim`);
+    if (!res.ok) return false;
+    const data = await res.json();
+    const docs = normalizeDocs(data.documents ?? []);
+    if (docs.length === 0) return false;
+    window.open(`/api/documents/${docs[0].id}/download`, '_blank');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function PrelimModal({ open, onClose, orderId, fileNumber, address, isClient, accentColor, hideFetch }: {
   open: boolean; onClose: () => void;
   orderId: number; fileNumber: string; address: string;
   isClient?: boolean; accentColor?: string;
+  hideFetch?: boolean;
 }) {
   const [checking, setChecking] = useState(false);
   const [docs, setDocs] = useState<PrelimDoc[]>([]);
@@ -27,7 +53,7 @@ export function PrelimModal({ open, onClose, orderId, fileNumber, address, isCli
     setFetchResult(null); setError('');
     fetch(docsUrl)
       .then((r) => r.ok ? r.json() : { [docsKey]: [] })
-      .then((d) => setDocs(d[docsKey] ?? d.documents ?? []))
+      .then((d) => setDocs(normalizeDocs(d[docsKey] ?? d.documents ?? [])))
       .catch(() => setDocs([]))
       .finally(() => setLoaded(true));
   }, [open, docsUrl, docsKey]);
@@ -45,7 +71,7 @@ export function PrelimModal({ open, onClose, orderId, fileNumber, address, isCli
       if ((body.documentsFound ?? body.documentsStored ?? 0) > 0) {
         const r2 = await fetch(docsUrl);
         const d2 = await r2.json();
-        setDocs(d2[docsKey] ?? d2.documents ?? []);
+        setDocs(normalizeDocs(d2[docsKey] ?? d2.documents ?? []));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
@@ -55,10 +81,12 @@ export function PrelimModal({ open, onClose, orderId, fileNumber, address, isCli
   return (
     <ModalShell open={open} onClose={onClose} title="Prelim Documents" subtitle={`${fileNumber} · ${address}`} accentColor={accentColor}>
       <div className="p-5 space-y-4">
-        <button onClick={checkPrelim} disabled={checking}
-          className="w-full h-11 bg-[#F26B2B] text-white text-sm font-semibold rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors">
-          {checking ? 'Checking SoftPro…' : 'Check for Prelim'}
-        </button>
+        {!hideFetch && (
+          <button onClick={checkPrelim} disabled={checking}
+            className="w-full h-11 bg-[#F26B2B] text-white text-sm font-semibold rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors">
+            {checking ? 'Checking SoftPro…' : 'Check for Prelim'}
+          </button>
+        )}
         {fetchResult && (
           <div className={`px-3 py-2 rounded-lg text-sm ${fetchResult.found > 0 ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
             {fetchResult.found > 0 ? `Found ${fetchResult.found} document(s)` : 'No prelim available yet in SoftPro'}
@@ -75,7 +103,10 @@ export function PrelimModal({ open, onClose, orderId, fileNumber, address, isCli
                     <p className="text-sm text-[#1A1A2E] truncate">{d.fileName}</p>
                     <p className="text-xs text-[#6B7280]">{new Date(d.createdAt).toLocaleDateString()}</p>
                   </div>
-                  <a href={`${dlBase}/documents/${d.id}/download`} className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">Download</a>
+                  <a href={`${dlBase}/documents/${d.id}/download`} target="_blank" rel="noopener noreferrer"
+                    className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">
+                    View PDF
+                  </a>
                 </div>
               ))}
             </div>

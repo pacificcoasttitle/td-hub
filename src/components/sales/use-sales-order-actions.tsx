@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { PrelimModal, DetailModal } from '@/components/shared/action-modals';
+import { PrelimModal, DetailModal, openPrelimInNewTab } from '@/components/shared/action-modals';
 import { TessaPrelimResultsModal } from '@/components/tessa/TessaPrelimResultsModal';
 import type { SalesAction } from './order-actions';
 import type { SalesOrder } from './types';
@@ -24,6 +24,10 @@ export function useSalesOrderActions() {
   const handleOrderAction = useCallback((action: SalesAction, order: SalesOrder) => {
     switch (action) {
       case 'review_prelim':
+        openPrelimInNewTab(order.id).then(ok => {
+          if (!ok) showToast('No prelim document found');
+        });
+        break;
       case 'update_prelim':
       case 'get_prelim_doc':
         setPrelimOrder(order);
@@ -51,6 +55,7 @@ export function useSalesOrderActions() {
           orderId={prelimOrder.id}
           fileNumber={prelimOrder.fileNumber}
           address={fmtAddr(prelimOrder)}
+          hideFetch
         />
       )}
       {detailOrder && (

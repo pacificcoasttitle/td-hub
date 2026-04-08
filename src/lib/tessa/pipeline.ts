@@ -102,17 +102,21 @@ export async function analyzePrelim(
     await updateRow(analysisId, { status: 'extracting' });
 
     // (d) Extract text from PDF
+    console.log(`[TESSA] Extracting text from PDF (${pdfBuffer.length} bytes)`);
     pdfText = await extractPdfText(pdfBuffer);
+    console.log(`[TESSA] Extracted ${pdfText.length} chars`);
     await updateRow(analysisId, {
       pdfText,
       pdfCharCount: pdfText.length,
     });
   } catch (err) {
+    console.error('[TESSA] PDF extraction FAILED:', err instanceof Error ? { message: err.message, stack: err.stack } : err);
     await updateRow(analysisId, {
       status: 'failed',
       errorMessage: err instanceof Error ? err.message : String(err),
       errorStep: 'extracting',
     });
+    finish('failed');
     return { analysisId, status: 'failed' };
   }
 

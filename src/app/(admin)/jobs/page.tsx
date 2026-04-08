@@ -1,32 +1,38 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { JobsTab } from '@/components/admin/jobs-tab';
+import { IntegrationHealth } from '@/components/admin/ops/integration-health';
+import { CronStatus } from '@/components/admin/ops/cron-status';
+import { TessaStatus } from '@/components/admin/ops/tessa-status';
+import { NotificationStatus } from '@/components/admin/ops/notification-status';
+import { SyncStatus } from '@/components/admin/ops/sync-status';
 import { VendorLogsTab } from '@/components/admin/vendor-logs-tab';
 import { WebhooksTab } from '@/components/admin/webhooks-tab';
 
-type TabKey = 'jobs' | 'logs' | 'webhooks';
+type TabKey = 'dashboard' | 'logs' | 'webhooks';
 
 const TABS: [TabKey, string][] = [
-  ['jobs', 'Jobs'],
-  ['logs', 'Vendor Logs'],
+  ['dashboard', 'Dashboard'],
+  ['logs', 'Detailed Logs'],
   ['webhooks', 'Webhooks'],
 ];
 
-export default function JobsPage() {
+export default function OperationsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeTab = (searchParams.get('tab') as TabKey) || 'jobs';
+  const activeTab = (searchParams.get('tab') as TabKey) || 'dashboard';
 
   function setTab(tab: TabKey) {
-    router.push(`/jobs?tab=${tab}`);
+    router.push(tab === 'dashboard' ? '/jobs' : `/jobs?tab=${tab}`);
   }
 
   return (
     <div className="p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-[#1A1A2E]">Jobs &amp; Logs</h1>
-        <p className="text-sm text-[#6B7280] mt-1">Monitor sync jobs, vendor API activity, and incoming webhooks</p>
+        <h1 className="text-2xl font-semibold text-[#1A1A2E]">Operations</h1>
+        <p className="text-sm text-[#6B7280] mt-1">
+          Monitor integrations, cron jobs, and system health
+        </p>
       </div>
 
       <div className="border-b border-gray-200 mb-6">
@@ -48,7 +54,19 @@ export default function JobsPage() {
         </nav>
       </div>
 
-      {activeTab === 'jobs' && <JobsTab />}
+      {activeTab === 'dashboard' && (
+        <div className="space-y-6">
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-3">Integration health</h2>
+            <IntegrationHealth />
+          </section>
+          <CronStatus />
+          <TessaStatus />
+          <NotificationStatus />
+          <SyncStatus />
+        </div>
+      )}
+
       {activeTab === 'logs' && <VendorLogsTab />}
       {activeTab === 'webhooks' && <WebhooksTab />}
     </div>

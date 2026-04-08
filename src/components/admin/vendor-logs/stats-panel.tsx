@@ -38,7 +38,20 @@ function vendorMap(stats: LogStats | null): Record<string, { count: number; succ
   return m;
 }
 
-export const VENDORS = ['SoftPro', 'SiteX', 'TitlePoint', 'Westcor', 'FNF', 'SendGrid', 'Twilio'] as const;
+export const VENDORS = [
+  { value: 'softpro', label: 'SoftPro' },
+  { value: 's3', label: 'AWS S3' },
+  { value: 'managers_report', label: 'Managers Report' },
+  { value: 'titlepoint', label: 'TitlePoint' },
+  { value: 'westcor', label: 'Westcor' },
+  { value: 'fnf', label: 'FNF' },
+  { value: 'sendgrid', label: 'SendGrid' },
+  { value: 'twilio', label: 'Twilio' },
+  { value: 'anthropic', label: 'Anthropic (TESSA)' },
+  { value: 'title_production', label: 'Title Production' },
+  { value: 'sitex', label: 'SiteX' },
+  { value: 'softpro_webhook', label: 'SoftPro Webhooks' },
+];
 
 export function StatCard({ label, value, loading, color }: { label: string; value?: number | string; loading: boolean; color?: string }) {
   return (
@@ -75,10 +88,10 @@ export function VendorCards({ stats, subTab }: { stats: LogStats | null; subTab:
   return (
     <div className="flex gap-2 overflow-x-auto pb-1">
       {VENDORS.map((v) => {
-        const data = byVendor[v.toLowerCase()];
+        const data = byVendor[v.value];
         return (
-          <div key={v} className="shrink-0 px-3 py-2 bg-white border border-gray-200 rounded-lg text-center min-w-[90px]">
-            <p className="text-xs font-semibold text-[#1A1A2E]">{v}</p>
+          <div key={v.value} className="shrink-0 px-3 py-2 bg-white border border-gray-200 rounded-lg text-center min-w-[90px]">
+            <p className="text-xs font-semibold text-[#1A1A2E]">{v.label}</p>
             <p className="text-lg font-bold text-[#1A1A2E] tabular-nums">{data?.count ?? 0}</p>
             {data && data.count > 0 && (
               <p className={`text-[10px] font-medium ${data.successPct >= 90 ? 'text-green-600' : data.successPct >= 70 ? 'text-amber-600' : 'text-red-600'}`}>

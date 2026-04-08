@@ -1,0 +1,127 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+
+interface CronJob {
+  jobType: string;
+  schedule: string;
+  lastRun: string | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  last24h: { runs: number; completed: number; failed: number };
+  avgDurationMs: number;
+}
+
+const JOB_LABELS: Record<string, string> = {
+  'softpro.sync_recent_orders': 'Sync Recent Orders',
+  'softpro.enrich_orders': 'Enrich Orders',
+  'softpro.fetch_prelims': 'Fetch Prelims',
+  'notifications.process_outbox': 'Process Notifications',
+  'softpro.verify_sync': 'Verify Sync',
+  'softpro.sync_new_users': 'Sync New Users',
+  'softpro.sync_all_contacts': 'Sync All Contacts',
+  'import-orders': 'Import Orders',
+};
+
+const STATUS_CLS: Record<string, string> = {
+  completed: 'bg-green-100 text-green-800',
+  failed: 'bg-red-100 text-red-800',
+  running: 'bg-blue-100 text-blue-800',
+  queued: 'bg-gray-100 text-gray-700',
+};
+
+function relTime(iso: string | null): string {
+  if (!iso) return '—';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return 'just now';
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)} min ago`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
+  return `${Math.floor(ms / 86_400_000)}d ago`;
+}
+
+function fmtMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+export function CronStatus() {
+  const [crons, setCrons] = useState<CronJob[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(() => {
+    fetch('/api/admin/ops/crons')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.crons) {
+          const sorted = [...d.crons].sort((a: CronJob, b: CronJob) => {
+            if (!a.lastRun) return 1;
+            if (!b.lastRun) return -1;
+            return new Date(b.lastRun).getTime() - new Date(a.lastRun).getTime();
+          });
+          setCrons(sorted);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const iv = setInterval(load, 60_000);
+    return () => clearInterval(iv);
+  }, [load]);
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-gray-900 mb-3">Scheduled jobs</h2>
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50/60">
+                <th className="text-left px-4 py-2.5 font-medium text-gray-500">Job</th>
+                <th className="text-left px-4 py-2.5 font-medium text-gray-500">Schedule</th>
+                <th className="text-left px-4 py-2.5 font-medium text-gray-500">Last Run</th>
+                <th className="text-left px-4 py-2.5 font-medium text-gray-500">Status</th>
+                <th className="text-right px-4 py-2.5 font-medium text-gray-500">Runs (24h)</th>
+                <th className="text-right px-4 py-2.5 font-medium text-gray-500">Failures</th>
+                <th className="text-right px-4 py-2.5 font-medium text-gray-500">Avg Time</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i} className="animate-pulse">
+                    {Array.from({ length: 7 }).map((__, j) => (
+                      <td key={j} className="px-4 py-3"><div className="h-4 bg-gray-200 rounded w-3/4" /></td>
+                    ))}
+                  </tr>
+                ))
+              ) : crons.length === 0 ? (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No cron data in the last 24 hours.</td></tr>
+              ) : crons.map(c => (
+                <tr key={c.jobType} className={c.last24h.failed > 0 ? 'bg-red-50' : ''}>
+                  <td className="px-4 py-3 font-medium text-gray-900">{JOB_LABELS[c.jobType] ?? c.jobType}</td>
+                  <td className="px-4 py-3 text-gray-500 text-xs">{c.schedule}</td>
+                  <td className="px-4 py-3 text-gray-500" title={c.lastRun ?? undefined}>{relTime(c.lastRun)}</td>
+                  <td className="px-4 py-3">
+                    {c.lastStatus && (
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_CLS[c.lastStatus] ?? 'bg-gray-100 text-gray-600'}`}>
+                        {c.lastStatus}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-gray-700">{c.last24h.runs}</td>
+                  <td className={`px-4 py-3 text-right tabular-nums ${c.last24h.failed > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}`}>
+                    {c.last24h.failed}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-gray-500">{fmtMs(c.avgDurationMs)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}

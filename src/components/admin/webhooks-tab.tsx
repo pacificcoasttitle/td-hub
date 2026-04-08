@@ -72,6 +72,20 @@ export function WebhooksTab() {
 
   return (
     <>
+      {data && !loading && (() => {
+        const today = new Date().toISOString().slice(0, 10);
+        const todayLogs = data.logs.filter(l => l.createdAt.startsWith(today));
+        const todaySuccess = todayLogs.filter(l => l.success === true).length;
+        const todayFailed = todayLogs.filter(l => l.success === false).length;
+        return todayLogs.length > 0 ? (
+          <div className="mb-4 text-sm text-[#6B7280]">
+            Today: <span className="font-medium text-[#1A1A2E]">{todayLogs.length}</span> received
+            {' · '}<span className="font-medium text-green-700">{todaySuccess}</span> processed
+            {' · '}<span className={`font-medium ${todayFailed > 0 ? 'text-red-600' : 'text-[#1A1A2E]'}`}>{todayFailed}</span> failed
+          </div>
+        ) : null;
+      })()}
+
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <select
           value={currentType}

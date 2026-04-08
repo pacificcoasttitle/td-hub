@@ -26,7 +26,7 @@ export function ApiFilterBar({
       <select value={vendor} onChange={(e) => onVendorChange(e.target.value)}
         className="h-9 px-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:border-[#C5A55A]">
         <option value="">All Vendors</option>
-        {VENDORS.map((v) => <option key={v} value={v.toLowerCase()}>{v}</option>)}
+        {VENDORS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
       </select>
       <div className="inline-flex border border-gray-200 rounded-lg overflow-hidden">
         {(['all', 'success', 'error'] as const).map((opt) => (

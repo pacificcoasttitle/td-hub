@@ -74,6 +74,41 @@ export async function POST(
       triggeredBy: 'manual',
     });
 
+    if (result.status === 'failed') {
+      let errorMessage = 'Analysis failed';
+      let errorStep: string | null = null;
+
+      if (result.analysisId > 0) {
+        const [row] = await db
+          .select({
+            id: prelimAnalyses.id,
+            errorMessage: prelimAnalyses.errorMessage,
+            errorStep: prelimAnalyses.errorStep,
+          })
+          .from(prelimAnalyses)
+          .where(eq(prelimAnalyses.id, result.analysisId))
+          .limit(1);
+
+        if (row) {
+          errorMessage = row.errorMessage ?? errorMessage;
+          errorStep = row.errorStep ?? null;
+        }
+      }
+
+      console.error('[TESSA] Returning structured failed manual result', {
+        analysisId: result.analysisId,
+        error: errorMessage,
+        errorStep,
+      });
+
+      return NextResponse.json({
+        analysisId: result.analysisId,
+        status: 'failed',
+        error: errorMessage,
+        errorStep,
+      });
+    }
+
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';

@@ -141,10 +141,13 @@ export function TessaPrelimResultsModal({ isOpen, onClose, orderId, fileNumber }
         return;
       }
 
-      // C) Pipeline finished failed
+      // C) Pipeline finished failed — prefer backend-provided detail
       if (body.status === 'failed') {
         setStatus('failed');
-        setError('Analysis failed — check the prelim document and try again');
+        const msg = body.errorStep
+          ? `${body.error || 'Analysis failed'} (step: ${body.errorStep})`
+          : (body.error || body.detail || 'Analysis failed — check the prelim document and try again');
+        setError(msg);
         return;
       }
 

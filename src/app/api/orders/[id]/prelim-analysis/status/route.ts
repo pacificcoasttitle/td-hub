@@ -39,7 +39,7 @@ export async function GET(
       .limit(1);
 
     if (!row) {
-      return NextResponse.json({ error: 'No analysis found for this order' }, { status: 404 });
+      return NextResponse.json({ analysisId: null, status: 'not_started', error: null });
     }
 
     return NextResponse.json({

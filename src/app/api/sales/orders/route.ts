@@ -19,13 +19,10 @@ export async function GET(req: NextRequest) {
 
   try {
     const access = await validateSalesAccess(session, repIdParam);
-    const teamIds =
-      access.role === 'sales_manager' && !repIdParam ? access.managedRepIds : undefined;
 
     const ordersResult = await getScopedOrders({
       scopeColumn: orders.salesRepId,
       contactId: access.contactId,
-      contactIds: teamIds,
       page,
       pageSize,
       status,

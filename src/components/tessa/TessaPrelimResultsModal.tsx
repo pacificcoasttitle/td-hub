@@ -70,8 +70,10 @@ export function TessaPrelimResultsModal({ isOpen, onClose, orderId, fileNumber }
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/orders/${orderId}/prelim-analysis/status`);
+        if (res.status === 404) { setPipelineStep('pending'); return; }
         if (!res.ok) return;
         const body = await res.json();
+        if (body.status === 'not_started') { setPipelineStep('pending'); return; }
         setPipelineStep(body.status ?? 'pending');
         if (body.status === 'complete') { stopPolling(); fetchFull(); }
         if (body.status === 'failed') { stopPolling(); setStatus('failed'); setError(body.error ?? 'Analysis failed'); }

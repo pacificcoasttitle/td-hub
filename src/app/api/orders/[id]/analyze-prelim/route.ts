@@ -75,8 +75,10 @@ export async function POST(
     });
 
     if (result.status === 'failed') {
-      let errorMessage = 'Analysis failed';
-      let errorStep: string | null = null;
+      console.error('[TESSA] Manual route returning failed result', result);
+
+      let errorMessage = result.error ?? 'Analysis failed';
+      let errorStep: string | null = result.errorStep ?? 'creating_row';
 
       if (result.analysisId > 0) {
         const [row] = await db
@@ -94,12 +96,6 @@ export async function POST(
           errorStep = row.errorStep ?? null;
         }
       }
-
-      console.error('[TESSA] Returning structured failed manual result', {
-        analysisId: result.analysisId,
-        error: errorMessage,
-        errorStep,
-      });
 
       return NextResponse.json({
         analysisId: result.analysisId,

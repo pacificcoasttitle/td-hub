@@ -30,6 +30,8 @@ export interface AnalyzePrelimParams {
 export interface AnalyzePrelimResult {
   analysisId: number;
   status: string;
+  error?: string;
+  errorStep?: string | null;
 }
 
 async function updateRow(
@@ -84,6 +86,12 @@ export async function analyzePrelim(
 
   // Create row with status 'pending'
   let analysisId: number;
+  console.error('[TESSA] About to create analysis row', {
+    orderId: params.orderId,
+    documentId: params.documentId,
+    fileNumber: params.fileNumber,
+    triggeredBy: params.triggeredBy,
+  });
   try {
     const [row] = await db.insert(prelimAnalyses).values({
       orderId: params.orderId,
@@ -93,14 +101,25 @@ export async function analyzePrelim(
       triggeredBy: params.triggeredBy,
     }).returning({ id: prelimAnalyses.id });
     analysisId = row!.id;
+    console.error('[TESSA] Created analysis row successfully', {
+      analysisId,
+      orderId: params.orderId,
+      documentId: params.documentId,
+    });
     console.log(`[TESSA] Created analysis row ${analysisId} for order ${params.orderId}`);
   } catch (err) {
     console.error('[TESSA] FATAL: Cannot create analysis row:', {
       orderId: params.orderId,
       documentId: params.documentId,
-      error: err instanceof Error ? err.message : err,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
     });
-    return { analysisId: 0, status: 'failed' };
+    return {
+      analysisId: 0,
+      status: 'failed',
+      error: err instanceof Error ? err.message : String(err),
+      errorStep: 'creating_row',
+    };
   }
 
   const finish = (status: string) => {
@@ -142,7 +161,12 @@ export async function analyzePrelim(
       errorStep: 'extracting',
     });
     finish('failed');
-    return { analysisId, status: 'failed' };
+    return {
+      analysisId,
+      status: 'failed',
+      error: err instanceof Error ? err.message : String(err),
+      errorStep: 'extracting',
+    };
   }
 
   try {
@@ -156,7 +180,12 @@ export async function analyzePrelim(
       errorStep: 'computing_facts',
     });
     finish('failed');
-    return { analysisId, status: 'failed' };
+    return {
+      analysisId,
+      status: 'failed',
+      error: err instanceof Error ? err.message : String(err),
+      errorStep: 'computing_facts',
+    };
   }
 
   try {
@@ -186,7 +215,12 @@ export async function analyzePrelim(
       factsJson: facts as unknown as Record<string, unknown>,
     });
     finish('failed');
-    return { analysisId, status: 'failed' };
+    return {
+      analysisId,
+      status: 'failed',
+      error: err instanceof Error ? err.message : String(err),
+      errorStep: 'analyzing',
+    };
   }
 
   try {
@@ -236,6 +270,11 @@ export async function analyzePrelim(
       errorStep: 'summarizing',
     });
     finish('failed');
-    return { analysisId, status: 'failed' };
+    return {
+      analysisId,
+      status: 'failed',
+      error: err instanceof Error ? err.message : String(err),
+      errorStep: 'summarizing',
+    };
   }
 }

@@ -24,10 +24,13 @@ export async function GET(req: NextRequest) {
   }
 
   const { month, year, limit } = parsed.data;
-  const monthStr = month ? month.padStart(2, '0') : undefined;
+  const now = new Date();
+  const y = year ? Number(year) : now.getFullYear();
+  const m = month ? Number(month) : now.getMonth() + 1;
+  const monthStr = `${y}-${String(m).padStart(2, '0')}`;
 
   try {
-    const result = await getLeaderboard(monthStr, limit, year);
+    const result = await getLeaderboard(monthStr, limit);
 
     if (!result.success || !result.data) {
       const notConfigured = result.error?.code === 'NOT_CONFIGURED';

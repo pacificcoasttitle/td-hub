@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     req.nextUrl.searchParams.get('year'),
   );
 
-  const monthStr = String(month).padStart(2, '0');
+  const monthStr = `${year}-${String(month).padStart(2, '0')}`;
 
   try {
     const conditions: SQL[] = [];
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 
     let teamRevenue: number | null = null;
     try {
-      const lb = await getLeaderboard(monthStr, undefined, String(year));
+      const lb = await getLeaderboard(monthStr);
       if (lb.success && lb.data) {
         let entries = lb.data.leaderboard;
 

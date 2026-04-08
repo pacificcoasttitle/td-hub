@@ -31,49 +31,66 @@ const STEP_LABELS: Record<string, string> = {
   summarizing: 'Generating summary…',
 };
 
+const MAX_POLLS = 60;
+
 export function TessaPrelimResultsModal({ isOpen, onClose, orderId, fileNumber }: Props) {
   const [status, setStatus] = useState<AnalysisStatus>('idle');
   const [pipelineStep, setPipelineStep] = useState('pending');
   const [data, setData] = useState<AnalysisData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollCountRef = useRef(0);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) { clearInterval(pollRef.current); pollRef.current = null; }
+    pollCountRef.current = 0;
   }, []);
 
   const fetchFull = useCallback(async () => {
-    const res = await fetch(`/api/orders/${orderId}/prelim-analysis`);
-    if (res.status === 404) { setStatus('not_found'); return; }
-    if (!res.ok) { setStatus('failed'); setError(`Failed to load (${res.status})`); return; }
+    try {
+      const res = await fetch(`/api/orders/${orderId}/prelim-analysis`);
+      if (res.status === 404) { setStatus('not_found'); return; }
+      if (!res.ok) { setStatus('failed'); setError(`Failed to load (${res.status})`); return; }
 
-    const body = await res.json();
-    if (body.status === 'complete' && body.extractionJson) {
-      setData({
-        extracted: body.extractionJson as ExtractedAnalysis,
-        summary: body.summaryText ?? '',
-        fileName: fileNumber,
-      });
-      setStatus('complete');
-    } else if (body.status === 'failed') {
+      const body = await res.json();
+      if (body.status === 'complete' && body.extractionJson) {
+        setData({
+          extracted: body.extractionJson as ExtractedAnalysis,
+          summary: body.summaryText ?? '',
+          fileName: fileNumber,
+        });
+        setStatus('complete');
+      } else if (body.status === 'failed') {
+        setStatus('failed');
+        setError(body.errorMessage ?? 'Analysis failed');
+      } else {
+        setPipelineStep(body.status ?? 'pending');
+        setStatus('polling');
+      }
+    } catch {
       setStatus('failed');
-      setError(body.errorMessage ?? 'Analysis failed');
-    } else {
-      setPipelineStep(body.status ?? 'pending');
-      setStatus('polling');
+      setError('Network error loading analysis');
     }
   }, [orderId, fileNumber]);
 
   const startPolling = useCallback(() => {
     stopPolling();
     setStatus('polling');
+    pollCountRef.current = 0;
     pollRef.current = setInterval(async () => {
+      pollCountRef.current++;
+      if (pollCountRef.current >= MAX_POLLS) {
+        stopPolling();
+        setStatus('failed');
+        setError('Analysis timed out — please try again');
+        return;
+      }
       try {
         const res = await fetch(`/api/orders/${orderId}/prelim-analysis/status`);
         if (res.status === 404) { setPipelineStep('pending'); return; }
         if (!res.ok) return;
         const body = await res.json();
-        if (body.status === 'not_started') { setPipelineStep('pending'); return; }
+        if (body.status === 'not_started' || body.status === 'not_found') { setPipelineStep('pending'); return; }
         setPipelineStep(body.status ?? 'pending');
         if (body.status === 'complete') { stopPolling(); fetchFull(); }
         if (body.status === 'failed') { stopPolling(); setStatus('failed'); setError(body.error ?? 'Analysis failed'); }
@@ -83,22 +100,23 @@ export function TessaPrelimResultsModal({ isOpen, onClose, orderId, fileNumber }
 
   const triggerAnalysis = useCallback(async (force = false) => {
     setStatus('triggering');
+    setPipelineStep('pending');
     setError(null);
     try {
       const url = `/api/orders/${orderId}/analyze-prelim${force ? '?force=true' : ''}`;
       const res = await fetch(url, { method: 'POST' });
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? `Trigger failed (${res.status})`);
+        setStatus('failed');
+        setError(body.detail || body.error || 'Analysis failed');
+        return;
       }
-      const body = await res.json();
-      if (body.status === 'complete') { fetchFull(); }
-      else { startPolling(); }
-    } catch (err) {
+      await fetchFull();
+    } catch {
       setStatus('failed');
-      setError(err instanceof Error ? err.message : 'Failed to start analysis');
+      setError('Network error — please try again');
     }
-  }, [orderId, startPolling, fetchFull]);
+  }, [orderId, fetchFull]);
 
   useEffect(() => {
     if (!isOpen) { stopPolling(); setStatus('idle'); setData(null); setError(null); return; }

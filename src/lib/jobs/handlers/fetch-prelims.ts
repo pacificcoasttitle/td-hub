@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
-import { orders, documents, documentAudit } from '@/lib/db/schema';
-import { sql, and } from 'drizzle-orm';
+import { orders, documents, documentAudit, prelimAnalyses } from '@/lib/db/schema';
+import { sql, and, eq, ne } from 'drizzle-orm';
 import { getAttachedDocuments } from '@/lib/integrations/softpro';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
 import { analyzePrelim } from '@/lib/tessa';
@@ -10,6 +10,7 @@ export interface FetchPrelimsResult {
   fetched: number;
   documentsStored: number;
   skipped: number;
+  retried: number;
   errors: Array<{ fileNumber: string; error: string }>;
 }
 
@@ -47,7 +48,53 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
     }
   }
 
-  return { total: ordersWithoutPrelims.length, fetched, documentsStored, skipped, errors };
+  // ── Phase 2: Retry failed analyses ──
+  // Only retries orders whose latest analysis is 'failed' (e.g. DOMMatrix era).
+  // Historical prelims without any analysis row are on-demand only.
+  let retried = 0;
+  try {
+    const failedRows = await db
+      .select({
+        orderId: prelimAnalyses.orderId,
+        documentId: prelimAnalyses.documentId,
+        fileNumber: prelimAnalyses.fileNumber,
+        storageKey: documents.storageKey,
+      })
+      .from(prelimAnalyses)
+      .innerJoin(documents, eq(documents.id, prelimAnalyses.documentId))
+      .where(and(
+        eq(prelimAnalyses.status, 'failed'),
+        sql`NOT EXISTS (
+          SELECT 1 FROM prelim_analyses pa2
+          WHERE pa2.order_id = ${prelimAnalyses.orderId}
+            AND pa2.status != 'failed'
+        )`,
+      ))
+      .limit(5);
+
+    for (const row of failedRows) {
+      try {
+        console.log(`[TESSA] Retrying failed analysis for order ${row.orderId}`);
+        await analyzePrelim({
+          orderId: row.orderId!,
+          documentId: row.documentId!,
+          fileNumber: row.fileNumber!,
+          storageKey: row.storageKey,
+          triggeredBy: 'cron',
+        });
+        retried++;
+      } catch (err) {
+        console.error('[TESSA] Retry failed:', {
+          orderId: row.orderId,
+          message: err instanceof Error ? err.message : err,
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[TESSA] Phase 2 query failed:', err instanceof Error ? err.message : err);
+  }
+
+  return { total: ordersWithoutPrelims.length, fetched, documentsStored, skipped, retried, errors };
 }
 
 /**

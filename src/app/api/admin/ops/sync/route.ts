@@ -1,26 +1,40 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, orderProperties, jobs } from '@/lib/db/schema';
-import { sql, eq, desc, isNotNull, or } from 'drizzle-orm';
+import { sql, eq, desc, isNotNull, or, and, gte, lt } from 'drizzle-orm';
 
 const ADMIN_ROLES = ['super_admin', 'admin'];
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session || !ADMIN_ROLES.includes(session.role)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    const [orderStats, lastSync, lastImport, recentSyncs, recentImports] = await Promise.all([
+    const now = new Date();
+    const month = Number(req.nextUrl.searchParams.get('month') || now.getMonth() + 1);
+    const year = Number(req.nextUrl.searchParams.get('year') || now.getFullYear());
+    const monthStart = new Date(year, month - 1, 1);
+    const monthEnd = new Date(year, month, 1);
+    const ordersMonth = and(gte(orders.createdAt, monthStart), lt(orders.createdAt, monthEnd));
+
+    const [orderStats, addressCount, lastSync, lastImport, recentSyncs, recentImports] = await Promise.all([
       db
         .select({
           total: sql<number>`count(*)::int`,
           withSalesRep: sql<number>`count(*) filter (where ${orders.salesRepId} is not null)::int`,
           withEscrow: sql<number>`count(*) filter (where ${orders.escrowOfficerId} is not null)::int`,
         })
-        .from(orders),
+        .from(orders)
+        .where(ordersMonth),
+
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(orderProperties)
+        .innerJoin(orders, eq(orderProperties.orderId, orders.id))
+        .where(and(isNotNull(orderProperties.fullAddress), ordersMonth)),
 
       db
         .select({ at: sql<string>`max(${orders.softproLastSyncedAt})` })
@@ -33,31 +47,18 @@ export async function GET() {
 
       db
         .select({
-          id: jobs.id,
-          jobType: jobs.jobType,
-          status: jobs.status,
-          startedAt: jobs.startedAt,
-          endedAt: jobs.endedAt,
-          error: jobs.error,
+          id: jobs.id, jobType: jobs.jobType, status: jobs.status,
+          startedAt: jobs.startedAt, endedAt: jobs.endedAt, error: jobs.error,
         })
         .from(jobs)
-        .where(
-          or(
-            eq(jobs.jobType, 'softpro.sync_recent_orders'),
-            eq(jobs.jobType, 'softpro.enrich_orders'),
-          ),
-        )
+        .where(or(eq(jobs.jobType, 'softpro.sync_recent_orders'), eq(jobs.jobType, 'softpro.enrich_orders')))
         .orderBy(desc(jobs.createdAt))
         .limit(5),
 
       db
         .select({
-          id: jobs.id,
-          jobType: jobs.jobType,
-          status: jobs.status,
-          startedAt: jobs.startedAt,
-          endedAt: jobs.endedAt,
-          error: jobs.error,
+          id: jobs.id, jobType: jobs.jobType, status: jobs.status,
+          startedAt: jobs.startedAt, endedAt: jobs.endedAt, error: jobs.error,
         })
         .from(jobs)
         .where(eq(jobs.jobType, 'import-orders'))
@@ -65,19 +66,11 @@ export async function GET() {
         .limit(5),
     ]);
 
-    const addressCount = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(orderProperties)
-      .where(isNotNull(orderProperties.fullAddress));
-
     const o = orderStats[0]!;
     const withAddress = addressCount[0]?.count ?? 0;
-    const missingEnrichment = Math.max(0, o.total - withAddress);
 
     const formatJob = (j: typeof recentSyncs[number]) => ({
-      id: j.id,
-      jobType: j.jobType,
-      status: j.status,
+      id: j.id, jobType: j.jobType, status: j.status,
       startedAt: j.startedAt?.toISOString() ?? null,
       endedAt: j.endedAt?.toISOString() ?? null,
       error: j.error,
@@ -89,10 +82,10 @@ export async function GET() {
         withAddress,
         withSalesRep: o.withSalesRep,
         withEscrow: o.withEscrow,
-        missingEnrichment,
-        lastSyncAt: lastSync[0]?.at ?? null,
-        lastImportAt: lastImport[0]?.at ?? null,
+        missingEnrichment: Math.max(0, o.total - withAddress),
       },
+      lastSyncAt: lastSync[0]?.at ?? null,
+      lastImportAt: lastImport[0]?.at ?? null,
       recentSyncJobs: recentSyncs.map(formatJob),
       recentImportJobs: recentImports.map(formatJob),
     });

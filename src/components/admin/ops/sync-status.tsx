@@ -6,8 +6,9 @@ interface SyncData {
   orders: {
     total: number; withAddress: number; withSalesRep: number;
     withEscrow: number; missingEnrichment: number;
-    lastSyncAt: string | null; lastImportAt: string | null;
   };
+  lastSyncAt: string | null;
+  lastImportAt: string | null;
 }
 
 function relTime(iso: string | null): string {
@@ -28,17 +29,18 @@ function Stat({ label, value, color }: { label: string; value: string | number; 
   );
 }
 
-export function SyncStatus() {
+export function SyncStatus({ month, year }: { month: number; year: number }) {
   const [data, setData] = useState<SyncData | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
-    fetch('/api/admin/ops/sync')
+    setLoading(true);
+    fetch(`/api/admin/ops/sync?month=${month}&year=${year}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setData(d); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [month, year]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { const iv = setInterval(load, 60_000); return () => clearInterval(iv); }, [load]);
@@ -81,11 +83,11 @@ export function SyncStatus() {
           </div>
 
           <div className="flex gap-6 text-sm text-gray-500">
-            <span title={o.lastSyncAt ?? undefined}>
-              Last sync: <strong className="text-gray-700">{relTime(o.lastSyncAt)}</strong>
+            <span title={data.lastSyncAt ?? undefined}>
+              Last sync: <strong className="text-gray-700">{relTime(data.lastSyncAt)}</strong>
             </span>
-            <span title={o.lastImportAt ?? undefined}>
-              Last import: <strong className="text-gray-700">{relTime(o.lastImportAt)}</strong>
+            <span title={data.lastImportAt ?? undefined}>
+              Last import: <strong className="text-gray-700">{relTime(data.lastImportAt)}</strong>
             </span>
           </div>
         </>

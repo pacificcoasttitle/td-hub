@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { jobs } from '@/lib/db/schema';
-import { sql, gte } from 'drizzle-orm';
+import { sql, gte, and, lt } from 'drizzle-orm';
 
 const ADMIN_ROLES = ['super_admin', 'admin'];
 
@@ -17,14 +17,18 @@ const CRON_SCHEDULES: Record<string, string> = {
   'import-orders': 'Every 6 hours',
 };
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session || !ADMIN_ROLES.includes(session.role)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const month = Number(req.nextUrl.searchParams.get('month') || now.getMonth() + 1);
+    const year = Number(req.nextUrl.searchParams.get('year') || now.getFullYear());
+    const monthStart = new Date(year, month - 1, 1);
+    const monthEnd = new Date(year, month, 1);
 
     const rows = await db
       .select({
@@ -46,7 +50,7 @@ export async function GET() {
         )`,
       })
       .from(jobs)
-      .where(gte(jobs.createdAt, cutoff))
+      .where(and(gte(jobs.createdAt, monthStart), lt(jobs.createdAt, monthEnd)))
       .groupBy(jobs.jobType);
 
     const crons = rows.map((r) => ({
@@ -55,7 +59,7 @@ export async function GET() {
       lastRun: r.lastRun ?? null,
       lastStatus: r.lastStatus ?? null,
       lastError: r.lastError ?? null,
-      last24h: { runs: r.runs, completed: r.completed, failed: r.failed },
+      monthly: { runs: r.runs, completed: r.completed, failed: r.failed },
       avgDurationMs: r.avgDurationMs,
     }));
 

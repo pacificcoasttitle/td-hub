@@ -5,11 +5,9 @@ import { useCallback, useEffect, useState } from 'react';
 interface VendorHealth {
   vendor: string;
   displayName: string;
+  health: { status: string; lastSuccess: string | null; lastFailure: string | null };
   last24h: { total: number; success: number; failed: number; avgMs: number };
-  lastSuccess: string | null;
-  lastFailure: string | null;
-  lastError: string | null;
-  status: string;
+  monthly: { total: number; success: number; failed: number };
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -48,33 +46,36 @@ function relTime(iso: string | null): string {
   return `${Math.floor(ms / 86_400_000)}d ago`;
 }
 
-export function IntegrationHealth() {
+function fmtNum(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+export function IntegrationHealth({ month, year }: { month: number; year: number }) {
   const [vendors, setVendors] = useState<VendorHealth[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
-    fetch('/api/admin/ops/health')
+    setLoading(true);
+    fetch(`/api/admin/ops/health?month=${month}&year=${year}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         const apiVendors: VendorHealth[] = d?.vendors ?? [];
         const apiMap = new Map(apiVendors.map(v => [v.vendor, v]));
         const merged = ALL_VENDORS.map(key => {
           const data = apiMap.get(key);
-          return {
+          return data ?? {
             vendor: key,
             displayName: VENDOR_LABELS[key] || key,
-            last24h: data?.last24h ?? { total: 0, success: 0, failed: 0, avgMs: 0 },
-            lastSuccess: data?.lastSuccess ?? null,
-            lastFailure: data?.lastFailure ?? null,
-            lastError: data?.lastError ?? null,
-            status: data ? data.status : 'inactive',
+            health: { status: 'inactive', lastSuccess: null, lastFailure: null },
+            last24h: { total: 0, success: 0, failed: 0, avgMs: 0 },
+            monthly: { total: 0, success: 0, failed: 0 },
           };
         });
         setVendors(merged);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [month, year]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -99,24 +100,26 @@ export function IntegrationHealth() {
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
       {vendors.map(v => {
-        const isCritical = v.status === 'critical';
-        const pct = v.last24h.total > 0 ? ((v.last24h.success / v.last24h.total) * 100).toFixed(1) : '0';
-        const lastCall = v.lastSuccess ?? v.lastFailure;
+        const status = v.health?.status ?? 'inactive';
+        const isCritical = status === 'critical';
+        const lastCall = v.health?.lastSuccess ?? v.health?.lastFailure ?? null;
         return (
           <div key={v.vendor}
             className={`rounded-lg p-3 ${isCritical ? 'bg-red-50 border border-red-300' : 'bg-white border border-gray-200'}`}>
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${STATUS_DOT[v.status] ?? 'bg-gray-400'}`} />
+                <span className={`w-2 h-2 rounded-full ${STATUS_DOT[status] ?? 'bg-gray-400'}`} />
                 <span className="font-semibold text-sm text-gray-900">
                   {VENDOR_LABELS[v.vendor] ?? v.displayName}
                 </span>
               </div>
-              <span className={`text-xs font-medium ${STATUS_TEXT[v.status] ?? 'text-gray-500'}`}>
-                {v.status}
+              <span className={`text-xs font-medium ${STATUS_TEXT[status] ?? 'text-gray-500'}`}>
+                {status}
               </span>
             </div>
-            <p className="text-xs text-gray-500">{v.last24h.total} calls · {pct}%</p>
+            <p className="text-xs text-gray-500">
+              {fmtNum(v.monthly.total)} calls · {v.monthly.failed > 0 ? `${v.monthly.failed} failed` : 'no failures'}
+            </p>
             <p className="text-xs text-gray-400" title={lastCall ?? undefined}>
               Last: {relTime(lastCall)}
             </p>

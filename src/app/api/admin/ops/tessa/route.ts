@@ -1,18 +1,25 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { prelimAnalyses, documents } from '@/lib/db/schema';
-import { sql, eq, desc, and, isNull } from 'drizzle-orm';
+import { sql, eq, desc, and, isNull, gte, lt } from 'drizzle-orm';
 
 const ADMIN_ROLES = ['super_admin', 'admin'];
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session || !ADMIN_ROLES.includes(session.role)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
+    const now = new Date();
+    const month = Number(req.nextUrl.searchParams.get('month') || now.getMonth() + 1);
+    const year = Number(req.nextUrl.searchParams.get('year') || now.getFullYear());
+    const monthStart = new Date(year, month - 1, 1);
+    const monthEnd = new Date(year, month, 1);
+    const monthFilter = and(gte(prelimAnalyses.createdAt, monthStart), lt(prelimAnalyses.createdAt, monthEnd));
+
     const [statsRows, recent, unanalyzedCount] = await Promise.all([
       db
         .select({
@@ -23,7 +30,8 @@ export async function GET() {
           lastSuccessAt: sql<string>`max(case when ${prelimAnalyses.status} = 'complete' then ${prelimAnalyses.completedAt} end)`,
           lastFailureAt: sql<string>`max(case when ${prelimAnalyses.status} = 'failed' then ${prelimAnalyses.updatedAt} end)`,
         })
-        .from(prelimAnalyses),
+        .from(prelimAnalyses)
+        .where(monthFilter),
 
       db
         .select({
@@ -38,6 +46,7 @@ export async function GET() {
           completedAt: prelimAnalyses.completedAt,
         })
         .from(prelimAnalyses)
+        .where(monthFilter)
         .orderBy(desc(prelimAnalyses.createdAt))
         .limit(20),
 
@@ -45,7 +54,12 @@ export async function GET() {
         .select({ count: sql<number>`count(*)::int` })
         .from(documents)
         .leftJoin(prelimAnalyses, eq(documents.id, prelimAnalyses.documentId))
-        .where(and(eq(documents.category, 'prelim'), isNull(prelimAnalyses.id))),
+        .where(and(
+          eq(documents.category, 'prelim'),
+          gte(documents.createdAt, monthStart),
+          lt(documents.createdAt, monthEnd),
+          isNull(prelimAnalyses.id),
+        )),
     ]);
 
     const s = statsRows[0]!;

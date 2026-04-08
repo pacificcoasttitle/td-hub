@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { IntegrationHealth } from '@/components/admin/ops/integration-health';
 import { CronStatus } from '@/components/admin/ops/cron-status';
@@ -17,10 +18,19 @@ const TABS: [TabKey, string][] = [
   ['webhooks', 'Webhooks'],
 ];
 
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 export default function OperationsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeTab = (searchParams.get('tab') as TabKey) || 'dashboard';
+
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
 
   function setTab(tab: TabKey) {
     router.push(tab === 'dashboard' ? '/jobs' : `/jobs?tab=${tab}`);
@@ -28,11 +38,35 @@ export default function OperationsPage() {
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-[#1A1A2E]">Operations</h1>
-        <p className="text-sm text-[#6B7280] mt-1">
-          Monitor integrations, cron jobs, and system health
-        </p>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-semibold text-[#1A1A2E]">Operations</h1>
+          <p className="text-sm text-[#6B7280] mt-1">
+            Monitor integrations, cron jobs, and system health
+          </p>
+        </div>
+
+        {activeTab === 'dashboard' && (
+          <div className="flex items-center gap-2">
+            <select
+              value={month}
+              onChange={e => setMonth(Number(e.target.value))}
+              className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm text-gray-700 bg-white focus:ring-1 focus:ring-[#1B2A4A] focus:border-[#1B2A4A]"
+            >
+              {MONTH_NAMES.map((name, i) => (
+                <option key={i + 1} value={i + 1}>{name}</option>
+              ))}
+            </select>
+            <select
+              value={year}
+              onChange={e => setYear(Number(e.target.value))}
+              className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm text-gray-700 bg-white focus:ring-1 focus:ring-[#1B2A4A] focus:border-[#1B2A4A]"
+            >
+              <option value={2025}>2025</option>
+              <option value={2026}>2026</option>
+            </select>
+          </div>
+        )}
       </div>
 
       <div className="border-b border-gray-200 mb-6">
@@ -58,12 +92,12 @@ export default function OperationsPage() {
         <div className="space-y-6">
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-3">Integration health</h2>
-            <IntegrationHealth />
+            <IntegrationHealth month={month} year={year} />
           </section>
-          <CronStatus />
-          <TessaStatus />
-          <NotificationStatus />
-          <SyncStatus />
+          <CronStatus month={month} year={year} />
+          <TessaStatus month={month} year={year} />
+          <NotificationStatus month={month} year={year} />
+          <SyncStatus month={month} year={year} />
         </div>
       )}
 

@@ -8,7 +8,7 @@ interface CronJob {
   lastRun: string | null;
   lastStatus: string | null;
   lastError: string | null;
-  last24h: { runs: number; completed: number; failed: number };
+  monthly: { runs: number; completed: number; failed: number };
   avgDurationMs: number;
 }
 
@@ -44,12 +44,13 @@ function fmtMs(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-export function CronStatus() {
+export function CronStatus({ month, year }: { month: number; year: number }) {
   const [crons, setCrons] = useState<CronJob[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
-    fetch('/api/admin/ops/crons')
+    setLoading(true);
+    fetch(`/api/admin/ops/crons?month=${month}&year=${year}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (d?.crons) {
@@ -63,7 +64,7 @@ export function CronStatus() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [month, year]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -83,7 +84,7 @@ export function CronStatus() {
                 <th className="text-left px-4 py-2.5 font-medium text-gray-500">Schedule</th>
                 <th className="text-left px-4 py-2.5 font-medium text-gray-500">Last Run</th>
                 <th className="text-left px-4 py-2.5 font-medium text-gray-500">Status</th>
-                <th className="text-right px-4 py-2.5 font-medium text-gray-500">Runs (24h)</th>
+                <th className="text-right px-4 py-2.5 font-medium text-gray-500">Runs</th>
                 <th className="text-right px-4 py-2.5 font-medium text-gray-500">Failures</th>
                 <th className="text-right px-4 py-2.5 font-medium text-gray-500">Avg Time</th>
               </tr>
@@ -98,9 +99,9 @@ export function CronStatus() {
                   </tr>
                 ))
               ) : crons.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No cron data in the last 24 hours.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No cron data for this month.</td></tr>
               ) : crons.map(c => (
-                <tr key={c.jobType} className={c.last24h.failed > 0 ? 'bg-red-50' : ''}>
+                <tr key={c.jobType} className={c.monthly.failed > 0 ? 'bg-red-50' : ''}>
                   <td className="px-4 py-3 font-medium text-gray-900">{JOB_LABELS[c.jobType] ?? c.jobType}</td>
                   <td className="px-4 py-3 text-gray-500 text-xs">{c.schedule}</td>
                   <td className="px-4 py-3 text-gray-500" title={c.lastRun ?? undefined}>{relTime(c.lastRun)}</td>
@@ -111,9 +112,9 @@ export function CronStatus() {
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums text-gray-700">{c.last24h.runs}</td>
-                  <td className={`px-4 py-3 text-right tabular-nums ${c.last24h.failed > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}`}>
-                    {c.last24h.failed}
+                  <td className="px-4 py-3 text-right tabular-nums text-gray-700">{c.monthly.runs}</td>
+                  <td className={`px-4 py-3 text-right tabular-nums ${c.monthly.failed > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}`}>
+                    {c.monthly.failed}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-500">{fmtMs(c.avgDurationMs)}</td>
                 </tr>

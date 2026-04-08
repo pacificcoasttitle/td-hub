@@ -43,18 +43,19 @@ function Stat({ label, value, color }: { label: string; value: number | string; 
   );
 }
 
-export function TessaStatus() {
+export function TessaStatus({ month, year }: { month: number; year: number }) {
   const [data, setData] = useState<TessaData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const load = useCallback(() => {
-    fetch('/api/admin/ops/tessa')
+    setLoading(true);
+    fetch(`/api/admin/ops/tessa?month=${month}&year=${year}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setData(d); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [month, year]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { const iv = setInterval(load, 60_000); return () => clearInterval(iv); }, [load]);
@@ -123,7 +124,7 @@ export function TessaStatus() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {analyses.length === 0 ? (
-                    <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500">No analyses yet.</td></tr>
+                    <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500">No analyses this month.</td></tr>
                   ) : analyses.map(a => (
                     <tr key={a.id}>
                       <td className="px-3 py-2">

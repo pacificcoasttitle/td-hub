@@ -8,7 +8,8 @@ interface NotifData {
     total: number; sent: number; failed: number; skipped: number;
     recentLogs: DeliveryLog[];
   };
-  emailsSent24h: number;
+  emailsSent: number;
+  smsSent: number;
 }
 
 interface DeliveryLog {
@@ -41,17 +42,18 @@ function Stat({ label, value, color }: { label: string; value: number | string; 
   );
 }
 
-export function NotificationStatus() {
+export function NotificationStatus({ month, year }: { month: number; year: number }) {
   const [data, setData] = useState<NotifData | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
-    fetch('/api/admin/ops/notifications')
+    setLoading(true);
+    fetch(`/api/admin/ops/notifications?month=${month}&year=${year}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setData(d); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [month, year]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { const iv = setInterval(load, 60_000); return () => clearInterval(iv); }, [load]);
@@ -76,7 +78,7 @@ export function NotificationStatus() {
             <Stat label="Processed" value={data.outbox.processed} color="text-green-700" />
             <Stat label="Pending" value={data.outbox.pending}
               color={data.outbox.pending > 0 ? 'text-amber-600' : undefined} />
-            <Stat label="Emails sent (24h)" value={data.emailsSent24h} />
+            <Stat label="Emails sent" value={data.emailsSent} />
           </div>
 
           {data.deliveries.recentLogs.length > 0 ? (
@@ -117,7 +119,7 @@ export function NotificationStatus() {
               </div>
             </div>
           ) : (
-            <p className="text-sm text-gray-400">No notification deliveries logged yet.</p>
+            <p className="text-sm text-gray-400">No notification deliveries this month.</p>
           )}
         </>
       ) : (

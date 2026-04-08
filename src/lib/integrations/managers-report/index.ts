@@ -14,13 +14,13 @@ export async function getRepFigures(
   return client.getRepFigures(repName, month);
 }
 
-export async function getLeaderboard(month?: string, limit?: number) {
+export async function getLeaderboard(month?: string, limit?: number, year?: string) {
   if (useMock) {
     const mock = await import('./mock');
-    return mock.getLeaderboard(month, limit);
+    return mock.getLeaderboard(month, limit, year);
   }
   const client = await import('./client');
-  return client.getLeaderboard(month, limit);
+  return client.getLeaderboard(month, limit, year);
 }
 
 export async function getClosings(month?: number, year?: number, repName?: string) {

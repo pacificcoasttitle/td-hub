@@ -34,7 +34,7 @@ export async function getRepFigures(repName: string, month?: string): Promise<Ve
   return vendorSuccess(mockRepFigures(repName, month), { requestId: `mock-${crypto.randomUUID()}`, durationMs: 0 });
 }
 
-export async function getLeaderboard(_month?: string, _limit?: number): Promise<VendorResult<LeaderboardResponse>> {
+export async function getLeaderboard(_month?: string, _limit?: number, _year?: string): Promise<VendorResult<LeaderboardResponse>> {
   return vendorSuccess(MOCK_LEADERBOARD, { requestId: `mock-${crypto.randomUUID()}`, durationMs: 0 });
 }
 

@@ -126,11 +126,16 @@ export function ManagerDashboard({ month: monthProp, year: yearProp }: { month?:
           Array.from({ length: 4 }).map((_, i) => <MetricCardSkeleton key={i} />)
         ) : stats ? (
           <>
-            <MetricCard label="Total Open Orders" value={stats.totalOpen.toLocaleString()} accent="bg-[#1B2A4A]" />
+            <MetricCard label={isCurrentMonth ? 'Opened This Month' : `Opened in ${monthName}`} value={stats.totalOpen.toLocaleString()} accent="bg-[#1B2A4A]" />
             <MetricCard label={isCurrentMonth ? 'Closed This Month' : `Closed in ${monthName}`} value={stats.totalClosedThisMonth.toLocaleString()} accent="bg-green-500" />
             <MetricCard
-              label="Team Pipeline Value"
-              value={stats.teamPipelineValue != null ? formatCurrency(stats.teamPipelineValue) : '—'}
+              label="Avg Per Close"
+              value={
+                stats.teamRevenue != null && stats.teamRevenue > 0 && stats.totalClosedThisMonth > 0
+                  ? formatCurrency(stats.teamRevenue / stats.totalClosedThisMonth)
+                  : '—'
+              }
+              sub={stats.teamRevenue == null || stats.teamRevenue === 0 ? 'Requires Managers Report data' : undefined}
               accent="bg-blue-500"
             />
             <MetricCard

@@ -7,6 +7,7 @@ const ALLOWED_ROLES = ['super_admin', 'admin', 'cs_admin'];
 
 const querySchema = z.object({
   month: z.string().optional(),
+  year: z.string().optional(),
   limit: z.coerce.number().min(1).max(100).default(10),
 });
 
@@ -22,10 +23,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid parameters', details: parsed.error.issues }, { status: 400 });
   }
 
-  const { month, limit } = parsed.data;
+  const { month, year, limit } = parsed.data;
+  const monthStr = month ? month.padStart(2, '0') : undefined;
 
   try {
-    const result = await getLeaderboard(month, limit);
+    const result = await getLeaderboard(monthStr, limit, year);
 
     if (!result.success || !result.data) {
       const notConfigured = result.error?.code === 'NOT_CONFIGURED';
@@ -42,6 +44,11 @@ export async function GET(req: NextRequest) {
         { error: result.error?.message ?? 'Failed to fetch leaderboard' },
         { status: 502 },
       );
+    }
+
+    const entries = result.data.leaderboard ?? (result.data as unknown as Record<string, unknown>).reps ?? [];
+    if (Array.isArray(entries) && entries.length === 0) {
+      console.warn('[MR API] Leaderboard returned empty for month:', monthStr, 'year:', year);
     }
 
     return NextResponse.json(result.data);

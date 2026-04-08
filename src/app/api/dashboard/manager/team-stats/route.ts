@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 
     let teamRevenue: number | null = null;
     try {
-      const lb = await getLeaderboard(monthStr);
+      const lb = await getLeaderboard(monthStr, undefined, String(year));
       if (lb.success && lb.data) {
         let entries = lb.data.leaderboard;
 

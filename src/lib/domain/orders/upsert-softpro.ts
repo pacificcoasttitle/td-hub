@@ -1,5 +1,5 @@
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderStatusHistory, contacts } from '@/lib/db/schema';
+import { orders, orderProperties, orderStatusHistory, contacts, branches } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import type { MappedOrderData } from '@/lib/integrations/softpro';
 import { getOrderByFileNumber } from './service';
@@ -10,6 +10,22 @@ type TransactionType = (typeof VALID_TRANSACTION_TYPES)[number];
 function validTransactionType(value: string | null): TransactionType | null {
   if (!value) return null;
   if ((VALID_TRANSACTION_TYPES as readonly string[]).includes(value)) return value as TransactionType;
+  return null;
+}
+
+let branchCache: { id: number; code: string }[] | null = null;
+
+async function getBranches() {
+  if (!branchCache) {
+    branchCache = await db.select({ id: branches.id, code: branches.code }).from(branches);
+  }
+  return branchCache;
+}
+
+function deriveBranchId(fileNumber: string, branchList: { id: number; code: string }[]): number | null {
+  for (const b of branchList) {
+    if (fileNumber.endsWith('-' + b.code)) return b.id;
+  }
   return null;
 }
 
@@ -31,11 +47,14 @@ export async function upsertFromSoftPro(
   if (!existing) {
     const salesRepId = await resolveContactByOfficerName(mapped.marketingRepName);
     const titleOfficerId = await resolveContactByOfficerName(mapped.titleOfficerName);
+    const branchList = await getBranches();
+    const branchId = deriveBranchId(mapped.fileNumber, branchList);
 
     const [newOrder] = await db
       .insert(orders)
       .values({
         fileNumber: mapped.fileNumber,
+        branchId,
         operationalStatus: mapped.operationalStatus,
         softproStatus: mapped.softproStatus,
         transactionType: validTransactionType(mapped.transactionType),
@@ -74,6 +93,12 @@ export async function upsertFromSoftPro(
 
   const statusChanged = existing.operationalStatus !== mapped.operationalStatus;
 
+  let branchIdUpdate: number | null | undefined;
+  if (!existing.branchId) {
+    const branchList = await getBranches();
+    branchIdUpdate = deriveBranchId(mapped.fileNumber, branchList);
+  }
+
   await db
     .update(orders)
     .set({
@@ -84,6 +109,7 @@ export async function upsertFromSoftPro(
       salesPrice: mapped.salesPrice ?? existing.salesPrice,
       softproLastSyncedAt: new Date(),
       updatedAt: new Date(),
+      ...(branchIdUpdate != null ? { branchId: branchIdUpdate } : {}),
     })
     .where(eq(orders.id, existing.id));
 

@@ -90,10 +90,12 @@ export async function getRepFigures(
 export async function getLeaderboard(
   month?: string,
   limit?: number,
+  year?: string,
 ): Promise<VendorResult<LeaderboardResponse>> {
   const params: Record<string, string> = {};
   if (month) params.month = month;
   if (limit) params.limit = String(limit);
+  if (year) params.year = year;
   return makeRequest<LeaderboardResponse>('/api/td/leaderboard', 'get_leaderboard', params);
 }
 

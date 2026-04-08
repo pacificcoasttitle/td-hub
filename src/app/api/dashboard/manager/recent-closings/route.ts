@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, orderProperties, contacts } from '@/lib/db/schema';
-import { eq, desc, isNotNull, and, inArray, SQL } from 'drizzle-orm';
+import { eq, desc, and, inArray, gte, lt, SQL } from 'drizzle-orm';
 import { getManagedRepIds } from '@/lib/domain/contacts/managed-reps';
+import { getMonthRange } from '@/lib/utils/month-range';
 
 const ALLOWED_ROLES = ['super_admin', 'admin', 'sales_manager'];
 
@@ -14,8 +15,15 @@ export async function GET(req: NextRequest) {
 
   const limitParam = req.nextUrl.searchParams.get('limit');
   const limit = Math.min(Number(limitParam ?? '20'), 50);
+  const { start, end } = getMonthRange(
+    req.nextUrl.searchParams.get('month'),
+    req.nextUrl.searchParams.get('year'),
+  );
 
-  const conditions: SQL[] = [isNotNull(orders.closedAt)];
+  const conditions: SQL[] = [
+    gte(orders.closedAt, start),
+    lt(orders.closedAt, end),
+  ];
 
   if (session.role === 'sales_manager' && session.contactId) {
     const repIds = await getManagedRepIds(session.contactId);

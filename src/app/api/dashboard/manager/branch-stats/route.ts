@@ -4,6 +4,7 @@ import { db } from '@/lib/db/client';
 import { orders, branches } from '@/lib/db/schema';
 import { sql, eq, and, inArray, SQL } from 'drizzle-orm';
 import { getManagedRepIds } from '@/lib/domain/contacts/managed-reps';
+import { getMonthRange } from '@/lib/utils/month-range';
 
 const ALLOWED_ROLES = ['super_admin', 'admin', 'sales_manager'];
 
@@ -11,6 +12,11 @@ export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   if (!ALLOWED_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const { start, end } = getMonthRange(
+    req.nextUrl.searchParams.get('month'),
+    req.nextUrl.searchParams.get('year'),
+  );
 
   let repFilter: SQL | undefined;
   if (session.role === 'sales_manager' && session.contactId) {
@@ -28,9 +34,9 @@ export async function GET(req: NextRequest) {
       branchId: branches.id,
       branchCode: branches.code,
       branchName: branches.name,
-      openOrders: sql<number>`count(*) filter (where ${orders.operationalStatus} in ('open', 'in_process'))`,
-      closedOrders: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'closed')`,
-      totalOrders: sql<number>`count(${orders.id})`,
+      openOrders: sql<number>`count(*) filter (where ${orders.operationalStatus} in ('open', 'in_process') and ${orders.createdAt} >= ${start} and ${orders.createdAt} < ${end})`,
+      closedOrders: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'closed' and ${orders.closedAt} >= ${start} and ${orders.closedAt} < ${end})`,
+      totalOrders: sql<number>`count(${orders.id}) filter (where ${orders.createdAt} >= ${start} and ${orders.createdAt} < ${end})`,
     })
     .from(branches)
     .leftJoin(orders, joinCondition)

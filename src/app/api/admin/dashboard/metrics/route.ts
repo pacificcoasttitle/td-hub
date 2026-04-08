@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, vendorApiLogs } from '@/lib/db/schema';
-import { sql, eq, and } from 'drizzle-orm';
+import { sql, eq, and, gte, lt } from 'drizzle-orm';
+import { getMonthRange } from '@/lib/utils/month-range';
 
 const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
 
@@ -15,23 +16,27 @@ function toIsoOrNull(value: Date | string | null | undefined): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session || !ADMIN_ROLES.includes(session.role)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    const now = new Date();
-    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const { month, year, start, end } = getMonthRange(
+      req.nextUrl.searchParams.get('month'),
+      req.nextUrl.searchParams.get('year'),
+    );
+
+    const inMonth = and(gte(orders.createdAt, start), lt(orders.createdAt, end));
 
     const [counts] = await db
       .select({
-        totalOrders: sql<number>`count(*)`,
-        openOrders: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'open')`,
-        inProcessOrders: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'in_process')`,
-        closedThisMonth: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'closed' and ${orders.closedAt} >= ${firstOfMonth})`,
-        canceledOrders: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'canceled')`,
+        ordersOpened: sql<number>`count(*) filter (where ${orders.createdAt} >= ${start} and ${orders.createdAt} < ${end})`,
+        open: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'open' and ${orders.createdAt} >= ${start} and ${orders.createdAt} < ${end})`,
+        inProcess: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'in_process' and ${orders.createdAt} >= ${start} and ${orders.createdAt} < ${end})`,
+        closed: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'closed' and ${orders.closedAt} >= ${start} and ${orders.closedAt} < ${end})`,
+        canceled: sql<number>`count(*) filter (where ${orders.operationalStatus} = 'canceled' and ${orders.updatedAt} >= ${start} and ${orders.updatedAt} < ${end})`,
       })
       .from(orders);
 
@@ -50,11 +55,13 @@ export async function GET() {
     const lastSyncAt = toIsoOrNull(syncLog?.lastSyncAt);
 
     return NextResponse.json({
-      totalOrders: Number(counts?.totalOrders ?? 0),
-      open: Number(counts?.openOrders ?? 0),
-      inProcess: Number(counts?.inProcessOrders ?? 0),
-      closedThisMonth: Number(counts?.closedThisMonth ?? 0),
-      canceled: Number(counts?.canceledOrders ?? 0),
+      month,
+      year,
+      ordersOpened: Number(counts?.ordersOpened ?? 0),
+      open: Number(counts?.open ?? 0),
+      inProcess: Number(counts?.inProcess ?? 0),
+      closed: Number(counts?.closed ?? 0),
+      canceled: Number(counts?.canceled ?? 0),
       lastSyncAt,
       lastSynced: lastSyncAt,
     });

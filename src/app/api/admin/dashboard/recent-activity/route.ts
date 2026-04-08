@@ -1,9 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, orderProperties, contacts, profiles } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and, gte, lt } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
+import { getMonthRange } from '@/lib/utils/month-range';
 
 const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
 
@@ -18,13 +19,18 @@ function contactName(c: { fullName: string | null; officerName: string | null; f
   return parts.length > 0 ? parts.join(' ') : null;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session || !ADMIN_ROLES.includes(session.role)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
+    const { start, end } = getMonthRange(
+      req.nextUrl.searchParams.get('month'),
+      req.nextUrl.searchParams.get('year'),
+    );
+
     const rows = await db
       .select({
         id: orders.id,
@@ -45,6 +51,7 @@ export async function GET() {
       .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
       .leftJoin(salesRepContact, eq(orders.salesRepId, salesRepContact.id))
       .leftJoin(createdByProfile, eq(orders.createdBy, createdByProfile.id))
+      .where(and(gte(orders.createdAt, start), lt(orders.createdAt, end)))
       .orderBy(desc(orders.createdAt))
       .limit(10);
 

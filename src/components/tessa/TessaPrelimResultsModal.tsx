@@ -40,13 +40,15 @@ export function TessaPrelimResultsModal({ isOpen, onClose, orderId, fileNumber }
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
+  const inflightRef = useRef(false);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) { clearInterval(pollRef.current); pollRef.current = null; }
     pollCountRef.current = 0;
   }, []);
 
-  const fetchFull = useCallback(async () => {
+  const fetchFull = useCallback(async (reason: string) => {
+    console.log(`[TESSA Modal] fetchFull called, reason: ${reason}`);
     try {
       const res = await fetch(`/api/orders/${orderId}/prelim-analysis`);
       if (res.status === 404) { setStatus('not_found'); return; }
@@ -92,13 +94,25 @@ export function TessaPrelimResultsModal({ isOpen, onClose, orderId, fileNumber }
         const body = await res.json();
         if (body.status === 'not_started' || body.status === 'not_found') { setPipelineStep('pending'); return; }
         setPipelineStep(body.status ?? 'pending');
-        if (body.status === 'complete') { stopPolling(); fetchFull(); }
-        if (body.status === 'failed') { stopPolling(); setStatus('failed'); setError(body.error ?? 'Analysis failed'); }
+        if (body.status === 'complete') {
+          console.log('[TESSA Modal] Polling saw complete');
+          stopPolling();
+          fetchFull('poll-complete');
+        }
+        if (body.status === 'failed') {
+          console.log('[TESSA Modal] Polling saw failed');
+          stopPolling();
+          setStatus('failed');
+          setError(body.error ?? 'Analysis failed');
+        }
       } catch { /* network error — keep polling */ }
     }, 3000);
   }, [orderId, stopPolling, fetchFull]);
 
   const triggerAnalysis = useCallback(async (force = false) => {
+    if (inflightRef.current) return;
+    inflightRef.current = true;
+    console.log('[TESSA Modal] triggerAnalysis start, force:', force);
     setStatus('triggering');
     setPipelineStep('pending');
     setError(null);
@@ -106,22 +120,49 @@ export function TessaPrelimResultsModal({ isOpen, onClose, orderId, fileNumber }
       const url = `/api/orders/${orderId}/analyze-prelim${force ? '?force=true' : ''}`;
       const res = await fetch(url, { method: 'POST' });
       const body = await res.json().catch(() => ({}));
+      console.log('[TESSA Modal] POST response:', res.status, 'body.status:', body.status, 'cached:', body.cached);
+
+      // A) HTTP error
       if (!res.ok) {
         setStatus('failed');
         setError(body.detail || body.error || 'Analysis failed');
         return;
       }
-      await fetchFull();
+
+      // E) Cached complete — fetch full results
+      if (body.cached) {
+        fetchFull('manual-cached');
+        return;
+      }
+
+      // B) Pipeline finished complete
+      if (body.status === 'complete') {
+        fetchFull('manual-complete');
+        return;
+      }
+
+      // C) Pipeline finished failed
+      if (body.status === 'failed') {
+        setStatus('failed');
+        setError('Analysis failed — check the prelim document and try again');
+        return;
+      }
+
+      // D) Pipeline returned an in-progress status (shouldn't normally happen
+      //    since analyzePrelim awaits the full pipeline, but handle defensively)
+      startPolling();
     } catch {
       setStatus('failed');
       setError('Network error — please try again');
+    } finally {
+      inflightRef.current = false;
     }
-  }, [orderId, fetchFull]);
+  }, [orderId, fetchFull, startPolling]);
 
   useEffect(() => {
     if (!isOpen) { stopPolling(); setStatus('idle'); setData(null); setError(null); return; }
     setStatus('loading');
-    fetchFull();
+    fetchFull('open');
     return stopPolling;
   }, [isOpen, fetchFull, stopPolling]);
 

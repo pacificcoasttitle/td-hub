@@ -4,8 +4,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, BarChart3, TrendingUp, Users, FileText, DollarSign,
-  Briefcase, CalendarDays, Trophy, LogOut, Menu, X,
+  LayoutDashboard, BarChart3, TrendingUp, Users, DollarSign,
+  Briefcase, Trophy, LogOut, Menu, X,
 } from 'lucide-react';
 import { handleSignOut } from '@/lib/security/sign-out';
 
@@ -20,11 +20,9 @@ const BASE_ITEMS: NavItem[] = [
   { label: 'Production History', href: '/sales/production-history', icon: <BarChart3 className={ICON_CLS} /> },
   { label: 'Trends',             href: '/sales/trends',             icon: <TrendingUp className={ICON_CLS} /> },
   { label: 'Summary',            href: '/sales/summary',            icon: <Users className={ICON_CLS} /> },
-  { label: 'Reports',            href: '/sales/reports',            icon: <FileText className={ICON_CLS} /> },
   { label: 'Commission',         href: '/sales/commission',         icon: <DollarSign className={ICON_CLS} /> },
 ];
 
-const DAILY: NavItem   = { label: 'Daily',   href: '/sales/daily',   icon: <CalendarDays className={ICON_CLS} /> };
 const RANKING: NavItem = { label: 'Ranking', href: '/sales/ranking', icon: <Trophy className={ICON_CLS} /> };
 
 const ORDER_ITEMS: NavItem[] = [
@@ -34,9 +32,8 @@ const ORDER_ITEMS: NavItem[] = [
 function buildNav(role: Role): { top: NavItem[]; orders: NavItem[] } {
   if (role === 'sales_manager') {
     const top = [...BASE_ITEMS];
-    top.splice(1, 0, DAILY);
-    const reportsIdx = top.findIndex(i => i.label === 'Reports');
-    top.splice(reportsIdx + 1, 0, RANKING);
+    const summaryIdx = top.findIndex(i => i.label === 'Summary');
+    top.splice(summaryIdx + 1, 0, RANKING);
     return { top, orders: ORDER_ITEMS };
   }
   return { top: BASE_ITEMS, orders: ORDER_ITEMS };

@@ -121,17 +121,17 @@ export function DashboardContent({ displayName, role }: Props) {
           <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
             <colgroup>
               <col style={{ width: '110px' }} />
-              <col />
-              <col style={{ width: '80px' }} />
-              <col style={{ width: '85px' }} />
-              <col style={{ width: '140px' }} />
+              <col style={{ width: '180px' }} />
+              <col style={{ width: '90px' }} />
+              <col style={{ width: '90px' }} />
+              <col style={{ width: '160px' }} />
             </colgroup>
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/60">
-                <th className="text-left px-5 py-2.5 font-medium text-gray-500">File #</th>
-                <th className="text-left px-5 py-2.5 font-medium text-gray-500">Address</th>
-                <th className="text-left px-5 py-2.5 font-medium text-gray-500">Status</th>
-                <th className="text-left px-5 py-2.5 font-medium text-gray-500">Opened</th>
+                <th className="text-left px-5 py-2.5 font-medium text-gray-500 border-r border-gray-200">File #</th>
+                <th className="text-left px-5 py-2.5 font-medium text-gray-500 border-r border-gray-200">Address</th>
+                <th className="text-left px-5 py-2.5 font-medium text-gray-500 border-r border-gray-200">Status</th>
+                <th className="text-left px-5 py-2.5 font-medium text-gray-500 border-r border-gray-200">Opened</th>
                 <th className="text-right px-5 py-2.5 font-medium text-gray-500">Actions</th>
               </tr>
             </thead>
@@ -146,14 +146,14 @@ export function DashboardContent({ displayName, role }: Props) {
                     const addr = fmtAddr(o);
                     return (
                       <tr key={o.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-5 py-3 font-medium text-blue-600 whitespace-nowrap">{o.fileNumber}</td>
-                        <td className="px-4 py-3 text-gray-900 truncate" title={addr}>{addr}</td>
-                        <td className="px-5 py-3 whitespace-nowrap">
+                        <td className="px-5 py-3 font-medium text-blue-600 whitespace-nowrap border-r border-gray-200">{o.fileNumber}</td>
+                        <td className="px-4 py-3 text-gray-900 truncate max-w-[180px] border-r border-gray-200" title={addr}>{addr}</td>
+                        <td className="px-5 py-3 whitespace-nowrap border-r border-gray-200">
                           <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize bg-gray-100 text-gray-700">
                             {(o.operationalStatus ?? '—').replace(/_/g, ' ')}
                           </span>
                         </td>
-                        <td className="px-5 py-3 text-gray-500 whitespace-nowrap">{fmtDate(o.openedAt)}</td>
+                        <td className="px-5 py-3 text-gray-500 whitespace-nowrap border-r border-gray-200">{fmtDate(o.openedAt)}</td>
                         <td className="px-2 py-3 text-right">
                           <OrderActions order={o} onAction={handleOrderAction} />
                         </td>

@@ -25,8 +25,9 @@ interface Props {
   onAction: (action: SalesAction, order: SalesOrder) => void;
 }
 
-const thClass = 'text-left px-5 py-2.5 font-medium text-gray-500';
-const thRightClass = 'text-right px-5 py-2.5 font-medium text-gray-500';
+const thCls = 'text-left px-5 py-2.5 font-medium text-gray-500 border-r border-gray-200';
+const thLast = 'text-right px-5 py-2.5 font-medium text-gray-500';
+const tdBr = 'border-r border-gray-200';
 
 export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
   const showRep = role === 'sales_manager';
@@ -37,18 +38,18 @@ export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
       <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
         {showRep ? (
           <colgroup>
-            <col style={{ width: '110px' }} />
-            <col style={{ width: 'auto' }} />
+            <col style={{ width: '100px' }} />
+            <col style={{ width: '160px' }} />
             <col style={{ width: '80px' }} />
             <col style={{ width: '90px' }} />
-            <col style={{ width: '120px' }} />
+            <col style={{ width: '110px' }} />
             <col style={{ width: '85px' }} />
             <col style={{ width: '150px' }} />
           </colgroup>
         ) : (
           <colgroup>
-            <col style={{ width: '120px' }} />
-            <col style={{ width: 'auto' }} />
+            <col style={{ width: '110px' }} />
+            <col style={{ width: '180px' }} />
             <col style={{ width: '90px' }} />
             <col style={{ width: '100px' }} />
             <col style={{ width: '90px' }} />
@@ -57,13 +58,13 @@ export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
         )}
         <thead>
           <tr className="border-b border-gray-100 bg-gray-50/60">
-            <th className={thClass}>File #</th>
-            <th className={thClass}>Address</th>
-            <th className={thClass}>Status</th>
-            <th className={thClass}>Type</th>
-            {showRep && <th className={thClass}>Sales Rep</th>}
-            <th className={thClass}>Opened</th>
-            <th className={thRightClass}>Actions</th>
+            <th className={thCls}>File #</th>
+            <th className={thCls}>Address</th>
+            <th className={thCls}>Status</th>
+            <th className={thCls}>Type</th>
+            {showRep && <th className={thCls}>Sales Rep</th>}
+            <th className={thCls}>Opened</th>
+            <th className={thLast}>Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -81,22 +82,22 @@ export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
                 const addr = fmtAddr(o);
                 return (
                   <tr key={o.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-3 font-medium text-blue-600 whitespace-nowrap">{o.fileNumber}</td>
-                    <td className="px-4 py-3 truncate text-gray-900" title={addr}>
+                    <td className={`px-5 py-3 font-medium text-blue-600 whitespace-nowrap ${tdBr}`}>{o.fileNumber}</td>
+                    <td className={`px-4 py-3 truncate text-gray-900 max-w-[180px] ${tdBr}`} title={addr}>
                       {addr}
                     </td>
-                    <td className="px-5 py-3 whitespace-nowrap">
+                    <td className={`px-5 py-3 whitespace-nowrap ${tdBr}`}>
                       <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize bg-gray-100 text-gray-700">
                         {(o.operationalStatus ?? '—').replace(/_/g, ' ')}
                       </span>
                     </td>
-                    <td className="px-5 py-3 text-gray-700 whitespace-nowrap truncate">{orderTypeLabel(o)}</td>
+                    <td className={`px-5 py-3 text-gray-700 whitespace-nowrap truncate ${tdBr}`}>{orderTypeLabel(o)}</td>
                     {showRep && (
-                      <td className="px-5 py-3 text-gray-700 whitespace-nowrap truncate">
+                      <td className={`px-5 py-3 text-gray-700 whitespace-nowrap truncate ${tdBr}`}>
                         {o.salesRepName ?? '—'}
                       </td>
                     )}
-                    <td className="px-5 py-3 text-gray-500 whitespace-nowrap">{fmtDate(o.openedAt)}</td>
+                    <td className={`px-5 py-3 text-gray-500 whitespace-nowrap ${tdBr}`}>{fmtDate(o.openedAt)}</td>
                     <td className="px-2 py-3 text-right">
                       <OrderActions order={o} onAction={onAction} />
                     </td>

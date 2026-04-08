@@ -107,6 +107,24 @@ export function RankingContent() {
                       </tr>
                     ))}
               </tbody>
+              {!loading && reps.length > 0 && (() => {
+                const totalOpenings = reps.reduce((s, r) => s + r.openings, 0);
+                const totalClosings = reps.reduce((s, r) => s + r.closings, 0);
+                const totalRevenue = reps.reduce((s, r) => s + r.revenue, 0);
+                return (
+                  <tfoot>
+                    <tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+                      <td className="px-4 py-3" colSpan={2}>TOTALS</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{totalOpenings}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{totalClosings}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{fmtCurrency(totalRevenue)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {totalOpenings > 0 ? Math.round((totalClosings / totalOpenings) * 100) : 0}%
+                      </td>
+                    </tr>
+                  </tfoot>
+                );
+              })()}
             </table>
             {!loading && reps.length === 0 && (
               <div className="p-12 text-center"><p className="text-gray-500">No ranking data for {MONTH_NAMES[month - 1]} {year}.</p></div>

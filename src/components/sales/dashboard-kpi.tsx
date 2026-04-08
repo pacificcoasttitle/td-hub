@@ -72,16 +72,16 @@ export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
             <div className="flex gap-6 mt-3 flex-wrap">
               {(mtd.purchaseRevenue || 0) > 0 && (
                 <div>
-                  <p className="text-[11px] text-white/50">Purchase</p>
-                  <p className="text-sm text-white font-medium">
+                  <p className="text-xs text-white/50">Purchase</p>
+                  <p className="text-base text-white font-medium">
                     {formatCurrency(mtd.purchaseRevenue)} ({pctPart(mtd.purchaseRevenue || 0, typedTotal)}%)
                   </p>
                 </div>
               )}
               {(mtd.refinanceRevenue || 0) > 0 && (
                 <div>
-                  <p className="text-[11px] text-white/50">Refinance</p>
-                  <p className="text-sm text-white font-medium">
+                  <p className="text-xs text-white/50">Refinance</p>
+                  <p className="text-base text-white font-medium">
                     {formatCurrency(mtd.refinanceRevenue)} ({pctPart(mtd.refinanceRevenue || 0, typedTotal)}%)
                   </p>
                 </div>
@@ -95,12 +95,12 @@ export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
             }`}
           >
             {hasMrMtd && projected && (
-              <p className="text-[11px] text-white/50">
+              <p className="text-sm text-white/50">
                 Projected:{' '}
-                <span className="text-[#F26B2B] font-medium">{formatCurrency(projected.revenue)}</span>
+                <span className="text-sm font-semibold text-[#F26B2B]">{formatCurrency(projected.revenue)}</span>
               </p>
             )}
-            <span className="text-[11px] text-white/50 hover:text-white/80 transition-colors shrink-0">
+            <span className="text-sm text-white/50 hover:text-white/80 transition-colors shrink-0">
               View closed files →
             </span>
           </div>
@@ -111,7 +111,7 @@ export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
           {ranking ? (
             <>
               <p className="text-[64px] font-semibold text-[#F26B2B] leading-none mt-1">#{ranking.position}</p>
-              <p className="text-sm text-white/50 mt-1">of {ranking.totalReps} reps</p>
+              <p className="text-base text-white/50 mt-1">of {ranking.totalReps} reps</p>
             </>
           ) : (
             <>
@@ -121,8 +121,8 @@ export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
           )}
           {ratePct !== null && (
             <div className="mt-3 pt-3 border-t border-white/10 w-full">
-              <p className="text-[11px] text-white/50 text-center">
-                <span className="text-[#22C55E] font-medium">Close rate: {ratePct}%</span>
+              <p className="text-sm text-white/50 text-center">
+                <span className="text-sm font-semibold text-[#22C55E]">Close rate: {ratePct}%</span>
               </p>
             </div>
           )}

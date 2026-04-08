@@ -8,6 +8,7 @@ import {
 } from './shared';
 import { RepRow, SortTh } from './manager-components';
 import type { RepPerformance, SortKey, SortDir } from './manager-components';
+import { MONTH_NAMES } from './month-selector';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -55,8 +56,13 @@ function normalizeRep(entry: any): RepPerformance {
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function ManagerDashboard() {
+export function ManagerDashboard({ month: monthProp, year: yearProp }: { month?: number; year?: number }) {
   const router = useRouter();
+  const month = monthProp ?? new Date().getMonth() + 1;
+  const year = yearProp ?? new Date().getFullYear();
+  const monthName = MONTH_NAMES[month - 1];
+  const isCurrentMonth = month === new Date().getMonth() + 1 && year === new Date().getFullYear();
+
   const [stats, setStats] = useState<TeamStats | null>(null);
   const [reps, setReps] = useState<RepPerformance[]>([]);
   const [branches, setBranches] = useState<BranchStat[]>([]);
@@ -67,15 +73,18 @@ export function ManagerDashboard() {
   const [sortDir, setSortDir] = useState<SortDir>('asc');
 
   useEffect(() => {
+    setLoading(true);
+    setError(null);
     const controller = new AbortController();
     const opts = { signal: controller.signal };
+    const qs = `month=${month}&year=${year}`;
     Promise.all([
-      fetch('/api/dashboard/manager/team-stats', opts).then((r) => r.ok ? r.json() : null),
-      fetch('/api/managers-report/leaderboard', opts)
+      fetch(`/api/dashboard/manager/team-stats?${qs}`, opts).then((r) => r.ok ? r.json() : null),
+      fetch(`/api/managers-report/leaderboard?${qs}`, opts)
         .then((r) => r.ok ? r.json() : null)
-        .then((d) => d ?? fetch('/api/dashboard/manager/rep-performance', opts).then((r) => r.ok ? r.json() : { reps: [] })),
-      fetch('/api/dashboard/manager/branch-stats', opts).then((r) => r.ok ? r.json() : { branches: [] }),
-      fetch('/api/dashboard/manager/recent-closings?limit=20', opts).then((r) => r.ok ? r.json() : { orders: [] }),
+        .then((d) => d ?? fetch(`/api/dashboard/manager/rep-performance?${qs}`, opts).then((r) => r.ok ? r.json() : { reps: [] })),
+      fetch(`/api/dashboard/manager/branch-stats?${qs}`, opts).then((r) => r.ok ? r.json() : { branches: [] }),
+      fetch(`/api/dashboard/manager/recent-closings?limit=20&${qs}`, opts).then((r) => r.ok ? r.json() : { orders: [] }),
     ])
       .then(([s, r, b, c]) => {
         setStats(s);
@@ -86,7 +95,7 @@ export function ManagerDashboard() {
       .catch((e) => { if (e.name !== 'AbortError') setError(e.message); })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, []);
+  }, [month, year]);
 
   function handleSort(key: SortKey) {
     if (sortKey === key) {
@@ -118,14 +127,14 @@ export function ManagerDashboard() {
         ) : stats ? (
           <>
             <MetricCard label="Total Open Orders" value={stats.totalOpen.toLocaleString()} accent="bg-[#1B2A4A]" />
-            <MetricCard label="Closed This Month" value={stats.totalClosedThisMonth.toLocaleString()} accent="bg-green-500" />
+            <MetricCard label={isCurrentMonth ? 'Closed This Month' : `Closed in ${monthName}`} value={stats.totalClosedThisMonth.toLocaleString()} accent="bg-green-500" />
             <MetricCard
               label="Team Pipeline Value"
               value={stats.teamPipelineValue != null ? formatCurrency(stats.teamPipelineValue) : '—'}
               accent="bg-blue-500"
             />
             <MetricCard
-              label="Team MTD Revenue"
+              label={isCurrentMonth ? 'Team MTD Revenue' : `Revenue — ${monthName}`}
               value={stats.teamRevenue != null ? formatCurrency(stats.teamRevenue) : '—'}
               sub={stats.lastUpdated ? `Updated ${formatRelative(stats.lastUpdated)}` : 'Managers Report API'}
               accent="bg-[#C5A55A]"
@@ -181,7 +190,7 @@ export function ManagerDashboard() {
 
       {/* Row 3: Branches + Recent Closings */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <SectionCard title="Branch Performance">
+        <SectionCard title={`Branch Performance — ${monthName} ${year}`}>
           {loading ? (
             <div className="p-5 space-y-3 animate-pulse">
               {Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-14 bg-gray-100 rounded-lg" />)}
@@ -217,7 +226,7 @@ export function ManagerDashboard() {
           )}
         </SectionCard>
 
-        <SectionCard title="Recent Closings">
+        <SectionCard title={`Closings — ${monthName} ${year}`}>
           {loading ? (
             <div className="divide-y divide-gray-100">
               {Array.from({ length: 8 }).map((_, i) => (
@@ -248,7 +257,7 @@ export function ManagerDashboard() {
               </table>
             </div>
           ) : (
-            <div className="p-8 text-center"><p className="text-sm text-[#6B7280]">No closed orders this month.</p></div>
+            <div className="p-8 text-center"><p className="text-sm text-[#6B7280]">No closed orders for {monthName} {year}.</p></div>
           )}
         </SectionCard>
       </div>

@@ -7,6 +7,7 @@ import {
   MetricCard, MetricCardSkeleton, StatusBadge, SectionCard,
   formatAddress, formatDate, formatRelative, formatDateTime,
 } from './shared';
+import { MONTH_NAMES } from './month-selector';
 
 /* ── Types — new API shapes ──────────────────────────────────────────────── */
 
@@ -55,7 +56,7 @@ interface LegacyDashboard {
 
 /* ── Component ───────────────────────────────────────────────────────────── */
 
-export function AdminOpsDashboard() {
+export function AdminOpsDashboard({ month, year }: { month: number; year: number }) {
   const router = useRouter();
   const [metrics, setMetrics] = useState<MetricsData | null>(null);
   const [orders, setOrders] = useState<ActivityOrder[]>([]);
@@ -63,17 +64,24 @@ export function AdminOpsDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const monthName = MONTH_NAMES[month - 1];
+  const isCurrentMonth = month === new Date().getMonth() + 1 && year === new Date().getFullYear();
+  const closedLabel = isCurrentMonth ? 'Closed This Month' : `Closed in ${monthName}`;
+
   useEffect(() => {
+    setLoading(true);
+    setError(null);
     const ac = new AbortController();
     const o = { signal: ac.signal };
+    const qs = `month=${month}&year=${year}`;
 
     Promise.all([
-      fetch('/api/admin/dashboard/metrics', o).then(r => r.ok ? r.json() as Promise<MetricsData> : null),
-      fetch('/api/admin/dashboard/recent-activity', o).then(r => r.ok ? r.json() : null),
+      fetch(`/api/admin/dashboard/metrics?${qs}`, o).then(r => r.ok ? r.json() as Promise<MetricsData> : null),
+      fetch(`/api/admin/dashboard/recent-activity?${qs}`, o).then(r => r.ok ? r.json() : null),
       fetch('/api/dashboard', o).then(r => r.ok ? r.json() as Promise<LegacyDashboard> : null),
     ])
       .then(([m, a, h]) => {
-        if (m) setMetrics(m);
+        if (m) setMetrics(m); else setMetrics(null);
         setOrders(a?.orders ?? a?.activity ?? []);
         if (h) setHealth(h);
       })
@@ -81,7 +89,7 @@ export function AdminOpsDashboard() {
       .finally(() => setLoading(false));
 
     return () => ac.abort();
-  }, []);
+  }, [month, year]);
 
   const sys = health?.systemHealth;
   const webhooks = health?.webhooks;
@@ -109,7 +117,7 @@ export function AdminOpsDashboard() {
             <MetricCard label="Total Orders" value="—" accent="bg-gray-300" />
             <MetricCard label="Open" value="—" accent="bg-gray-300" />
             <MetricCard label="In Process" value="—" accent="bg-gray-300" />
-            <MetricCard label="Closed This Month" value="—" accent="bg-gray-300" />
+            <MetricCard label={closedLabel} value="—" accent="bg-gray-300" />
             <MetricCard label="Canceled" value="—" accent="bg-gray-300" />
           </>
         )}
@@ -130,7 +138,7 @@ export function AdminOpsDashboard() {
 
       {/* ── Row 2: Recent Activity Table ── */}
       <div className="mb-6">
-        <SectionCard title="Recent Activity" action={{ label: 'View all →', href: '/orders' }}>
+        <SectionCard title={`Recent activity — ${monthName} ${year}`} action={{ label: 'View all →', href: '/orders' }}>
           {error && !loading && (
             <div className="px-5 py-4">
               <p className="text-sm text-red-600 font-medium">Failed to load dashboard data</p>

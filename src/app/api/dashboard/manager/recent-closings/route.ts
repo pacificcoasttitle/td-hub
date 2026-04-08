@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, orderProperties, contacts } from '@/lib/db/schema';
-import { eq, desc, and, inArray, gte, lt, SQL } from 'drizzle-orm';
+import { eq, desc, and, inArray, sql, SQL } from 'drizzle-orm';
 import { getManagedRepIds } from '@/lib/domain/contacts/managed-reps';
 import { getMonthRange } from '@/lib/utils/month-range';
 
@@ -21,8 +21,8 @@ export async function GET(req: NextRequest) {
   );
 
   const conditions: SQL[] = [
-    gte(orders.closedAt, start),
-    lt(orders.closedAt, end),
+    sql`${orders.closedAt} >= ${start}`,
+    sql`${orders.closedAt} < ${end}`,
   ];
 
   if (session.role === 'sales_manager' && session.contactId) {

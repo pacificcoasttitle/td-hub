@@ -7,15 +7,15 @@ export function getMonthRange(monthParam?: string | null, yearParam?: string | n
     return {
       month: now.getMonth() + 1,
       year: now.getFullYear(),
-      start: new Date(now.getFullYear(), now.getMonth(), 1),
-      end: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+      start: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
+      end: new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString(),
     };
   }
 
   return {
     month,
     year,
-    start: new Date(year, month - 1, 1),
-    end: new Date(year, month, 1),
+    start: new Date(year, month - 1, 1).toISOString(),
+    end: new Date(year, month, 1).toISOString(),
   };
 }

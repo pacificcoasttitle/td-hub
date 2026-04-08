@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, orderProperties, contacts, profiles } from '@/lib/db/schema';
-import { eq, desc, and, gte, lt } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { getMonthRange } from '@/lib/utils/month-range';
 
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
       .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
       .leftJoin(salesRepContact, eq(orders.salesRepId, salesRepContact.id))
       .leftJoin(createdByProfile, eq(orders.createdBy, createdByProfile.id))
-      .where(and(gte(orders.createdAt, start), lt(orders.createdAt, end)))
+      .where(sql`${orders.createdAt} >= ${start} and ${orders.createdAt} < ${end}`)
       .orderBy(desc(orders.createdAt))
       .limit(10);
 

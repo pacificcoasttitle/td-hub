@@ -40,6 +40,7 @@ export const prelimAnalyses = pgTable('prelim_analyses', {
 
   errorMessage: text('error_message'),
   errorStep: varchar('error_step', { length: 50 }),
+  errorType: varchar('error_type', { length: 30 }),
 
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

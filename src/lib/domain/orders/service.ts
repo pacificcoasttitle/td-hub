@@ -20,7 +20,7 @@ export interface OrderListParams {
   status?: string;
   search?: string;
   branchId?: number;
-  sortBy?: 'openedAt' | 'fileNumber' | 'operationalStatus';
+  sortBy?: 'openedAt' | 'fileNumber' | 'operationalStatus' | 'salesRep' | 'productType' | 'createdBy';
   sortDir?: 'asc' | 'desc';
 }
 
@@ -69,11 +69,16 @@ function contactName(c: { fullName: string | null; officerName: string | null; f
   return null;
 }
 
-const SORT_COLUMNS = {
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const SORT_COLUMNS: Record<string, any> = {
   openedAt: orders.openedAt,
   fileNumber: orders.fileNumber,
   operationalStatus: orders.operationalStatus,
-} as const;
+  salesRep: salesRepContact.fullName,
+  productType: orders.productType,
+  createdBy: createdByProfile.displayName,
+};
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export async function getOrders(params: OrderListParams = {}, scopeFilter?: SQL | null): Promise<OrderListResult> {
   const page = params.page ?? 1;

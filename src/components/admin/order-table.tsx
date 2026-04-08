@@ -99,6 +99,7 @@ export function OrderTable({
                 <TH className="w-12 text-center">No.</TH>
                 <TH>File No.</TH>
                 <TH>Address</TH>
+                <TH>Opened</TH>
                 <TH>Type</TH>
                 <TH>Product</TH>
                 <TH>Sales Rep</TH>
@@ -106,7 +107,6 @@ export function OrderTable({
                 <TH>Source</TH>
                 <TH>Email</TH>
                 <TH className="text-center">Dup Override</TH>
-                <TH>Opened</TH>
                 <TH className="text-center w-20">Actions</TH>
               </tr>
             </thead>
@@ -215,6 +215,7 @@ function OrderRow({ order, rowNum, onClick, onAction }: {
       <td className="px-4 py-3 text-center text-[#9CA3AF] tabular-nums">{rowNum}</td>
       <td className="px-4 py-3 font-mono font-medium text-[#1B2A4A] whitespace-nowrap">{order.fileNumber}</td>
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap" title={fullAddr}>{truncAddr}</td>
+      <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap tabular-nums">{fmtOpenedDate(order.openedAt)}</td>
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.transactionType ?? '—'}</td>
       <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{order.productType ?? '—'}</td>
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.salesRepName ?? '—'}</td>
@@ -244,7 +245,6 @@ function OrderRow({ order, rowNum, onClick, onAction }: {
           )}
         </button>
       </td>
-      <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap tabular-nums">{fmtOpenedDate(order.openedAt)}</td>
       <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
         <ActionsDropdown
           onDetails={() => onAction('details')}

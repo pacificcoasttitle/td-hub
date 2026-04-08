@@ -16,13 +16,22 @@ const FALLBACK_OPTIONS = [
   { value: 'duplicate', label: 'Duplicate' },
 ];
 
+export interface SortOption { label: string; value: string }
+
+const SEL =
+  'px-3 py-2 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] bg-white focus:outline-none focus:ring-2 focus:ring-[#C5A55A]/40 focus:border-[#C5A55A]';
+
 export function OrderFilters({
   searchInput, onSearchChange, currentStatus, onStatusChange,
+  sortOptions, currentSort, onSortChange,
 }: {
   searchInput: string;
   onSearchChange: (value: string) => void;
   currentStatus: string;
   onStatusChange: (status: string) => void;
+  sortOptions?: SortOption[];
+  currentSort?: string;
+  onSortChange?: (value: string) => void;
 }) {
   const [options, setOptions] = useState(FALLBACK_OPTIONS);
 
@@ -55,15 +64,18 @@ export function OrderFilters({
           className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] placeholder:text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-[#C5A55A]/40 focus:border-[#C5A55A] bg-white"
         />
       </div>
-      <select
-        value={currentStatus}
-        onChange={(e) => onStatusChange(e.target.value)}
-        className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] bg-white focus:outline-none focus:ring-2 focus:ring-[#C5A55A]/40 focus:border-[#C5A55A]"
-      >
+      <select value={currentStatus} onChange={(e) => onStatusChange(e.target.value)} className={SEL}>
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>{opt.label}</option>
         ))}
       </select>
+      {sortOptions && onSortChange && (
+        <select value={currentSort ?? ''} onChange={(e) => onSortChange(e.target.value)} className={SEL}>
+          {sortOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }

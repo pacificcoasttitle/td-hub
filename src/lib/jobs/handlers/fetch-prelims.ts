@@ -103,9 +103,13 @@ export async function fetchPrelimsForOrder(
           triggeredBy: 'cron',
         });
       } catch (err) {
-        console.error('[TESSA] Cron-triggered analysis failed:',
-          err instanceof Error ? { message: err.message, stack: err.stack } : err,
-        );
+        console.error('[TESSA] Cron-triggered analysis failed:', {
+          orderId,
+          documentId: doc!.id,
+          fileNumber,
+          message: err instanceof Error ? err.message : err,
+          stack: err instanceof Error ? err.stack : undefined,
+        });
       }
 
       stored++;

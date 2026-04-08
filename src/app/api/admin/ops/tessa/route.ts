@@ -13,7 +13,7 @@ export async function GET() {
   }
 
   try {
-    const [statsRows, recent, errorRows, unanalyzedCount] = await Promise.all([
+    const [statsRows, recent, unanalyzedCount] = await Promise.all([
       db
         .select({
           total: sql<number>`count(*)::int`,
@@ -33,7 +33,6 @@ export async function GET() {
           status: prelimAnalyses.status,
           errorMessage: prelimAnalyses.errorMessage,
           errorStep: prelimAnalyses.errorStep,
-          errorType: prelimAnalyses.errorType,
           triggeredBy: prelimAnalyses.triggeredBy,
           createdAt: prelimAnalyses.createdAt,
           completedAt: prelimAnalyses.completedAt,
@@ -43,15 +42,6 @@ export async function GET() {
         .limit(20),
 
       db
-        .select({
-          msg: prelimAnalyses.errorMessage,
-          cnt: sql<number>`count(*)::int`,
-        })
-        .from(prelimAnalyses)
-        .where(eq(prelimAnalyses.status, 'failed'))
-        .groupBy(prelimAnalyses.errorMessage),
-
-      db
         .select({ count: sql<number>`count(*)::int` })
         .from(documents)
         .leftJoin(prelimAnalyses, eq(documents.id, prelimAnalyses.documentId))
@@ -59,10 +49,6 @@ export async function GET() {
     ]);
 
     const s = statsRows[0]!;
-    const errorBreakdown: Record<string, number> = {};
-    for (const r of errorRows) {
-      if (r.msg) errorBreakdown[r.msg] = r.cnt;
-    }
 
     const recentAnalyses = recent.map((r) => ({
       id: r.id,
@@ -71,7 +57,6 @@ export async function GET() {
       status: r.status,
       errorMessage: r.errorMessage,
       errorStep: r.errorStep,
-      errorType: r.errorType,
       triggeredBy: r.triggeredBy,
       createdAt: r.createdAt?.toISOString() ?? null,
       processingTimeMs:
@@ -79,6 +64,13 @@ export async function GET() {
           ? r.completedAt.getTime() - r.createdAt.getTime()
           : null,
     }));
+
+    const errorBreakdown: Record<string, number> = {};
+    for (const a of recentAnalyses) {
+      if (a.status === 'failed' && a.errorMessage) {
+        errorBreakdown[a.errorMessage] = (errorBreakdown[a.errorMessage] ?? 0) + 1;
+      }
+    }
 
     return NextResponse.json({
       stats: {

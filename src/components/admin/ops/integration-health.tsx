@@ -26,6 +26,12 @@ const STATUS_TEXT: Record<string, string> = {
   inactive: 'text-gray-500',
 };
 
+const ALL_VENDORS = [
+  'softpro', 's3', 'managers_report', 'titlepoint', 'westcor',
+  'fnf', 'sendgrid', 'twilio', 'anthropic', 'title_production',
+  'sitex', 'softpro_webhook',
+];
+
 const VENDOR_LABELS: Record<string, string> = {
   softpro: 'SoftPro', s3: 'AWS S3', managers_report: 'Mgrs Report',
   titlepoint: 'TitlePoint', westcor: 'Westcor', fnf: 'FNF',
@@ -49,7 +55,23 @@ export function IntegrationHealth() {
   const load = useCallback(() => {
     fetch('/api/admin/ops/health')
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.vendors) setVendors(d.vendors); })
+      .then(d => {
+        const apiVendors: VendorHealth[] = d?.vendors ?? [];
+        const apiMap = new Map(apiVendors.map(v => [v.vendor, v]));
+        const merged = ALL_VENDORS.map(key => {
+          const data = apiMap.get(key);
+          return {
+            vendor: key,
+            displayName: VENDOR_LABELS[key] || key,
+            last24h: data?.last24h ?? { total: 0, success: 0, failed: 0, avgMs: 0 },
+            lastSuccess: data?.lastSuccess ?? null,
+            lastFailure: data?.lastFailure ?? null,
+            lastError: data?.lastError ?? null,
+            status: data ? data.status : 'inactive',
+          };
+        });
+        setVendors(merged);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -72,10 +94,6 @@ export function IntegrationHealth() {
         ))}
       </div>
     );
-  }
-
-  if (vendors.length === 0) {
-    return <p className="text-sm text-gray-500">No vendor activity in the last 24 hours.</p>;
   }
 
   return (

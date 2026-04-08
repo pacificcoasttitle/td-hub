@@ -10,6 +10,7 @@ interface TessaData {
     lastSuccessAt: string | null; lastFailureAt: string | null;
   };
   recentAnalyses: Analysis[];
+  errorBreakdown: Record<string, number>;
 }
 
 interface Analysis {
@@ -83,12 +84,28 @@ export function TessaStatus() {
         </div>
       ) : s ? (
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">
-          <div className="grid grid-cols-2 gap-3">
-            <Stat label="Total" value={s.total} />
-            <Stat label="Successful" value={s.complete} color="text-green-700" />
-            <Stat label="Failed" value={s.failed} color={s.failed > 0 ? 'text-red-600' : undefined} />
-            <Stat label="Pending prelims" value={s.documentsWithoutAnalysis}
-              color={s.documentsWithoutAnalysis > 0 ? 'text-amber-600' : undefined} />
+          <div>
+            <div className="grid grid-cols-2 gap-3">
+              <Stat label="Total" value={s.total} />
+              <Stat label="Successful" value={s.complete} color="text-green-700" />
+              <Stat label="Failed" value={s.failed} color={s.failed > 0 ? 'text-red-600' : undefined} />
+              <Stat label="Pending prelims" value={s.documentsWithoutAnalysis}
+                color={s.documentsWithoutAnalysis > 0 ? 'text-amber-600' : undefined} />
+            </div>
+
+            {s.failed > 0 && data.errorBreakdown && Object.keys(data.errorBreakdown).length > 0 && (
+              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <div className="text-xs font-semibold uppercase tracking-wider text-red-800 mb-2">Error breakdown</div>
+                <div className="space-y-1">
+                  {Object.entries(data.errorBreakdown).map(([error, count]) => (
+                    <div key={error} className="flex justify-between text-xs gap-2">
+                      <span className="text-red-700 truncate" title={error}>{error}</span>
+                      <span className="text-red-800 font-medium shrink-0">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">

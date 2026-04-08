@@ -7,7 +7,7 @@
 
 import { db } from '@/lib/db/client';
 import { prelimAnalyses } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { downloadFile as s3Download } from '@/lib/integrations/s3/client';
 import { extractPdfText } from './pdf-extract';
 import { computeFacts } from './tessa-pre-parser';
@@ -29,7 +29,7 @@ export interface AnalyzePrelimParams {
 
 export interface AnalyzePrelimResult {
   analysisId: number;
-  status: 'complete' | 'failed';
+  status: string;
 }
 
 async function updateRow(
@@ -67,19 +67,43 @@ export async function analyzePrelim(
   );
   const startedAt = Date.now();
 
-  // (a) Create row with status 'pending'
-  const [row] = await db.insert(prelimAnalyses).values({
-    orderId: params.orderId,
-    documentId: params.documentId,
-    fileNumber: params.fileNumber,
-    status: 'pending',
-    triggeredBy: params.triggeredBy,
-  }).returning({ id: prelimAnalyses.id });
+  // Dedupe: skip if an active (non-failed) analysis already exists for this document
+  const [existing] = await db
+    .select({ id: prelimAnalyses.id, status: prelimAnalyses.status })
+    .from(prelimAnalyses)
+    .where(and(
+      eq(prelimAnalyses.documentId, params.documentId),
+      inArray(prelimAnalyses.status, ['pending', 'downloading', 'extracting', 'analyzing', 'summarizing', 'complete']),
+    ))
+    .limit(1);
 
-  const analysisId = row!.id;
-  console.log(`[TESSA] Created analysis row ${analysisId} for order ${params.orderId}`);
+  if (existing) {
+    console.log(`[TESSA] Analysis already exists for doc ${params.documentId}: ${existing.status}`);
+    return { analysisId: existing.id, status: existing.status };
+  }
 
-  const finish = (status: 'complete' | 'failed') => {
+  // Create row with status 'pending'
+  let analysisId: number;
+  try {
+    const [row] = await db.insert(prelimAnalyses).values({
+      orderId: params.orderId,
+      documentId: params.documentId,
+      fileNumber: params.fileNumber,
+      status: 'pending',
+      triggeredBy: params.triggeredBy,
+    }).returning({ id: prelimAnalyses.id });
+    analysisId = row!.id;
+    console.log(`[TESSA] Created analysis row ${analysisId} for order ${params.orderId}`);
+  } catch (err) {
+    console.error('[TESSA] FATAL: Cannot create analysis row:', {
+      orderId: params.orderId,
+      documentId: params.documentId,
+      error: err instanceof Error ? err.message : err,
+    });
+    return { analysisId: 0, status: 'failed' };
+  }
+
+  const finish = (status: string) => {
     console.log(
       `[TESSA] Analysis ${analysisId} for order ${params.orderId}: ${status}, took ${Date.now() - startedAt}ms`,
     );
@@ -90,21 +114,22 @@ export async function analyzePrelim(
   let extraction: ExtractedAnalysis | undefined;
 
   try {
-    // (b) Download PDF — prefer S3 direct, fall back to HTTP URL
+    // Download PDF — prefer S3 direct, fall back to HTTP URL
     if (!params.storageKey && !params.pdfUrl) {
       throw new Error('Either storageKey or pdfUrl must be provided');
     }
+
+    await updateRow(analysisId, { status: 'downloading' });
+    console.log(`[TESSA] ${analysisId}: downloading PDF`);
     const pdfBuffer = params.storageKey
       ? await downloadPdfByKey(params.storageKey)
       : await downloadPdfByUrl(params.pdfUrl!);
 
-    // (c) Update status to 'extracting'
+    // Extract text from PDF
     await updateRow(analysisId, { status: 'extracting' });
-
-    // (d) Extract text from PDF
-    console.log(`[TESSA] Extracting text from PDF (${pdfBuffer.length} bytes)`);
+    console.log(`[TESSA] ${analysisId}: extracting text (${pdfBuffer.length} bytes)`);
     pdfText = await extractPdfText(pdfBuffer);
-    console.log(`[TESSA] Extracted ${pdfText.length} chars`);
+    console.log(`[TESSA] ${analysisId}: extracted ${pdfText.length} chars`);
     await updateRow(analysisId, {
       pdfText,
       pdfCharCount: pdfText.length,

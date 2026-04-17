@@ -7,7 +7,7 @@ import { eq, desc } from 'drizzle-orm';
 const ALLOWED_ROLES = [
   'super_admin', 'admin', 'cs_admin',
   'title_officer', 'escrow_officer', 'title_production',
-  'sales_rep', 'sales_manager', 'open_order_team',
+  'sales_rep', 'sales_manager', 'open_order_team', 'escrow_assistant',
 ];
 
 export async function GET(

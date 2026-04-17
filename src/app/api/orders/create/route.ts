@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { createAndSendToSoftPro } from '@/lib/domain/orders/create-order';
 
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
+const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
 
 export const maxDuration = 300;
 

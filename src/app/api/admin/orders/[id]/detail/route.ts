@@ -14,7 +14,7 @@ import {
   contactDisplayName, formatParty,
 } from '@/lib/domain/orders/detail-helpers';
 
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
+const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
 
 const paramSchema = z.object({ id: z.coerce.number().int().positive() });
 

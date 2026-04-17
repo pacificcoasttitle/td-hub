@@ -5,7 +5,7 @@ import { db } from '@/lib/db/client';
 import { vendorApiLogs, orders } from '@/lib/db/schema';
 import { eq, and, desc, sql, ilike, or, gte, lte, SQL } from 'drizzle-orm';
 
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
+const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
 
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),

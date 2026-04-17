@@ -23,6 +23,7 @@ const NAV_LABELS_BY_ROLE: Record<string, string[]> = {
   title_officer: ['Dashboard', 'Orders', 'Documents'],
   escrow_officer: ['Dashboard', 'Orders', 'Documents'],
   open_order_team: ['Dashboard', 'Orders', 'Open Order (On Behalf)', 'Contacts & Companies'],
+  escrow_assistant: ['Dashboard', 'Orders', 'Open Order (On Behalf)', 'Contacts & Companies'],
 };
 
 export function getNavItemsForRole(role: string): NavItem[] {
@@ -43,6 +44,7 @@ const FEATURES_BY_ROLE: Record<string, Feature[]> = {
   title_officer: ['orders', 'documents', 'dashboard'],
   escrow_officer: ['orders', 'documents', 'dashboard'],
   open_order_team: ['orders', 'contacts', 'dashboard'],
+  escrow_assistant: ['orders', 'contacts', 'dashboard'],
 };
 
 export function canAccessFeature(role: string, feature: Feature): boolean {

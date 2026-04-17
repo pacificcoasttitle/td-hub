@@ -55,6 +55,10 @@ async function buildScopeFilter(session: { id: string; role: string; contactId: 
     return eq(orders.escrowOfficerId, cid);
   }
 
+  if (session.role === 'escrow_assistant') {
+    return inArray(orders.orderType, ['Title & Escrow', 'Escrow only']);
+  }
+
   if (session.role === 'client') {
     return eq(orders.createdBy, session.id);
   }

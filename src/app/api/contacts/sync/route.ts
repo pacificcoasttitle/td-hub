@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { handleSyncContacts } from '@/lib/jobs/handlers/sync-contacts';
 
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
+const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
 
 const VALID_USER_TYPES = [
   'Order Contact - Person',

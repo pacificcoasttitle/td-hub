@@ -14,6 +14,7 @@ function isSalesRole(role: string): role is SalesRole {
 const ROLE_REDIRECT: Record<string, string> = {
   client: '/client/dashboard',
   open_order_team: '/hub',
+  escrow_assistant: '/hub',
   title_production: '/title-production',
 };
 

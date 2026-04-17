@@ -4,7 +4,7 @@ import { getSession } from '@/lib/security/auth';
 import { generateCpl } from '@/lib/domain/cpl/service';
 
 const ALLOWED_ROLES = [
-  'super_admin', 'admin', 'cs_admin', 'open_order_team',
+  'super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant',
 ];
 
 const bodySchema = z.object({

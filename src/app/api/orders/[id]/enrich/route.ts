@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { enrichSingleOrder } from '@/lib/jobs/handlers/enrich-orders';
 
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
+const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
 
 export async function POST(
   _req: NextRequest,

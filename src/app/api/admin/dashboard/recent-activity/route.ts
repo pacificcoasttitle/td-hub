@@ -6,7 +6,7 @@ import { eq, desc, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { getMonthRange } from '@/lib/utils/month-range';
 
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
+const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
 
 const salesRepContact = alias(contacts, 'sales_rep');
 const createdByProfile = alias(profiles, 'created_by_profile');

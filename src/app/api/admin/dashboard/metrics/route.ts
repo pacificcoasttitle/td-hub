@@ -5,7 +5,7 @@ import { orders, vendorApiLogs } from '@/lib/db/schema';
 import { sql, eq, and } from 'drizzle-orm';
 import { getMonthRange } from '@/lib/utils/month-range';
 
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
+const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
 
 function toIsoOrNull(value: Date | string | null | undefined): string | null {
   if (!value) return null;

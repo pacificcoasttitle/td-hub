@@ -24,6 +24,7 @@ export default function LoginPage() {
         const { role } = await r.json();
         if (role === 'client') return '/client/dashboard';
         if (role === 'open_order_team') return '/hub';
+        if (role === 'escrow_assistant') return '/hub';
         if (role === 'title_production') return '/title-production';
         if (role === 'sales_rep') return '/sales/dashboard';
         if (role === 'sales_manager') return '/sales/dashboard';

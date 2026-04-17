@@ -4,7 +4,7 @@ import { HubHeader } from '@/components/admin/hub/hub-header';
 
 export const dynamic = 'force-dynamic';
 
-const HUB_ROLES = ['open_order_team', 'super_admin', 'admin', 'cs_admin'];
+const HUB_ROLES = ['open_order_team', 'escrow_assistant', 'super_admin', 'admin', 'cs_admin'];
 
 export default async function HubLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();

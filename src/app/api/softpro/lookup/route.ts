@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { getLookupTable, mapLookupTableEntry } from '@/lib/integrations/softpro';
 
-const ALLOWED_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team',
+const ALLOWED_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant',
   'sales_rep', 'title_officer', 'escrow_officer'];
 
 const querySchema = z.object({

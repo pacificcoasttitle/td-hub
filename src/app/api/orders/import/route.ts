@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { importOrdersFromSoftPro } from '@/lib/jobs/handlers/import-orders';
 
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
+const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
 
 const bodySchema = z.object({
   dateFrom: z.string().min(1, 'dateFrom is required'),

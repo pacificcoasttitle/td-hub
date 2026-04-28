@@ -78,7 +78,7 @@ export function OpeningsDrilldownModal({ isOpen, onClose, month, year, repId }: 
 
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-semibold text-gray-900">
-            Opened Files — {MONTH_NAMES[month - 1]} {year}
+            Orders Opened — {MONTH_NAMES[month - 1]} {year}
           </h2>
           <button onClick={onClose} aria-label="Close"
             className="text-gray-400 hover:text-gray-600 transition-colors">
@@ -134,7 +134,7 @@ export function OpeningsDrilldownModal({ isOpen, onClose, month, year, repId }: 
 
         {!loading && (!data || data.orders.length === 0) && (
           <div className="py-10 text-center">
-            <p className="text-gray-400">No openings found for this period</p>
+            <p className="text-gray-400">No orders opened in this period</p>
           </div>
         )}
       </div>

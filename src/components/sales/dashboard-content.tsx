@@ -65,9 +65,6 @@ export function DashboardContent({ displayName, role }: Props) {
       case 'view_contacts':
         setDetailOrder(order);
         break;
-      case 'view_invoice':
-        showToast('View Invoice coming soon');
-        break;
       case 'view_detail':
         setDetailOrder(order);
         break;

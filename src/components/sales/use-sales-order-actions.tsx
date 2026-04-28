@@ -40,9 +40,6 @@ export function useSalesOrderActions() {
       case 'view_detail':
         setDetailOrder(order);
         break;
-      case 'view_invoice':
-        showToast('View Invoice coming soon');
-        break;
     }
   }, [showToast]);
 

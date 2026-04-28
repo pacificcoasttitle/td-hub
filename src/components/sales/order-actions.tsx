@@ -6,7 +6,7 @@ import type { SalesOrder } from './types';
 export type SalesAction =
   | 'review_prelim' | 'prelim_summary' | 'update_prelim'
   | 'regenerate_summary' | 'get_prelim_doc'
-  | 'view_contacts' | 'view_invoice' | 'view_detail';
+  | 'view_contacts' | 'view_detail';
 
 interface Props {
   order: SalesOrder;
@@ -31,7 +31,7 @@ export function OrderActions({ order, onAction }: Props) {
           <Dots>
             <MenuItem onClick={() => onAction('update_prelim', order)}>Update Prelim</MenuItem>
             <MenuItem onClick={() => onAction('view_contacts', order)}>View Contacts</MenuItem>
-            <MenuItem onClick={() => onAction('view_invoice', order)}>View Invoice</MenuItem>
+            <DisabledMenuItem label="View Invoice" hint="Coming soon" />
             <MenuItem onClick={() => onAction('regenerate_summary', order)}>Regenerate Summary</MenuItem>
           </Dots>
         </div>
@@ -43,7 +43,7 @@ export function OrderActions({ order, onAction }: Props) {
           <Dots>
             <MenuItem onClick={() => onAction('get_prelim_doc', order)}>Get Prelim Doc</MenuItem>
             <MenuItem onClick={() => onAction('view_contacts', order)}>View Contacts</MenuItem>
-            <MenuItem onClick={() => onAction('view_invoice', order)}>View Invoice</MenuItem>
+            <DisabledMenuItem label="View Invoice" hint="Coming soon" />
           </Dots>
         </div>
       )}
@@ -85,6 +85,18 @@ function MenuItem({ onClick, children }: { onClick: () => void; children: React.
     <button onClick={onClick}
       className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
       {children}
+    </button>
+  );
+}
+
+function DisabledMenuItem({ label, hint }: { label: string; hint: string }) {
+  return (
+    <button
+      disabled
+      className="w-full text-left px-4 py-2 text-sm text-gray-400 cursor-not-allowed flex items-center justify-between"
+    >
+      {label}
+      <span className="text-[10px] text-gray-300">{hint}</span>
     </button>
   );
 }

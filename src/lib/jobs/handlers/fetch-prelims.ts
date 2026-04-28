@@ -105,6 +105,20 @@ export async function fetchPrelimsForOrder(
   orderId: number,
   fileNumber: string,
 ): Promise<number> {
+  const [existing] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(documents)
+    .where(and(
+      eq(documents.orderId, orderId),
+      eq(documents.category, 'prelim'),
+      eq(documents.status, 'active'),
+    ));
+
+  if (existing && existing.count > 0) {
+    console.log(`[fetch-prelims] Order ${fileNumber} already has ${existing.count} active prelim doc(s), skipping SoftPro call`);
+    return 0;
+  }
+
   const result = await getAttachedDocuments(fileNumber);
   if (!result.success || !result.data) return 0;
 

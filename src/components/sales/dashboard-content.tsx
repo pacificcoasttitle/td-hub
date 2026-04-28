@@ -207,7 +207,6 @@ export function DashboardContent({ displayName, role }: Props) {
           orderId={prelimOrder.id}
           fileNumber={prelimOrder.fileNumber}
           address={fmtAddr(prelimOrder)}
-          hideFetch
         />
       )}
 

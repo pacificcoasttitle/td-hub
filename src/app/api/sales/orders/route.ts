@@ -5,6 +5,7 @@ import { orders, documents } from '@/lib/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { getScopedOrders } from '@/lib/domain/orders/scoped-queries';
 import { validateSalesAccess, SalesAccessError } from '../_helpers/validate-access';
+import { getMonthRange } from '@/lib/utils/month-range';
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -16,6 +17,9 @@ export async function GET(req: NextRequest) {
   const pageSize = Math.min(Math.max(1, Number(sp.get('pageSize') ?? '25')), 100);
   const status = sp.get('status')?.trim() || undefined;
   const search = sp.get('search')?.trim() || undefined;
+  const monthParam = sp.get('month');
+  const yearParam = sp.get('year');
+  const openedRange = monthParam || yearParam ? getMonthRange(monthParam, yearParam) : null;
 
   try {
     const access = await validateSalesAccess(session, repIdParam);
@@ -27,6 +31,8 @@ export async function GET(req: NextRequest) {
       pageSize,
       status,
       search,
+      openedStart: openedRange?.start,
+      openedEnd: openedRange?.end,
     });
 
     const orderIds = ordersResult.orders.map(o => o.id);

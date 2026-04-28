@@ -19,6 +19,10 @@ export interface ScopedOrderListParams {
   status?: string;
   /** Case-insensitive match on file number or property address fields. */
   search?: string;
+  /** Inclusive opened_at lower bound. */
+  openedStart?: string;
+  /** Exclusive opened_at upper bound. */
+  openedEnd?: string;
 }
 
 function scopeWhereClause(
@@ -41,6 +45,12 @@ export async function getScopedOrders(params: ScopedOrderListParams) {
   ];
   if (params.status) {
     conditions.push(eq(orders.operationalStatus, params.status as typeof orders.operationalStatus.enumValues[number]));
+  }
+  if (params.openedStart) {
+    conditions.push(sql`${orders.openedAt} >= ${params.openedStart}`);
+  }
+  if (params.openedEnd) {
+    conditions.push(sql`${orders.openedAt} < ${params.openedEnd}`);
   }
   const q = params.search?.trim();
   if (q) {

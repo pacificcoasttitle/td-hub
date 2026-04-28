@@ -52,7 +52,6 @@ export function useSalesOrderActions() {
           orderId={prelimOrder.id}
           fileNumber={prelimOrder.fileNumber}
           address={fmtAddr(prelimOrder)}
-          hideFetch
         />
       )}
       {detailOrder && (

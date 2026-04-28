@@ -15,7 +15,7 @@ interface MonthRow {
   trend: 'up' | 'down' | 'flat';
 }
 
-interface Drilldown { monthName: string; year: number; type: 'openings' | 'revenue' }
+interface Drilldown { month: number; year: number; type: 'openings' | 'revenue' }
 
 const NOW = new Date();
 const CURRENT_MONTH = NOW.getMonth() + 1;
@@ -109,7 +109,7 @@ export default function ProductionHistoryPage() {
                             </td>
                             <td className="px-5 py-3 text-right">
                               {isFuture ? <span className="text-gray-300">—</span> : (
-                                <button onClick={() => setDrilldown({ monthName: m.monthName, year, type: 'openings' })}
+                                <button onClick={() => setDrilldown({ month: m.month, year, type: 'openings' })}
                                   className="cursor-pointer text-blue-600 hover:underline tabular-nums">
                                   {m.openings}
                                 </button>
@@ -120,7 +120,7 @@ export default function ProductionHistoryPage() {
                             </td>
                             <td className="px-5 py-3 text-right">
                               {isFuture ? <span className="text-gray-300">—</span> : (
-                                <button onClick={() => setDrilldown({ monthName: m.monthName, year, type: 'revenue' })}
+                                <button onClick={() => setDrilldown({ month: m.month, year, type: 'revenue' })}
                                   className="cursor-pointer text-blue-600 hover:underline tabular-nums">
                                   {fmtCurrency(m.revenue)}
                                 </button>
@@ -144,10 +144,22 @@ export default function ProductionHistoryPage() {
 
       {/* Drilldown Modals */}
       {drilldown?.type === 'openings' && (
-        <OpeningsDrilldownModal monthName={drilldown.monthName} year={drilldown.year} onClose={() => setDrilldown(null)} />
+        <OpeningsDrilldownModal
+          isOpen
+          month={drilldown.month}
+          year={drilldown.year}
+          repId={repId}
+          onClose={() => setDrilldown(null)}
+        />
       )}
       {drilldown?.type === 'revenue' && (
-        <RevenueDrilldownModal monthName={drilldown.monthName} year={drilldown.year} onClose={() => setDrilldown(null)} />
+        <RevenueDrilldownModal
+          isOpen
+          month={drilldown.month}
+          year={drilldown.year}
+          repId={repId}
+          onClose={() => setDrilldown(null)}
+        />
       )}
     </div>
   );

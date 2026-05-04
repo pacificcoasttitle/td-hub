@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { orders, documents, documentAudit, prelimAnalyses } from '@/lib/db/schema';
-import { sql, and, eq, ne } from 'drizzle-orm';
+import { sql, and, eq, or, isNull, asc } from 'drizzle-orm';
 import { getAttachedDocuments } from '@/lib/integrations/softpro';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
 import { analyzePrelim } from '@/lib/tessa';
@@ -20,14 +20,23 @@ export interface FetchPrelimsResult {
  * are stored in S3 and recorded in the documents table.
  */
 export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
+  // Prioritize orders never attempted (lastPrelimFetchAt IS NULL → asc nulls first),
+  // then those whose last attempt is older than 6 hours.
+  // Orders attempted within the last 6 hours are skipped to prevent the cron
+  // from re-polling the same unproductive files every 30 minutes.
   const ordersWithoutPrelims = await db
     .select({ id: orders.id, fileNumber: orders.fileNumber })
     .from(orders)
     .where(and(
-      sql`${orders.operationalStatus} in ('open', 'in_process')`,
-      sql`${orders.id} NOT IN (SELECT order_id FROM documents WHERE category = 'prelim')`,
+      sql`${orders.operationalStatus} in ('open', 'in_process', 'completed')`,
+      sql`${orders.id} NOT IN (SELECT order_id FROM documents WHERE category = 'prelim' AND status = 'active')`,
+      or(
+        isNull(orders.lastPrelimFetchAt),
+        sql`${orders.lastPrelimFetchAt} < NOW() - INTERVAL '6 hours'`,
+      ),
     ))
-    .limit(50);
+    .orderBy(asc(orders.lastPrelimFetchAt))
+    .limit(100);
 
   let fetched = 0;
   let documentsStored = 0;
@@ -120,6 +129,13 @@ export async function fetchPrelimsForOrder(
   }
 
   const result = await getAttachedDocuments(fileNumber);
+
+  // Stamp the attempt regardless of outcome so the cron's 6-hour
+  // re-check window applies to both empty and successful responses.
+  await db.update(orders)
+    .set({ lastPrelimFetchAt: sql`NOW()` })
+    .where(eq(orders.id, orderId));
+
   if (!result.success || !result.data) return 0;
 
   const urls = extractUrls(result.data);

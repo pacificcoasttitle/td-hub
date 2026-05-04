@@ -46,18 +46,18 @@ export async function GET(
 
     await db.insert(documentAudit).values({
       documentId: docId,
-      action: 'downloaded',
+      action: 'viewed',
       byUserId: session.id,
       meta: { filename: doc.filename, storageKey: doc.storageKey } as Record<string, unknown>,
     });
 
     const filename = sanitizeFilename(doc.filename);
-    const contentType = doc.contentType || result.data.contentType || 'application/octet-stream';
+    const contentType = doc.contentType || result.data.contentType || 'application/pdf';
 
     const headers: Record<string, string> = {
       'Content-Type': contentType,
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Cache-Control': 'private, no-store',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Cache-Control': 'private, max-age=3600',
     };
     if (result.data.contentLength) {
       headers['Content-Length'] = String(result.data.contentLength);
@@ -65,6 +65,6 @@ export async function GET(
 
     return new Response(result.data.body, { headers });
   } catch {
-    return NextResponse.json({ error: 'Download failed' }, { status: 500 });
+    return NextResponse.json({ error: 'View failed' }, { status: 500 });
   }
 }

@@ -23,7 +23,7 @@ export async function openPrelimInNewTab(orderId: number): Promise<boolean> {
     const data = await res.json();
     const docs = normalizeDocs(data.documents ?? []);
     if (docs.length === 0) return false;
-    window.open(`/api/documents/${docs[0].id}/download`, '_blank');
+    window.open(`/api/documents/${docs[0].id}/view`, '_blank');
     return true;
   } catch {
     return false;
@@ -103,7 +103,7 @@ export function PrelimModal({ open, onClose, orderId, fileNumber, address, isCli
                     <p className="text-sm text-[#1A1A2E] truncate">{d.fileName}</p>
                     <p className="text-xs text-[#6B7280]">{new Date(d.createdAt).toLocaleDateString()}</p>
                   </div>
-                  <a href={`${dlBase}/documents/${d.id}/download`} target="_blank" rel="noopener noreferrer"
+                  <a href={`${dlBase}/documents/${d.id}/view`} target="_blank" rel="noopener noreferrer"
                     className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">
                     View PDF
                   </a>

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { getDocumentById } from '@/lib/domain/documents/service';
 import { getObjectStream } from '@/lib/integrations/s3/client';
-import { canAccessOrder } from '@/lib/security/client-scope';
 import { db } from '@/lib/db/client';
 import { documentAudit } from '@/lib/db/schema';
 
@@ -31,11 +30,6 @@ export async function GET(
       return NextResponse.json({ error: 'Document not found' }, { status: 404 });
     }
 
-    const allowed = await canAccessOrder(session.id, doc.orderId);
-    if (!allowed) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    }
-
     const result = await getObjectStream(doc.storageKey);
     if (!result.success || !result.data) {
       return NextResponse.json(
@@ -46,18 +40,21 @@ export async function GET(
 
     await db.insert(documentAudit).values({
       documentId: docId,
-      action: 'downloaded',
+      action: 'viewed',
       byUserId: session.id,
-      meta: { filename: doc.filename, storageKey: doc.storageKey } as Record<string, unknown>,
+      meta: {
+        filename: doc.filename,
+        storageKey: doc.storageKey,
+      } as Record<string, unknown>,
     });
 
     const filename = sanitizeFilename(doc.filename);
-    const contentType = doc.contentType || result.data.contentType || 'application/octet-stream';
+    const contentType = doc.contentType || result.data.contentType || 'application/pdf';
 
     const headers: Record<string, string> = {
       'Content-Type': contentType,
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Cache-Control': 'private, no-store',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Cache-Control': 'private, max-age=3600',
     };
     if (result.data.contentLength) {
       headers['Content-Length'] = String(result.data.contentLength);
@@ -65,6 +62,6 @@ export async function GET(
 
     return new Response(result.data.body, { headers });
   } catch {
-    return NextResponse.json({ error: 'Download failed' }, { status: 500 });
+    return NextResponse.json({ error: 'View failed' }, { status: 500 });
   }
 }

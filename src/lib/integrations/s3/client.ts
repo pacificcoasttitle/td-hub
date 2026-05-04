@@ -97,6 +97,56 @@ export async function uploadFile(params: {
   }
 }
 
+export async function getObjectStream(key: string): Promise<VendorResult<{
+  body: ReadableStream;
+  contentType?: string;
+  contentLength?: number;
+}>> {
+  const requestId = crypto.randomUUID();
+  const startedAt = new Date();
+
+  try {
+    const response = await getClient().send(new GetObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+    }));
+
+    if (!response.Body) {
+      throw new Error('S3 response has no body');
+    }
+
+    await logRequest({
+      operation: 'get_object_stream',
+      requestId,
+      startedAt,
+      success: true,
+      requestMeta: { key },
+    });
+
+    return vendorSuccess(
+      {
+        body: response.Body as unknown as ReadableStream,
+        contentType: response.ContentType,
+        contentLength: response.ContentLength,
+      },
+      { requestId, durationMs: Date.now() - startedAt.getTime() },
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown S3 stream error';
+    await logRequest({
+      operation: 'get_object_stream',
+      requestId,
+      startedAt,
+      success: false,
+      errorCategory: 'S3_DOWNLOAD',
+      responseMeta: { error: message },
+    });
+    return vendorError(VENDOR, 'STREAM_FAILED', message, {
+      retryable: true, requestId, durationMs: Date.now() - startedAt.getTime(),
+    });
+  }
+}
+
 export async function downloadFile(key: string): Promise<VendorResult<Buffer>> {
   const requestId = crypto.randomUUID();
   const startedAt = new Date();

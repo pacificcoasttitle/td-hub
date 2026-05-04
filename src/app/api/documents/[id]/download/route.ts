@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { getDocumentById } from '@/lib/domain/documents/service';
-import { getSignedUrl } from '@/lib/integrations/s3/client';
+import { getObjectStream } from '@/lib/integrations/s3/client';
 import { db } from '@/lib/db/client';
 import { documentAudit } from '@/lib/db/schema';
 
+function sanitizeFilename(name: string): string {
+  return name.replace(/[\r\n"\\]/g, '_');
+}
+
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await getSession();
@@ -22,14 +26,14 @@ export async function GET(
     }
 
     const doc = await getDocumentById(docId);
-    if (!doc) {
+    if (!doc || doc.status !== 'active') {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 });
     }
 
-    const urlResult = await getSignedUrl(doc.storageKey);
-    if (!urlResult.success) {
+    const result = await getObjectStream(doc.storageKey);
+    if (!result.success || !result.data) {
       return NextResponse.json(
-        { error: urlResult.error?.message ?? 'Failed to generate download URL' },
+        { error: result.error?.message ?? 'Failed to load document' },
         { status: 502 },
       );
     }
@@ -44,7 +48,19 @@ export async function GET(
       } as Record<string, unknown>,
     });
 
-    return NextResponse.redirect(urlResult.data!);
+    const filename = sanitizeFilename(doc.filename);
+    const contentType = doc.contentType || result.data.contentType || 'application/octet-stream';
+
+    const headers: Record<string, string> = {
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'private, no-store',
+    };
+    if (result.data.contentLength) {
+      headers['Content-Length'] = String(result.data.contentLength);
+    }
+
+    return new Response(result.data.body, { headers });
   } catch {
     return NextResponse.json({ error: 'Download failed' }, { status: 500 });
   }

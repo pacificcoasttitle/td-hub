@@ -15,6 +15,7 @@ const CRON_SCHEDULES: Record<string, string> = {
   'softpro.sync_new_users': 'Daily 5:00 UTC',
   'softpro.sync_all_contacts': 'Daily 3:00 UTC',
   'import-orders': 'Every 6 hours',
+  'jobs.watchdog': 'Every 15min',
 };
 
 export async function GET(req: NextRequest) {

@@ -17,6 +17,7 @@ import { handleFetchPrelims } from '@/lib/jobs/handlers/fetch-prelims';
 import { handleVerifyOrderSync } from '@/lib/jobs/handlers/verify-order-sync';
 import { handleSyncNewUsers } from '@/lib/jobs/handlers/sync-new-users';
 import { handleSyncAllContacts } from '@/lib/jobs/handlers/sync-all-contacts';
+import { handleJobsWatchdog } from '@/lib/jobs/handlers/jobs-watchdog';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 
 function formatTodayForImport(): string {
@@ -66,6 +67,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
   },
   'notifications.process_outbox': () =>
     processOutboxEvents(),
+  'jobs.watchdog': () =>
+    handleJobsWatchdog(),
 };
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

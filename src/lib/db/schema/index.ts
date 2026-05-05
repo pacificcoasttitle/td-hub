@@ -8,3 +8,4 @@ export * from './admin';
 export * from './title-production';
 export * from './notifications';
 export * from './tessa';
+export * from './surveys';

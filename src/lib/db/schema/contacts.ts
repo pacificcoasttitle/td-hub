@@ -182,6 +182,9 @@ export const companies = pgTable('companies', {
   isSellingAgent: boolean('is_selling_agent').notNull().default(false),
   isUnderwriter: boolean('is_underwriter').notNull().default(false),
 
+  surveysDisabled: boolean('surveys_disabled').notNull().default(false),
+  surveysDisabledReason: text('surveys_disabled_reason'),
+
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

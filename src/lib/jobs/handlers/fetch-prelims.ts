@@ -7,12 +7,16 @@ import { analyzePrelim } from '@/lib/tessa';
 
 export interface FetchPrelimsResult {
   total: number;
+  attempted: number;
   fetched: number;
   documentsStored: number;
   skipped: number;
   retried: number;
+  timedOut: boolean;
   errors: Array<{ fileNumber: string; error: string }>;
 }
+
+const TIME_BUDGET_MS = 240_000;
 
 /**
  * Finds orders without prelim documents and attempts to fetch them
@@ -36,14 +40,24 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
       ),
     ))
     .orderBy(asc(orders.lastPrelimFetchAt))
-    .limit(100);
+    .limit(50);
 
+  const startTime = Date.now();
+  let attempted = 0;
   let fetched = 0;
   let documentsStored = 0;
   let skipped = 0;
+  let timedOut = false;
   const errors: Array<{ fileNumber: string; error: string }> = [];
 
   for (const order of ordersWithoutPrelims) {
+    if (Date.now() - startTime > TIME_BUDGET_MS) {
+      console.warn(`[fetch-prelims] Time budget exhausted after ${attempted} of ${ordersWithoutPrelims.length} orders — exiting cleanly`);
+      timedOut = true;
+      break;
+    }
+
+    attempted++;
     try {
       const stored = await fetchPrelimsForOrder(order.id, order.fileNumber);
       if (stored > 0) {
@@ -60,7 +74,11 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
   // ── Phase 2: Retry failed analyses ──
   // Only retries orders whose latest analysis is 'failed' (e.g. DOMMatrix era).
   // Historical prelims without any analysis row are on-demand only.
+  // Skip Phase 2 entirely if Phase 1 already exhausted the time budget.
   let retried = 0;
+  if (timedOut) {
+    return { total: ordersWithoutPrelims.length, attempted, fetched, documentsStored, skipped, retried, timedOut, errors };
+  }
   try {
     const failedRows = await db
       .select({
@@ -103,7 +121,7 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
     console.error('[TESSA] Phase 2 query failed:', err instanceof Error ? err.message : err);
   }
 
-  return { total: ordersWithoutPrelims.length, fetched, documentsStored, skipped, retried, errors };
+  return { total: ordersWithoutPrelims.length, attempted, fetched, documentsStored, skipped, retried, timedOut, errors };
 }
 
 /**

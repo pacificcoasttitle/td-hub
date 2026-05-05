@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+
+export const maxDuration = 300;
 import { db } from '@/lib/db/client';
 import { jobs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';

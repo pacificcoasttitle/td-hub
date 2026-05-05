@@ -9,7 +9,7 @@ const ADMIN_ROLES = ['super_admin', 'admin'];
 const CRON_SCHEDULES: Record<string, string> = {
   'softpro.sync_recent_orders': 'Hourly :00',
   'softpro.enrich_orders': 'Every 15min',
-  'softpro.fetch_prelims': 'Every 30min :05/:35',
+  'softpro.fetch_prelims': 'Every 15min',
   'notifications.process_outbox': 'Every 5min',
   'softpro.verify_sync': 'Daily 6:00 UTC',
   'softpro.sync_new_users': 'Daily 5:00 UTC',

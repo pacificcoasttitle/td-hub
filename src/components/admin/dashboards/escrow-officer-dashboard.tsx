@@ -1,14 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   MetricCard, MetricCardSkeleton, SectionCard,
   ErrorBanner, formatRelative,
 } from './shared';
 import { EscrowTaskCards } from '@/components/escrow/escrow-task-cards';
-import { OrdersHubTable, type HubOrder } from '@/components/shared/orders-hub-table';
-import type { EscrowTasksResponse, TaskPriority } from '@/lib/domain/escrow/tasks';
+import { OrdersHubTable } from '@/components/shared/orders-hub-table';
 
 interface EOStats {
   assignedOrders: number;
@@ -26,40 +25,12 @@ interface DocActivity {
   performedAt: string;
 }
 
-
 export function EscrowOfficerDashboard({ displayName }: { displayName: string | null }) {
-  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | null>(null);
-  const [tasksData, setTasksData] = useState<EscrowTasksResponse | null>(null);
+  const [priorityFilter, setPriorityFilter] = useState<1 | 2 | 3 | null>(null);
   const [stats, setStats] = useState<EOStats | null>(null);
   const [docActivity, setDocActivity] = useState<DocActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const handleTasksLoaded = useCallback((resp: EscrowTasksResponse) => {
-    setTasksData(resp);
-  }, []);
-
-  // Build orderId set per priority from /api/escrow/tasks (EscrowTaskCards fetch).
-  // TEMPORARY: client-side filtering — keep parity with hub page (EW-3).
-  // Port to /api/dashboard/escrow-officer/orders?priority= when /api/orders
-  // gains server-side ?priority= support.
-  const priorityOrderIds = useMemo<Record<TaskPriority, Set<number>> | null>(() => {
-    if (!tasksData) return null;
-    return {
-      1: new Set(tasksData.tasksByPriority['1'].map((t) => t.orderId)),
-      2: new Set(tasksData.tasksByPriority['2'].map((t) => t.orderId)),
-      3: new Set(tasksData.tasksByPriority['3'].map((t) => t.orderId)),
-    };
-  }, [tasksData]);
-
-  const clientFilter = useMemo(() => {
-    if (priorityFilter === null) return undefined;
-    return (o: HubOrder): boolean => {
-      const ids = priorityOrderIds?.[priorityFilter];
-      if (!ids || !ids.has(o.id)) return false;
-      return true;
-    };
-  }, [priorityFilter, priorityOrderIds]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -100,13 +71,12 @@ export function EscrowOfficerDashboard({ displayName }: { displayName: string | 
         ) : null}
       </div>
 
-      {/* My Tasks — between stats and the rest (task cards fetch scopes via role; see EW-2) */}
+      {/* My Tasks — EscrowTaskCards calls /api/escrow/tasks (scoped to this officer per EW-2) */}
       <div className="mb-6">
         <SectionCard title="My Tasks">
           <EscrowTaskCards
             onFilterChange={setPriorityFilter}
             activeFilter={priorityFilter}
-            onTasksLoaded={handleTasksLoaded}
           />
         </SectionCard>
       </div>
@@ -145,11 +115,12 @@ export function EscrowOfficerDashboard({ displayName }: { displayName: string | 
         </SectionCard>
       </div>
 
-      {/* Row 3: My Orders with modal actions */}
+      {/* My Orders — ?priority= filtered server-side (escrow-tasks-derivation) */}
       <SectionCard title="My Orders" action={{ label: 'View all →', href: '/orders' }}>
         <OrdersHubTable
-          fetchUrl="/api/dashboard/escrow-officer/orders"
-          clientFilter={clientFilter}
+          fetchUrl={priorityFilter
+            ? `/api/dashboard/escrow-officer/orders?priority=${priorityFilter}`
+            : '/api/dashboard/escrow-officer/orders'}
           actions={['cpl', 'proposed', 'notes', 'detail']}
           accentColor="#C5A55A"
           showSearch

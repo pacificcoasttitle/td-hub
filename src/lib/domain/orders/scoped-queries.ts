@@ -23,6 +23,11 @@ export interface ScopedOrderListParams {
   openedStart?: string;
   /** Exclusive opened_at upper bound. */
   openedEnd?: string;
+  /**
+   * Further restrict to these order IDs (AND with scope). Empty array = no rows match.
+   * Used for ?priority= on escrow-officer dashboard (task derivation).
+   */
+  restrictToOrderIds?: number[];
 }
 
 function scopeWhereClause(
@@ -43,6 +48,13 @@ export async function getScopedOrders(params: ScopedOrderListParams) {
   const conditions: SQL[] = [
     scopeWhereClause(params.scopeColumn, params.contactId, params.contactIds),
   ];
+  if (params.restrictToOrderIds !== undefined) {
+    if (params.restrictToOrderIds.length === 0) {
+      conditions.push(eq(orders.id, -1));
+    } else {
+      conditions.push(inArray(orders.id, params.restrictToOrderIds));
+    }
+  }
   if (params.status) {
     conditions.push(eq(orders.operationalStatus, params.status as typeof orders.operationalStatus.enumValues[number]));
   }

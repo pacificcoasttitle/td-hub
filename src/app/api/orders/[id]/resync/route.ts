@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
-import { canAccessOrder } from '@/lib/security/permissions';
+import { canAccessOrder, isStaff } from '@/lib/security/permissions';
 import { getOrderById } from '@/lib/domain/orders/service';
 
 export async function POST(
@@ -10,6 +10,10 @@ export async function POST(
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  if (!isStaff(session)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {

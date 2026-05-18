@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
-import { canAccessOrder } from '@/lib/security/permissions';
+import { canAccessOrder, isStaff } from '@/lib/security/permissions';
 import { db } from '@/lib/db/client';
 import { orders } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -17,6 +17,10 @@ export async function PATCH(
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  if (!isStaff(session)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const { id } = await params;

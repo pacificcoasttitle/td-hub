@@ -64,6 +64,14 @@ export function getDashboardRedirect(role: string): string | null {
   return null;
 }
 
+// ─── Staff roles (admin console / privileged actions) ───────────────────────
+
+export const STAFF_ROLES = ['super_admin', 'admin', 'cs_admin'] as const;
+
+export function isStaff(session: { role: string }): boolean {
+  return (STAFF_ROLES as readonly string[]).includes(session.role);
+}
+
 // ─── Per-Order Access ───────────────────────────────────────────────────────
 
 const ALL_ORDERS_ROLES = new Set(['super_admin', 'admin', 'cs_admin', 'open_order_team']);

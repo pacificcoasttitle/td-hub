@@ -80,7 +80,11 @@ const SORT_COLUMNS: Record<string, any> = {
 };
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-export async function getOrders(params: OrderListParams = {}, scopeFilter?: SQL | null): Promise<OrderListResult> {
+export async function getOrders(
+  params: OrderListParams = {},
+  scopeFilter?: SQL | null,
+  extraFilter?: SQL | null,
+): Promise<OrderListResult> {
   const page = params.page ?? 1;
   const pageSize = params.pageSize ?? 25;
   const offset = (page - 1) * pageSize;
@@ -89,6 +93,10 @@ export async function getOrders(params: OrderListParams = {}, scopeFilter?: SQL 
 
   if (scopeFilter) {
     conditions.push(scopeFilter);
+  }
+
+  if (extraFilter) {
+    conditions.push(extraFilter);
   }
 
   if (params.status) {

@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { contacts, companies } from '@/lib/db/schema';
-import { eq, or } from 'drizzle-orm';
+import { and, eq, or, sql } from 'drizzle-orm';
 import { getLookupTable, getSalesReps } from '@/lib/integrations/softpro';
 import type { SoftProLookupItem } from '@/lib/integrations/softpro';
 
@@ -147,6 +147,26 @@ async function syncEscrowOfficers(items: SyncRow[]): Promise<SyncContactsResult>
     if (!examiner) { skipped++; continue; }
 
     try {
+      // Dedupe guard: if this row is a PCT\ login-code entry and a
+      // canonical (non-PCT\ source_id) contact already exists with the
+      // same email, skip the insert/update entirely to avoid resurrecting
+      // the duplicate-officer problem.
+      const email = str(item, 'Email');
+      if (examiner.startsWith('PCT\\') && email) {
+        const canonical = await db.select({ id: contacts.id })
+          .from(contacts)
+          .where(and(
+            eq(contacts.email, email),
+            sql`(${contacts.sourceId} IS NOT NULL AND ${contacts.sourceId} NOT LIKE 'PCT\\%')`,
+          ))
+          .limit(1);
+
+        if (canonical.length > 0) {
+          skipped++;
+          continue;
+        }
+      }
+
       const [existing] = await db.select({ id: contacts.id })
         .from(contacts)
         .where(or(eq(contacts.closerExaminer, examiner), eq(contacts.softproLookupCode, examiner)))
@@ -158,7 +178,7 @@ async function syncEscrowOfficers(items: SyncRow[]): Promise<SyncContactsResult>
         officeLookupCode: str(item, 'Office LookupCode'),
         lookupCode: str(item, 'Office LookupCode'),
         officerName: str(item, 'Officer Name'),
-        email: str(item, 'Email'),
+        email,
         isEscrowOfficer: true,
         isActive: true,
         updatedAt: new Date(),

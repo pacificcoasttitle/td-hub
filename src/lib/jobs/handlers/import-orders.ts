@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { orders, orderProperties, orderStatusHistory, contacts } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getOrderDetails } from '@/lib/integrations/softpro';
 import { parseSoftProDate } from '@/lib/integrations/softpro/types';
 import type { SoftProOrderDetailItem } from '@/lib/integrations/softpro/types';
@@ -103,6 +103,8 @@ async function loadTitleOfficers(): Promise<ContactRecord[]> {
 
 export async function loadEscrowOfficers(): Promise<ContactRecord[]> {
   if (_escrowOfficers) return _escrowOfficers;
+  // Exclude PCT\ login-code rows so the resolver always lands on the
+  // canonical person-code contact, preventing duplicate-row regressions.
   _escrowOfficers = await db
     .select({
       id: contacts.id,
@@ -112,7 +114,10 @@ export async function loadEscrowOfficers(): Promise<ContactRecord[]> {
       officerName: contacts.officerName,
     })
     .from(contacts)
-    .where(eq(contacts.isEscrowOfficer, true));
+    .where(and(
+      eq(contacts.isEscrowOfficer, true),
+      sql`(${contacts.sourceId} IS NULL OR ${contacts.sourceId} NOT LIKE 'PCT\\%')`,
+    ));
   return _escrowOfficers;
 }
 

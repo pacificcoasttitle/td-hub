@@ -46,6 +46,8 @@ export default function HubPage() {
   const [officerFilter, setOfficerFilter] = useState<OfficerFilterValue>(null);
   const [tasksData, setTasksData] = useState<EscrowTasksResponse | null>(null);
   const [loadedOrders, setLoadedOrders] = useState<HubOrder[]>([]);
+  /** Full roster from GET /api/escrow/officers; null = fetch not succeeded yet (use page-derived fallback). */
+  const [officerRosterFromApi, setOfficerRosterFromApi] = useState<OfficerOption[] | null>(null);
 
   useEffect(() => {
     fetch('/api/form-options').catch(() => {});
@@ -57,6 +59,22 @@ export default function HubPage() {
   }, []);
 
   const isEscrowAssistant = role === 'escrow_assistant';
+
+  useEffect(() => {
+    if (!isEscrowAssistant) {
+      setOfficerRosterFromApi(null);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/escrow/officers')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { officers?: Array<{ id: number; name: string }> } | null) => {
+        if (cancelled || !d?.officers) return;
+        setOfficerRosterFromApi(d.officers.map((o) => ({ id: o.id, name: o.name })));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isEscrowAssistant]);
 
   // ─── Build orderId set per priority from the tasks response.
   // TEMPORARY: client-side filtering. Remove once /api/orders supports
@@ -70,10 +88,9 @@ export default function HubPage() {
     };
   }, [tasksData]);
 
-  // ─── Officer options derived from the loaded orders page.
-  // TEMPORARY: this only sees the current page of orders. Replace with a
-  // dedicated /api/escrow/officers endpoint when EW-2 follow-up ships.
+  // Officer dropdown: prefer GET /api/escrow/officers (full roster); until it loads or if unavailable, derive from the current page of orders.
   const officerOptions = useMemo<OfficerOption[]>(() => {
+    if (officerRosterFromApi !== null) return officerRosterFromApi;
     const map = new Map<number, string>();
     for (const o of loadedOrders) {
       if (typeof o.escrowOfficerId === 'number' && o.escrowOfficerName) {
@@ -81,7 +98,7 @@ export default function HubPage() {
       }
     }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [loadedOrders]);
+  }, [officerRosterFromApi, loadedOrders]);
 
   // ─── Combined client-side filter applied to the orders table.
   const clientFilter = useMemo(() => {

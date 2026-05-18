@@ -28,7 +28,8 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
     }
 
-    if (!(await canAccessOrder(session, orderId))) {
+    const canAccess = await canAccessOrder(session, orderId);
+    if (!canAccess) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
@@ -90,7 +91,8 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
     }
 
-    if (!(await canAccessOrder(session, orderId))) {
+    const canAccess = await canAccessOrder(session, orderId);
+    if (!canAccess) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 

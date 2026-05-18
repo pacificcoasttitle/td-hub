@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { OrdersHubTable, type HubOrder, type ActionType } from '@/components/shared/orders-hub-table';
 import { CplModal } from '@/components/shared/action-modals/cpl-modal';
@@ -8,11 +8,18 @@ import { PrelimModal } from '@/components/shared/action-modals/prelim-modal';
 import { ProposedInsuredModal } from '@/components/shared/action-modals/proposed-insured-modal';
 import { NotesModal } from '@/components/shared/action-modals/notes-modal';
 import { DetailModal } from '@/components/shared/action-modals/detail-modal';
-import { ModalShell } from '@/components/shared/action-modals/modal-shell';
+import { BatchProcessModal, type BatchResult } from '@/components/shared/batch-process-modal';
+import { QuickActionButton } from '@/components/admin/hub/quick-action-button';
+import { EscrowTaskCards } from '@/components/escrow/escrow-task-cards';
+import {
+  OfficerFilterChips,
+  type OfficerFilterValue,
+  type OfficerOption,
+} from '@/components/escrow/officer-filter-chips';
+import type { EscrowTasksResponse, TaskPriority } from '@/lib/domain/escrow/tasks';
 
 interface QuickResult { id: number; fileNumber: string; propertyStreet: string | null; propertyCity: string | null; propertyState: string | null; operationalStatus: string | null; }
 type ModalType = 'cpl' | 'prelim' | 'proposed' | 'notes' | 'detail' | null;
-interface BatchResult { order: HubOrder; ok: boolean; error?: string; }
 
 function oAddr(o: HubOrder | QuickResult) {
   return [o.propertyStreet, o.propertyCity, o.propertyState].filter(Boolean).join(', ') || '—';
@@ -33,9 +40,73 @@ export default function HubPage() {
   const [modalOrder, setModalOrder] = useState<HubOrder | null>(null);
   const [batchState, setBatchState] = useState<{ type: string; orders: HubOrder[]; current: number; results: BatchResult[] } | null>(null);
 
+  // ─── Role-aware state (escrow_assistant gets task cards + officer chips) ───
+  const [role, setRole] = useState<string | null>(null);
+  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | null>(null);
+  const [officerFilter, setOfficerFilter] = useState<OfficerFilterValue>(null);
+  const [tasksData, setTasksData] = useState<EscrowTasksResponse | null>(null);
+  const [loadedOrders, setLoadedOrders] = useState<HubOrder[]>([]);
+
   useEffect(() => {
     fetch('/api/form-options').catch(() => {});
     fetch('/api/branches').catch(() => {});
+    fetch('/api/auth/session')
+      .then((r) => r.ok ? r.json() : null)
+      .then((d: { role?: string } | null) => { if (d?.role) setRole(d.role); })
+      .catch(() => {});
+  }, []);
+
+  const isEscrowAssistant = role === 'escrow_assistant';
+
+  // ─── Build orderId set per priority from the tasks response.
+  // TEMPORARY: client-side filtering. Remove once /api/orders supports
+  // ?priority= and ?escrowOfficerId= query params.
+  const priorityOrderIds = useMemo<Record<TaskPriority, Set<number>> | null>(() => {
+    if (!tasksData) return null;
+    return {
+      1: new Set(tasksData.tasksByPriority['1'].map((t) => t.orderId)),
+      2: new Set(tasksData.tasksByPriority['2'].map((t) => t.orderId)),
+      3: new Set(tasksData.tasksByPriority['3'].map((t) => t.orderId)),
+    };
+  }, [tasksData]);
+
+  // ─── Officer options derived from the loaded orders page.
+  // TEMPORARY: this only sees the current page of orders. Replace with a
+  // dedicated /api/escrow/officers endpoint when EW-2 follow-up ships.
+  const officerOptions = useMemo<OfficerOption[]>(() => {
+    const map = new Map<number, string>();
+    for (const o of loadedOrders) {
+      if (typeof o.escrowOfficerId === 'number' && o.escrowOfficerName) {
+        map.set(o.escrowOfficerId, o.escrowOfficerName);
+      }
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [loadedOrders]);
+
+  // ─── Combined client-side filter applied to the orders table.
+  const clientFilter = useMemo(() => {
+    if (!isEscrowAssistant) return undefined;
+    if (priorityFilter === null && officerFilter === null) return undefined;
+    return (o: HubOrder): boolean => {
+      if (priorityFilter !== null) {
+        const ids = priorityOrderIds?.[priorityFilter];
+        if (!ids || !ids.has(o.id)) return false;
+      }
+      if (officerFilter === 'unassigned') {
+        if (o.escrowOfficerId !== null && o.escrowOfficerId !== undefined) return false;
+      } else if (typeof officerFilter === 'number') {
+        if (o.escrowOfficerId !== officerFilter) return false;
+      }
+      return true;
+    };
+  }, [isEscrowAssistant, priorityFilter, officerFilter, priorityOrderIds]);
+
+  const handleTasksLoaded = useCallback((resp: EscrowTasksResponse) => {
+    setTasksData(resp);
+  }, []);
+
+  const handleOrdersLoaded = useCallback((next: HubOrder[]) => {
+    setLoadedOrders(next);
   }, []);
 
   function handleSearchInput(v: string) {
@@ -121,9 +192,9 @@ export default function HubPage() {
           New Order
         </Link>
 
-        <QAButton label="Generate CPL" count={selCount} disabled={selCount === 0} onClick={() => handleQuickAction('cpl')} />
-        <QAButton label="Proposed Insured" count={selCount} disabled={selCount === 0} onClick={() => handleQuickAction('proposed')} />
-        <QAButton label="Find Prelim" count={selCount} disabled={selCount === 0} onClick={() => handleQuickAction('prelim')} />
+        <QuickActionButton label="Generate CPL" count={selCount} disabled={selCount === 0} onClick={() => handleQuickAction('cpl')} />
+        <QuickActionButton label="Proposed Insured" count={selCount} disabled={selCount === 0} onClick={() => handleQuickAction('proposed')} />
+        <QuickActionButton label="Find Prelim" count={selCount} disabled={selCount === 0} onClick={() => handleQuickAction('prelim')} />
 
         <div className="flex-1" />
 
@@ -168,6 +239,22 @@ export default function HubPage() {
         </div>
       </div>
 
+      {/* ─── Escrow Assistant signals (cards + officer chips) ─── */}
+      {isEscrowAssistant && (
+        <>
+          <EscrowTaskCards
+            activeFilter={priorityFilter}
+            onFilterChange={setPriorityFilter}
+            onTasksLoaded={handleTasksLoaded}
+          />
+          <OfficerFilterChips
+            activeOfficerId={officerFilter}
+            onChange={setOfficerFilter}
+            officers={officerOptions}
+          />
+        </>
+      )}
+
       {/* ─── Orders Table (checkboxes, no internal search/status) ─── */}
       <OrdersHubTable
         fetchUrl="/api/orders"
@@ -184,6 +271,9 @@ export default function HubPage() {
         pageSize={25}
         pollMs={30_000}
         className="flex-1 min-h-0"
+        showEscrowOfficerColumn={isEscrowAssistant}
+        clientFilter={clientFilter}
+        onOrdersLoaded={isEscrowAssistant ? handleOrdersLoaded : undefined}
       />
 
       {/* ─── Single-Order Modals (opened from row actions or single-select quick action) ─── */}
@@ -195,64 +285,9 @@ export default function HubPage() {
 
       {/* ─── Batch Processing Modal ─── */}
       {batchState && (
-        <ModalShell open onClose={() => setBatchState(null)}
-          title={`Batch ${batchState.type === 'cpl' ? 'CPL' : batchState.type === 'proposed' ? 'Proposed Insured' : 'Prelim Check'}`}
-          subtitle={`${batchState.orders.length} orders`}>
-          <div className="p-5 space-y-3">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                <div className="h-full bg-[#F26B2B] rounded-full transition-all" style={{ width: `${(batchState.current / batchState.orders.length) * 100}%` }} />
-              </div>
-              <span className="text-xs text-[#6B7280] shrink-0 tabular-nums">{batchState.current}/{batchState.orders.length}</span>
-            </div>
-            <div className="space-y-1 max-h-64 overflow-y-auto">
-              {batchState.orders.map((o, i) => {
-                const r = batchState.results[i];
-                return (
-                  <div key={o.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-50 text-sm">
-                    {r ? (
-                      r.ok
-                        ? <svg className="h-4 w-4 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                        : <svg className="h-4 w-4 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                    ) : i < batchState.current ? (
-                      <div className="w-4 h-4 border-2 border-gray-200 border-t-[#F26B2B] rounded-full animate-spin shrink-0" />
-                    ) : (
-                      <div className="w-4 h-4 rounded-full border border-gray-300 shrink-0" />
-                    )}
-                    <span className="font-mono text-xs font-medium text-[#1A1A2E]">{o.fileNumber}</span>
-                    <span className="text-xs text-[#6B7280] truncate">{oAddr(o)}</span>
-                    {r && !r.ok && <span className="text-[10px] text-red-500 ml-auto shrink-0">{r.error}</span>}
-                  </div>
-                );
-              })}
-            </div>
-            {batchState.current === batchState.orders.length && (
-              <div className="pt-3 border-t border-gray-100">
-                <p className="text-sm text-[#1A1A2E] font-medium">
-                  {batchState.results.filter(r => r.ok).length}/{batchState.orders.length} succeeded
-                </p>
-                <button onClick={() => setBatchState(null)} className="mt-3 w-full h-10 bg-[#F26B2B] text-white text-sm font-semibold rounded-lg hover:bg-[#E05A1A] transition-colors">
-                  Done
-                </button>
-              </div>
-            )}
-          </div>
-        </ModalShell>
+        <BatchProcessModal state={batchState} onClose={() => setBatchState(null)} />
       )}
     </div>
   );
 }
 
-function QAButton({ label, count, disabled, onClick }: { label: string; count: number; disabled: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} disabled={disabled}
-      className="px-3 h-9 border border-[#1B2A4A] text-[#1B2A4A] text-xs font-medium rounded-lg hover:bg-[#1B2A4A]/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1.5 shrink-0">
-      {label}
-      {count > 0 && (
-        <span className="bg-[#F26B2B] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">
-          {count}
-        </span>
-      )}
-    </button>
-  );
-}

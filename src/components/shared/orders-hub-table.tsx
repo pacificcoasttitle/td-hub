@@ -23,6 +23,8 @@ export interface HubOrder {
   clientName?: string | null;
   openedBy?: string | null;
   documents?: OrderDocuments;
+  escrowOfficerId?: number | null;
+  escrowOfficerName?: string | null;
 }
 
 export type ActionType = 'cpl' | 'prelim' | 'proposed' | 'notes' | 'detail' | 'fees' | 'resync' | 'retry_tp';
@@ -46,6 +48,9 @@ export interface OrdersHubTableProps {
   externalSearch?: string;
   externalStatus?: string;
   onAction?: (type: ActionType, order: HubOrder) => void;
+  showEscrowOfficerColumn?: boolean;
+  clientFilter?: (order: HubOrder) => boolean;
+  onOrdersLoaded?: (orders: HubOrder[]) => void;
 }
 
 /* ── Component ─────────────────────────────────────────────────────────────── */
@@ -55,6 +60,7 @@ export function OrdersHubTable({
   onOrderSelect, showSearch = true, showStatusFilter = true,
   pageSize = 25, pollMs = 0, className = '', feesHrefBuilder,
   showCheckboxes = false, onSelectedOrdersChange, externalSearch, externalStatus, onAction,
+  showEscrowOfficerColumn = false, clientFilter, onOrdersLoaded,
 }: OrdersHubTableProps) {
   const [orders, setOrders] = useState<HubOrder[]>([]);
   const [page, setPage] = useState(1);
@@ -92,12 +98,17 @@ export function OrdersHubTable({
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
         if (!d) return;
-        setOrders(d.orders ?? []);
+        const next: HubOrder[] = d.orders ?? [];
+        setOrders(next);
         setTotalPages(d.totalPages ?? 1);
         setTotal(d.total ?? 0);
+        onOrdersLoaded?.(next);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  // onOrdersLoaded intentionally excluded — it's a stable callback in practice
+  // and including it would trigger refetch storms on parent re-render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchUrl, page, pageSize, status, search]);
 
   useEffect(() => { setLoading(true); fetchOrders(); }, [fetchOrders]);
@@ -166,7 +177,8 @@ export function OrdersHubTable({
   const allOnPage = orders.length > 0 && orders.every(o => selectedMap.has(o.id));
   const someOnPage = orders.some(o => selectedMap.has(o.id));
 
-  const colCount = (showCheckboxes ? 1 : 0) + 7 + (hasActions ? 1 : 0);
+  const colCount = (showCheckboxes ? 1 : 0) + 7 + (showEscrowOfficerColumn ? 1 : 0) + (hasActions ? 1 : 0);
+  const visibleOrders = clientFilter ? orders.filter(clientFilter) : orders;
 
   return (
     <div className={`flex flex-col ${className}`}>
@@ -209,6 +221,7 @@ export function OrdersHubTable({
               <TH>Client</TH>
               <TH>Status</TH>
               <TH>Type</TH>
+              {showEscrowOfficerColumn && <TH>Escrow Officer</TH>}
               <TH>Opened</TH>
               {hasActions && <TH center>Actions</TH>}
             </tr>
@@ -216,9 +229,11 @@ export function OrdersHubTable({
           <tbody>
             {loading ? (
               <tr><td colSpan={colCount} className="text-center py-12 text-[#6B7280]">Loading…</td></tr>
-            ) : orders.length === 0 ? (
-              <tr><td colSpan={colCount} className="text-center py-12 text-[#6B7280]">No orders found.</td></tr>
-            ) : orders.map((o) => {
+            ) : visibleOrders.length === 0 ? (
+              <tr><td colSpan={colCount} className="text-center py-12 text-[#6B7280]">
+                {orders.length === 0 ? 'No orders found.' : 'No orders match the current filters.'}
+              </td></tr>
+            ) : visibleOrders.map((o) => {
               const checked = selectedMap.has(o.id);
               return (
                 <tr key={o.id}
@@ -243,6 +258,13 @@ export function OrdersHubTable({
                   <td className={`px-4 ${cellPy} text-[#4B5563] max-w-[160px] truncate`}>{o.clientName ?? '—'}</td>
                   <td className={`px-4 ${cellPy}`}><StatusBadge status={o.operationalStatus} /></td>
                   <td className={`px-4 ${cellPy} text-[#4B5563] capitalize`}>{o.transactionType?.replace(/_/g, ' ') ?? '—'}</td>
+                  {showEscrowOfficerColumn && (
+                    <td className={`px-4 ${cellPy} whitespace-nowrap`}>
+                      {o.escrowOfficerName
+                        ? <span className="text-[#1A1A2E]">{o.escrowOfficerName}</span>
+                        : <span className="text-red-600 font-medium">Unassigned</span>}
+                    </td>
+                  )}
                   <td className={`px-4 ${cellPy} text-[#4B5563] tabular-nums whitespace-nowrap`}>{o.openedAt ? new Date(o.openedAt).toLocaleDateString() : '—'}</td>
                   {hasActions && (
                     <td className={`px-4 ${cellPy}`} onClick={(e) => e.stopPropagation()}>
@@ -269,7 +291,10 @@ export function OrdersHubTable({
 
       {/* Pagination */}
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-t border-gray-200 bg-white text-sm">
-        <span className="text-[#6B7280]">{total} orders{selectedMap.size > 0 && <> · <span className="text-[#F26B2B] font-medium">{selectedMap.size} selected</span></>}</span>
+        <span className="text-[#6B7280]">
+          {clientFilter ? <>{visibleOrders.length} of {total} orders</> : <>{total} orders</>}
+          {selectedMap.size > 0 && <> · <span className="text-[#F26B2B] font-medium">{selectedMap.size} selected</span></>}
+        </span>
         <div className="flex items-center gap-2">
           <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}
             className="px-3 h-8 border border-gray-200 rounded-md text-[#4B5563] hover:bg-gray-50 disabled:opacity-30 transition-colors text-xs font-medium">‹ Prev</button>

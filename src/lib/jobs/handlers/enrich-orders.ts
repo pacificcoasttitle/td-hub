@@ -53,14 +53,6 @@ async function enrichOrder(order: { id: number; fileNumber: string }): Promise<E
   const data = apiResult.data;
   const updates: Record<string, number | null> = {};
 
-  const escrowCode = safeGet(data, 'EscrowCompanies', 'PersonLookupCode');
-  if (escrowCode) {
-    const id = await resolveContact(escrowCode);
-    updates.escrowOfficerId = id;
-    if (id) result.resolved.escrowOfficerId = id;
-    else result.unresolved.push(`EscrowCompanies.PersonLookupCode=${escrowCode}`);
-  }
-
   const lenderCode = safeGet(data, 'Lenders', 'PersonLookupCode');
   if (lenderCode) {
     const id = await resolveContact(lenderCode);
@@ -118,7 +110,6 @@ export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
     .from(orders)
     .where(
       and(
-        isNull(orders.escrowOfficerId),
         isNull(orders.lenderId),
         isNull(orders.listingAgentId),
         isNull(orders.titleCompanyId),

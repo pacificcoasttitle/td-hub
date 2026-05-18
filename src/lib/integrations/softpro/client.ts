@@ -51,6 +51,24 @@ async function logRequest(params: {
   }
 }
 
+function buildSuccessResponseMeta<T>(operation: string, raw: SoftProResponse<T>): Record<string, unknown> {
+  const meta: Record<string, unknown> = { status: raw.Status, message: raw.Message };
+
+  if (operation === 'get_order_details' && Array.isArray(raw.data)) {
+    const escrowOfficerValues = raw.data
+      .map((item) => (item as Partial<SoftProOrderDetailItem>).EscrowOfficer)
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .map((value) => value.trim());
+
+    meta.resultCount = raw.data.length;
+    meta.escrowOfficerCount = escrowOfficerValues.length;
+    // SoftPro GetOrderDetails is the canonical source for the internal PCT escrow officer.
+    meta.sampleEscrowOfficers = Array.from(new Set(escrowOfficerValues)).slice(0, 5);
+  }
+
+  return meta;
+}
+
 async function makeRequest<T>(
   method: 'GET' | 'POST',
   endpoint: string,
@@ -123,7 +141,7 @@ async function makeRequest<T>(
       httpStatus: response.status,
       requestMeta: { url, method, ...(options?.body ? { payload: options.body } : { queryParams: options?.queryParams }) },
       responseMeta: success
-        ? { status: raw.Status, message: raw.Message }
+        ? buildSuccessResponseMeta(operation, raw)
         : { status: raw.Status, message: raw.Message, rawBody: raw },
     });
 
@@ -232,6 +250,7 @@ export async function getOrderDetails(params: {
   dateFrom: string;
   dateTo?: string;
   orderNumber?: string;
+  orderId?: number;
 }): Promise<VendorResult<SoftProOrderDetailItem[]>> {
   return makeRequest<SoftProOrderDetailItem[]>('GET', SOFTPRO_ENDPOINTS.getOrderDetails, {
     queryParams: {
@@ -240,6 +259,7 @@ export async function getOrderDetails(params: {
       OrderNumber: params.orderNumber ?? '',
     },
     operation: 'get_order_details',
+    orderId: params.orderId,
     timeoutMs: 120_000,
   });
 }

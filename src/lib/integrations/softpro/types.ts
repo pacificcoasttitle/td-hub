@@ -36,6 +36,7 @@ export interface SoftProOrderDetailItem {
   State: string;
   Country: string;
   TitleOfficer: string;
+  EscrowOfficer?: string;
   SalesPrice: string;
   TransactionType: string;
   ProductType: string;

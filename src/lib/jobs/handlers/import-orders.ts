@@ -69,6 +69,7 @@ interface ContactRecord {
 
 let _salesReps: ContactRecord[] | null = null;
 let _titleOfficers: ContactRecord[] | null = null;
+let _escrowOfficers: ContactRecord[] | null = null;
 
 async function loadSalesReps(): Promise<ContactRecord[]> {
   if (_salesReps) return _salesReps;
@@ -98,6 +99,21 @@ async function loadTitleOfficers(): Promise<ContactRecord[]> {
     .from(contacts)
     .where(eq(contacts.isTitleOfficer, true));
   return _titleOfficers;
+}
+
+export async function loadEscrowOfficers(): Promise<ContactRecord[]> {
+  if (_escrowOfficers) return _escrowOfficers;
+  _escrowOfficers = await db
+    .select({
+      id: contacts.id,
+      firstName: contacts.firstName,
+      lastName: contacts.lastName,
+      fullName: contacts.fullName,
+      officerName: contacts.officerName,
+    })
+    .from(contacts)
+    .where(eq(contacts.isEscrowOfficer, true));
+  return _escrowOfficers;
 }
 
 function normalizeName(name: string | null | undefined): string {
@@ -136,6 +152,22 @@ function resolveTitleOfficerId(titleOfficer: string | null | undefined, officers
   return null;
 }
 
+export function resolveEscrowOfficerId(escrowOfficer: string | null | undefined, officers: ContactRecord[]): number | null {
+  if (!escrowOfficer || !escrowOfficer.trim()) return null;
+  const target = normalizeName(escrowOfficer);
+
+  for (const o of officers) {
+    if (normalizeName(o.officerName) === target) return o.id;
+  }
+  for (const o of officers) {
+    if (normalizeName(o.fullName) === target) return o.id;
+  }
+  for (const o of officers) {
+    if (constructedName(o) === target) return o.id;
+  }
+  return null;
+}
+
 // ─── Price Parsing ───────────────────────────────────────────────────────────
 
 function parseSalesPrice(raw: string | null | undefined): string | null {
@@ -153,6 +185,7 @@ export async function importOrdersFromSoftPro(
 ): Promise<ImportOrdersResult> {
   _salesReps = null;
   _titleOfficers = null;
+  _escrowOfficers = null;
 
   const apiResult = await getOrderDetails({
     dateFrom: payload.dateFrom,
@@ -178,6 +211,7 @@ export async function importOrdersFromSoftPro(
 
   const salesReps = await loadSalesReps();
   const titleOfficers = await loadTitleOfficers();
+  const escrowOfficers = await loadEscrowOfficers();
 
   let imported = 0;
   let updated = 0;
@@ -185,7 +219,7 @@ export async function importOrdersFromSoftPro(
 
   for (const item of items) {
     try {
-      await processOrderDetail(item, salesReps, titleOfficers);
+      await processOrderDetail(item, salesReps, titleOfficers, escrowOfficers);
 
       const existing = await db.select({ id: orders.id })
         .from(orders)
@@ -214,6 +248,7 @@ async function processOrderDetail(
   item: SoftProOrderDetailItem,
   salesReps: ContactRecord[],
   titleOfficers: ContactRecord[],
+  escrowOfficers: ContactRecord[],
 ): Promise<void> {
   const fileNumber = item.OrderNumber;
   if (!fileNumber) return;
@@ -228,6 +263,7 @@ async function processOrderDetail(
 
   const salesRepId = resolveSalesRepId(item.MarketingRep, salesReps);
   const titleOfficerId = resolveTitleOfficerId(item.TitleOfficer, titleOfficers);
+  const escrowOfficerId = resolveEscrowOfficerId(item.EscrowOfficer, escrowOfficers);
 
   const [existing] = await db
     .select({ id: orders.id, operationalStatus: orders.operationalStatus })
@@ -248,6 +284,7 @@ async function processOrderDetail(
       marketingSource: item.MarketingSource || null,
       salesRepId: salesRepId ?? undefined,
       titleOfficerId: titleOfficerId ?? undefined,
+      escrowOfficerId: escrowOfficerId ?? undefined,
       openedAt: openedAt ?? undefined,
       completedAt: completedAt ?? undefined,
       closedAt: closedAt ?? undefined,
@@ -277,6 +314,7 @@ async function processOrderDetail(
       marketingSource: item.MarketingSource || null,
       salesRepId,
       titleOfficerId,
+      escrowOfficerId,
       openedAt: openedAt ?? new Date(),
       completedAt,
       closedAt,

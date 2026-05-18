@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrder } from '@/lib/security/permissions';
 import { generateProposedInsured } from '@/lib/domain/documents/proposed-insured';
 import { db } from '@/lib/db/client';
 import { documents } from '@/lib/db/schema';
@@ -48,6 +49,10 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
     }
 
+    if (!(await canAccessOrder(session, orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
     const body = await req.json().catch(() => null);
     const parsed = bodySchema.safeParse(body);
     if (!parsed.success) {
@@ -87,6 +92,10 @@ export async function GET(
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    if (!(await canAccessOrder(session, orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const docs = await db

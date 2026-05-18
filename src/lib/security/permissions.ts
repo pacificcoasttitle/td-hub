@@ -1,3 +1,8 @@
+import { eq } from 'drizzle-orm';
+import { db } from '@/lib/db/client';
+import { orders } from '@/lib/db/schema';
+import type { SessionUser } from './auth';
+
 export interface NavItem {
   label: string;
   href: string;
@@ -57,4 +62,57 @@ export function canAccessFeature(role: string, feature: Feature): boolean {
 export function getDashboardRedirect(role: string): string | null {
   if (role === 'client') return '/client/orders';
   return null;
+}
+
+// ─── Per-Order Access ───────────────────────────────────────────────────────
+
+const ALL_ORDERS_ROLES = new Set(['super_admin', 'admin', 'cs_admin', 'open_order_team']);
+const ESCROW_ASSISTANT_ORDER_TYPES = new Set(['Title & Escrow', 'Escrow only']);
+
+/**
+ * Returns true if `session` is allowed to read/act on the order identified by
+ * `orderId`. Returns false for missing orders so callers can respond with 404
+ * and avoid leaking order existence to unauthorized roles.
+ *
+ * Routes should treat a `false` result as 404 (not 403) for all order-detail
+ * endpoints — see the FIX-2 ticket rationale.
+ */
+export async function canAccessOrder(
+  session: SessionUser,
+  orderId: number,
+): Promise<boolean> {
+  if (!Number.isInteger(orderId) || orderId <= 0) return false;
+
+  const [order] = await db
+    .select({
+      id: orders.id,
+      orderType: orders.orderType,
+      escrowOfficerId: orders.escrowOfficerId,
+      titleOfficerId: orders.titleOfficerId,
+      salesRepId: orders.salesRepId,
+    })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (!order) return false;
+
+  if (ALL_ORDERS_ROLES.has(session.role)) return true;
+
+  switch (session.role) {
+    case 'escrow_assistant':
+      return ESCROW_ASSISTANT_ORDER_TYPES.has(order.orderType ?? '');
+    case 'escrow_officer':
+      return session.contactId !== null && order.escrowOfficerId === session.contactId;
+    case 'title_officer':
+      return session.contactId !== null && order.titleOfficerId === session.contactId;
+    case 'sales_rep':
+    case 'sales_manager':
+      // TODO: switch to validateSalesAccess() once it covers sales_manager
+      // hierarchy + branch scopes. For now use direct ownership which matches
+      // existing list-scoping behaviour for sales_rep.
+      return session.contactId !== null && order.salesRepId === session.contactId;
+    default:
+      return false;
+  }
 }

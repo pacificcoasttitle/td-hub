@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrder } from '@/lib/security/permissions';
 import { getOrderById } from '@/lib/domain/orders/service';
 import { db } from '@/lib/db/client';
 import { contacts, companies, orderExternalRefs } from '@/lib/db/schema';
@@ -17,6 +18,10 @@ export async function GET(
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    if (!(await canAccessOrder(session, orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const order = await getOrderById(orderId);

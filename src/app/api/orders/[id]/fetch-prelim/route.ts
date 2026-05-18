@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrder } from '@/lib/security/permissions';
 import { getOrderById } from '@/lib/domain/orders/service';
 import { fetchPrelimsForOrder } from '@/lib/jobs/handlers/fetch-prelims';
 
@@ -23,6 +24,10 @@ export async function POST(
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    if (!(await canAccessOrder(session, orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const order = await getOrderById(orderId);

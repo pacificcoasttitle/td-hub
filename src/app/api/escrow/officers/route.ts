@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { and, eq, sql } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
+import { internalContactFilter } from '@/lib/domain/contacts/filters';
 import { db } from '@/lib/db/client';
 import { contacts, orders } from '@/lib/db/schema';
 
@@ -45,12 +46,7 @@ export async function GET() {
       )`,
     })
     .from(contacts)
-    .where(
-      and(
-        eq(contacts.isEscrowOfficer, true),
-        sql`(${contacts.sourceId} is null or ${contacts.sourceId} not like 'PCT\\%')`,
-      ),
-    )
+    .where(and(eq(contacts.isEscrowOfficer, true), internalContactFilter()))
     .orderBy(officerDisplayName);
 
   const officers = rows.map((r) => ({

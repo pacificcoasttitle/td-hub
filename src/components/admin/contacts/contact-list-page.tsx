@@ -31,6 +31,8 @@ interface Props {
   title: string;
   subtitle: string;
   typeFilter: string;
+  /** Passed as ?scope= to /api/contacts (internal/external roster split). */
+  scope?: 'internal' | 'external' | 'all';
   showCompanyColumn?: boolean;
   showManagerColumn?: boolean;
   readOnly?: boolean;
@@ -47,7 +49,7 @@ function cName(c: Contact) {
   return c.fullName || [c.firstName, c.lastName].filter(Boolean).join(' ') || '—';
 }
 
-export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn = true, showManagerColumn = false, readOnly = false }: Props) {
+export function ContactListPage({ title, subtitle, typeFilter, scope = 'all', showCompanyColumn = true, showManagerColumn = false, readOnly = false }: Props) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -70,13 +72,14 @@ export function ContactListPage({ title, subtitle, typeFilter, showCompanyColumn
     setError(null);
     const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), active: activeFilter, sort: 'fullName', order: 'asc' });
     if (typeFilter) p.set('type', typeFilter);
+    if (scope && scope !== 'all') p.set('scope', scope);
     if (search) p.set('search', search);
     fetch(`/api/contacts?${p}`)
       .then(r => { if (!r.ok) throw new Error(`Failed (${r.status})`); return r.json(); })
       .then(d => { if (id === fetchCount.current) { setContacts(d.contacts ?? []); setTotal(d.total ?? 0); } })
       .catch(e => { if (id === fetchCount.current) setError(e.message); })
       .finally(() => { if (id === fetchCount.current) setLoading(false); });
-  }, [page, search, activeFilter, typeFilter]);
+  }, [page, search, activeFilter, typeFilter, scope]);
 
   useEffect(() => { fetchContacts(); }, [fetchContacts]);
 

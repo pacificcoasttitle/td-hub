@@ -22,7 +22,8 @@ const NAV: NavEntry[] = [
 
   { kind: 'section', label: 'PCT Team', icon: <I d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />, children: [
     { label: 'Title Officers', href: '/contacts/title-officers' },
-    { label: 'Escrow Officers', href: '/contacts/escrow-officers' },
+    { label: 'Internal Escrow Officers', href: '/contacts/escrow-officers' },
+    { label: 'External Escrow Officers', href: '/contacts/external-escrow-officers' },
     { label: 'Sales Reps', href: '/contacts/sales-reps' },
   ]},
 

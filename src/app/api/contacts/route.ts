@@ -16,6 +16,7 @@ const querySchema = z.object({
   search: z.string().optional(),
   role: z.string().optional(),
   type: z.string().optional(),
+  scope: z.enum(['internal', 'external', 'all']).optional(),
   active: z.string().optional(),
   sort: z.string().optional(),
   order: z.enum(['asc', 'desc']).optional(),
@@ -65,9 +66,12 @@ export async function GET(req: NextRequest) {
     const rawParams = Object.fromEntries(req.nextUrl.searchParams);
     const params = querySchema.parse(rawParams);
 
+    const scope = params.scope === 'all' ? undefined : params.scope;
+
     const result = await getContacts({
       ...params,
       role: params.role ?? params.type,
+      scope,
       active: params.active === 'true' ? true : params.active === 'false' ? false : undefined,
       sortField: params.sort,
       sortDir: params.order,

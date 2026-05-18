@@ -411,6 +411,19 @@ async function syncCompanyType(config: CompanySyncConfig, items: SyncRow[]): Pro
   return { entityType: config.entityType, totalFetched: items.length, created, updated, skipped, errors };
 }
 
+/** Flag contacts assigned on any order as escrow officers (covers external SoftPro persons). Idempotent. */
+async function reconcileEscrowOfficerFlagsFromOrders(): Promise<void> {
+  await db.execute(sql`
+    UPDATE contacts AS c
+    SET is_escrow_officer = true
+    WHERE EXISTS (
+      SELECT 1 FROM orders AS o
+      WHERE o.escrow_officer_id = c.id
+    )
+      AND c.is_escrow_officer = false
+  `);
+}
+
 // ─── Sync configs ────────────────────────────────────────────────────────
 
 const COMPANY_CONFIGS: Record<string, CompanySyncConfig> = {
@@ -479,30 +492,41 @@ export async function handleSyncContacts(
     return emptyResult(entityType, `Invalid entity type: ${entityType}`);
   }
 
+  let result: SyncContactsResult;
+
   if (entityType === 'Sales Rep') {
-    return syncSalesReps();
-  }
+    result = await syncSalesReps();
+  } else {
+    const userType = entityType;
+    const adapterResult = await getLookupTable(userType);
 
-  const userType = entityType;
-  const adapterResult = await getLookupTable(userType);
+    if (!adapterResult.success || !adapterResult.data) {
+      return emptyResult(entityType, adapterResult.error?.message ?? 'Failed to fetch lookup table');
+    }
 
-  if (!adapterResult.success || !adapterResult.data) {
-    return emptyResult(entityType, adapterResult.error?.message ?? 'Failed to fetch lookup table');
-  }
+    const items = adapterResult.data;
 
-  const items = adapterResult.data;
-
-  switch (entityType) {
-    case 'Order Contact - Person':
-      return syncOpenContacts(items);
-    case 'Title Officer':
-      return syncTitleOfficers(items);
-    case 'Escrow Officer':
-      return syncEscrowOfficers(items);
-    default: {
-      const config = COMPANY_CONFIGS[entityType];
-      if (config) return syncCompanyType(config, items);
-      return emptyResult(entityType, `No handler for: ${entityType}`);
+    switch (entityType) {
+      case 'Order Contact - Person':
+        result = await syncOpenContacts(items);
+        break;
+      case 'Title Officer':
+        result = await syncTitleOfficers(items);
+        break;
+      case 'Escrow Officer':
+        result = await syncEscrowOfficers(items);
+        break;
+      default: {
+        const config = COMPANY_CONFIGS[entityType];
+        if (config) {
+          result = await syncCompanyType(config, items);
+        } else {
+          return emptyResult(entityType, `No handler for: ${entityType}`);
+        }
+      }
     }
   }
+
+  await reconcileEscrowOfficerFlagsFromOrders();
+  return result;
 }

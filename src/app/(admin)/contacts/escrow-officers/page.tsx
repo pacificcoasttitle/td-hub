@@ -1,5 +1,13 @@
 import { ContactListPage } from '@/components/admin/contacts/contact-list-page';
 
 export default function EscrowOfficersPage() {
-  return <ContactListPage title="Escrow Officers" subtitle="Internal staff — escrow officers synced from SoftPro" typeFilter="escrow_officer" showCompanyColumn={false} />;
+  return (
+    <ContactListPage
+      title="Internal Escrow Officers"
+      subtitle="PCT internal escrow team"
+      typeFilter="escrow_officer"
+      scope="internal"
+      showCompanyColumn={false}
+    />
+  );
 }

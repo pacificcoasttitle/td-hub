@@ -1,6 +1,7 @@
 import { db } from '@/lib/db/client';
 import { contacts, companies } from '@/lib/db/schema';
 import { eq, desc, asc, sql, ilike, or, and, SQL } from 'drizzle-orm';
+import { externalContactFilter, internalContactFilter } from '@/lib/domain/contacts/filters';
 
 // ─── Role → Boolean Flag Mapping ──────────────────────────────────────────────
 
@@ -37,6 +38,8 @@ export interface ContactListParams {
   pageSize?: number;
   search?: string;
   role?: string;
+  /** Narrow roster for escrow_officer lists: internal PCT vs external counterparties. */
+  scope?: 'internal' | 'external' | 'all';
   active?: boolean;
   sortField?: string;
   sortDir?: 'asc' | 'desc';
@@ -82,6 +85,12 @@ export async function getContacts(params: ContactListParams = {}): Promise<Conta
     if (boolFilter) {
       conditions.push(boolFilter);
     }
+  }
+
+  if (params.scope === 'internal') {
+    conditions.push(internalContactFilter());
+  } else if (params.scope === 'external') {
+    conditions.push(externalContactFilter());
   }
 
   if (params.active !== undefined) {

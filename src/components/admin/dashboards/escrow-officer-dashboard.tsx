@@ -6,6 +6,7 @@ import {
   MetricCard, MetricCardSkeleton, SectionCard,
   ErrorBanner, formatRelative,
 } from './shared';
+import { EscrowTaskCards } from '@/components/escrow/escrow-task-cards';
 import { OrdersHubTable } from '@/components/shared/orders-hub-table';
 
 interface EOStats {
@@ -26,6 +27,7 @@ interface DocActivity {
 
 
 export function EscrowOfficerDashboard({ displayName }: { displayName: string | null }) {
+  const [priorityFilter, setPriorityFilter] = useState<1 | 2 | 3 | null>(null);
   const [stats, setStats] = useState<EOStats | null>(null);
   const [docActivity, setDocActivity] = useState<DocActivity[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,10 +106,20 @@ export function EscrowOfficerDashboard({ displayName }: { displayName: string | 
         </SectionCard>
       </div>
 
+      {/* Task signals — filter state is passed to My Orders; server-side ?priority= not implemented yet */}
+      <div className="mb-6">
+        <SectionCard title="My Tasks">
+          <EscrowTaskCards
+            onFilterChange={setPriorityFilter}
+            activeFilter={priorityFilter}
+          />
+        </SectionCard>
+      </div>
+
       {/* Row 3: My Orders with modal actions */}
       <SectionCard title="My Orders" action={{ label: 'View all →', href: '/orders' }}>
         <OrdersHubTable
-          fetchUrl="/api/dashboard/escrow-officer/orders"
+          fetchUrl={`/api/dashboard/escrow-officer/orders${priorityFilter ? `?priority=${priorityFilter}` : ''}`}
           actions={['cpl', 'proposed', 'notes', 'detail']}
           accentColor="#C5A55A"
           showSearch

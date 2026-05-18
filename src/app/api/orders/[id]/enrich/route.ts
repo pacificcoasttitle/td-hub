@@ -1,22 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrder } from '@/lib/security/permissions';
 import { enrichSingleOrder } from '@/lib/jobs/handlers/enrich-orders';
-
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
 
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
-  if (!session || !ADMIN_ROLES.includes(session.role)) {
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const { id } = await params;
-  const orderId = Number(id);
-  if (!orderId || isNaN(orderId)) {
+  const orderId = parseInt(id, 10);
+  if (isNaN(orderId)) {
     return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+  }
+
+  if (!(await canAccessOrder(session, orderId))) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
   try {

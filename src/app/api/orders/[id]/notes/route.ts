@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrder } from '@/lib/security/permissions';
 import { db } from '@/lib/db/client';
 import { orders, orderNotes } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
@@ -25,6 +26,10 @@ export async function POST(
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    if (!(await canAccessOrder(session, orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const body = await req.json().catch(() => null);
@@ -83,6 +88,10 @@ export async function GET(
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    if (!(await canAccessOrder(session, orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const rows = await db

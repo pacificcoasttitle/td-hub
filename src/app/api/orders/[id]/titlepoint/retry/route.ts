@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrder } from '@/lib/security/permissions';
 import { retryFailedSearches } from '@/lib/domain/titlepoint/service';
 
 export const maxDuration = 300;
@@ -18,6 +19,10 @@ export async function POST(
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    if (!(await canAccessOrder(session, orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const result = await retryFailedSearches(orderId, session.id ?? 'admin');

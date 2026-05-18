@@ -4,8 +4,7 @@ import { db } from '@/lib/db/client';
 import { documentRequests, eventOutbox } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
-
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin'];
+import { canAccessOrder } from '@/lib/security/permissions';
 
 const fulfillSchema = z.object({
   requestId: z.number().int().positive(),
@@ -17,7 +16,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
-  if (!session || !ADMIN_ROLES.includes(session.role)) {
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -26,6 +25,10 @@ export async function GET(
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    if (!(await canAccessOrder(session, orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const rows = await db
@@ -44,7 +47,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
-  if (!session || !ADMIN_ROLES.includes(session.role)) {
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -53,6 +56,10 @@ export async function PATCH(
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    if (!(await canAccessOrder(session, orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const body = await req.json().catch(() => null);

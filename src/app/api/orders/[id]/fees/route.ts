@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrder } from '@/lib/security/permissions';
 import { getOrderByIdSimple } from '@/lib/domain/orders/service';
 import { getFees } from '@/lib/integrations/softpro';
 
@@ -12,16 +13,15 @@ export async function GET(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'sales_rep', 'title_officer', 'escrow_officer'];
-  if (!ADMIN_ROLES.includes(session.role)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
-
   try {
     const { id } = await params;
     const orderId = parseInt(id, 10);
     if (isNaN(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+
+    if (!(await canAccessOrder(session, orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const order = await getOrderByIdSimple(orderId);

@@ -7,7 +7,6 @@ import type { EscrowTasksResponse, TaskPriority } from '@/lib/domain/escrow/task
 export interface EscrowTaskCardsProps {
   activeFilter: TaskPriority | null;
   onFilterChange: (priority: TaskPriority | null) => void;
-  onTasksLoaded?: (resp: EscrowTasksResponse) => void;
 }
 
 type CardConfig = {
@@ -58,7 +57,7 @@ const CARDS: CardConfig[] = [
   },
 ];
 
-export function EscrowTaskCards({ activeFilter, onFilterChange, onTasksLoaded }: EscrowTaskCardsProps) {
+export function EscrowTaskCards({ activeFilter, onFilterChange }: EscrowTaskCardsProps) {
   const [data, setData] = useState<EscrowTasksResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +74,6 @@ export function EscrowTaskCards({ activeFilter, onFilterChange, onTasksLoaded }:
       .then((resp) => {
         if (cancelled) return;
         setData(resp);
-        onTasksLoaded?.(resp);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -85,7 +83,7 @@ export function EscrowTaskCards({ activeFilter, onFilterChange, onTasksLoaded }:
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [onTasksLoaded]);
+  }, []);
 
   function handleClick(priority: TaskPriority) {
     onFilterChange(activeFilter === priority ? null : priority);

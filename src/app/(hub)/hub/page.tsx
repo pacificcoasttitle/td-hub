@@ -14,9 +14,8 @@ import { EscrowTaskCards } from '@/components/escrow/escrow-task-cards';
 import {
   OfficerFilterChips,
   type OfficerFilterValue,
-  type OfficerOption,
 } from '@/components/escrow/officer-filter-chips';
-import type { EscrowTasksResponse, TaskPriority } from '@/lib/domain/escrow/tasks';
+import type { TaskPriority } from '@/lib/domain/escrow/tasks';
 
 interface QuickResult { id: number; fileNumber: string; propertyStreet: string | null; propertyCity: string | null; propertyState: string | null; operationalStatus: string | null; }
 type ModalType = 'cpl' | 'prelim' | 'proposed' | 'notes' | 'detail' | null;
@@ -44,10 +43,13 @@ export default function HubPage() {
   const [role, setRole] = useState<string | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | null>(null);
   const [officerFilter, setOfficerFilter] = useState<OfficerFilterValue>(null);
-  const [tasksData, setTasksData] = useState<EscrowTasksResponse | null>(null);
-  const [loadedOrders, setLoadedOrders] = useState<HubOrder[]>([]);
-  /** Full roster from GET /api/escrow/officers; null = fetch not succeeded yet (use page-derived fallback). */
-  const [officerRosterFromApi, setOfficerRosterFromApi] = useState<OfficerOption[] | null>(null);
+
+  useEffect(() => {
+    if (role !== 'escrow_assistant') {
+      setPriorityFilter(null);
+      setOfficerFilter(null);
+    }
+  }, [role]);
 
   useEffect(() => {
     fetch('/api/form-options').catch(() => {});
@@ -60,71 +62,21 @@ export default function HubPage() {
 
   const isEscrowAssistant = role === 'escrow_assistant';
 
-  useEffect(() => {
-    if (!isEscrowAssistant) {
-      setOfficerRosterFromApi(null);
-      return;
+  const ordersFetchUrl = useMemo(() => {
+    let base = '/api/orders';
+    const params = new URLSearchParams();
+    if (priorityFilter !== null && isEscrowAssistant) {
+      params.set('priority', String(priorityFilter));
     }
-    let cancelled = false;
-    fetch('/api/escrow/officers')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { officers?: Array<{ id: number; name: string }> } | null) => {
-        if (cancelled || !d?.officers) return;
-        setOfficerRosterFromApi(d.officers.map((o) => ({ id: o.id, name: o.name })));
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [isEscrowAssistant]);
-
-  // ─── Build orderId set per priority from the tasks response.
-  // TEMPORARY: client-side filtering. Remove once /api/orders supports
-  // ?priority= and ?escrowOfficerId= query params.
-  const priorityOrderIds = useMemo<Record<TaskPriority, Set<number>> | null>(() => {
-    if (!tasksData) return null;
-    return {
-      1: new Set(tasksData.tasksByPriority['1'].map((t) => t.orderId)),
-      2: new Set(tasksData.tasksByPriority['2'].map((t) => t.orderId)),
-      3: new Set(tasksData.tasksByPriority['3'].map((t) => t.orderId)),
-    };
-  }, [tasksData]);
-
-  // Officer dropdown: prefer GET /api/escrow/officers (full roster); until it loads or if unavailable, derive from the current page of orders.
-  const officerOptions = useMemo<OfficerOption[]>(() => {
-    if (officerRosterFromApi !== null) return officerRosterFromApi;
-    const map = new Map<number, string>();
-    for (const o of loadedOrders) {
-      if (typeof o.escrowOfficerId === 'number' && o.escrowOfficerName) {
-        map.set(o.escrowOfficerId, o.escrowOfficerName);
-      }
+    if (officerFilter === 'unassigned' && isEscrowAssistant) {
+      params.set('escrowOfficerId', 'null');
+    } else if (typeof officerFilter === 'number' && isEscrowAssistant) {
+      params.set('escrowOfficerId', String(officerFilter));
     }
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [officerRosterFromApi, loadedOrders]);
-
-  // ─── Combined client-side filter applied to the orders table.
-  const clientFilter = useMemo(() => {
-    if (!isEscrowAssistant) return undefined;
-    if (priorityFilter === null && officerFilter === null) return undefined;
-    return (o: HubOrder): boolean => {
-      if (priorityFilter !== null) {
-        const ids = priorityOrderIds?.[priorityFilter];
-        if (!ids || !ids.has(o.id)) return false;
-      }
-      if (officerFilter === 'unassigned') {
-        if (o.escrowOfficerId !== null && o.escrowOfficerId !== undefined) return false;
-      } else if (typeof officerFilter === 'number') {
-        if (o.escrowOfficerId !== officerFilter) return false;
-      }
-      return true;
-    };
-  }, [isEscrowAssistant, priorityFilter, officerFilter, priorityOrderIds]);
-
-  const handleTasksLoaded = useCallback((resp: EscrowTasksResponse) => {
-    setTasksData(resp);
-  }, []);
-
-  const handleOrdersLoaded = useCallback((next: HubOrder[]) => {
-    setLoadedOrders(next);
-  }, []);
+    const qs = params.toString();
+    if (qs) base = `${base}?${qs}`;
+    return base;
+  }, [priorityFilter, officerFilter, isEscrowAssistant]);
 
   function handleSearchInput(v: string) {
     setSearchQuery(v);
@@ -262,19 +214,17 @@ export default function HubPage() {
           <EscrowTaskCards
             activeFilter={priorityFilter}
             onFilterChange={setPriorityFilter}
-            onTasksLoaded={handleTasksLoaded}
           />
           <OfficerFilterChips
             activeOfficerId={officerFilter}
             onChange={setOfficerFilter}
-            officers={officerOptions}
           />
         </>
       )}
 
       {/* ─── Orders Table (checkboxes, no internal search/status) ─── */}
       <OrdersHubTable
-        fetchUrl="/api/orders"
+        fetchUrl={ordersFetchUrl}
         actions={['cpl', 'proposed', 'prelim', 'notes', 'detail', 'retry_tp', 'resync']}
         compact
         accentColor="#F26B2B"
@@ -289,8 +239,6 @@ export default function HubPage() {
         pollMs={30_000}
         className="flex-1 min-h-0"
         showEscrowOfficerColumn={isEscrowAssistant}
-        clientFilter={clientFilter}
-        onOrdersLoaded={isEscrowAssistant ? handleOrdersLoaded : undefined}
       />
 
       {/* ─── Single-Order Modals (opened from row actions or single-select quick action) ─── */}

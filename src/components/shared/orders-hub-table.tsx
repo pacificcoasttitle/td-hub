@@ -49,8 +49,6 @@ export interface OrdersHubTableProps {
   externalStatus?: string;
   onAction?: (type: ActionType, order: HubOrder) => void;
   showEscrowOfficerColumn?: boolean;
-  clientFilter?: (order: HubOrder) => boolean;
-  onOrdersLoaded?: (orders: HubOrder[]) => void;
 }
 
 /* ── Component ─────────────────────────────────────────────────────────────── */
@@ -60,7 +58,7 @@ export function OrdersHubTable({
   onOrderSelect, showSearch = true, showStatusFilter = true,
   pageSize = 25, pollMs = 0, className = '', feesHrefBuilder,
   showCheckboxes = false, onSelectedOrdersChange, externalSearch, externalStatus, onAction,
-  showEscrowOfficerColumn = false, clientFilter, onOrdersLoaded,
+  showEscrowOfficerColumn = false,
 }: OrdersHubTableProps) {
   const [orders, setOrders] = useState<HubOrder[]>([]);
   const [page, setPage] = useState(1);
@@ -102,13 +100,9 @@ export function OrdersHubTable({
         setOrders(next);
         setTotalPages(d.totalPages ?? 1);
         setTotal(d.total ?? 0);
-        onOrdersLoaded?.(next);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  // onOrdersLoaded intentionally excluded — it's a stable callback in practice
-  // and including it would trigger refetch storms on parent re-render.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchUrl, page, pageSize, status, search]);
 
   useEffect(() => { setLoading(true); fetchOrders(); }, [fetchOrders]);
@@ -133,10 +127,14 @@ export function OrdersHubTable({
   }, [isClient]);
 
   useEffect(() => {
+    setPage(1);
+  }, [fetchUrl]);
+
+  useEffect(() => {
     setSelectedMap(new Map());
     onSelectedOrdersChange?.([]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, status]);
+  }, [search, status, fetchUrl]);
 
   function handleSearchInput(v: string) {
     setSearchInput(v);
@@ -178,7 +176,6 @@ export function OrdersHubTable({
   const someOnPage = orders.some(o => selectedMap.has(o.id));
 
   const colCount = (showCheckboxes ? 1 : 0) + 7 + (showEscrowOfficerColumn ? 1 : 0) + (hasActions ? 1 : 0);
-  const visibleOrders = clientFilter ? orders.filter(clientFilter) : orders;
 
   return (
     <div className={`flex flex-col ${className}`}>
@@ -229,11 +226,9 @@ export function OrdersHubTable({
           <tbody>
             {loading ? (
               <tr><td colSpan={colCount} className="text-center py-12 text-[#6B7280]">Loading…</td></tr>
-            ) : visibleOrders.length === 0 ? (
-              <tr><td colSpan={colCount} className="text-center py-12 text-[#6B7280]">
-                {orders.length === 0 ? 'No orders found.' : 'No orders match the current filters.'}
-              </td></tr>
-            ) : visibleOrders.map((o) => {
+            ) : orders.length === 0 ? (
+              <tr><td colSpan={colCount} className="text-center py-12 text-[#6B7280]">No orders found.</td></tr>
+            ) : orders.map((o) => {
               const checked = selectedMap.has(o.id);
               return (
                 <tr key={o.id}
@@ -292,7 +287,7 @@ export function OrdersHubTable({
       {/* Pagination */}
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-t border-gray-200 bg-white text-sm">
         <span className="text-[#6B7280]">
-          {clientFilter ? <>{visibleOrders.length} of {total} orders</> : <>{total} orders</>}
+          {total} orders
           {selectedMap.size > 0 && <> · <span className="text-[#F26B2B] font-medium">{selectedMap.size} selected</span></>}
         </span>
         <div className="flex items-center gap-2">

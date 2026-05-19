@@ -8,6 +8,7 @@ import {
   ActionsDropdown, SkeletonRow, PagBtn,
   formatAddress, buildPageRange,
 } from './order-table-parts';
+import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
 
 export interface Order {
   id: number;
@@ -209,6 +210,10 @@ function OrderRow({ order, rowNum, onClick, onAction }: {
   const emailColor = EMAIL_COLORS[emailSt] ?? 'bg-gray-100 text-gray-500';
   const fullAddr = formatAddress(order.property);
   const truncAddr = fullAddr.length > 40 ? fullAddr.slice(0, 40) + '…' : fullAddr;
+  const createdByDisplay = formatCreatedBy(order.createdByName);
+  const createdByClass = createdByVariant(order.createdByName) === 'system'
+    ? 'text-[#9CA3AF] italic'
+    : 'text-[#6B7280]';
 
   return (
     <tr onClick={onClick} className="hover:bg-gray-50 cursor-pointer transition-colors">
@@ -219,7 +224,7 @@ function OrderRow({ order, rowNum, onClick, onAction }: {
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.transactionType ?? '—'}</td>
       <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{order.productType ?? '—'}</td>
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.salesRepName ?? '—'}</td>
-      <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{order.createdByName ?? '—'}</td>
+      <td className={`px-4 py-3 whitespace-nowrap ${createdByClass}`}>{createdByDisplay}</td>
       <td className="px-4 py-3 whitespace-nowrap">
         {order.source ? (
           <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${SOURCE_STYLES[order.source] ?? 'bg-gray-100 text-gray-600'}`}>

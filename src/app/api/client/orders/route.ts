@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { orders, orderProperties } from '@/lib/db/schema';
+import { orders, orderProperties, profiles } from '@/lib/db/schema';
 import { eq, desc, sql, ilike, or, and, inArray, SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { getSession } from '@/lib/security/auth';
 import { getAccessibleOrderIds } from '@/lib/security/client-scope';
+
+const createdByProfile = alias(profiles, 'created_by_profile');
 
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
@@ -63,9 +66,11 @@ export async function GET(req: NextRequest) {
           address: orderProperties.address,
           city: orderProperties.city,
           state: orderProperties.state,
+          createdByName: createdByProfile.displayName,
         })
         .from(orders)
         .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
+        .leftJoin(createdByProfile, eq(orders.createdBy, createdByProfile.id))
         .where(where)
         .orderBy(desc(orders.openedAt))
         .limit(params.pageSize)

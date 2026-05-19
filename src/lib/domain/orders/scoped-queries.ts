@@ -1,5 +1,5 @@
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, documents, contacts } from '@/lib/db/schema';
+import { orders, orderProperties, documents, contacts, profiles } from '@/lib/db/schema';
 import { eq, desc, sql, and, SQL, inArray, or, ilike } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
@@ -8,6 +8,7 @@ type ScopeColumn = typeof orders.salesRepId | typeof orders.titleOfficerId | typ
 // ─── Scoped Order List ──────────────────────────────────────────────────────
 
 const salesRepContact = alias(contacts, 'sales_rep_contact');
+const createdByProfile = alias(profiles, 'created_by_profile');
 
 export interface ScopedOrderListParams {
   scopeColumn: ScopeColumn;
@@ -80,6 +81,7 @@ export async function getScopedOrders(params: ScopedOrderListParams) {
 
   const orderJoin = eq(orders.id, orderProperties.orderId);
   const repJoin = eq(orders.salesRepId, salesRepContact.id);
+  const createdByJoin = eq(orders.createdBy, createdByProfile.id);
 
   const [rows, countResult] = await Promise.all([
     db.select({
@@ -91,10 +93,12 @@ export async function getScopedOrders(params: ScopedOrderListParams) {
       address: orderProperties.address, city: orderProperties.city,
       state: orderProperties.state, fullAddress: orderProperties.fullAddress,
       salesRepName: salesRepContact.fullName,
+      createdByName: createdByProfile.displayName,
     })
       .from(orders)
       .leftJoin(orderProperties, orderJoin)
       .leftJoin(salesRepContact, repJoin)
+      .leftJoin(createdByProfile, createdByJoin)
       .where(where)
       .orderBy(desc(orders.openedAt))
       .limit(pageSize)

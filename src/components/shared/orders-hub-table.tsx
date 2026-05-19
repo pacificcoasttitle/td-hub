@@ -6,6 +6,7 @@ import {
 } from '@/components/shared/action-modals';
 import { STATUS_OPTS, STATUS_LABELS, TH, StatusBadge, DocBadges, ActionsDropdown } from './orders-hub-parts';
 import type { OrderDocuments } from './orders-hub-parts';
+import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -25,6 +26,7 @@ export interface HubOrder {
   clientEmail?: string | null;
   clientCompany?: string | null;
   openedBy?: string | null;
+  createdByName?: string | null;
   documents?: OrderDocuments;
   escrowOfficerId?: number | null;
   escrowOfficerName?: string | null;
@@ -178,7 +180,7 @@ export function OrdersHubTable({
   const allOnPage = orders.length > 0 && orders.every(o => selectedMap.has(o.id));
   const someOnPage = orders.some(o => selectedMap.has(o.id));
 
-  const colCount = (showCheckboxes ? 1 : 0) + 7 + (showEscrowOfficerColumn ? 1 : 0) + (hasActions ? 1 : 0);
+  const colCount = (showCheckboxes ? 1 : 0) + 8 + (showEscrowOfficerColumn ? 1 : 0) + (hasActions ? 1 : 0);
 
   return (
     <div className={`flex flex-col ${className}`}>
@@ -223,6 +225,7 @@ export function OrdersHubTable({
               <TH>Type</TH>
               {showEscrowOfficerColumn && <TH>Escrow Officer</TH>}
               <TH>Opened</TH>
+              <TH>Created By</TH>
               {hasActions && <TH center>Actions</TH>}
             </tr>
           </thead>
@@ -233,6 +236,10 @@ export function OrdersHubTable({
               <tr><td colSpan={colCount} className="text-center py-12 text-[#6B7280]">No orders found.</td></tr>
             ) : orders.map((o) => {
               const checked = selectedMap.has(o.id);
+              const createdByDisplay = formatCreatedBy(o.createdByName);
+              const createdByClass = createdByVariant(o.createdByName) === 'system'
+                ? 'text-[#9CA3AF] italic'
+                : 'text-[#4B5563]';
               return (
                 <tr key={o.id}
                   onClick={() => { if (showCheckboxes) toggleCheck(o); else { onOrderSelect?.(o); } }}
@@ -277,6 +284,7 @@ export function OrdersHubTable({
                     </td>
                   )}
                   <td className={`px-4 ${cellPy} text-[#4B5563] tabular-nums whitespace-nowrap`}>{o.openedAt ? new Date(o.openedAt).toLocaleDateString() : '—'}</td>
+                  <td className={`px-4 ${cellPy} whitespace-nowrap ${createdByClass}`}>{createdByDisplay}</td>
                   {hasActions && (
                     <td className={`px-4 ${cellPy}`} onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-center">

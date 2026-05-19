@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -50,8 +51,8 @@ function SH({ children }: { children: React.ReactNode }) {
 function Label({ children }: { children: React.ReactNode }) {
   return <span className="text-sm text-gray-500">{children}</span>;
 }
-function Val({ children }: { children: React.ReactNode }) {
-  return <span className="text-sm font-medium text-[#1A1A2E]">{children}</span>;
+function Val({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return <span className={`text-sm font-medium text-[#1A1A2E] ${className}`}>{children}</span>;
 }
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return <div><Label>{label}</Label><div><Val>{value ?? '—'}</Val></div></div>;
@@ -158,23 +159,29 @@ function PartyCard({ label, party, isOrg }: { label: string; party: Party | null
 /* ── Assignments ───────────────────────────────────────────────────────────── */
 
 export function AssignmentsSection({ assignments }: { assignments: OrderDetail['assignments'] }) {
+  const createdByName = assignments.createdBy?.name;
+  const createdByDisplay = formatCreatedBy(createdByName);
+  const createdByClass = createdByVariant(createdByName) === 'system'
+    ? 'text-[#9CA3AF] italic'
+    : '';
+
   return (
     <Section>
       <SH>Assignments</SH>
       <div className="flex gap-8">
         <AssignmentPill label="Sales Rep" value={assignments.salesRep?.name} />
         <AssignmentPill label="Title Officer" value={assignments.titleOfficer?.name} />
-        <AssignmentPill label="Created By" value={assignments.createdBy?.name} />
+        <AssignmentPill label="Created By" value={createdByDisplay} valueClassName={createdByClass} />
       </div>
     </Section>
   );
 }
 
-function AssignmentPill({ label, value }: { label: string; value?: string | null }) {
+function AssignmentPill({ label, value, valueClassName = '' }: { label: string; value?: string | null; valueClassName?: string }) {
   return (
     <div>
       <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
-      <Val>{value || '—'}</Val>
+      <Val className={valueClassName}>{value || '—'}</Val>
     </div>
   );
 }

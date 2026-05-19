@@ -250,6 +250,7 @@ export async function getOrderById(id: number) {
     .select()
     .from(orders)
     .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
+    .leftJoin(createdByProfile, eq(orders.createdBy, createdByProfile.id))
     .where(eq(orders.id, id))
     .limit(1);
 
@@ -269,6 +270,7 @@ export async function getOrderById(id: number) {
 
   return {
     ...result[0]!.orders,
+    createdByName: result[0]!.created_by_profile?.displayName ?? null,
     property: result[0]!.order_properties,
     parties,
     statusHistory: history,

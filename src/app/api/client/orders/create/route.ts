@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
 
-    const result = await clientCreateOrder(body as Record<string, unknown>, session);
+    const result = await clientCreateOrder(body as Record<string, unknown>, session, session.id);
 
     if (!result.success) {
       return NextResponse.json({ error: result.error ?? 'Order creation failed' }, { status: 422 });

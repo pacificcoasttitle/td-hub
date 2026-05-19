@@ -12,6 +12,7 @@ import type { SessionUser } from '@/lib/security/auth';
 export async function clientCreateOrder(
   raw: Record<string, unknown>,
   session: SessionUser,
+  creatorUserId: string = session.id,
 ): Promise<CreateOrderResult> {
   let contactData: ContactRow | null = null;
 
@@ -25,7 +26,7 @@ export async function clientCreateOrder(
   }
 
   const merged = mergeWithContactDefaults(raw, contactData, session);
-  return createAndSendToSoftPro(merged);
+  return createAndSendToSoftPro(merged, creatorUserId);
 }
 
 type ContactRow = typeof contacts.$inferSelect;

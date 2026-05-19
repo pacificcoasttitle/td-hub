@@ -8,6 +8,7 @@ import {
   formatAddress, formatDate, formatRelative, formatDateTime,
 } from './shared';
 import { MONTH_NAMES } from './month-selector';
+import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
 
 /* ── Types — new API shapes ──────────────────────────────────────────────── */
 
@@ -245,21 +246,32 @@ function RecentActivityTable({ orders, loading, onRowClick }: {
         </thead>
         <tbody className="divide-y divide-gray-100">
           {orders.map(o => (
-            <tr key={o.id} onClick={() => onRowClick(o.id)} className="hover:bg-gray-50 cursor-pointer transition-colors">
-              <td className="px-5 py-3 font-medium text-[#1B2A4A] whitespace-nowrap">{o.fileNumber}</td>
-              <td className="px-5 py-3 text-[#1A1A2E] max-w-xs truncate">
-                {o.address ?? formatAddress(o.property) ?? '—'}
-              </td>
-              <td className="px-5 py-3 whitespace-nowrap"><StatusBadge status={o.status} /></td>
-              <td className="px-5 py-3 text-[#6B7280] whitespace-nowrap">{o.productType ?? '—'}</td>
-              <td className="px-5 py-3 text-[#6B7280] whitespace-nowrap">{o.salesRep ?? '—'}</td>
-              <td className="px-5 py-3 text-[#6B7280] whitespace-nowrap">{o.createdBy ?? '—'}</td>
-              <td className="px-5 py-3 text-[#6B7280] whitespace-nowrap">{formatRelative(o.createdAt)}</td>
-            </tr>
+            <RecentActivityRow key={o.id} order={o} onRowClick={onRowClick} />
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function RecentActivityRow({ order: o, onRowClick }: { order: ActivityOrder; onRowClick: (id: number) => void }) {
+  const createdByDisplay = formatCreatedBy(o.createdBy);
+  const createdByClass = createdByVariant(o.createdBy) === 'system'
+    ? 'text-[#9CA3AF] italic'
+    : 'text-[#6B7280]';
+
+  return (
+    <tr onClick={() => onRowClick(o.id)} className="hover:bg-gray-50 cursor-pointer transition-colors">
+      <td className="px-5 py-3 font-medium text-[#1B2A4A] whitespace-nowrap">{o.fileNumber}</td>
+      <td className="px-5 py-3 text-[#1A1A2E] max-w-xs truncate">
+        {o.address ?? formatAddress(o.property) ?? '—'}
+      </td>
+      <td className="px-5 py-3 whitespace-nowrap"><StatusBadge status={o.status} /></td>
+      <td className="px-5 py-3 text-[#6B7280] whitespace-nowrap">{o.productType ?? '—'}</td>
+      <td className="px-5 py-3 text-[#6B7280] whitespace-nowrap">{o.salesRep ?? '—'}</td>
+      <td className={`px-5 py-3 whitespace-nowrap ${createdByClass}`}>{createdByDisplay}</td>
+      <td className="px-5 py-3 text-[#6B7280] whitespace-nowrap">{formatRelative(o.createdAt)}</td>
+    </tr>
   );
 }
 

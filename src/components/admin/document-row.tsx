@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { formatFileSize } from './document-upload-form';
+import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
 
 interface Document {
   id: number;
@@ -34,6 +35,10 @@ export { type Document };
 export function DocumentRow({ doc, onRefresh }: { doc: Document; onRefresh: () => void }) {
   const [attaching, setAttaching] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const createdByDisplay = formatCreatedBy(doc.createdBy);
+  const createdByClass = createdByVariant(doc.createdBy) === 'system'
+    ? 'text-[#9CA3AF] italic'
+    : 'text-[#1A1A2E]';
 
   async function handleAttach() {
     setAttaching(true);
@@ -65,7 +70,7 @@ export function DocumentRow({ doc, onRefresh }: { doc: Document; onRefresh: () =
         </td>
         <td className="px-4 py-3 whitespace-nowrap"><CategoryBadge category={doc.category} /></td>
         <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{doc.sizeBytes != null ? formatFileSize(doc.sizeBytes) : '—'}</td>
-        <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{doc.createdBy ?? '—'}</td>
+        <td className={`px-4 py-3 whitespace-nowrap ${createdByClass}`}>{createdByDisplay}</td>
         <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{formatDate(doc.createdAt)}</td>
         <td className="px-4 py-3 whitespace-nowrap">
           {doc.isSyncedToSoftpro ? (
@@ -73,7 +78,7 @@ export function DocumentRow({ doc, onRefresh }: { doc: Document; onRefresh: () =
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
-              Synced
+              {formatCreatedBy(null)}
             </span>
           ) : (
             <button onClick={handleAttach} disabled={attaching}

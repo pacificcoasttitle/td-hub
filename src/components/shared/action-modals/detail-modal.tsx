@@ -16,6 +16,34 @@ interface OrderDetail {
   lenderName: string | null; escrowCompanyName: string | null;
 }
 
+interface AdminDetailResponse {
+  order?: {
+    id: number; fileNumber: string; status: string;
+    transactionType: string | null; productType: string | null; salesPrice: string | null; loanAmount?: string | null;
+    openedAt?: string | null; closedAt?: string | null;
+  };
+  property?: {
+    address: string | null; city: string | null; state: string | null; zip: string | null;
+    county: string | null; apn: string | null; legalDescription: string | null;
+  };
+  parties?: {
+    buyer?: { firstName: string | null; lastName: string | null } | null;
+    seller?: { firstName: string | null; lastName: string | null } | null;
+    lender?: { name: string | null } | null;
+    escrowOfficer?: { name: string | null } | null;
+  };
+}
+
+interface LegacyDetailResponse {
+  id: number; fileNumber: string; operationalStatus: string;
+  transactionType: string | null; productType?: string | null; salesPrice?: string | null; loanAmount?: string | null;
+  openedAt?: string | null; closedAt?: string | null;
+  property?: {
+    address: string | null; city: string | null; state: string | null; zip?: string | null;
+    county?: string | null; apn?: string | null; legalDescription?: string | null;
+  } | null;
+}
+
 interface Doc {
   id: number; filename: string; originalFilename?: string | null;
   category: string | null; sizeBytes?: number | null; createdAt: string;
@@ -35,17 +63,18 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
   const [loading, setLoading] = useState(true);
 
   const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
+  const detailUrl = isClient ? base : `/api/admin/orders/${orderId}/detail`;
   const detailHref = isClient ? `/client/orders/${orderId}` : `/orders/${orderId}`;
 
   useEffect(() => {
     if (!open) { setTab('Overview'); return; }
     setLoading(true);
     Promise.all([
-      fetch(base).then((r) => r.ok ? r.json() : null),
+      fetch(detailUrl).then((r) => r.ok ? r.json() : null),
       fetch(`${base}/documents`).then((r) => r.ok ? r.json() : { documents: [] }),
-    ]).then(([o, d]) => { setOrder(o); setDocs(d?.documents ?? []); })
+    ]).then(([o, d]) => { setOrder(normalizeOrderDetail(o)); setDocs(d?.documents ?? []); })
       .catch(() => {}).finally(() => setLoading(false));
-  }, [open, base]);
+  }, [open, base, detailUrl]);
 
   const seller = order ? [order.sellerFirstName, order.sellerLastName].filter(Boolean).join(' ') : '';
   const buyer = order ? [order.buyerFirstName, order.buyerLastName].filter(Boolean).join(' ') : '';
@@ -119,6 +148,62 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
       )}
     </ModalShell>
   );
+}
+
+function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse | null): OrderDetail | null {
+  if (!data) return null;
+  if (!('order' in data)) {
+    return {
+      id: data.id,
+      fileNumber: data.fileNumber,
+      operationalStatus: data.operationalStatus,
+      propertyStreet: data.property?.address ?? null,
+      propertyCity: data.property?.city ?? null,
+      propertyState: data.property?.state ?? null,
+      propertyZip: data.property?.zip ?? null,
+      propertyCounty: data.property?.county ?? null,
+      propertyApn: data.property?.apn ?? null,
+      propertyLegalDescription: data.property?.legalDescription ?? null,
+      sellerFirstName: null,
+      sellerLastName: null,
+      buyerFirstName: null,
+      buyerLastName: null,
+      transactionType: data.transactionType,
+      productType: data.productType ?? null,
+      salesPrice: data.salesPrice ?? null,
+      loanAmount: data.loanAmount ?? null,
+      openedAt: data.openedAt ?? null,
+      closedAt: data.closedAt ?? null,
+      lenderName: null,
+      escrowCompanyName: null,
+    };
+  }
+
+  if (!data.order) return null;
+  return {
+    id: data.order.id,
+    fileNumber: data.order.fileNumber,
+    operationalStatus: data.order.status,
+    propertyStreet: data.property?.address ?? null,
+    propertyCity: data.property?.city ?? null,
+    propertyState: data.property?.state ?? null,
+    propertyZip: data.property?.zip ?? null,
+    propertyCounty: data.property?.county ?? null,
+    propertyApn: data.property?.apn ?? null,
+    propertyLegalDescription: data.property?.legalDescription ?? null,
+    sellerFirstName: data.parties?.seller?.firstName ?? null,
+    sellerLastName: data.parties?.seller?.lastName ?? null,
+    buyerFirstName: data.parties?.buyer?.firstName ?? null,
+    buyerLastName: data.parties?.buyer?.lastName ?? null,
+    transactionType: data.order.transactionType,
+    productType: data.order.productType,
+    salesPrice: data.order.salesPrice,
+    loanAmount: data.order.loanAmount ?? null,
+    openedAt: data.order.openedAt ?? null,
+    closedAt: data.order.closedAt ?? null,
+    lenderName: data.parties?.lender?.name ?? null,
+    escrowCompanyName: data.parties?.escrowOfficer?.name ?? null,
+  };
 }
 
 function F({ l, v }: { l: string; v: string }) {

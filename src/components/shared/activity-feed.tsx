@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 export interface ActivityEntry {
   id: string | number;
   type: 'document' | 'generated' | 'status' | 'vendor' | 'error' | string;
-  description: string;
+  summary: string;
   actor?: string | null;
   timestamp: string;
 }
@@ -90,7 +90,7 @@ export function ActivityFeed({ fetchUrl, emptyMessage = 'No activity yet on this
         <div key={e.id} className="flex items-start gap-3 px-4 py-3 hover:bg-gray-50/50 transition-colors">
           <span className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${DOT_COLORS[e.type] ?? 'bg-gray-400'}`} />
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-[#1A1A2E] leading-snug">{e.description}</p>
+            <p className="text-sm text-[#1A1A2E] leading-snug">{e.summary}</p>
             <div className="flex items-center gap-2 mt-0.5">
               {e.actor && <span className="text-xs text-[#6B7280]">{e.actor}</span>}
               <span className="text-xs text-[#9CA3AF]">{timeAgo(e.timestamp)}</span>

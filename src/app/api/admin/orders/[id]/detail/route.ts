@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrder } from '@/lib/security/permissions';
 import { db } from '@/lib/db/client';
 import {
   orders, orderProperties, orderParties, orderStatusHistory,
@@ -14,7 +15,17 @@ import {
   contactDisplayName, formatParty,
 } from '@/lib/domain/orders/detail-helpers';
 
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
+const ORDER_DETAIL_ROLES = [
+  'super_admin',
+  'admin',
+  'cs_admin',
+  'open_order_team',
+  'escrow_assistant',
+  'escrow_officer',
+  'title_officer',
+  'sales_rep',
+  'sales_manager',
+];
 
 const paramSchema = z.object({ id: z.coerce.number().int().positive() });
 
@@ -23,7 +34,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
-  if (!session || !ADMIN_ROLES.includes(session.role)) {
+  if (!session || !ORDER_DETAIL_ROLES.includes(session.role)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -33,6 +44,10 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
   }
   const orderId = parsed.data.id;
+
+  if (!(await canAccessOrder(session, orderId))) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
 
   try {
     const [row] = await db
@@ -45,6 +60,9 @@ export async function GET(
         productType: orders.productType,
         transactionType: orders.transactionType,
         salesPrice: orders.salesPrice,
+        loanAmount: orders.loanAmount,
+        openedAt: orders.openedAt,
+        closedAt: orders.closedAt,
         marketingSource: orders.marketingSource,
         emailStatus: orders.emailStatus,
         dupOverride: orders.dupOverride,
@@ -184,6 +202,9 @@ export async function GET(
         productType: row.productType,
         transactionType: row.transactionType,
         salesPrice: row.salesPrice,
+        loanAmount: row.loanAmount,
+        openedAt: row.openedAt.toISOString(),
+        closedAt: row.closedAt?.toISOString() ?? null,
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
         emailStatus: row.emailStatus,

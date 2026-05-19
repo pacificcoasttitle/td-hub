@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { ModalShell } from './modal-shell';
 
-interface Note { id: number; note: string; createdAt: string; createdBy?: string; }
+interface Note { id: number; body: string; createdAt: string; authorName?: string | null; }
 
 export function NotesModal({ open, onClose, orderId, fileNumber, address, isClient, accentColor }: {
   open: boolean; onClose: () => void;
@@ -59,8 +59,8 @@ export function NotesModal({ open, onClose, orderId, fileNumber, address, isClie
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {notes.map((n) => (
               <div key={n.id} className="px-3 py-2.5 bg-gray-50 rounded-lg">
-                <p className="text-sm text-[#1A1A2E] whitespace-pre-wrap">{n.note}</p>
-                <p className="text-[10px] text-[#6B7280] mt-1">{new Date(n.createdAt).toLocaleString()}{n.createdBy ? ` · ${n.createdBy}` : ''}</p>
+                <p className="text-sm text-[#1A1A2E] whitespace-pre-wrap">{n.body}</p>
+                <p className="text-[10px] text-[#6B7280] mt-1">{new Date(n.createdAt).toLocaleString()}{n.authorName ? ` · ${n.authorName}` : ''}</p>
               </div>
             ))}
           </div>

@@ -65,6 +65,7 @@ export const orders = pgTable('orders', {
   marketingSource: varchar('marketing_source', { length: 200 }),
   softproLastSyncedAt: timestamp('softpro_last_synced_at'),
   lastPrelimFetchAt: timestamp('last_prelim_fetch_at'),
+  lastDetailsFetchAt: timestamp('last_details_fetch_at'),
   isImported: boolean('is_imported').notNull().default(false),
 
   dupOverride: boolean('dup_override').notNull().default(false),

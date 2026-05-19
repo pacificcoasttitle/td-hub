@@ -11,6 +11,7 @@ import { handleSyncContacts } from '@/lib/jobs/handlers/sync-contacts';
 import type { SyncContactsPayload } from '@/lib/jobs/handlers/sync-contacts';
 import { handleTitlePointPoll } from '@/lib/jobs/handlers/titlepoint-poll';
 import { handleEnrichOrders } from '@/lib/jobs/handlers/enrich-orders';
+import { handleEnrichOrderDetails } from '@/lib/jobs/handlers/enrich-order-details';
 import { importOrdersFromSoftPro } from '@/lib/jobs/handlers/import-orders';
 import { handleResolveOfficers } from '@/lib/jobs/handlers/resolve-order-officers';
 import { handleFetchPrelims } from '@/lib/jobs/handlers/fetch-prelims';
@@ -46,6 +47,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleSyncContacts(payload as unknown as SyncContactsPayload),
   'softpro.enrich_orders': () =>
     handleEnrichOrders(),
+  'softpro.enrich_order_details': () =>
+    handleEnrichOrderDetails(),
   'enrich-orders': () =>
     handleEnrichOrders(),
   'resolve_officers': () =>

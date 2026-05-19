@@ -45,6 +45,10 @@ interface LegacyDetailResponse {
   } | null;
 }
 
+function isLegacyDetailResponse(data: AdminDetailResponse | LegacyDetailResponse): data is LegacyDetailResponse {
+  return 'id' in data;
+}
+
 interface Doc {
   id: number; filename: string; originalFilename?: string | null;
   category: string | null; sizeBytes?: number | null; createdAt: string;
@@ -244,7 +248,7 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
 
 function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse | null): OrderDetail | null {
   if (!data) return null;
-  if (!('order' in data)) {
+  if (isLegacyDetailResponse(data)) {
     return {
       id: data.id,
       fileNumber: data.fileNumber,

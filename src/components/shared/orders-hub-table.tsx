@@ -253,8 +253,19 @@ export function OrdersHubTable({
                     </span>
                   </td>
                   <td className={`px-4 ${cellPy} text-[#1A1A2E] max-w-[300px]`}>{addr(o)}</td>
-                  <td className={`px-4 ${cellPy} text-[#4B5563] max-w-[160px] truncate`}>
-                    {o.clientName ?? o.clientCompany ?? o.clientEmail ?? '—'}
+                  <td className={`px-4 ${cellPy} max-w-[200px]`}>
+                    {o.clientName ? (
+                      <div className="min-w-0">
+                        <div className="text-sm text-[#1A1A2E] truncate" title={o.clientName}>{o.clientName}</div>
+                        {o.clientCompany && (
+                          <div className="text-xs text-[#6B7280] truncate" title={o.clientCompany}>{o.clientCompany}</div>
+                        )}
+                      </div>
+                    ) : o.clientCompany ? (
+                      <div className="text-sm text-[#1A1A2E] truncate" title={o.clientCompany}>{o.clientCompany}</div>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
                   </td>
                   <td className={`px-4 ${cellPy}`}><StatusBadge status={o.operationalStatus} /></td>
                   <td className={`px-4 ${cellPy} text-[#4B5563] capitalize`}>{o.transactionType?.replace(/_/g, ' ') ?? '—'}</td>

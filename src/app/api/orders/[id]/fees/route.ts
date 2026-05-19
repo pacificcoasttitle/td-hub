@@ -38,14 +38,22 @@ export async function GET(
       });
     }
 
-    const invoices = result.data.map((inv) => ({
-      invoiceNumber: inv.InvoiceNumber,
-      fees: inv.Fees.map((f) => ({
-        description: f.Description,
-        amount: f.Amount,
-      })),
-      total: inv.Total.Amount,
-    }));
+    const invoices = result.data.map((inv) => {
+      const datedInvoice = inv as typeof inv & {
+        InvoiceDate?: string | null;
+        Date?: string | null;
+        CreatedDate?: string | null;
+      };
+      return {
+        invoiceNumber: inv.InvoiceNumber,
+        invoiceDate: datedInvoice.InvoiceDate ?? datedInvoice.Date ?? datedInvoice.CreatedDate ?? null,
+        fees: inv.Fees.map((f) => ({
+          description: f.Description,
+          amount: f.Amount,
+        })),
+        total: inv.Total.Amount,
+      };
+    });
 
     const grandTotal = invoices.reduce((sum, inv) => sum + inv.total, 0);
 

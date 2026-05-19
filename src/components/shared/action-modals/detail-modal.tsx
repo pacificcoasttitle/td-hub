@@ -50,7 +50,33 @@ interface Doc {
   category: string | null; sizeBytes?: number | null; createdAt: string;
 }
 
-const TABS = ['Overview', 'Property', 'Parties', 'Documents', 'Activity', 'Notes'] as const;
+interface FeeLineItem {
+  description: string | null;
+  amount: number | string | null;
+}
+
+interface FeeInvoice {
+  invoiceNumber: string | null;
+  invoiceDate?: string | null;
+  date?: string | null;
+  fees: FeeLineItem[];
+  total: number | string | null;
+}
+
+interface FeesData {
+  invoices: FeeInvoice[];
+  grandTotal: number;
+}
+
+interface Milestone {
+  id: number;
+  status: string;
+  label: string;
+  notes: string | null;
+  occurredAt: string;
+}
+
+const TABS = ['Overview', 'Property', 'Parties', 'Documents', 'Activity', 'Notes', 'Fees', 'Milestones'] as const;
 type Tab = (typeof TABS)[number];
 
 export function DetailModal({ open, onClose, orderId, fileNumber, address, isClient, accentColor }: {
@@ -61,11 +87,19 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
   const [tab, setTab] = useState<Tab>('Overview');
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
+  const [fees, setFees] = useState<FeesData | null>(null);
+  const [feesLoading, setFeesLoading] = useState(false);
+  const [feesError, setFeesError] = useState<string | null>(null);
+  const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [milestonesLoading, setMilestonesLoading] = useState(false);
+  const [milestonesError, setMilestonesError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
   const detailUrl = isClient ? base : `/api/admin/orders/${orderId}/detail`;
   const detailHref = isClient ? `/client/orders/${orderId}` : `/orders/${orderId}`;
+  const visibleTabs = isClient ? TABS.filter((t) => t !== 'Milestones') : TABS;
 
   useEffect(() => {
     if (!open) { setTab('Overview'); return; }
@@ -76,6 +110,43 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
     ]).then(([o, d]) => { setOrder(normalizeOrderDetail(o)); setDocs(d?.documents ?? []); })
       .catch(() => {}).finally(() => setLoading(false));
   }, [open, base, detailUrl]);
+
+  useEffect(() => {
+    if (!open) return;
+    setFees(null);
+    setFeesError(null);
+    setFeesLoading(true);
+    setExpandedInvoices(new Set());
+
+    fetch(`${base}/fees`)
+      .then(async (r) => {
+        const body = await r.json().catch(() => null);
+        if (!r.ok || body?.success === false) {
+          throw new Error(body?.error ?? `Failed to load fees (${r.status})`);
+        }
+        return body?.data as FeesData | undefined;
+      })
+      .then((data) => setFees(data ?? { invoices: [], grandTotal: 0 }))
+      .catch((err: unknown) => setFeesError(err instanceof Error ? err.message : 'Failed to load fees'))
+      .finally(() => setFeesLoading(false));
+  }, [open, base]);
+
+  useEffect(() => {
+    if (!open || isClient) return;
+    setMilestones([]);
+    setMilestonesError(null);
+    setMilestonesLoading(true);
+
+    fetch(`/api/orders/${orderId}/milestones`)
+      .then(async (r) => {
+        const body = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(body?.error ?? `Failed to load milestones (${r.status})`);
+        return body?.milestones as Milestone[] | undefined;
+      })
+      .then((items) => setMilestones(items ?? []))
+      .catch((err: unknown) => setMilestonesError(err instanceof Error ? err.message : 'Failed to load milestones'))
+      .finally(() => setMilestonesLoading(false));
+  }, [open, isClient, orderId]);
 
   const seller = order ? [order.sellerFirstName, order.sellerLastName].filter(Boolean).join(' ') : '';
   const buyer = order ? [order.buyerFirstName, order.buyerLastName].filter(Boolean).join(' ') : '';
@@ -89,7 +160,7 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
       ) : (
         <>
           <div className="flex border-b border-gray-100 px-5">
-            {TABS.map((t) => (
+            {visibleTabs.map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors -mb-px ${tab === t ? 'border-[#F26B2B] text-[#1A1A2E]' : 'border-transparent text-[#6B7280] hover:text-[#1A1A2E]'}`}>
                 {t}
@@ -143,6 +214,23 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
             )}
             {tab === 'Notes' && (
               <NotesTab notesUrl={`${base}/notes`} accentColor={accentColor} />
+            )}
+            {tab === 'Fees' && (
+              <FeesTab
+                fees={fees}
+                loading={feesLoading}
+                error={feesError}
+                expanded={expandedInvoices}
+                onToggle={(invoiceKey) => setExpandedInvoices((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(invoiceKey)) next.delete(invoiceKey);
+                  else next.add(invoiceKey);
+                  return next;
+                })}
+              />
+            )}
+            {tab === 'Milestones' && !isClient && (
+              <MilestonesTab milestones={milestones} loading={milestonesLoading} error={milestonesError} />
             )}
             <div className="mt-6 pt-4 border-t border-gray-100">
               <Link href={detailHref} className="text-xs font-semibold text-[#F26B2B] hover:text-[#E05A1A]" onClick={onClose}>Open Full Page →</Link>
@@ -212,6 +300,174 @@ function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse |
 
 function F({ l, v }: { l: string; v: string }) {
   return <div className="px-3 py-2.5 bg-gray-50 rounded-lg"><p className="text-[10px] uppercase tracking-wider text-[#6B7280]">{l}</p><p className="text-sm font-medium text-[#1A1A2E] mt-0.5 truncate">{v}</p></div>;
+}
+
+function money(value: number | string | null | undefined): string {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n)
+    ? n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+    : '$0.00';
+}
+
+function dateLabel(value: string | null | undefined): string {
+  if (!value) return '—';
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime())
+    ? value
+    : parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function FeesTab({
+  fees,
+  loading,
+  error,
+  expanded,
+  onToggle,
+}: {
+  fees: FeesData | null;
+  loading: boolean;
+  error: string | null;
+  expanded: Set<string>;
+  onToggle: (invoiceKey: string) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs text-[#6B7280]">Loading live fees from SoftPro…</p>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="h-11 bg-gray-100 rounded-lg animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return <div className="p-6 text-center text-sm text-red-600 bg-red-50 rounded-lg">{error}</div>;
+  }
+
+  const invoices = fees?.invoices ?? [];
+  if (invoices.length === 0) {
+    return (
+      <div className="p-8 text-center bg-gray-50 rounded-lg">
+        <p className="text-sm font-medium text-[#1A1A2E]">No fees found</p>
+        <p className="text-xs text-[#6B7280] mt-1">SoftPro did not return invoice fees for this order.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-gray-200">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 text-xs uppercase tracking-wide text-[#6B7280]">
+          <tr>
+            <th className="w-10 px-3 py-2" />
+            <th className="px-3 py-2 text-left font-medium">Invoice #</th>
+            <th className="px-3 py-2 text-left font-medium">Date</th>
+            <th className="px-3 py-2 text-right font-medium">Total</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {invoices.map((invoice, i) => {
+            const key = invoice.invoiceNumber ?? `invoice-${i}`;
+            const isExpanded = expanded.has(key);
+            const date = invoice.invoiceDate ?? invoice.date ?? null;
+            return (
+              <tr key={key} className="align-top">
+                <td className="px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => onToggle(key)}
+                    className="w-6 h-6 rounded-full text-[#6B7280] hover:bg-gray-100"
+                    aria-label={isExpanded ? 'Collapse invoice fees' : 'Expand invoice fees'}
+                  >
+                    {isExpanded ? '−' : '+'}
+                  </button>
+                </td>
+                <td className="px-3 py-2">
+                  <p className="font-medium text-[#1A1A2E]">{invoice.invoiceNumber ?? '—'}</p>
+                  {isExpanded && (
+                    <div className="mt-2 space-y-1">
+                      {invoice.fees.length > 0 ? invoice.fees.map((fee, feeIdx) => (
+                        <div key={`${key}-${feeIdx}`} className="flex justify-between gap-4 text-xs text-[#6B7280]">
+                          <span className="min-w-0 truncate">{fee.description ?? 'Fee'}</span>
+                          <span className="shrink-0 tabular-nums">{money(fee.amount)}</span>
+                        </div>
+                      )) : (
+                        <p className="text-xs text-[#6B7280]">No line items returned.</p>
+                      )}
+                    </div>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-[#4B5563] whitespace-nowrap">{dateLabel(date)}</td>
+                <td className="px-3 py-2 text-right font-semibold text-[#1A1A2E] tabular-nums">{money(invoice.total)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot className="bg-gray-50 border-t border-gray-200">
+          <tr>
+            <td colSpan={3} className="px-3 py-2 text-right text-sm font-semibold text-[#1A1A2E]">Grand Total</td>
+            <td className="px-3 py-2 text-right text-sm font-bold text-[#1A1A2E] tabular-nums">{money(fees?.grandTotal)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
+function MilestonesTab({
+  milestones,
+  loading,
+  error,
+}: {
+  milestones: Milestone[];
+  loading: boolean;
+  error: string | null;
+}) {
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <p className="text-xs text-[#6B7280]">Milestones reported by SoftPro. New events appear as they occur.</p>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return <div className="p-6 text-center text-sm text-red-600 bg-red-50 rounded-lg">{error}</div>;
+  }
+
+  if (milestones.length === 0) {
+    return (
+      <div className="p-8 text-center bg-gray-50 rounded-lg">
+        <p className="text-sm font-medium text-[#1A1A2E]">No webhook milestones yet</p>
+        <p className="text-xs text-[#6B7280] mt-1">Milestones reported by SoftPro. New events appear as they occur.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-xs text-[#6B7280] mb-4">Milestones reported by SoftPro. New events appear as they occur.</p>
+      <div className="space-y-3">
+        {milestones.map((m, i) => (
+          <div key={m.id} className="flex gap-3">
+            <div className="flex flex-col items-center">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#F26B2B] mt-1.5" />
+              {i < milestones.length - 1 && <span className="w-px flex-1 bg-gray-200 mt-1" />}
+            </div>
+            <div className="pb-4 min-w-0">
+              <p className="text-sm font-semibold text-[#1A1A2E]">{m.label}</p>
+              <p className="text-xs text-[#6B7280] mt-0.5">{dateLabel(m.occurredAt)} · {m.status}</p>
+              {m.notes && <p className="text-sm text-[#4B5563] mt-1 whitespace-pre-wrap">{m.notes}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /* ── Document Grouping ─────────────────────────────────────────────────────── */

@@ -6,6 +6,7 @@ import { alias } from 'drizzle-orm/pg-core';
 const salesRepContact = alias(contacts, 'sales_rep');
 const titleOfficerContact = alias(contacts, 'title_officer');
 const escrowOfficerContact = alias(contacts, 'escrow_officer');
+const clientContact = alias(contacts, 'client_contact');
 const lenderContact = alias(contacts, 'lender_contact');
 const listingAgentContact = alias(contacts, 'listing_agent');
 const titleCompanyAlias = alias(companies, 'title_company');
@@ -39,7 +40,10 @@ export interface OrderListResult {
     propertyStreet: string | null;
     propertyCity: string | null;
     propertyState: string | null;
+    clientContactId: number | null;
     clientName: string | null;
+    clientEmail: string | null;
+    clientCompany: string | null;
     salesRepName: string | null;
     titleOfficerName: string | null;
     escrowOfficerName: string | null;
@@ -66,6 +70,15 @@ function contactName(c: { fullName: string | null; officerName: string | null; f
   const parts = [c.firstName, c.lastName].filter(Boolean);
   if (parts.length > 0) return parts.join(' ');
   if (c.companyName) return c.companyName;
+  return null;
+}
+
+function clientName(c: { fullName: string | null; officerName: string | null; firstName: string | null; lastName: string | null } | null): string | null {
+  if (!c) return null;
+  const parts = [c.firstName, c.lastName].filter(Boolean);
+  if (parts.length > 0) return parts.join(' ');
+  if (c.fullName) return c.fullName;
+  if (c.officerName) return c.officerName;
   return null;
 }
 
@@ -114,6 +127,9 @@ export async function getOrders(
         ilike(orders.fileNumber, term),
         ilike(orderProperties.address, term),
         ilike(orderProperties.city, term),
+        ilike(clientContact.fullName, term),
+        ilike(clientContact.email, term),
+        ilike(clientContact.companyName, term),
       )!
     );
   }
@@ -139,6 +155,7 @@ export async function getOrders(
       .leftJoin(salesRepContact, eq(orders.salesRepId, salesRepContact.id))
       .leftJoin(titleOfficerContact, eq(orders.titleOfficerId, titleOfficerContact.id))
       .leftJoin(escrowOfficerContact, eq(orders.escrowOfficerId, escrowOfficerContact.id))
+      .leftJoin(clientContact, eq(orders.clientContactId, clientContact.id))
       .leftJoin(lenderContact, eq(orders.lenderId, lenderContact.id))
       .leftJoin(listingAgentContact, eq(orders.listingAgentId, listingAgentContact.id))
       .leftJoin(titleCompanyAlias, eq(orders.titleCompanyId, titleCompanyAlias.id))
@@ -167,7 +184,10 @@ export async function getOrders(
     propertyStreet: row.order_properties?.address ?? null,
     propertyCity: row.order_properties?.city ?? null,
     propertyState: row.order_properties?.state ?? null,
-    clientName: row.opened_by?.name ?? null,
+    clientContactId: row.orders.clientContactId,
+    clientName: clientName(row.client_contact),
+    clientEmail: row.client_contact?.email ?? null,
+    clientCompany: row.client_contact?.companyName ?? null,
     salesRepName: contactName(row.sales_rep),
     titleOfficerName: contactName(row.title_officer),
     escrowOfficerName: contactName(row.escrow_officer),

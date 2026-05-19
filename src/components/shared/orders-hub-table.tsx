@@ -20,7 +20,10 @@ export interface HubOrder {
   operationalStatus: string | null;
   transactionType: string | null;
   openedAt: string | null;
+  clientContactId?: number | null;
   clientName?: string | null;
+  clientEmail?: string | null;
+  clientCompany?: string | null;
   openedBy?: string | null;
   documents?: OrderDocuments;
   escrowOfficerId?: number | null;
@@ -250,7 +253,9 @@ export function OrdersHubTable({
                     </span>
                   </td>
                   <td className={`px-4 ${cellPy} text-[#1A1A2E] max-w-[300px]`}>{addr(o)}</td>
-                  <td className={`px-4 ${cellPy} text-[#4B5563] max-w-[160px] truncate`}>{o.clientName ?? '—'}</td>
+                  <td className={`px-4 ${cellPy} text-[#4B5563] max-w-[160px] truncate`}>
+                    {o.clientName ?? o.clientCompany ?? o.clientEmail ?? '—'}
+                  </td>
                   <td className={`px-4 ${cellPy}`}><StatusBadge status={o.operationalStatus} /></td>
                   <td className={`px-4 ${cellPy} text-[#4B5563] capitalize`}>{o.transactionType?.replace(/_/g, ' ') ?? '—'}</td>
                   {showEscrowOfficerColumn && (

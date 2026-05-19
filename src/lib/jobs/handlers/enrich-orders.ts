@@ -1,8 +1,9 @@
 import { db } from '@/lib/db/client';
 import { orders, contacts, companies } from '@/lib/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, desc, isNull, or, sql } from 'drizzle-orm';
 import { getOrderContacts } from '@/lib/integrations/softpro';
 import type { SoftProOrderContactsData } from '@/lib/integrations/softpro';
+import { resolveClientContactId } from '@/lib/domain/orders/client-resolver';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ export interface EnrichSingleResult {
 // ─── Single Order Enrichment ─────────────────────────────────────────────────
 
 export async function enrichSingleOrder(orderId: number): Promise<EnrichSingleResult> {
-  const [order] = await db.select({ id: orders.id, fileNumber: orders.fileNumber })
+  const [order] = await db.select({ id: orders.id, fileNumber: orders.fileNumber, orderType: orders.orderType })
     .from(orders).where(eq(orders.id, orderId)).limit(1);
 
   if (!order) {
@@ -35,7 +36,7 @@ export async function enrichSingleOrder(orderId: number): Promise<EnrichSingleRe
   return enrichOrder(order);
 }
 
-async function enrichOrder(order: { id: number; fileNumber: string }): Promise<EnrichSingleResult> {
+async function enrichOrder(order: { id: number; fileNumber: string; orderType: string | null }): Promise<EnrichSingleResult> {
   const result: EnrichSingleResult = {
     success: false,
     orderId: order.id,
@@ -85,6 +86,12 @@ async function enrichOrder(order: { id: number; fileNumber: string }): Promise<E
     else result.unresolved.push(`Underwriters.CompanyLookUpCode=${underwriterCode}`);
   }
 
+  const clientContactId = await resolveClientContactId(order.orderType, data);
+  if (clientContactId) {
+    updates.clientContactId = clientContactId;
+    result.resolved.clientContactId = clientContactId;
+  }
+
   const setFields: Record<string, unknown> = { updatedAt: new Date() };
   let hasUpdate = false;
   for (const [key, val] of Object.entries(updates)) {
@@ -106,16 +113,26 @@ async function enrichOrder(order: { id: number; fileNumber: string }): Promise<E
 
 export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
   const unenriched = await db
-    .select({ id: orders.id, fileNumber: orders.fileNumber })
+    .select({ id: orders.id, fileNumber: orders.fileNumber, orderType: orders.orderType })
     .from(orders)
     .where(
       and(
-        isNull(orders.lenderId),
-        isNull(orders.listingAgentId),
-        isNull(orders.titleCompanyId),
-        isNull(orders.underwriterId),
+        or(
+          and(
+            isNull(orders.lenderId),
+            isNull(orders.listingAgentId),
+            isNull(orders.titleCompanyId),
+            isNull(orders.underwriterId),
+          ),
+          isNull(orders.clientContactId),
+        ),
+        or(
+          isNull(orders.lastDetailsFetchAt),
+          sql`${orders.lastDetailsFetchAt} < NOW() - INTERVAL '6 hours'`,
+        ),
       )
     )
+    .orderBy(desc(orders.createdAt))
     .limit(200);
 
   let enriched = 0;
@@ -124,6 +141,10 @@ export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
 
   for (const order of unenriched) {
     try {
+      await db.update(orders)
+        .set({ lastDetailsFetchAt: sql`NOW()` })
+        .where(eq(orders.id, order.id));
+
       const result = await enrichOrder(order);
       if (result.success && Object.keys(result.resolved).length > 0) {
         enriched++;

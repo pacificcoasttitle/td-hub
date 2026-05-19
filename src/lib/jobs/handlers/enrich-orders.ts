@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { orders, contacts, companies } from '@/lib/db/schema';
-import { eq, and, desc, isNull, or, sql } from 'drizzle-orm';
+import { eq, and, isNull, or, sql } from 'drizzle-orm';
 import { getOrderContacts } from '@/lib/integrations/softpro';
 import type { SoftProOrderContactsData } from '@/lib/integrations/softpro';
 import { resolveClientContactId } from '@/lib/domain/orders/client-resolver';
@@ -127,12 +127,12 @@ export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
           isNull(orders.clientContactId),
         ),
         or(
-          isNull(orders.lastDetailsFetchAt),
-          sql`${orders.lastDetailsFetchAt} < NOW() - INTERVAL '6 hours'`,
+          isNull(orders.lastContactsFetchAt),
+          sql`${orders.lastContactsFetchAt} < NOW() - INTERVAL '6 hours'`,
         ),
       )
     )
-    .orderBy(desc(orders.createdAt))
+    .orderBy(sql`${orders.lastContactsFetchAt} ASC NULLS FIRST`)
     .limit(200);
 
   let enriched = 0;
@@ -142,7 +142,7 @@ export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
   for (const order of unenriched) {
     try {
       await db.update(orders)
-        .set({ lastDetailsFetchAt: sql`NOW()` })
+        .set({ lastContactsFetchAt: sql`NOW()` })
         .where(eq(orders.id, order.id));
 
       const result = await enrichOrder(order);

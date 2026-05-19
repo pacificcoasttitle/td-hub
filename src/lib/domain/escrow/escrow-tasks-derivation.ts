@@ -10,6 +10,17 @@ import {
 } from '@/lib/db/schema';
 import type { Task, TaskPriority } from '@/lib/domain/escrow/tasks';
 
+/**
+ * Coerce a value that may be Date | string | null into Date | null.
+ * Raw SQL subqueries can return ISO strings even when TypeScript declares them as Date.
+ */
+function toDate(value: Date | string | null | undefined): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 
@@ -186,12 +197,12 @@ export async function loadEscrowTaskOrderRows(
           and ${documents.category} = 'policy'
           and ${documents.status} = 'active'
       )`,
-      lastDocActivity: sql<Date | null>`(
+      lastDocActivity: sql<Date | string | null>`(
         select max(${documents.updatedAt}) from ${documents}
         where ${documents.orderId} = ${orders.id}
           and ${documents.status} = 'active'
       )`,
-      lastStatusChange: sql<Date | null>`(
+      lastStatusChange: sql<Date | string | null>`(
         select max(${orderStatusHistory.changedAt}) from ${orderStatusHistory}
         where ${orderStatusHistory.orderId} = ${orders.id}
       )`,
@@ -201,7 +212,7 @@ export async function loadEscrowTaskOrderRows(
         order by ${prelimAnalyses.createdAt} desc
         limit 1
       )`,
-      latestTessaCompleteAt: sql<Date | null>`(
+      latestTessaCompleteAt: sql<Date | string | null>`(
         select ${prelimAnalyses.completedAt} from ${prelimAnalyses}
         where ${prelimAnalyses.orderId} = ${orders.id}
           and ${prelimAnalyses.status} = 'complete'
@@ -217,6 +228,9 @@ export async function loadEscrowTaskOrderRows(
   return orderRows.map((row) => ({
     ...row,
     operationalStatus: row.operationalStatus as EscrowTaskOrderData['operationalStatus'],
+    lastDocActivity: toDate(row.lastDocActivity),
+    lastStatusChange: toDate(row.lastStatusChange),
+    latestTessaCompleteAt: toDate(row.latestTessaCompleteAt),
   }));
 }
 

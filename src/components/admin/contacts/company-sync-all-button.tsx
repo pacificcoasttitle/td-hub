@@ -6,7 +6,6 @@ const COMPANY_TYPES = [
   'Escrow Company',
   'Lender',
   'Mortgage Broker',
-  'Selling Agent/Broker',
   'Underwriter',
 ];
 

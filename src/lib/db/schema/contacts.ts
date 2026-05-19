@@ -103,7 +103,7 @@ export const contacts = pgTable('contacts', {
   isEscrowOfficer: boolean('is_escrow_officer').notNull().default(false),
   isLender: boolean('is_lender').notNull().default(false),
   isMortgageBroker: boolean('is_mortgage_broker').notNull().default(false),
-  isSellingAgent: boolean('is_selling_agent').notNull().default(false),
+  isRealEstateAgent: boolean('is_real_estate_agent').notNull().default(false),
   isTitleOfficer: boolean('is_title_officer').notNull().default(false),
   isSalesRep: boolean('is_sales_rep').notNull().default(false),
   isUnderwriter: boolean('is_underwriter').notNull().default(false),
@@ -179,7 +179,7 @@ export const companies = pgTable('companies', {
   isEscrowCompany: boolean('is_escrow_company').notNull().default(false),
   isLender: boolean('is_lender').notNull().default(false),
   isMortgageBroker: boolean('is_mortgage_broker').notNull().default(false),
-  isSellingAgent: boolean('is_selling_agent').notNull().default(false),
+  isRealEstateCompany: boolean('is_real_estate_company').notNull().default(false),
   isUnderwriter: boolean('is_underwriter').notNull().default(false),
 
   surveysDisabled: boolean('surveys_disabled').notNull().default(false),

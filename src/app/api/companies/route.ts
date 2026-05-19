@@ -116,6 +116,7 @@ export async function POST(req: NextRequest) {
       city: data.city ?? null,
       state: data.state ?? null,
       zip: data.zip ?? null,
+      isRealEstateCompany: data.userType === 'realtor',
       isActive: true,
     }).returning({ id: companies.id });
 

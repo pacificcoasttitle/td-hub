@@ -18,9 +18,9 @@ function typeToSql(type: string) {
     case 'escrow': return sql`c.is_escrow = true`;
     case 'lender': return sql`c.is_lender = true`;
     case 'mortgage_broker': return sql`c.is_mortgage_broker = true`;
-    case 'selling_agent':
     case 'agent':
-    case 'realtor': return sql`c.is_selling_agent = true`;
+    case 'real_estate_agent':
+    case 'realtor': return sql`c.is_real_estate_agent = true`;
     case 'title_officer': return sql`c.is_title_officer = true`;
     case 'escrow_officer': return sql`c.is_escrow_officer = true`;
     case 'sales_rep': return sql`c.is_sales_rep = true`;
@@ -31,13 +31,13 @@ function typeToSql(type: string) {
 
 function deriveClientType(row: {
   isEscrow: boolean; isLender: boolean; isMortgageBroker: boolean;
-  isSellingAgent: boolean; isTitleOfficer: boolean; isEscrowOfficer: boolean;
+  isRealEstateAgent: boolean; isTitleOfficer: boolean; isEscrowOfficer: boolean;
   isSalesRep: boolean; userType: string | null;
 }): string {
   if (row.isEscrow) return 'escrow';
   if (row.isLender) return 'lender';
   if (row.isMortgageBroker) return 'mortgage_broker';
-  if (row.isSellingAgent) return 'realtor';
+  if (row.isRealEstateAgent) return 'realtor';
   if (row.isTitleOfficer) return 'title_officer';
   if (row.isEscrowOfficer) return 'escrow_officer';
   if (row.isSalesRep) return 'sales_rep';
@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
         c.is_escrow,
         c.is_lender,
         c.is_mortgage_broker,
-        c.is_selling_agent,
+        c.is_real_estate_agent,
         c.is_title_officer,
         c.is_escrow_officer,
         c.is_sales_rep,
@@ -128,7 +128,7 @@ export async function GET(req: NextRequest) {
         isEscrow: r.is_escrow as boolean,
         isLender: r.is_lender as boolean,
         isMortgageBroker: r.is_mortgage_broker as boolean,
-        isSellingAgent: r.is_selling_agent as boolean,
+        isRealEstateAgent: r.is_real_estate_agent as boolean,
         isTitleOfficer: r.is_title_officer as boolean,
         isEscrowOfficer: r.is_escrow_officer as boolean,
         isSalesRep: r.is_sales_rep as boolean,

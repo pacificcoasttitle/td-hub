@@ -8,7 +8,6 @@ const ALL_ENTITY_TYPES = [
   'Escrow Company',
   'Lender',
   'Mortgage Broker',
-  'Selling Agent/Broker',
   'Underwriter',
 ];
 

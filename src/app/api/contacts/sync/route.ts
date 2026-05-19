@@ -13,7 +13,6 @@ const VALID_USER_TYPES = [
   'Escrow Company',
   'Lender',
   'Mortgage Broker',
-  'Selling Agent/Broker',
   'Underwriter',
 ] as const;
 

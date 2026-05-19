@@ -303,7 +303,7 @@ async function resolveContactIds(input: CreateOrderInput): Promise<ResolvedConta
         isEscrowCompany: companies.isEscrowCompany,
         isLender: companies.isLender,
         isMortgageBroker: companies.isMortgageBroker,
-        isSellingAgent: companies.isSellingAgent,
+        isRealEstateCompany: companies.isRealEstateCompany,
         branchId: companies.branchId,
       }).from(companies)
         .where(eq(companies.lookupCode, openerRow.flookupCode))
@@ -323,7 +323,7 @@ async function resolveContactIds(input: CreateOrderInput): Promise<ResolvedConta
           isEscrowCompany: co.isEscrowCompany,
           isLender: co.isLender ?? false,
           isMortgageBroker: co.isMortgageBroker ?? false,
-          isSellingAgent: co.isSellingAgent ?? false,
+          isRealEstateCompany: co.isRealEstateCompany ?? false,
           branchCode,
         };
       }

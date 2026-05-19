@@ -273,8 +273,8 @@ async function syncSalesReps(): Promise<SyncContactsResult> {
 interface CompanySyncConfig {
   entityType: string;
   userType: string;
-  contactFlag: 'isEscrow' | 'isLender' | 'isMortgageBroker' | 'isSellingAgent' | 'isUnderwriter';
-  companyFlag: 'isEscrowCompany' | 'isLender' | 'isMortgageBroker' | 'isSellingAgent' | 'isUnderwriter';
+  contactFlag: 'isEscrow' | 'isLender' | 'isMortgageBroker' | 'isUnderwriter';
+  companyFlag: 'isEscrowCompany' | 'isLender' | 'isMortgageBroker' | 'isUnderwriter';
   useSpacedFields: boolean;
   extraCompanyFields?: (item: SyncRow) => Record<string, string | null>;
 }
@@ -448,18 +448,6 @@ const COMPANY_CONFIGS: Record<string, CompanySyncConfig> = {
     companyFlag: 'isMortgageBroker',
     useSpacedFields: true,
   },
-  'Selling Agent/Broker': {
-    entityType: 'Selling Agent/Broker',
-    userType: 'Selling Agent/Broker',
-    contactFlag: 'isSellingAgent',
-    companyFlag: 'isSellingAgent',
-    useSpacedFields: true,
-    extraCompanyFields: (item) => ({
-      homePhone: str(item, 'Home Phone'),
-      represents: str(item, 'Represents'),
-      licenseNo: str(item, 'License No'),
-    }),
-  },
   'Underwriter': {
     entityType: 'Underwriter',
     userType: 'Underwriter',
@@ -479,7 +467,6 @@ const VALID_ENTITY_TYPES = [
   'Escrow Company',
   'Lender',
   'Mortgage Broker',
-  'Selling Agent/Broker',
   'Underwriter',
 ];
 

@@ -27,6 +27,7 @@ const USER_TYPE_ROLES: Record<string, string[]> = {
   lender: ['lender'],
   mortgage_broker: ['mortgage_broker'],
   realtor: ['agent'],
+  real_estate_agent: ['agent'],
 };
 
 const createSchema = z.object({
@@ -179,6 +180,7 @@ export async function POST(req: NextRequest) {
       softproLookupCode: lookupCode,
       softproUserType: data.userType,
       roles,
+      isRealEstateAgent: data.userType === 'realtor' || data.userType === 'agent' || data.userType === 'real_estate_agent',
       isActive: data.isActive ?? true,
     }).returning({ id: contacts.id });
 

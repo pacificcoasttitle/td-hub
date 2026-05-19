@@ -10,6 +10,7 @@ const USER_TYPE_MAP: Record<string, string> = {
   agent: 'ListingAgentBroker',
   realtor: 'ListingAgentBroker',
   listing_agent: 'ListingAgentBroker',
+  real_estate_company: 'ListingAgentBroker',
 };
 
 const OFFICER_BRANCH_MAP: Record<string, string> = {
@@ -77,7 +78,7 @@ export interface OpenerCompany {
   isEscrowCompany: boolean;
   isLender: boolean;
   isMortgageBroker: boolean;
-  isSellingAgent: boolean;
+  isRealEstateCompany: boolean;
   branchCode: string | null;
 }
 
@@ -96,7 +97,7 @@ function deriveUserType(
 ): string {
   if (company?.isEscrowCompany) return 'EscrowCompany';
   if (company?.isLender) return 'Lender';
-  if (company?.isSellingAgent) return 'ListingAgentBroker';
+  if (company?.isRealEstateCompany) return 'ListingAgentBroker';
   if (company?.isMortgageBroker) return 'MortgageBroker';
 
   if (company?.companyType) {

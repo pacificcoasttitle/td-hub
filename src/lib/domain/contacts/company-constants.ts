@@ -3,7 +3,7 @@ export const COMPANY_TYPE_MAP: Record<string, string> = {
   escrow: 'Escrow Company',
   lender: 'Lender',
   mortgage_broker: 'Mortgage Broker',
-  realtor: 'Selling Agent/Broker',
+  realtor: 'Real Estate',
 };
 
 /** SoftPro display value → internal companyType */

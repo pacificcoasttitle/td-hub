@@ -33,7 +33,7 @@ const PAGE_SIZE = 25;
 const TYPE_OPTS = [
   { value: '', label: 'All Types' }, { value: 'escrow_company', label: 'Escrow Company' },
   { value: 'lender', label: 'Lender' }, { value: 'mortgage_broker', label: 'Mortgage Broker' },
-  { value: 'selling_agent', label: 'Selling Agent' }, { value: 'underwriter', label: 'Underwriter' },
+  { value: 'real_estate_company', label: 'Real Estate Company' }, { value: 'underwriter', label: 'Underwriter' },
 ];
 
 export default function CompaniesPage() {

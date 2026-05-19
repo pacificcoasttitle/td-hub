@@ -23,7 +23,7 @@ const TYPE_OPTIONS = [
   { value: 'title_officer', label: 'Title Officer' },
   { value: 'escrow_officer', label: 'Escrow Officer' },
   { value: 'sales_rep', label: 'Sales Rep' },
-  { value: 'agent', label: 'Agent' },
+  { value: 'real_estate_agent', label: 'Real Estate Agent' },
   { value: 'escrow', label: 'Escrow Company Contact' },
   { value: 'lender', label: 'Lender' },
   { value: 'mortgage_broker', label: 'Mortgage Broker' },

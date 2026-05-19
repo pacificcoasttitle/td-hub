@@ -11,7 +11,8 @@ function roleToBooleanFilter(role: string): SQL | null {
     case 'escrow_officer': return eq(contacts.isEscrowOfficer, true);
     case 'sales_rep': return eq(contacts.isSalesRep, true);
     case 'agent':
-    case 'selling_agent': return eq(contacts.isSellingAgent, true);
+    case 'realtor':
+    case 'real_estate_agent': return eq(contacts.isRealEstateAgent, true);
     case 'escrow': return eq(contacts.isEscrow, true);
     case 'lender': return eq(contacts.isLender, true);
     case 'mortgage_broker': return eq(contacts.isMortgageBroker, true);
@@ -25,7 +26,8 @@ function companyTypeToBooleanFilter(type: string): SQL | null {
     case 'escrow_company': return eq(companies.isEscrowCompany, true);
     case 'lender': return eq(companies.isLender, true);
     case 'mortgage_broker': return eq(companies.isMortgageBroker, true);
-    case 'selling_agent': return eq(companies.isSellingAgent, true);
+    case 'realtor':
+    case 'real_estate_company': return eq(companies.isRealEstateCompany, true);
     case 'underwriter': return eq(companies.isUnderwriter, true);
     default: return null;
   }

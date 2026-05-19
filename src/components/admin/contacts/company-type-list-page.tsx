@@ -20,7 +20,7 @@ interface Props {
   title: string;
   subtitle: string;
   companyType: string;
-  syncUserType: string;
+  syncUserType?: string;
 }
 
 const PAGE_SIZE = 25;
@@ -67,7 +67,9 @@ export function CompanyTypeListPage({ title, subtitle, companyType, syncUserType
           <h1 className="text-2xl font-semibold text-[#1A1A2E]">{title}</h1>
           <p className="text-sm text-[#6B7280] mt-1">{subtitle}</p>
         </div>
-        <SyncButton endpoint="/api/contacts/sync" userType={syncUserType} onSuccess={fetchCompanies} />
+        {syncUserType && (
+          <SyncButton endpoint="/api/contacts/sync" userType={syncUserType} onSuccess={fetchCompanies} />
+        )}
       </div>
 
       <div className="flex items-center gap-3 mb-4 flex-wrap">

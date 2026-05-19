@@ -17,7 +17,7 @@ export function partyVisibility(ct: string | null | undefined, ot: string, tt: s
   const o = ot.toLowerCase().trim();
   const t = tt.toLowerCase().trim();
 
-  const isListingSelling = ['listing agent', 'selling agent'].includes(c);
+  const isListingClient = c === 'listing agent';
   const isEscrowClient = ['escrow company', 'escrow officer', 'escrow'].includes(c);
   const isRefiLike = t === 'refinance' || t === 'equity';
 
@@ -25,8 +25,8 @@ export function partyVisibility(ct: string | null | undefined, ot: string, tt: s
   const intEscrow = ['title & escrow', 'title_escrow', 'escrow only', 'escrow_only'].includes(o);
 
   return {
-    buyerAgent: !['agent', 'listing agent', 'selling agent'].includes(c) && !isRefiLike,
-    listingAgent: !isListingSelling && !isRefiLike,
+    buyerAgent: !['agent', 'listing agent'].includes(c) && !isRefiLike,
+    listingAgent: !isListingClient && !isRefiLike,
     lender: c !== 'lender',
     mortgageBroker: c !== 'mortgage broker',
     escrowCompany: extEscrow && !isEscrowClient,

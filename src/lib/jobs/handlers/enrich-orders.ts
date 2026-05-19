@@ -66,8 +66,10 @@ async function enrichOrder(order: { id: number; fileNumber: string; orderType: s
   if (listingCode) {
     const id = await resolveContact(listingCode);
     updates.listingAgentId = id;
-    if (id) result.resolved.listingAgentId = id;
-    else result.unresolved.push(`ListingAgentBrokers.PersonLookupCode=${listingCode}`);
+    if (id) {
+      result.resolved.listingAgentId = id;
+      await flagRealEstateAgentAndCompany(id);
+    } else result.unresolved.push(`ListingAgentBrokers.PersonLookupCode=${listingCode}`);
   }
 
   const titleCompanyCode = safeGet(data, 'TitleCompanies', 'CompanyLookUpCode');
@@ -177,6 +179,29 @@ async function resolveContact(lookupCode: string): Promise<number | null> {
     .where(eq(contacts.lookupCode, lookupCode))
     .limit(1);
   return row?.id ?? null;
+}
+
+async function flagRealEstateAgentAndCompany(contactId: number): Promise<void> {
+  await db.update(contacts)
+    .set({ isRealEstateAgent: true, updatedAt: new Date() })
+    .where(and(
+      eq(contacts.id, contactId),
+      eq(contacts.isRealEstateAgent, false),
+    ));
+
+  const [agent] = await db.select({ flookupCode: contacts.flookupCode })
+    .from(contacts)
+    .where(eq(contacts.id, contactId))
+    .limit(1);
+
+  if (!agent?.flookupCode) return;
+
+  await db.update(companies)
+    .set({ isRealEstateCompany: true, updatedAt: new Date() })
+    .where(and(
+      eq(companies.lookupCode, agent.flookupCode),
+      eq(companies.isRealEstateCompany, false),
+    ));
 }
 
 async function resolveCompany(lookupCode: string): Promise<number | null> {

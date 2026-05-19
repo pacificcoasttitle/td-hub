@@ -36,11 +36,12 @@ interface Props {
   showCompanyColumn?: boolean;
   showManagerColumn?: boolean;
   readOnly?: boolean;
+  emptyStateMessage?: string;
 }
 
 const SYNC_USER_TYPE: Record<string, string> = {
   title_officer: 'Title Officer', escrow_officer: 'Escrow Officer', sales_rep: 'Sales Rep',
-  agent: 'Selling Agent/Broker', escrow: 'Escrow Company', lender: 'Lender', mortgage_broker: 'Mortgage Broker',
+  escrow: 'Escrow Company', lender: 'Lender', mortgage_broker: 'Mortgage Broker',
 };
 
 const PAGE_SIZE = 25;
@@ -49,7 +50,16 @@ function cName(c: Contact) {
   return c.fullName || [c.firstName, c.lastName].filter(Boolean).join(' ') || '—';
 }
 
-export function ContactListPage({ title, subtitle, typeFilter, scope = 'all', showCompanyColumn = true, showManagerColumn = false, readOnly = false }: Props) {
+export function ContactListPage({
+  title,
+  subtitle,
+  typeFilter,
+  scope = 'all',
+  showCompanyColumn = true,
+  showManagerColumn = false,
+  readOnly = false,
+  emptyStateMessage = 'No contacts found',
+}: Props) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -133,7 +143,9 @@ export function ContactListPage({ title, subtitle, typeFilter, scope = 'all', sh
           <p className="text-sm text-[#6B7280] mt-1">{subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
-          <SyncButton endpoint="/api/contacts/sync" userType={SYNC_USER_TYPE[typeFilter]} onSuccess={fetchContacts} />
+          {SYNC_USER_TYPE[typeFilter] && (
+            <SyncButton endpoint="/api/contacts/sync" userType={SYNC_USER_TYPE[typeFilter]} onSuccess={fetchContacts} />
+          )}
           {!readOnly && (
             <button onClick={() => { setEditContact(null); setModalOpen(true); }}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] transition-colors">
@@ -265,7 +277,7 @@ export function ContactListPage({ title, subtitle, typeFilter, scope = 'all', sh
             </table>
             {!loading && contacts.length === 0 && (
               <div className="p-12 text-center">
-                <p className="text-[#1A1A2E] font-medium">No contacts found</p>
+                <p className="text-[#1A1A2E] font-medium">{emptyStateMessage}</p>
                 <p className="text-sm text-[#6B7280] mt-1">Try adjusting your search or filters.</p>
               </div>
             )}

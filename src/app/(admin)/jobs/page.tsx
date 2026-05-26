@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Send } from 'lucide-react';
 import { IntegrationHealth } from '@/components/admin/ops/integration-health';
 import { CronStatus } from '@/components/admin/ops/cron-status';
 import { TessaStatus } from '@/components/admin/ops/tessa-status';
@@ -11,6 +12,7 @@ import { VendorLogsTab } from '@/components/admin/vendor-logs-tab';
 import { WebhooksTab } from '@/components/admin/webhooks-tab';
 
 type TabKey = 'dashboard' | 'logs' | 'webhooks';
+type SendStatus = { type: 'success' | 'error'; message: string } | null;
 
 const TABS: [TabKey, string][] = [
   ['dashboard', 'Dashboard'],
@@ -31,9 +33,35 @@ export default function OperationsPage() {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
+  const [sendingReport, setSendingReport] = useState(false);
+  const [sendStatus, setSendStatus] = useState<SendStatus>(null);
 
   function setTab(tab: TabKey) {
     router.push(tab === 'dashboard' ? '/jobs' : `/jobs?tab=${tab}`);
+  }
+
+  async function sendDailyReport() {
+    if (sendingReport) return;
+    setSendingReport(true);
+    setSendStatus(null);
+
+    try {
+      const res = await fetch('/api/admin/ops/send-report', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        const totalSections = Number(data.sectionsLoaded ?? 0) + Number(data.sectionsFailed ?? 0);
+        setSendStatus({
+          type: 'success',
+          message: `Report sent to ${data.sentTo}. ${data.sectionsLoaded}/${totalSections} sections loaded.`,
+        });
+      } else {
+        setSendStatus({ type: 'error', message: data.error ?? 'Failed to send report' });
+      }
+    } catch {
+      setSendStatus({ type: 'error', message: 'Network error while sending report' });
+    } finally {
+      setSendingReport(false);
+    }
   }
 
   return (
@@ -47,24 +75,40 @@ export default function OperationsPage() {
         </div>
 
         {activeTab === 'dashboard' && (
-          <div className="flex items-center gap-2">
-            <select
-              value={month}
-              onChange={e => setMonth(Number(e.target.value))}
-              className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm text-gray-700 bg-white focus:ring-1 focus:ring-[#1B2A4A] focus:border-[#1B2A4A]"
-            >
-              {MONTH_NAMES.map((name, i) => (
-                <option key={i + 1} value={i + 1}>{name}</option>
-              ))}
-            </select>
-            <select
-              value={year}
-              onChange={e => setYear(Number(e.target.value))}
-              className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm text-gray-700 bg-white focus:ring-1 focus:ring-[#1B2A4A] focus:border-[#1B2A4A]"
-            >
-              <option value={2025}>2025</option>
-              <option value={2026}>2026</option>
-            </select>
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={sendDailyReport}
+                disabled={sendingReport}
+                className="inline-flex items-center gap-2 rounded-md bg-[#1B2A4A] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#25385f] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Send className="h-4 w-4" />
+                {sendingReport ? 'Sending...' : 'Send Daily Report Now'}
+              </button>
+              <select
+                value={month}
+                onChange={e => setMonth(Number(e.target.value))}
+                className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm text-gray-700 bg-white focus:ring-1 focus:ring-[#1B2A4A] focus:border-[#1B2A4A]"
+              >
+                {MONTH_NAMES.map((name, i) => (
+                  <option key={i + 1} value={i + 1}>{name}</option>
+                ))}
+              </select>
+              <select
+                value={year}
+                onChange={e => setYear(Number(e.target.value))}
+                className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm text-gray-700 bg-white focus:ring-1 focus:ring-[#1B2A4A] focus:border-[#1B2A4A]"
+              >
+                <option value={2025}>2025</option>
+                <option value={2026}>2026</option>
+              </select>
+            </div>
+            {sendStatus && (
+              <div className={`text-sm ${sendStatus.type === 'success' ? 'text-green-700' : 'text-red-700'}`}>
+                {sendStatus.message}
+              </div>
+            )}
           </div>
         )}
       </div>

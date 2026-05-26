@@ -21,6 +21,7 @@ const JOB_LABELS: Record<string, string> = {
   'softpro.sync_new_users': 'Sync New Users',
   'softpro.sync_all_contacts': 'Sync All Contacts',
   'import-orders': 'Import Orders',
+  'ops.daily_report': 'Daily Ops Report',
 };
 
 const STATUS_CLS: Record<string, string> = {

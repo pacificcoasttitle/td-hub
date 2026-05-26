@@ -19,6 +19,7 @@ import { handleVerifyOrderSync } from '@/lib/jobs/handlers/verify-order-sync';
 import { handleSyncNewUsers } from '@/lib/jobs/handlers/sync-new-users';
 import { handleSyncAllContacts } from '@/lib/jobs/handlers/sync-all-contacts';
 import { handleJobsWatchdog } from '@/lib/jobs/handlers/jobs-watchdog';
+import { handleOpsDailyReport } from '@/lib/jobs/handlers/ops-daily-report';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 
 function formatTodayForImport(): string {
@@ -72,6 +73,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     processOutboxEvents(),
   'jobs.watchdog': () =>
     handleJobsWatchdog(),
+  'ops.daily_report': () =>
+    handleOpsDailyReport(),
 };
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

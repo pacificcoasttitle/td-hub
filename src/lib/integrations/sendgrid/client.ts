@@ -17,6 +17,7 @@ export interface SendEmailParams {
   cc?: string | string[];
   subject: string;
   html: string;
+  text?: string;
   from?: string;
   attachments?: SendGridAttachment[];
 }
@@ -94,7 +95,10 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
     personalizations,
     from: { email: from },
     subject: params.subject,
-    content: [{ type: 'text/html', value: params.html }],
+    content: [
+      ...(params.text ? [{ type: 'text/plain', value: params.text }] : []),
+      { type: 'text/html', value: params.html },
+    ],
   };
 
   if (params.attachments && params.attachments.length > 0) {

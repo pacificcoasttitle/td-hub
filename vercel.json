@@ -35,6 +35,10 @@
     {
       "path": "/api/jobs/run?name=jobs.watchdog",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=ops.daily_report",
+      "schedule": "0 15 * * *"
     }
   ]
 }

@@ -125,18 +125,37 @@ export async function getContacts(params: ContactListParams = {}): Promise<Conta
   }
 
   const [rows, countResult] = await Promise.all([
-    db.select().from(contacts).where(where)
+    db.select({
+      contact: contacts,
+      joinedCompanyName: companies.name,
+    })
+      .from(contacts)
+      .leftJoin(companies, eq(companies.lookupCode, contacts.flookupCode))
+      .where(where)
       .orderBy(buildOrderBy())
       .limit(pageSize).offset(offset),
     db.select({ count: sql<number>`count(*)` }).from(contacts).where(where),
   ]);
 
   return {
-    contacts: rows,
+    contacts: rows.map(({ contact, joinedCompanyName }) => ({
+      ...contact,
+      contactCompanyName: contact.companyName,
+      // Companies are authoritative when flookup_code matches lookup_code;
+      // manual contacts without a matching company keep their typed companyName.
+      companyName: firstNonEmpty(joinedCompanyName, contact.companyName),
+    })),
     total: Number(countResult[0]?.count ?? 0),
     page,
     pageSize,
   };
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (value && value.trim() !== '') return value;
+  }
+  return null;
 }
 
 export async function getContactById(id: number) {

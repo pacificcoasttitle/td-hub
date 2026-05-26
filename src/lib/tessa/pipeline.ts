@@ -7,7 +7,7 @@
 
 import { db } from '@/lib/db/client';
 import { prelimAnalyses } from '@/lib/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { downloadFile as s3Download } from '@/lib/integrations/s3/client';
 import { extractPdfText } from './pdf-extract';
 import { computeFacts } from './tessa-pre-parser';
@@ -26,6 +26,7 @@ export interface AnalyzePrelimParams {
   pdfUrl?: string;
   triggeredBy: 'webhook' | 'cron' | 'manual';
   attemptCount?: number;
+  force?: boolean;
 }
 
 export interface AnalyzePrelimResult {
@@ -69,60 +70,79 @@ export async function analyzePrelim(
     `[TESSA] Starting analysis for order ${params.orderId}, doc ${params.documentId}, trigger: ${params.triggeredBy}`,
   );
   const startedAt = Date.now();
-  const attemptCount = params.attemptCount ?? (params.triggeredBy === 'cron' ? 1 : 0);
 
-  // Dedupe: skip if an active (non-failed) analysis already exists for this document
+  // One analysis row per document. Retries reuse the existing row so attempt_count
+  // can cap permanent failures instead of resetting on every cron tick.
   const [existing] = await db
-    .select({ id: prelimAnalyses.id, status: prelimAnalyses.status })
+    .select({
+      id: prelimAnalyses.id,
+      status: prelimAnalyses.status,
+      attemptCount: prelimAnalyses.attemptCount,
+    })
     .from(prelimAnalyses)
-    .where(and(
-      eq(prelimAnalyses.documentId, params.documentId),
-      inArray(prelimAnalyses.status, ['pending', 'downloading', 'extracting', 'analyzing', 'summarizing', 'complete']),
-    ))
+    .where(eq(prelimAnalyses.documentId, params.documentId))
+    .orderBy(desc(prelimAnalyses.createdAt))
     .limit(1);
 
-  if (existing) {
+  const activeStatuses = ['pending', 'downloading', 'extracting', 'analyzing', 'summarizing'] as const;
+  if (existing && !params.force && (existing.status === 'complete' || activeStatuses.includes(existing.status as typeof activeStatuses[number]))) {
     console.log(`[TESSA] Analysis already exists for doc ${params.documentId}: ${existing.status}`);
     return { analysisId: existing.id, status: existing.status };
   }
 
-  // Create row with status 'pending'
   let analysisId: number;
-  console.error('[TESSA] About to create analysis row', {
-    orderId: params.orderId,
-    documentId: params.documentId,
-    fileNumber: params.fileNumber,
-    triggeredBy: params.triggeredBy,
-  });
-  try {
-    const [row] = await db.insert(prelimAnalyses).values({
+  const attemptCount = params.attemptCount ?? (existing ? existing.attemptCount + 1 : params.triggeredBy === 'cron' ? 1 : 0);
+
+  if (existing) {
+    analysisId = existing.id;
+    await updateRow(analysisId, {
       orderId: params.orderId,
-      documentId: params.documentId,
       fileNumber: params.fileNumber,
       status: 'pending',
       triggeredBy: params.triggeredBy,
       attemptCount,
-    }).returning({ id: prelimAnalyses.id });
-    analysisId = row!.id;
-    console.error('[TESSA] Created analysis row successfully', {
-      analysisId,
+      errorMessage: null,
+      errorStep: null,
+      errorType: null,
+    });
+    console.log(`[TESSA] Reusing analysis row ${analysisId} for order ${params.orderId}, attempt ${attemptCount}`);
+  } else {
+    console.error('[TESSA] About to create analysis row', {
       orderId: params.orderId,
       documentId: params.documentId,
+      fileNumber: params.fileNumber,
+      triggeredBy: params.triggeredBy,
     });
-    console.log(`[TESSA] Created analysis row ${analysisId} for order ${params.orderId}`);
-  } catch (err) {
-    console.error('[TESSA] FATAL: Cannot create analysis row:', {
-      orderId: params.orderId,
-      documentId: params.documentId,
-      error: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
-    });
-    return {
-      analysisId: 0,
-      status: 'failed',
-      error: err instanceof Error ? err.message : String(err),
-      errorStep: 'creating_row',
-    };
+    try {
+      const [row] = await db.insert(prelimAnalyses).values({
+        orderId: params.orderId,
+        documentId: params.documentId,
+        fileNumber: params.fileNumber,
+        status: 'pending',
+        triggeredBy: params.triggeredBy,
+        attemptCount,
+      }).returning({ id: prelimAnalyses.id });
+      analysisId = row!.id;
+      console.error('[TESSA] Created analysis row successfully', {
+        analysisId,
+        orderId: params.orderId,
+        documentId: params.documentId,
+      });
+      console.log(`[TESSA] Created analysis row ${analysisId} for order ${params.orderId}`);
+    } catch (err) {
+      console.error('[TESSA] FATAL: Cannot create analysis row:', {
+        orderId: params.orderId,
+        documentId: params.documentId,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      return {
+        analysisId: 0,
+        status: 'failed',
+        error: err instanceof Error ? err.message : String(err),
+        errorStep: 'creating_row',
+      };
+    }
   }
 
   const finish = (status: string) => {

@@ -72,8 +72,15 @@ export async function POST(
 
   try {
     await db.update(prelimAnalyses)
-      .set({ attemptCount: 0, updatedAt: new Date() })
-      .where(and(eq(prelimAnalyses.documentId, doc.id), eq(prelimAnalyses.status, 'failed')));
+      .set({
+        attemptCount: 0,
+        status: 'pending',
+        errorMessage: null,
+        errorType: null,
+        errorStep: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(prelimAnalyses.documentId, doc.id));
 
     const result = await analyzePrelim({
       orderId: order.id,
@@ -81,6 +88,8 @@ export async function POST(
       fileNumber: order.fileNumber,
       storageKey: doc.storageKey,
       triggeredBy: 'manual',
+      attemptCount: 0,
+      force: true,
     });
 
     if (result.status === 'failed') {

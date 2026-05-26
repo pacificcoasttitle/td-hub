@@ -1,6 +1,6 @@
 import {
   pgTable, serial, text, varchar, integer,
-  timestamp, boolean, jsonb, index,
+  timestamp, boolean, jsonb, index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { orders } from './orders';
 import { documents } from './documents';
@@ -49,5 +49,6 @@ export const prelimAnalyses = pgTable('prelim_analyses', {
 }, (table) => ({
   orderIdx: index('prelim_analyses_order_idx').on(table.orderId),
   documentIdx: index('prelim_analyses_document_idx').on(table.documentId),
+  documentUniqueIdx: uniqueIndex('prelim_analyses_document_id_unique').on(table.documentId),
   statusIdx: index('prelim_analyses_status_idx').on(table.status),
 }));

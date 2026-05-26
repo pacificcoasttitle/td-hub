@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { orders, documents, documentAudit, prelimAnalyses } from '@/lib/db/schema';
-import { sql, and, eq, or, isNull, asc, desc, lt } from 'drizzle-orm';
+import { sql, and, eq, or, isNull, asc } from 'drizzle-orm';
 import { getAttachedDocuments } from '@/lib/integrations/softpro';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
 import { analyzePrelim } from '@/lib/tessa';
@@ -15,6 +15,15 @@ export interface FetchPrelimsResult {
   timedOut: boolean;
   errors: Array<{ fileNumber: string; error: string }>;
 }
+
+type TessaCandidateRow = {
+  analysis_id: number | null;
+  order_id: number;
+  document_id: number;
+  file_number: string;
+  attempt_count: number;
+  storage_key: string;
+};
 
 const TIME_BUDGET_MS = 240_000;
 // Cap retries at 5: prevents runaway retries on permanent failures
@@ -84,44 +93,54 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
     return { total: ordersWithoutPrelims.length, attempted, fetched, documentsStored, skipped, retried, timedOut, errors };
   }
   try {
-    const failedRows = await db
-      .select({
-        id: prelimAnalyses.id,
-        orderId: prelimAnalyses.orderId,
-        documentId: prelimAnalyses.documentId,
-        fileNumber: prelimAnalyses.fileNumber,
-        attemptCount: prelimAnalyses.attemptCount,
-        storageKey: documents.storageKey,
-      })
-      .from(prelimAnalyses)
-      .innerJoin(documents, eq(documents.id, prelimAnalyses.documentId))
-      .where(and(
-        eq(prelimAnalyses.status, 'failed'),
-        lt(prelimAnalyses.attemptCount, MAX_TESSA_ATTEMPTS),
-        sql`NOT EXISTS (
-          SELECT 1 FROM prelim_analyses pa2
-          WHERE pa2.document_id = ${prelimAnalyses.documentId}
-            AND pa2.status != 'failed'
-        )`,
-        sql`NOT EXISTS (
-          SELECT 1 FROM prelim_analyses newer
-          WHERE newer.document_id = ${prelimAnalyses.documentId}
-            AND newer.status = 'failed'
-            AND newer.updated_at > ${prelimAnalyses.updatedAt}
-        )`,
-      ))
-      .orderBy(desc(prelimAnalyses.updatedAt))
-      .limit(5);
+    const candidateRows = await db.execute(sql`
+      with latest_analysis as (
+        select distinct on (document_id)
+          id,
+          document_id,
+          file_number,
+          status,
+          attempt_count,
+          updated_at
+        from prelim_analyses
+        where document_id is not null
+        order by document_id, updated_at desc nulls last, id desc
+      )
+      select
+        la.id as analysis_id,
+        d.order_id,
+        d.id as document_id,
+        coalesce(la.file_number, o.file_number) as file_number,
+        coalesce(la.attempt_count, 0)::int as attempt_count,
+        d.storage_key
+      from documents d
+      inner join orders o on o.id = d.order_id
+      left join latest_analysis la on la.document_id = d.id
+      where d.category = 'prelim'
+        and d.status = 'active'
+        and (
+          la.id is null
+          or (la.status in ('failed', 'pending') and la.attempt_count < ${MAX_TESSA_ATTEMPTS})
+        )
+        and not exists (
+          select 1 from prelim_analyses complete
+          where complete.document_id = d.id
+            and complete.status = 'complete'
+        )
+      order by coalesce(la.updated_at, d.created_at) asc
+      limit 5
+    `);
+    const candidates = candidateRows as unknown as TessaCandidateRow[];
 
-    for (const row of failedRows) {
-      const nextAttempt = row.attemptCount + 1;
+    for (const row of candidates) {
+      const nextAttempt = row.attempt_count + 1;
       try {
-        console.log(`[TESSA] Retrying failed analysis for order ${row.orderId}`);
+        console.log(`[TESSA] Running analysis for order ${row.order_id}, doc ${row.document_id}, attempt ${nextAttempt}`);
         const result = await analyzePrelim({
-          orderId: row.orderId!,
-          documentId: row.documentId!,
-          fileNumber: row.fileNumber!,
-          storageKey: row.storageKey,
+          orderId: row.order_id,
+          documentId: row.document_id,
+          fileNumber: row.file_number,
+          storageKey: row.storage_key,
           triggeredBy: 'cron',
           attemptCount: nextAttempt,
         });
@@ -130,11 +149,11 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
         }
         retried++;
       } catch (err) {
-        if (nextAttempt >= MAX_TESSA_ATTEMPTS) {
-          await markTessaRetryCapReached(row.id, err instanceof Error ? err.message : 'Unknown retry failure');
+        if (nextAttempt >= MAX_TESSA_ATTEMPTS && row.analysis_id !== null) {
+          await markTessaRetryCapReached(row.analysis_id, err instanceof Error ? err.message : 'Unknown retry failure');
         }
         console.error('[TESSA] Retry failed:', {
-          orderId: row.orderId,
+          orderId: row.order_id,
           message: err instanceof Error ? err.message : err,
         });
       }

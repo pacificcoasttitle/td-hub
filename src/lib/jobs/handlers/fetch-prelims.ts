@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { orders, documents, documentAudit, prelimAnalyses } from '@/lib/db/schema';
-import { sql, and, eq, or, isNull, asc } from 'drizzle-orm';
+import { sql, and, eq, or, isNull, asc, desc, lt } from 'drizzle-orm';
 import { getAttachedDocuments } from '@/lib/integrations/softpro';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
 import { analyzePrelim } from '@/lib/tessa';
@@ -17,6 +17,10 @@ export interface FetchPrelimsResult {
 }
 
 const TIME_BUDGET_MS = 240_000;
+// Cap retries at 5: prevents runaway retries on permanent failures
+// (e.g., image-based PDFs that can't be text-extracted).
+// See: ops report incident 2026-05-26 (Orders 324, 3259)
+const MAX_TESSA_ATTEMPTS = 5;
 
 /**
  * Finds orders without prelim documents and attempts to fetch them
@@ -82,35 +86,53 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
   try {
     const failedRows = await db
       .select({
+        id: prelimAnalyses.id,
         orderId: prelimAnalyses.orderId,
         documentId: prelimAnalyses.documentId,
         fileNumber: prelimAnalyses.fileNumber,
+        attemptCount: prelimAnalyses.attemptCount,
         storageKey: documents.storageKey,
       })
       .from(prelimAnalyses)
       .innerJoin(documents, eq(documents.id, prelimAnalyses.documentId))
       .where(and(
         eq(prelimAnalyses.status, 'failed'),
+        lt(prelimAnalyses.attemptCount, MAX_TESSA_ATTEMPTS),
         sql`NOT EXISTS (
           SELECT 1 FROM prelim_analyses pa2
-          WHERE pa2.order_id = ${prelimAnalyses.orderId}
+          WHERE pa2.document_id = ${prelimAnalyses.documentId}
             AND pa2.status != 'failed'
         )`,
+        sql`NOT EXISTS (
+          SELECT 1 FROM prelim_analyses newer
+          WHERE newer.document_id = ${prelimAnalyses.documentId}
+            AND newer.status = 'failed'
+            AND newer.updated_at > ${prelimAnalyses.updatedAt}
+        )`,
       ))
+      .orderBy(desc(prelimAnalyses.updatedAt))
       .limit(5);
 
     for (const row of failedRows) {
+      const nextAttempt = row.attemptCount + 1;
       try {
         console.log(`[TESSA] Retrying failed analysis for order ${row.orderId}`);
-        await analyzePrelim({
+        const result = await analyzePrelim({
           orderId: row.orderId!,
           documentId: row.documentId!,
           fileNumber: row.fileNumber!,
           storageKey: row.storageKey,
           triggeredBy: 'cron',
+          attemptCount: nextAttempt,
         });
+        if (result.status === 'failed' && nextAttempt >= MAX_TESSA_ATTEMPTS && result.analysisId > 0) {
+          await markTessaRetryCapReached(result.analysisId, result.error ?? 'Analysis failed');
+        }
         retried++;
       } catch (err) {
+        if (nextAttempt >= MAX_TESSA_ATTEMPTS) {
+          await markTessaRetryCapReached(row.id, err instanceof Error ? err.message : 'Unknown retry failure');
+        }
         console.error('[TESSA] Retry failed:', {
           orderId: row.orderId,
           message: err instanceof Error ? err.message : err,
@@ -122,6 +144,18 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
   }
 
   return { total: ordersWithoutPrelims.length, attempted, fetched, documentsStored, skipped, retried, timedOut, errors };
+}
+
+async function markTessaRetryCapReached(analysisId: number, error: string) {
+  await db.update(prelimAnalyses)
+    .set({
+      status: 'failed',
+      attemptCount: MAX_TESSA_ATTEMPTS,
+      errorType: 'max_attempts_reached',
+      errorMessage: `Failed after ${MAX_TESSA_ATTEMPTS} attempts: ${error}`,
+      updatedAt: new Date(),
+    })
+    .where(eq(prelimAnalyses.id, analysisId));
 }
 
 /**

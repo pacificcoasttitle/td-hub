@@ -25,6 +25,7 @@ export interface AnalyzePrelimParams {
   /** HTTP URL fallback (signed URL or external URL). */
   pdfUrl?: string;
   triggeredBy: 'webhook' | 'cron' | 'manual';
+  attemptCount?: number;
 }
 
 export interface AnalyzePrelimResult {
@@ -68,6 +69,7 @@ export async function analyzePrelim(
     `[TESSA] Starting analysis for order ${params.orderId}, doc ${params.documentId}, trigger: ${params.triggeredBy}`,
   );
   const startedAt = Date.now();
+  const attemptCount = params.attemptCount ?? (params.triggeredBy === 'cron' ? 1 : 0);
 
   // Dedupe: skip if an active (non-failed) analysis already exists for this document
   const [existing] = await db
@@ -99,6 +101,7 @@ export async function analyzePrelim(
       fileNumber: params.fileNumber,
       status: 'pending',
       triggeredBy: params.triggeredBy,
+      attemptCount,
     }).returning({ id: prelimAnalyses.id });
     analysisId = row!.id;
     console.error('[TESSA] Created analysis row successfully', {

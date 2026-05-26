@@ -41,6 +41,7 @@ export interface OrderFlowData {
   enrichedFully: number;
   pendingEnrichmentWithinCooldown: number;
   stuckOver6Hours: number;
+  newlyStuckOver6Hours: number;
 }
 
 export interface SyncHealthRow {
@@ -142,16 +143,20 @@ export interface SecurityAccessData {
 }
 
 export interface FailureDetailRow {
-  timestamp: Date | null;
   category: string;
   vendorOrJob: string;
   orderReference: string | null;
-  errorMessage: string;
+  errorSummary: string;
+  occurrences: number;
+  firstSeen: Date | null;
+  lastSeen: Date | null;
   remediationStatus: string;
 }
 
 export interface FailuresDetailData {
   rows: FailureDetailRow[];
+  distinctCount: number;
+  limit: number;
 }
 
 const TRACKED_VENDORS = ['softpro', 'titlepoint', 'sitex', 'westcor', 'fnf', 'sendgrid', 'anthropic', 'claude'];
@@ -199,6 +204,7 @@ export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): P
       enriched_fully: unknown;
       pending_enrichment_within_cooldown: unknown;
       stuck_over_6_hours: unknown;
+      newly_stuck_over_6_hours: unknown;
     }>(sql`
       select
         count(*) filter (where o.source = 'softpro_sync' and o.created_at >= ${windowStart.toISOString()} and o.created_at < ${windowEnd.toISOString()})::int as synced_from_softpro,
@@ -218,7 +224,13 @@ export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): P
           where o.source = 'softpro_sync'
             and o.created_at < (${windowEnd.toISOString()}::timestamp - interval '6 hours')
             and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
-        )::int as stuck_over_6_hours
+        )::int as stuck_over_6_hours,
+        count(*) filter (
+          where o.source = 'softpro_sync'
+            and o.created_at >= ${windowStart.toISOString()}
+            and o.created_at < (${windowEnd.toISOString()}::timestamp - interval '6 hours')
+            and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
+        )::int as newly_stuck_over_6_hours
       from orders o
       left join order_properties op on op.order_id = o.id
     `);
@@ -229,6 +241,7 @@ export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): P
       enrichedFully: toNumber(row?.enriched_fully),
       pendingEnrichmentWithinCooldown: toNumber(row?.pending_enrichment_within_cooldown),
       stuckOver6Hours: toNumber(row?.stuck_over_6_hours),
+      newlyStuckOver6Hours: toNumber(row?.newly_stuck_over_6_hours),
     };
   });
 }
@@ -543,41 +556,61 @@ export async function getFailuresDetailSection(windowStart: Date, windowEnd: Dat
     // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
     // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const rows = await queryRows<Record<string, unknown>>(sql`
-      select * from (
+      with raw_failures as (
         select created_at as failure_timestamp, 'Vendor' as category, vendor as vendor_or_job, order_id::text as order_reference,
-          left(coalesce(error_category, response_meta->>'error', response_meta->>'body', 'Vendor call failed'), 200) as error_message,
+          left(coalesce(error_category, response_meta->>'error', response_meta->>'body', 'Vendor call failed'), 100) as error_summary,
           case when retryable then 'auto-retried' else 'pending' end as remediation_status
         from vendor_api_logs
         where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()} and success = false
         union all
         select created_at as failure_timestamp, 'Cron' as category, job_type as vendor_or_job, order_id::text as order_reference,
-          left(coalesce(error, 'Job failed'), 200) as error_message,
+          left(coalesce(error, 'Job failed'), 100) as error_summary,
           'manual intervention needed' as remediation_status
         from jobs
         where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()} and status = 'failed'
         union all
         select created_at as failure_timestamp, 'Notification' as category, coalesce(provider, event_type) as vendor_or_job, order_id::text as order_reference,
-          left(coalesce(error_message, status), 200) as error_message,
+          left(coalesce(error_message, status), 100) as error_summary,
           'pending' as remediation_status
         from notification_logs
         where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()} and status in ('failed', 'bounced', 'rejected', 'error')
         union all
         select updated_at as failure_timestamp, 'TESSA' as category, coalesce(error_step, 'analysis') as vendor_or_job, order_id::text as order_reference,
-          left(coalesce(error_message, 'TESSA analysis failed'), 200) as error_message,
-          'pending' as remediation_status
+          left(coalesce(error_message, 'TESSA analysis failed'), 100) as error_summary,
+          case when error_type = 'max_attempts_reached' then 'manual intervention needed' else 'pending' end as remediation_status
         from prelim_analyses
         where updated_at >= ${windowStart.toISOString()} and updated_at < ${windowEnd.toISOString()} and status = 'failed'
-      ) failures
-      order by failure_timestamp desc
+      ),
+      grouped_failures as (
+        select
+          category,
+          vendor_or_job,
+          order_reference,
+          error_summary,
+          count(*)::int as occurrences,
+          min(failure_timestamp) as first_seen,
+          max(failure_timestamp) as last_seen,
+          max(remediation_status) as remediation_status
+        from raw_failures
+        GROUP BY category, vendor_or_job, order_reference, error_summary
+      )
+      select *, (select count(*)::int from grouped_failures) as distinct_count
+      from grouped_failures
+      order by occurrences desc, last_seen desc
+      limit 30
     `);
 
     return {
+      distinctCount: toNumber(rows[0]?.distinct_count),
+      limit: 30,
       rows: rows.map((row) => ({
-        timestamp: toDate(row.failure_timestamp),
         category: String(row.category ?? 'Other'),
         vendorOrJob: String(row.vendor_or_job ?? 'unknown'),
         orderReference: row.order_reference ? String(row.order_reference) : null,
-        errorMessage: String(row.error_message ?? 'Unknown failure'),
+        errorSummary: String(row.error_summary ?? 'Unknown failure'),
+        occurrences: toNumber(row.occurrences),
+        firstSeen: toDate(row.first_seen),
+        lastSeen: toDate(row.last_seen),
         remediationStatus: String(row.remediation_status ?? 'pending'),
       })),
     };
@@ -667,43 +700,39 @@ function computeSummary(input: {
 
   if (input.syncHealth.ok) {
     const failedJobs = input.syncHealth.data.rows.filter((row) => row.failed > 0);
-    if (failedJobs.length > 0) {
+    if (failedJobs.length >= 3) {
       critical = true;
+      attentionItems.push(`Cron failures in last 24h: ${failedJobs.map((row) => `${row.jobType} (${row.failed})`).join(', ')}`);
+    } else if (failedJobs.length > 0) {
+      attention = true;
       attentionItems.push(`Cron failures in last 24h: ${failedJobs.map((row) => `${row.jobType} (${row.failed})`).join(', ')}`);
     }
   }
 
+  let aggregateRate = 100;
   if (input.vendorApiHealth.ok) {
     const totalCalls = input.vendorApiHealth.data.rows.reduce((sum, row) => sum + row.calls, 0);
     const totalSuccess = input.vendorApiHealth.data.rows.reduce((sum, row) => sum + row.success, 0);
-    const aggregateRate = totalCalls === 0 ? 100 : (totalSuccess / totalCalls) * 100;
-    const highErrorVendors = input.vendorApiHealth.data.rows.filter((row) => row.errors > 10);
+    aggregateRate = totalCalls === 0 ? 100 : (totalSuccess / totalCalls) * 100;
     if (aggregateRate < 80) {
       critical = true;
       attentionItems.push(`Vendor API success rate is ${aggregateRate.toFixed(1)}%.`);
-    }
-    for (const vendor of highErrorVendors) {
+    } else if (aggregateRate < 95) {
       attention = true;
-      attentionItems.push(`${vendor.vendor} has ${vendor.errors} vendor errors.`);
+      attentionItems.push(`Vendor API success rate is ${aggregateRate.toFixed(1)}%.`);
     }
   }
 
-  if (input.notifications.ok && input.notifications.data.attempted > 0) {
-    const deliveryRate = (input.notifications.data.delivered / input.notifications.data.attempted) * 100;
-    if (deliveryRate < 90) {
+  if (input.notifications.ok) {
+    if (input.notifications.data.attempted >= 10 && input.notifications.data.delivered === 0) {
       critical = true;
-      attentionItems.push(`Notification delivery is ${deliveryRate.toFixed(1)}%.`);
+      attentionItems.push(`Notification delivery stopped: ${input.notifications.data.attempted} attempted, 0 delivered.`);
     }
   }
 
-  if (input.orderFlow.ok && input.orderFlow.data.stuckOver6Hours > 5) {
+  if (input.orderFlow.ok && input.orderFlow.data.newlyStuckOver6Hours > 50) {
     attention = true;
-    attentionItems.push(`${input.orderFlow.data.stuckOver6Hours} synced orders older than 6h are still missing required enrichment.`);
-  }
-
-  if (input.prelims.ok && typeof input.prelims.data.approximateClaudeApiCost === 'number' && input.prelims.data.approximateClaudeApiCost > 20) {
-    attention = true;
-    attentionItems.push(`TESSA Claude API cost is $${input.prelims.data.approximateClaudeApiCost.toFixed(2)} today.`);
+    attentionItems.push(`${input.orderFlow.data.newlyStuckOver6Hours} orders synced in the last 24h are now >6h old and still missing required enrichment.`);
   }
 
   const failedSections = input.sections.filter((section) => !section.ok).length;

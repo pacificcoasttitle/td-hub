@@ -71,6 +71,10 @@ export async function POST(
   }
 
   try {
+    await db.update(prelimAnalyses)
+      .set({ attemptCount: 0, updatedAt: new Date() })
+      .where(and(eq(prelimAnalyses.documentId, doc.id), eq(prelimAnalyses.status, 'failed')));
+
     const result = await analyzePrelim({
       orderId: order.id,
       documentId: doc.id,

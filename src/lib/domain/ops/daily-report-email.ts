@@ -114,7 +114,7 @@ export function renderDailyReportHtml(report: DailyReport): string {
         ['Service role token usage', d.serviceRoleTokenUsage],
         ['Role escalations', d.roleEscalations],
       ]))}
-      ${renderSectionHtml('13. Failures Detail (24h)', report.failuresDetail, (d) => renderFailureRows(d.rows))}
+      ${renderSectionHtml('13. Failures Detail (24h)', report.failuresDetail, (d) => renderFailureRows(d))}
     </div>
   </div>
 </body>
@@ -195,7 +195,12 @@ export function renderDailyReportText(report: DailyReport): string {
       `Service role token usage: ${d.serviceRoleTokenUsage}`,
       `Role escalations: ${d.roleEscalations}`,
     ]),
-    sectionText('13. Failures Detail (24h)', report.failuresDetail, (d) => d.rows.length === 0 ? ['No failures found.'] : d.rows.map((r) => `${formatPacific(r.timestamp)} | ${r.category} | ${r.vendorOrJob} | ${r.orderReference ?? '—'} | ${r.errorMessage} | ${r.remediationStatus}`)),
+    sectionText('13. Failures Detail (24h)', report.failuresDetail, (d) => [
+      `Total distinct failure groups in last 24h: ${d.distinctCount}. Showing top ${d.limit} by occurrence count.`,
+      ...(d.rows.length === 0
+        ? ['No failures found.']
+        : d.rows.map((r) => `${formatPacific(r.lastSeen)} | ${r.category} | ${r.vendorOrJob} | ${r.orderReference ?? '—'} | ${r.errorSummary} | occurrences ${r.occurrences} | ${r.remediationStatus}`)),
+    ]),
   ];
 
   return lines.join('\n');
@@ -265,16 +270,29 @@ function renderGrowthRows(items: GrowthItem[]): string {
   return table(['Metric', 'Total', 'Delta'], items.map((item) => [item.label, String(item.total), formatDelta(item.delta)]));
 }
 
-function renderFailureRows(rows: FailureDetailRow[]): string {
-  if (rows.length === 0) return emptyState('No failures found.');
-  return table(['Timestamp', 'Category', 'Vendor / Job', 'Order', 'Error', 'Remediation'], rows.map((row) => [
-    formatPacific(row.timestamp),
-    row.category,
-    row.vendorOrJob,
-    row.orderReference ?? '—',
-    row.errorMessage,
-    row.remediationStatus,
-  ]));
+function renderFailureRows(data: { rows: FailureDetailRow[]; distinctCount: number; limit: number }): string {
+  const summary = `<p style="margin:0 0 10px;color:${MUTED};font-size:13px;">Total distinct failure groups in last 24h: <strong>${data.distinctCount}</strong>. Showing top ${data.limit} by occurrence count.</p>`;
+  if (data.rows.length === 0) return `${summary}${emptyState('No failures found.')}`;
+  return `${summary}${failureTable(data.rows)}`;
+}
+
+function failureTable(rows: FailureDetailRow[]): string {
+  const headers = ['Last Seen', 'Category', 'Vendor / Job', 'Order', 'Error', 'Occurrences', 'Remediation'];
+  return `<table cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;border:1px solid ${BORDER};font-size:12px;">
+    <thead><tr style="background:#F9FAFB;">${headers.map((header) => `<th style="padding:8px;border-bottom:1px solid ${BORDER};text-align:left;color:${MUTED};">${escapeHtml(header)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((row) => {
+      const noisy = row.occurrences > 10;
+      return `<tr style="${noisy ? 'background:#FFFBEB;' : ''}">
+        <td style="padding:8px;border-bottom:1px solid ${BORDER};vertical-align:top;">${escapeHtml(formatPacific(row.lastSeen))}</td>
+        <td style="padding:8px;border-bottom:1px solid ${BORDER};vertical-align:top;">${escapeHtml(row.category)}</td>
+        <td style="padding:8px;border-bottom:1px solid ${BORDER};vertical-align:top;">${escapeHtml(row.vendorOrJob)}</td>
+        <td style="padding:8px;border-bottom:1px solid ${BORDER};vertical-align:top;">${escapeHtml(row.orderReference ?? '—')}</td>
+        <td style="padding:8px;border-bottom:1px solid ${BORDER};vertical-align:top;">${escapeHtml(row.errorSummary)}</td>
+        <td style="padding:8px;border-bottom:1px solid ${BORDER};vertical-align:top;${noisy ? 'font-weight:700;' : ''}">${row.occurrences}</td>
+        <td style="padding:8px;border-bottom:1px solid ${BORDER};vertical-align:top;">${escapeHtml(row.remediationStatus)}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
 }
 
 function table(headers: string[], rows: string[][]): string {

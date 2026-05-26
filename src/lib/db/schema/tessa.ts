@@ -13,6 +13,7 @@ export const prelimAnalyses = pgTable('prelim_analyses', {
 
   status: varchar('status', { length: 50 }).notNull().default('pending'),
   triggeredBy: varchar('triggered_by', { length: 20 }).notNull(),
+  attemptCount: integer('attempt_count').notNull().default(0),
 
   pdfText: text('pdf_text'),
   pdfCharCount: integer('pdf_char_count'),

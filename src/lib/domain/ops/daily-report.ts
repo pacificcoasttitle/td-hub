@@ -191,6 +191,8 @@ async function runSection<T>(load: () => Promise<T>): Promise<SectionResult<T>> 
 
 export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): Promise<SectionResult<OrderFlowData>> {
   return runSection(async () => {
+    // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
+    // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const [row] = await queryRows<{
       synced_from_softpro: unknown;
       created_in_td_hub: unknown;
@@ -199,10 +201,10 @@ export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): P
       stuck_over_6_hours: unknown;
     }>(sql`
       select
-        count(*) filter (where o.source = 'softpro_sync' and o.created_at >= ${windowStart} and o.created_at < ${windowEnd})::int as synced_from_softpro,
-        count(*) filter (where o.source in ('manual_entry', 'web_form') and o.created_at >= ${windowStart} and o.created_at < ${windowEnd})::int as created_in_td_hub,
+        count(*) filter (where o.source = 'softpro_sync' and o.created_at >= ${windowStart.toISOString()} and o.created_at < ${windowEnd.toISOString()})::int as synced_from_softpro,
+        count(*) filter (where o.source in ('manual_entry', 'web_form') and o.created_at >= ${windowStart.toISOString()} and o.created_at < ${windowEnd.toISOString()})::int as created_in_td_hub,
         count(*) filter (
-          where o.created_at >= ${windowStart} and o.created_at < ${windowEnd}
+          where o.created_at >= ${windowStart.toISOString()} and o.created_at < ${windowEnd.toISOString()}
             and nullif(coalesce(op.address, op.full_address), '') is not null
             and o.sales_rep_id is not null
             and o.escrow_officer_id is not null
@@ -210,11 +212,11 @@ export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): P
         count(*) filter (
           where o.source = 'softpro_sync'
             and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
-            and o.last_details_fetch_at >= (${windowEnd}::timestamp - interval '6 hours')
+            and o.last_details_fetch_at >= (${windowEnd.toISOString()}::timestamp - interval '6 hours')
         )::int as pending_enrichment_within_cooldown,
         count(*) filter (
           where o.source = 'softpro_sync'
-            and o.created_at < (${windowEnd}::timestamp - interval '6 hours')
+            and o.created_at < (${windowEnd.toISOString()}::timestamp - interval '6 hours')
             and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
         )::int as stuck_over_6_hours
       from orders o
@@ -233,6 +235,8 @@ export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): P
 
 export async function getSyncHealthSection(windowStart: Date, windowEnd: Date): Promise<SectionResult<SyncHealthData>> {
   return runSection(async () => {
+    // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
+    // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const rows = await queryRows<{
       job_type: string;
       runs: unknown;
@@ -249,7 +253,7 @@ export async function getSyncHealthSection(windowStart: Date, windowEnd: Date): 
         coalesce(avg(extract(epoch from (ended_at - started_at))), 0)::float as avg_duration_seconds,
         max(coalesce(started_at, created_at)) as last_run
       from jobs
-      where created_at >= ${windowStart} and created_at < ${windowEnd}
+      where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}
       group by job_type
       order by job_type
     `);
@@ -269,6 +273,8 @@ export async function getSyncHealthSection(windowStart: Date, windowEnd: Date): 
 
 export async function getPrelimsSection(windowStart: Date, windowEnd: Date): Promise<SectionResult<PrelimsData>> {
   return runSection(async () => {
+    // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
+    // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const [row] = await queryRows<{
       fetched: unknown;
       queued: unknown;
@@ -276,10 +282,10 @@ export async function getPrelimsSection(windowStart: Date, windowEnd: Date): Pro
       failed: unknown;
     }>(sql`
       select
-        (select count(*)::int from documents where category = 'prelim' and status = 'active' and created_at >= ${windowStart} and created_at < ${windowEnd}) as fetched,
-        (select count(*)::int from prelim_analyses where status in ('pending', 'downloading', 'extracting', 'analyzing', 'summarizing') and created_at >= ${windowStart} and created_at < ${windowEnd}) as queued,
-        (select count(*)::int from prelim_analyses where status = 'complete' and coalesce(completed_at, updated_at, created_at) >= ${windowStart} and coalesce(completed_at, updated_at, created_at) < ${windowEnd}) as completed,
-        (select count(*)::int from prelim_analyses where status = 'failed' and updated_at >= ${windowStart} and updated_at < ${windowEnd}) as failed
+        (select count(*)::int from documents where category = 'prelim' and status = 'active' and created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}) as fetched,
+        (select count(*)::int from prelim_analyses where status in ('pending', 'downloading', 'extracting', 'analyzing', 'summarizing') and created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}) as queued,
+        (select count(*)::int from prelim_analyses where status = 'complete' and coalesce(completed_at, updated_at, created_at) >= ${windowStart.toISOString()} and coalesce(completed_at, updated_at, created_at) < ${windowEnd.toISOString()}) as completed,
+        (select count(*)::int from prelim_analyses where status = 'failed' and updated_at >= ${windowStart.toISOString()} and updated_at < ${windowEnd.toISOString()}) as failed
     `);
 
     return {
@@ -294,10 +300,12 @@ export async function getPrelimsSection(windowStart: Date, windowEnd: Date): Pro
 
 export async function getCplsSection(windowStart: Date, windowEnd: Date): Promise<SectionResult<CplsData>> {
   return runSection(async () => {
+    // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
+    // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const generated = await queryRows<{ vendor: string; count: unknown }>(sql`
       select vendor, count(*)::int as count
       from vendor_api_logs
-      where created_at >= ${windowStart} and created_at < ${windowEnd}
+      where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}
         and operation ilike '%cpl%'
         and success = true
       group by vendor
@@ -306,14 +314,14 @@ export async function getCplsSection(windowStart: Date, windowEnd: Date): Promis
     const failedByVendor = await queryRows<{ vendor: string; count: unknown }>(sql`
       select coalesce(nullif(underwriter, ''), 'unknown') as vendor, count(*)::int as count
       from cpl_error_logs
-      where created_at >= ${windowStart} and created_at < ${windowEnd}
+      where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}
       group by coalesce(nullif(underwriter, ''), 'unknown')
       order by vendor
     `);
     const [documentsRow] = await queryRows<{ count: unknown }>(sql`
       select count(*)::int as count
       from documents
-      where category = 'cpl' and status = 'active' and created_at >= ${windowStart} and created_at < ${windowEnd}
+      where category = 'cpl' and status = 'active' and created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}
     `);
 
     return {
@@ -326,6 +334,8 @@ export async function getCplsSection(windowStart: Date, windowEnd: Date): Promis
 
 export async function getVendorApiHealthSection(windowStart: Date, windowEnd: Date): Promise<SectionResult<VendorApiHealthData>> {
   return runSection(async () => {
+    // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
+    // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const rows = await queryRows<{
       vendor: string;
       calls: unknown;
@@ -340,7 +350,7 @@ export async function getVendorApiHealthSection(windowStart: Date, windowEnd: Da
         count(*) filter (where success = false)::int as error_count,
         max(created_at) filter (where success = false) as last_failure
       from vendor_api_logs
-      where created_at >= ${windowStart} and created_at < ${windowEnd}
+      where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}
       group by vendor
     `);
 
@@ -368,18 +378,20 @@ export async function getVendorApiHealthSection(windowStart: Date, windowEnd: Da
 
 export async function getNotificationsSection(windowStart: Date, windowEnd: Date): Promise<SectionResult<NotificationsData>> {
   return runSection(async () => {
+    // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
+    // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const [row] = await queryRows<{ attempted: unknown; delivered: unknown; failed: unknown }>(sql`
       select
         count(*)::int as attempted,
         count(*) filter (where status in ('sent', 'delivered', 'success', 'completed'))::int as delivered,
         count(*) filter (where status in ('failed', 'bounced', 'rejected', 'error'))::int as failed
       from notification_logs
-      where created_at >= ${windowStart} and created_at < ${windowEnd}
+      where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}
     `);
     const categories = await queryRows<{ vendor: string; count: unknown }>(sql`
       select status as vendor, count(*)::int as count
       from notification_logs
-      where created_at >= ${windowStart} and created_at < ${windowEnd}
+      where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}
         and status in ('failed', 'bounced', 'rejected', 'error')
       group by status
       order by status
@@ -396,10 +408,12 @@ export async function getNotificationsSection(windowStart: Date, windowEnd: Date
 
 export async function getUsersSection(windowStart: Date, windowEnd: Date): Promise<SectionResult<UsersData>> {
   return runSection(async () => {
+    // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
+    // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const [row] = await queryRows<{ new_users: unknown }>(sql`
       select count(*)::int as new_users
       from profiles
-      where created_at >= ${windowStart} and created_at < ${windowEnd}
+      where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}
     `);
 
     return {
@@ -413,19 +427,21 @@ export async function getUsersSection(windowStart: Date, windowEnd: Date): Promi
 
 export async function getGrowthSection(_windowStart: Date, windowEnd: Date): Promise<SectionResult<GrowthData>> {
   return runSection(async () => {
+    // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
+    // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const sevenDaysAgo = new Date(windowEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
     const [row] = await queryRows<Record<string, unknown>>(sql`
       select
         (select count(*)::int from orders) as orders_total,
-        (select count(*)::int from orders where created_at >= ${sevenDaysAgo} and created_at < ${windowEnd}) as orders_delta,
+        (select count(*)::int from orders where created_at >= ${sevenDaysAgo.toISOString()} and created_at < ${windowEnd.toISOString()}) as orders_delta,
         (select count(*)::int from contacts where is_real_estate_agent = true) as agents_total,
-        (select count(*)::int from contacts where is_real_estate_agent = true and created_at >= ${sevenDaysAgo} and created_at < ${windowEnd}) as agents_delta,
+        (select count(*)::int from contacts where is_real_estate_agent = true and created_at >= ${sevenDaysAgo.toISOString()} and created_at < ${windowEnd.toISOString()}) as agents_delta,
         (select count(*)::int from companies where is_real_estate_company = true) as re_companies_total,
-        (select count(*)::int from companies where is_real_estate_company = true and created_at >= ${sevenDaysAgo} and created_at < ${windowEnd}) as re_companies_delta,
+        (select count(*)::int from companies where is_real_estate_company = true and created_at >= ${sevenDaysAgo.toISOString()} and created_at < ${windowEnd.toISOString()}) as re_companies_delta,
         (select count(*)::int from contacts where is_escrow_officer = true and source_system = 'softpro') as external_eo_total,
-        (select count(*)::int from contacts where is_escrow_officer = true and source_system = 'softpro' and created_at >= ${sevenDaysAgo} and created_at < ${windowEnd}) as external_eo_delta,
+        (select count(*)::int from contacts where is_escrow_officer = true and source_system = 'softpro' and created_at >= ${sevenDaysAgo.toISOString()} and created_at < ${windowEnd.toISOString()}) as external_eo_delta,
         (select count(*)::int from companies) as companies_total,
-        (select count(*)::int from companies where created_at >= ${sevenDaysAgo} and created_at < ${windowEnd}) as companies_delta
+        (select count(*)::int from companies where created_at >= ${sevenDaysAgo.toISOString()} and created_at < ${windowEnd.toISOString()}) as companies_delta
     `);
 
     return {
@@ -442,12 +458,14 @@ export async function getGrowthSection(_windowStart: Date, windowEnd: Date): Pro
 
 export async function getContactAutoFlaggingSection(windowStart: Date, windowEnd: Date): Promise<SectionResult<ContactAutoFlaggingData>> {
   return runSection(async () => {
+    // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
+    // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const [row] = await queryRows<Record<string, unknown>>(sql`
       select
-        (select count(*)::int from contacts where is_real_estate_agent = true and updated_at >= ${windowStart} and updated_at < ${windowEnd}) as agent_flags,
-        (select count(*)::int from companies where name = lookup_code and created_at >= ${windowStart} and created_at < ${windowEnd}) as stub_companies,
+        (select count(*)::int from contacts where is_real_estate_agent = true and updated_at >= ${windowStart.toISOString()} and updated_at < ${windowEnd.toISOString()}) as agent_flags,
+        (select count(*)::int from companies where name = lookup_code and created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}) as stub_companies,
         (select count(*)::int from contacts
-          where updated_at >= ${windowStart} and updated_at < ${windowEnd}
+          where updated_at >= ${windowStart.toISOString()} and updated_at < ${windowEnd.toISOString()}
             and is_real_estate_agent = true
             and (is_escrow_officer = true or is_lender = true or is_mortgage_broker = true or is_title_officer = true or is_sales_rep = true)
         ) as multi_role_expansions
@@ -484,12 +502,14 @@ export async function getOperationsBacklogSection(_windowStart: Date, _windowEnd
 
 export async function getTessaPrelimAnalysisSection(windowStart: Date, windowEnd: Date): Promise<SectionResult<TessaPrelimAnalysisData>> {
   return runSection(async () => {
+    // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
+    // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const [row] = await queryRows<Record<string, unknown>>(sql`
       select
-        (select count(*)::int from prelim_analyses where triggered_by = 'cron' and created_at >= ${windowStart} and created_at < ${windowEnd}) as cron_count,
-        (select count(*)::int from prelim_analyses where triggered_by = 'manual' and created_at >= ${windowStart} and created_at < ${windowEnd}) as manual_count,
-        (select count(*)::int from prelim_analyses where status = 'complete' and coalesce(completed_at, updated_at, created_at) >= ${windowStart} and coalesce(completed_at, updated_at, created_at) < ${windowEnd}) as success_count,
-        (select count(*)::int from prelim_analyses where status = 'failed' and updated_at >= ${windowStart} and updated_at < ${windowEnd}) as failed_count,
+        (select count(*)::int from prelim_analyses where triggered_by = 'cron' and created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}) as cron_count,
+        (select count(*)::int from prelim_analyses where triggered_by = 'manual' and created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}) as manual_count,
+        (select count(*)::int from prelim_analyses where status = 'complete' and coalesce(completed_at, updated_at, created_at) >= ${windowStart.toISOString()} and coalesce(completed_at, updated_at, created_at) < ${windowEnd.toISOString()}) as success_count,
+        (select count(*)::int from prelim_analyses where status = 'failed' and updated_at >= ${windowStart.toISOString()} and updated_at < ${windowEnd.toISOString()}) as failed_count,
         (select count(*)::int from documents d
           where d.category = 'prelim' and d.status = 'active'
             and not exists (
@@ -520,31 +540,33 @@ export async function getSecurityAccessSection(_windowStart: Date, _windowEnd: D
 
 export async function getFailuresDetailSection(windowStart: Date, windowEnd: Date): Promise<SectionResult<FailuresDetailData>> {
   return runSection(async () => {
+    // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
+    // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
     const rows = await queryRows<Record<string, unknown>>(sql`
       select * from (
         select created_at as failure_timestamp, 'Vendor' as category, vendor as vendor_or_job, order_id::text as order_reference,
           left(coalesce(error_category, response_meta->>'error', response_meta->>'body', 'Vendor call failed'), 200) as error_message,
           case when retryable then 'auto-retried' else 'pending' end as remediation_status
         from vendor_api_logs
-        where created_at >= ${windowStart} and created_at < ${windowEnd} and success = false
+        where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()} and success = false
         union all
         select created_at as failure_timestamp, 'Cron' as category, job_type as vendor_or_job, order_id::text as order_reference,
           left(coalesce(error, 'Job failed'), 200) as error_message,
           'manual intervention needed' as remediation_status
         from jobs
-        where created_at >= ${windowStart} and created_at < ${windowEnd} and status = 'failed'
+        where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()} and status = 'failed'
         union all
         select created_at as failure_timestamp, 'Notification' as category, coalesce(provider, event_type) as vendor_or_job, order_id::text as order_reference,
           left(coalesce(error_message, status), 200) as error_message,
           'pending' as remediation_status
         from notification_logs
-        where created_at >= ${windowStart} and created_at < ${windowEnd} and status in ('failed', 'bounced', 'rejected', 'error')
+        where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()} and status in ('failed', 'bounced', 'rejected', 'error')
         union all
         select updated_at as failure_timestamp, 'TESSA' as category, coalesce(error_step, 'analysis') as vendor_or_job, order_id::text as order_reference,
           left(coalesce(error_message, 'TESSA analysis failed'), 200) as error_message,
           'pending' as remediation_status
         from prelim_analyses
-        where updated_at >= ${windowStart} and updated_at < ${windowEnd} and status = 'failed'
+        where updated_at >= ${windowStart.toISOString()} and updated_at < ${windowEnd.toISOString()} and status = 'failed'
       ) failures
       order by failure_timestamp desc
     `);

@@ -67,6 +67,7 @@ export const orders = pgTable('orders', {
   softproLastSyncedAt: timestamp('softpro_last_synced_at'),
   lastPrelimFetchAt: timestamp('last_prelim_fetch_at'),
   lastDetailsFetchAt: timestamp('last_details_fetch_at'),
+  detailsAttemptCount: integer('details_attempt_count').notNull().default(0),
   lastContactsFetchAt: timestamp('last_contacts_fetch_at'),
   isImported: boolean('is_imported').notNull().default(false),
 

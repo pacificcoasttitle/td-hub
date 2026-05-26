@@ -58,6 +58,7 @@ export function renderDailyReportHtml(report: DailyReport): string {
           ['Enriched fully', d.enrichedFully],
           ['Pending enrichment within cooldown', d.pendingEnrichmentWithinCooldown],
           ['Stuck > 6 hours', d.stuckOver6Hours],
+          ['Stuck (terminal)', d.stuckTerminal],
         ])}
       `)}
       ${renderSectionHtml('2. Sync Health (24h)', report.syncHealth, (d) => renderSyncRows(d.rows))}
@@ -142,6 +143,7 @@ export function renderDailyReportText(report: DailyReport): string {
       `Enriched fully: ${d.enrichedFully}`,
       `Pending enrichment within cooldown: ${d.pendingEnrichmentWithinCooldown}`,
       `Stuck > 6 hours: ${d.stuckOver6Hours}`,
+      `Stuck (terminal): ${d.stuckTerminal}`,
     ]),
     sectionText('2. Sync Health (24h)', report.syncHealth, (d) => d.rows.map((r) => `${r.jobType}: runs ${r.runs}, succeeded ${r.succeeded}, failed ${r.failed}, avg ${r.avgDurationSeconds.toFixed(1)}s, last ${formatPacific(r.lastRun)}`)),
     sectionText('3. Prelims (24h)', report.prelims, (d) => [

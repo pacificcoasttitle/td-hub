@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { orders, orderProperties } from '@/lib/db/schema';
-import { and, asc, eq, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import { getOrderDetails } from '@/lib/integrations/softpro';
 import {
   loadEscrowOfficers,
@@ -19,10 +19,11 @@ export interface EnrichOrderDetailsResult {
 
 const TIME_BUDGET_MS = 240_000; // 4 min — leaves headroom under the 5-min route maxDuration
 const BATCH_SIZE = 50;
+const MAX_DETAILS_ATTEMPTS = 20;
 
 /**
  * Per-order enrichment of softpro_sync orders missing GetOrderDetails-shaped
- * fields (address, sales rep, title officer). Mirrors the fetch-prelims
+ * fields (address, sales rep, title officer, escrow officer). Mirrors the fetch-prelims
  * architecture: backlog-aware (asc lastDetailsFetchAt — NULLs first),
  * 6-hour cooldown after each attempt, fails loudly if SoftPro returns
  * zero successes across the run.
@@ -52,7 +53,9 @@ export async function handleEnrichOrderDetails(): Promise<EnrichOrderDetailsResu
         isNull(orderProperties.address),
         isNull(orders.salesRepId),
         isNull(orders.titleOfficerId),
+        isNull(orders.escrowOfficerId),
       ),
+      lt(orders.detailsAttemptCount, MAX_DETAILS_ATTEMPTS),
       or(
         isNull(orders.lastDetailsFetchAt),
         sql`${orders.lastDetailsFetchAt} < NOW() - INTERVAL '6 hours'`,
@@ -88,7 +91,10 @@ export async function handleEnrichOrderDetails(): Promise<EnrichOrderDetailsResu
     // Stamp the attempt BEFORE the call so a hang/failure still applies
     // the 6-hour cooldown and stops us re-polling the same dead file.
     await db.update(orders)
-      .set({ lastDetailsFetchAt: sql`NOW()` })
+      .set({
+        lastDetailsFetchAt: sql`NOW()`,
+        detailsAttemptCount: sql`${orders.detailsAttemptCount} + 1`,
+      })
       .where(eq(orders.id, order.id));
 
     try {

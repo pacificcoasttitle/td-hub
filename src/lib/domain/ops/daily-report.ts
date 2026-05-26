@@ -41,6 +41,7 @@ export interface OrderFlowData {
   enrichedFully: number;
   pendingEnrichmentWithinCooldown: number;
   stuckOver6Hours: number;
+  stuckTerminal: number;
   newlyStuckOver6Hours: number;
 }
 
@@ -204,6 +205,7 @@ export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): P
       enriched_fully: unknown;
       pending_enrichment_within_cooldown: unknown;
       stuck_over_6_hours: unknown;
+      stuck_terminal: unknown;
       newly_stuck_over_6_hours: unknown;
     }>(sql`
       select
@@ -217,16 +219,25 @@ export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): P
         )::int as enriched_fully,
         count(*) filter (
           where o.source = 'softpro_sync'
+            and o.operational_status in ('open', 'in_process', 'completed')
             and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
             and o.last_details_fetch_at >= (${windowEnd.toISOString()}::timestamp - interval '6 hours')
         )::int as pending_enrichment_within_cooldown,
         count(*) filter (
           where o.source = 'softpro_sync'
+            and o.operational_status in ('open', 'in_process', 'completed')
             and o.created_at < (${windowEnd.toISOString()}::timestamp - interval '6 hours')
             and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
         )::int as stuck_over_6_hours,
         count(*) filter (
           where o.source = 'softpro_sync'
+            and o.operational_status in ('closed', 'canceled', 'duplicate')
+            and o.created_at < (${windowEnd.toISOString()}::timestamp - interval '6 hours')
+            and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
+        )::int as stuck_terminal,
+        count(*) filter (
+          where o.source = 'softpro_sync'
+            and o.operational_status in ('open', 'in_process', 'completed')
             and o.created_at >= ${windowStart.toISOString()}
             and o.created_at < (${windowEnd.toISOString()}::timestamp - interval '6 hours')
             and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
@@ -241,6 +252,7 @@ export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): P
       enrichedFully: toNumber(row?.enriched_fully),
       pendingEnrichmentWithinCooldown: toNumber(row?.pending_enrichment_within_cooldown),
       stuckOver6Hours: toNumber(row?.stuck_over_6_hours),
+      stuckTerminal: toNumber(row?.stuck_terminal),
       newlyStuckOver6Hours: toNumber(row?.newly_stuck_over_6_hours),
     };
   });

@@ -166,6 +166,13 @@ export async function processOrderDetail(
   const titleOfficerId = resolveTitleOfficerId(item.TitleOfficer, titleOfficers);
   const escrowOfficerId = resolveEscrowOfficerId(item.EscrowOfficer, escrowOfficers);
 
+  if (item.EscrowOfficer?.trim() && escrowOfficerId === null) {
+    console.warn('[process-order-detail] Unable to resolve SoftPro escrow officer', {
+      fileNumber,
+      escrowOfficer: item.EscrowOfficer,
+    });
+  }
+
   const [existing] = await db
     .select({ id: orders.id, operationalStatus: orders.operationalStatus })
     .from(orders)

@@ -9,6 +9,11 @@ import {
   SoftProFeeResponse,
   SOFTPRO_ENDPOINTS,
 } from './types';
+import {
+  categorizeSoftProResponse,
+  isRetryableSoftProError,
+  softProCategoryToErrorCode,
+} from './error-category';
 import { db } from '@/lib/db/client';
 import { vendorApiLogs } from '@/lib/db/schema';
 
@@ -28,6 +33,7 @@ async function logRequest(params: {
   endedAt?: Date;
   success?: boolean;
   httpStatus?: number;
+  retryable?: boolean;
   errorCategory?: string;
   requestMeta?: unknown;
   responseMeta?: unknown;
@@ -41,6 +47,7 @@ async function logRequest(params: {
       startedAt: params.startedAt,
       endedAt: params.endedAt ?? new Date(),
       success: params.success ?? null,
+      retryable: params.retryable ?? false,
       httpStatus: params.httpStatus ?? null,
       errorCategory: params.errorCategory ?? null,
       requestMeta: params.requestMeta as Record<string, unknown> ?? null,
@@ -52,7 +59,11 @@ async function logRequest(params: {
 }
 
 function buildSuccessResponseMeta<T>(operation: string, raw: SoftProResponse<T>): Record<string, unknown> {
-  const meta: Record<string, unknown> = { status: raw.Status, message: raw.Message };
+  const meta: Record<string, unknown> = {
+    status: raw.Status,
+    bodyStatus: raw.Status,
+    message: raw.Message,
+  };
 
   if (operation === 'get_order_details' && Array.isArray(raw.data)) {
     const escrowOfficerValues = raw.data
@@ -113,6 +124,11 @@ async function makeRequest<T>(
       raw = JSON.parse(rawText) as SoftProResponse<T>;
     } catch {
       const durationMs = Date.now() - startedAt.getTime();
+      const category = categorizeSoftProResponse({
+        httpStatus: response.status,
+        message: rawText,
+      });
+      const retryable = isRetryableSoftProError(category);
       await logRequest({
         operation,
         orderId: options?.orderId,
@@ -120,17 +136,24 @@ async function makeRequest<T>(
         startedAt,
         success: false,
         httpStatus: response.status,
-        errorCategory: 'PARSE_ERROR',
+        retryable,
+        errorCategory: category,
         requestMeta: { url, method, ...(options?.body ? { payload: options.body } : { queryParams: options?.queryParams }) },
-        responseMeta: { rawSnippet: (rawText ?? '').slice(0, 500) },
+        responseMeta: { bodyStatus: null, rawSnippet: (rawText ?? '').slice(0, 500) },
       });
-      return vendorError<T>(VENDOR, 'API_ERROR', `Non-JSON response (HTTP ${response.status}): ${(rawText ?? '').slice(0, 200)}`, {
-        httpStatus: response.status, requestId, durationMs,
+      return vendorError<T>(VENDOR, softProCategoryToErrorCode(category), `Non-JSON response (HTTP ${response.status}): ${(rawText ?? '').slice(0, 200)}`, {
+        httpStatus: response.status, requestId, durationMs, retryable,
       });
     }
 
     const durationMs = Date.now() - startedAt.getTime();
-    const success = raw.Status === 200 || response.status === 200;
+    const success = raw.Status === 200 && response.status < 400;
+    const category = categorizeSoftProResponse({
+      bodyStatus: raw.Status,
+      httpStatus: response.status,
+      message: raw.Message,
+    });
+    const retryable = isRetryableSoftProError(category);
 
     await logRequest({
       operation,
@@ -139,10 +162,12 @@ async function makeRequest<T>(
       startedAt,
       success,
       httpStatus: response.status,
+      retryable: success ? false : retryable,
+      errorCategory: success ? undefined : category,
       requestMeta: { url, method, ...(options?.body ? { payload: options.body } : { queryParams: options?.queryParams }) },
       responseMeta: success
         ? buildSuccessResponseMeta(operation, raw)
-        : { status: raw.Status, message: raw.Message, rawBody: raw },
+        : { status: raw.Status, bodyStatus: raw.Status, message: raw.Message, rawBody: raw },
     });
 
     if (success) {
@@ -152,10 +177,11 @@ async function makeRequest<T>(
     const errorMsg = raw.Message
       || (typeof raw === 'object' ? JSON.stringify(raw).slice(0, 300) : String(raw))
       || 'Unknown SoftPro error';
-    return vendorError<T>(VENDOR, 'API_ERROR', errorMsg, {
+    return vendorError<T>(VENDOR, softProCategoryToErrorCode(category), errorMsg, {
       httpStatus: response.status,
       requestId,
       durationMs,
+      retryable,
     });
   } catch (err) {
     const durationMs = Date.now() - startedAt.getTime();
@@ -167,9 +193,10 @@ async function makeRequest<T>(
       requestId,
       startedAt,
       success: false,
-      errorCategory: 'NETWORK',
+      retryable: true,
+      errorCategory: 'unknown',
       requestMeta: { url, method, ...(options?.body ? { payload: options.body } : {}) },
-      responseMeta: { error: message },
+      responseMeta: { bodyStatus: null, error: message },
     });
 
     return vendorError<T>(VENDOR, 'NETWORK_ERROR', message, {

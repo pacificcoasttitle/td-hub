@@ -31,6 +31,25 @@ import { vendorApiLogs } from '@/lib/db/schema';
 
 const VENDOR = 'softpro';
 
+type SoftProArrayEnvelopeItem = {
+  Status?: number;
+  Message?: string;
+  FileUploadedStatus?: boolean;
+  OrderNumber?: string;
+  Id?: string;
+};
+
+type SoftProArrayEnvelopeEvaluation = {
+  success: boolean;
+  category: ReturnType<typeof categorizeSoftProResponse>;
+  retryable: boolean;
+  message: string;
+  itemCount: number;
+  failedCount: number;
+  items: SoftProArrayEnvelopeItem[];
+  failedItems: Array<SoftProArrayEnvelopeItem & { index: number }>;
+};
+
 function getBaseUrl(): string {
   const url = process.env.SOFTPRO_API_URL;
   if (!url) throw new Error('SOFTPRO_API_URL is not configured');
@@ -92,6 +111,102 @@ function buildSuccessResponseMeta<T>(operation: string, raw: SoftProResponse<T>)
   return meta;
 }
 
+function asArrayEnvelopeItem(item: unknown): SoftProArrayEnvelopeItem {
+  if (item === null || typeof item !== 'object') {
+    return { Message: 'SoftPro array-envelope response item was not an object' };
+  }
+
+  const record = item as Record<string, unknown>;
+  return {
+    Status: typeof record.Status === 'number' ? record.Status : undefined,
+    Message: typeof record.Message === 'string' ? record.Message : undefined,
+    FileUploadedStatus: typeof record.FileUploadedStatus === 'boolean' ? record.FileUploadedStatus : undefined,
+    OrderNumber: typeof record.OrderNumber === 'string' ? record.OrderNumber : undefined,
+    Id: typeof record.Id === 'string' ? record.Id : undefined,
+  };
+}
+
+function evaluateArrayEnvelope(raw: unknown, httpStatus: number): SoftProArrayEnvelopeEvaluation {
+  if (!Array.isArray(raw)) {
+    const category = categorizeSoftProResponse({
+      httpStatus,
+      message: 'SoftPro array-envelope response was not an array',
+    });
+    return {
+      success: false,
+      category,
+      retryable: isRetryableSoftProError(category),
+      message: 'SoftPro array-envelope response was not an array',
+      itemCount: 0,
+      failedCount: 0,
+      items: [],
+      failedItems: [],
+    };
+  }
+
+  const items = raw.map(asArrayEnvelopeItem);
+  const failedItems = items
+    .map((item, index) => ({ ...item, index }))
+    .filter((item) => (
+      item.Status !== 200
+      || item.FileUploadedStatus === false
+    ));
+
+  if (items.length === 0) {
+    const category = categorizeSoftProResponse({
+      httpStatus,
+      message: 'SoftPro array-envelope response was empty',
+    });
+    return {
+      success: false,
+      category,
+      retryable: isRetryableSoftProError(category),
+      message: 'SoftPro array-envelope response was empty',
+      itemCount: 0,
+      failedCount: 0,
+      items,
+      failedItems,
+    };
+  }
+
+  if (failedItems.length === 0 && httpStatus < 400) {
+    return {
+      success: true,
+      category: 'ok',
+      retryable: false,
+      message: 'Success',
+      itemCount: items.length,
+      failedCount: 0,
+      items,
+      failedItems,
+    };
+  }
+
+  const firstFailure = failedItems[0];
+  const category = firstFailure
+    ? categorizeSoftProResponse({
+      bodyStatus: firstFailure.Status,
+      httpStatus,
+      message: firstFailure.Message,
+    })
+    : categorizeSoftProResponse({ httpStatus, message: 'SoftPro array-envelope response failed' });
+  const retryable = isRetryableSoftProError(category);
+  const details = failedItems
+    .map((item) => `item ${item.index}: Status=${item.Status ?? 'missing'}, FileUploadedStatus=${String(item.FileUploadedStatus)}, Message=${item.Message ?? 'none'}`)
+    .join('; ');
+
+  return {
+    success: false,
+    category,
+    retryable,
+    message: details || 'SoftPro array-envelope response failed',
+    itemCount: items.length,
+    failedCount: failedItems.length,
+    items,
+    failedItems,
+  };
+}
+
 async function makeRequest<T>(
   method: 'GET' | 'POST',
   endpoint: string,
@@ -102,6 +217,8 @@ async function makeRequest<T>(
     orderId?: number;
     timeoutMs?: number;
     userContext?: SoftProUserContext;
+    bodyShape?: 'object' | 'array';
+    responseShape?: 'envelope' | 'array';
   }
 ): Promise<VendorResult<T>> {
   const requestId = crypto.randomUUID();
@@ -120,7 +237,8 @@ async function makeRequest<T>(
       'Content-Type': 'application/json',
       ...buildSoftProHeaders({ requireToken: isWrite }),
     };
-    const body = isWrite && options?.body
+    const shouldAddUserId = isWrite && options?.bodyShape !== 'array';
+    const body = shouldAddUserId && options?.body
       ? addSoftProUserIdToWritePayload(options.body, options.userContext)
       : options?.body;
     const loggedBody = body ? redactSoftProAuthFields(body) : undefined;
@@ -137,11 +255,11 @@ async function makeRequest<T>(
 
     const response = await fetch(url, fetchOptions);
 
-    let raw: SoftProResponse<T>;
+    let parsed: unknown;
     let rawText: string | undefined;
     try {
       rawText = await response.text();
-      raw = JSON.parse(rawText) as SoftProResponse<T>;
+      parsed = JSON.parse(rawText) as unknown;
     } catch {
       const durationMs = Date.now() - startedAt.getTime();
       const category = categorizeSoftProResponse({
@@ -167,6 +285,47 @@ async function makeRequest<T>(
     }
 
     const durationMs = Date.now() - startedAt.getTime();
+
+    if (options?.responseShape === 'array') {
+      const evaluated = evaluateArrayEnvelope(parsed, response.status);
+
+      await logRequest({
+        operation,
+        orderId: options?.orderId,
+        requestId,
+        startedAt,
+        success: evaluated.success,
+        httpStatus: response.status,
+        retryable: evaluated.success ? false : evaluated.retryable,
+        errorCategory: evaluated.success ? undefined : evaluated.category,
+        requestMeta: { url, method, ...(loggedBody ? { payload: loggedBody } : { queryParams: options?.queryParams }) },
+        responseMeta: {
+          responseShape: 'array',
+          itemCount: evaluated.itemCount,
+          failedCount: evaluated.failedCount,
+          items: evaluated.items,
+          failedItems: evaluated.failedItems,
+        },
+      });
+
+      if (evaluated.success) {
+        return vendorSuccess(parsed as T, { requestId, durationMs });
+      }
+
+      return vendorError<T>(
+        VENDOR,
+        softProCategoryToErrorCode(evaluated.category),
+        evaluated.message,
+        {
+          httpStatus: response.status,
+          requestId,
+          durationMs,
+          retryable: evaluated.retryable,
+        },
+      );
+    }
+
+    const raw = parsed as SoftProResponse<T>;
     const success = raw.Status === 200 && response.status < 400;
     const category = categorizeSoftProResponse({
       bodyStatus: raw.Status,
@@ -460,6 +619,8 @@ export async function uploadDocument(params: {
     body,
     operation: 'upload_document',
     orderId: undefined,
+    bodyShape: 'array',
+    responseShape: 'array',
   });
 }
 
@@ -486,8 +647,16 @@ export async function addNotes(
   return makeRequest<{ success: boolean }>('POST', SOFTPRO_ENDPOINTS.addNote, {
     body,
     operation: 'add_notes',
+    bodyShape: 'array',
+    responseShape: 'array',
   });
 }
+
+// AddDocuments, AddNotes, and future AddTask use array bodies/responses.
+// Do not inject per-item UserId: INV-UPLOAD-DIFF proved that broke uploads.
+// Before adapter auth is enforced globally, the Director must confirm with the
+// API team how array-body endpoints carry auth (header-only, wrapper, exempt,
+// or another shape). AddTask should use this same array path when exported.
 
 export async function getFees(
   orderNumber: string,

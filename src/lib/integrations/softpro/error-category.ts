@@ -35,7 +35,13 @@ export function categorizeSoftProResponse(params: {
     return 'not_found';
   }
 
-  if (message.includes('cannot be null')) {
+  if (
+    message.includes('cannot be null')
+    || message.includes('path, file name, or both are too long')
+    || message.includes('path, filename, or both are too long')
+    || message.includes('file name is too long')
+    || message.includes('filename is too long')
+  ) {
     return 'validation';
   }
 

@@ -1,5 +1,6 @@
 export * from './types';
 export * from './mapper';
+export * from './auth';
 
 const useMock = !process.env.SOFTPRO_API_URL;
 
@@ -13,6 +14,14 @@ export async function createOrder(payload: Record<string, unknown>) {
   }
   const client = await import('./client');
   return client.createOrder(payload);
+}
+
+export async function registerSoftProToken(params?: Parameters<typeof import('./client').registerSoftProToken>[0]) {
+  if (useMock) {
+    throw new Error('registerSoftProToken is not available in mock mode');
+  }
+  const client = await import('./client');
+  return client.registerSoftProToken(params);
 }
 
 export async function getOrders(params: Parameters<typeof import('./client').getOrders>[0]) {

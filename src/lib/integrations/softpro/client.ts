@@ -14,6 +14,16 @@ import {
   isRetryableSoftProError,
   softProCategoryToErrorCode,
 } from './error-category';
+import {
+  addSoftProUserIdToRecord,
+  addSoftProUserIdToWritePayload,
+  buildSoftProHeaders,
+  generateSoftProToken,
+  getSoftProUserId,
+  type RegisterSoftProTokenParams,
+  type RegisterSoftProTokenResult,
+  type SoftProUserContext,
+} from './auth';
 import { db } from '@/lib/db/client';
 import { vendorApiLogs } from '@/lib/db/schema';
 
@@ -89,6 +99,7 @@ async function makeRequest<T>(
     operation?: string;
     orderId?: number;
     timeoutMs?: number;
+    userContext?: SoftProUserContext;
   }
 ): Promise<VendorResult<T>> {
   const requestId = crypto.randomUUID();
@@ -102,8 +113,14 @@ async function makeRequest<T>(
   }
 
   try {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (process.env.SOFTPRO_TOKEN) headers['X-API-KEY'] = process.env.SOFTPRO_TOKEN;
+    const isWrite = method === 'POST';
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...buildSoftProHeaders({ requireToken: isWrite }),
+    };
+    const body = isWrite && options?.body
+      ? addSoftProUserIdToWritePayload(options.body, options.userContext)
+      : options?.body;
 
     const fetchOptions: RequestInit = {
       method,
@@ -111,8 +128,8 @@ async function makeRequest<T>(
       signal: AbortSignal.timeout(options?.timeoutMs ?? 60_000),
     };
 
-    if (method === 'POST' && options?.body) {
-      fetchOptions.body = JSON.stringify(options.body);
+    if (method === 'POST' && body) {
+      fetchOptions.body = JSON.stringify(body);
     }
 
     const response = await fetch(url, fetchOptions);
@@ -138,7 +155,7 @@ async function makeRequest<T>(
         httpStatus: response.status,
         retryable,
         errorCategory: category,
-        requestMeta: { url, method, ...(options?.body ? { payload: options.body } : { queryParams: options?.queryParams }) },
+        requestMeta: { url, method, ...(body ? { payload: body } : { queryParams: options?.queryParams }) },
         responseMeta: { bodyStatus: null, rawSnippet: (rawText ?? '').slice(0, 500) },
       });
       return vendorError<T>(VENDOR, softProCategoryToErrorCode(category), `Non-JSON response (HTTP ${response.status}): ${(rawText ?? '').slice(0, 200)}`, {
@@ -164,7 +181,7 @@ async function makeRequest<T>(
       httpStatus: response.status,
       retryable: success ? false : retryable,
       errorCategory: success ? undefined : category,
-      requestMeta: { url, method, ...(options?.body ? { payload: options.body } : { queryParams: options?.queryParams }) },
+      requestMeta: { url, method, ...(body ? { payload: body } : { queryParams: options?.queryParams }) },
       responseMeta: success
         ? buildSuccessResponseMeta(operation, raw)
         : { status: raw.Status, bodyStatus: raw.Status, message: raw.Message, rawBody: raw },
@@ -217,13 +234,16 @@ export async function createOrder(
   const url = getBaseUrl() + SOFTPRO_ENDPOINTS.createOrder;
 
   try {
-    const hdrs: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (process.env.SOFTPRO_TOKEN) hdrs['X-API-KEY'] = process.env.SOFTPRO_TOKEN;
+    const payloadWithUserId = addSoftProUserIdToRecord(payload);
+    const hdrs: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...buildSoftProHeaders({ requireToken: true }),
+    };
 
     const response = await fetch(url, {
       method: 'POST',
       headers: hdrs,
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payloadWithUserId),
       signal: AbortSignal.timeout(60_000),
     });
 
@@ -234,7 +254,7 @@ export async function createOrder(
       operation: 'create_order', requestId, startedAt,
       success: raw.Status === 200,
       httpStatus: response.status,
-      requestMeta: { url, method: 'POST', payload },
+      requestMeta: { url, method: 'POST', payload: payloadWithUserId },
       responseMeta: raw.Status === 200
         ? { status: raw.Status, message: raw.Message, orderNumber: raw.OrderNumber }
         : { status: raw.Status, message: raw.Message, rawBody: raw },
@@ -259,6 +279,106 @@ export async function createOrder(
 
     return vendorError<{ orderNumber: string }>(VENDOR, 'NETWORK_ERROR', message, {
       retryable: true, requestId, durationMs,
+    });
+  }
+}
+
+export async function registerSoftProToken(
+  params: RegisterSoftProTokenParams = {},
+): Promise<VendorResult<RegisterSoftProTokenResult>> {
+  const requestId = crypto.randomUUID();
+  const startedAt = new Date();
+  const url = getBaseUrl() + SOFTPRO_ENDPOINTS.createUserToken;
+  const userId = params.userId?.trim() || getSoftProUserId();
+  const token = params.token?.trim() || generateSoftProToken();
+  const tokenStatus = params.tokenStatus ?? 1;
+  const payload = { UserId: userId, Token: token, TokenStatus: tokenStatus };
+  const loggedPayload = { ...payload, Token: '[redacted]' };
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    let raw: SoftProResponse<unknown>;
+    let rawText: string | undefined;
+    try {
+      rawText = await response.text();
+      raw = JSON.parse(rawText) as SoftProResponse<unknown>;
+    } catch {
+      const durationMs = Date.now() - startedAt.getTime();
+      await logRequest({
+        operation: 'create_user_token',
+        requestId,
+        startedAt,
+        success: false,
+        httpStatus: response.status,
+        retryable: response.status >= 500,
+        errorCategory: response.status === 401 ? 'auth' : 'unknown',
+        requestMeta: { url, method: 'POST', payload: loggedPayload },
+        responseMeta: { bodyStatus: null, rawSnippet: (rawText ?? '').slice(0, 500) },
+      });
+      return vendorError<RegisterSoftProTokenResult>(
+        VENDOR,
+        response.status === 401 ? 'AUTH' : 'UNKNOWN',
+        `Non-JSON response (HTTP ${response.status}): ${(rawText ?? '').slice(0, 200)}`,
+        { httpStatus: response.status, requestId, durationMs, retryable: response.status >= 500 },
+      );
+    }
+
+    const durationMs = Date.now() - startedAt.getTime();
+    const success = raw.Status === 200 && response.status < 400;
+    const category = categorizeSoftProResponse({
+      bodyStatus: raw.Status,
+      httpStatus: response.status,
+      message: raw.Message,
+    });
+    const retryable = isRetryableSoftProError(category);
+
+    await logRequest({
+      operation: 'create_user_token',
+      requestId,
+      startedAt,
+      success,
+      httpStatus: response.status,
+      retryable: success ? false : retryable,
+      errorCategory: success ? undefined : category,
+      requestMeta: { url, method: 'POST', payload: loggedPayload },
+      responseMeta: { status: raw.Status, bodyStatus: raw.Status, message: raw.Message },
+    });
+
+    if (success) {
+      return vendorSuccess({ userId, token, tokenStatus }, { requestId, durationMs });
+    }
+
+    return vendorError<RegisterSoftProTokenResult>(
+      VENDOR,
+      softProCategoryToErrorCode(category),
+      raw.Message || 'SoftPro token registration failed',
+      { httpStatus: response.status, requestId, durationMs, retryable },
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    const durationMs = Date.now() - startedAt.getTime();
+
+    await logRequest({
+      operation: 'create_user_token',
+      requestId,
+      startedAt,
+      success: false,
+      retryable: true,
+      errorCategory: 'unknown',
+      requestMeta: { url, method: 'POST', payload: loggedPayload },
+      responseMeta: { bodyStatus: null, error: message },
+    });
+
+    return vendorError<RegisterSoftProTokenResult>(VENDOR, 'NETWORK_ERROR', message, {
+      retryable: true,
+      requestId,
+      durationMs,
     });
   }
 }
@@ -419,7 +539,10 @@ export async function healthCheck(): Promise<VendorHealthResult> {
   const start = Date.now();
   try {
     const url = getBaseUrl();
-    const response = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const response = await fetch(url, {
+      headers: buildSoftProHeaders(),
+      signal: AbortSignal.timeout(5_000),
+    });
     return {
       healthy: response.ok,
       vendor: VENDOR,

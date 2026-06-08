@@ -131,6 +131,7 @@ export const SOFTPRO_ENDPOINTS = {
   getSalesReps: 'ordercreation/GetOrderMarketingRep',
   getOrders: 'ordercreation/GetOrders',
   getOrderDetails: 'ordercreation/GetOrderDetails',
+  createUserToken: 'authentication/CreateUserToken',
   createUser: 'ordercreation/CreateUser',
   updateUser: 'ordercreation/UpdateUser',
   addNote: 'ordercreation/AddNotes',

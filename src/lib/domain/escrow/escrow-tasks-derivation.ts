@@ -9,6 +9,7 @@ import {
   prelimAnalyses,
 } from '@/lib/db/schema';
 import type { Task, TaskPriority } from '@/lib/domain/escrow/tasks';
+import { expectsPctEscrowOfficer, expectsPctEscrowOfficerSql } from '@/lib/domain/orders/escrow-officer-expectation';
 
 /**
  * Coerce a value that may be Date | string | null into Date | null.
@@ -36,6 +37,7 @@ export function isEscrowTaskRole(role: string): role is EscrowTaskRole {
 export type EscrowTaskOrderData = {
   id: number;
   fileNumber: string;
+  orderType: string | null;
   escrowOfficerId: number | null;
   operationalStatus: 'open' | 'in_process' | 'completed';
   openedAt: Date;
@@ -97,6 +99,7 @@ export function computeTasksForOrder(
   if (
     role !== 'escrow_officer'
     && order.escrowOfficerId === null
+    && expectsPctEscrowOfficer(order.orderType)
     && ['open', 'in_process'].includes(order.operationalStatus)
   ) {
     addTask(tasks, order, 1, 'Unassigned', null);
@@ -162,7 +165,7 @@ export async function loadEscrowTaskOrderRows(
     ? undefined
     : eq(orders.escrowOfficerId, assignedContactId);
   const scopeConditions = [
-    inArray(orders.orderType, ['Title & Escrow', 'Escrow only']),
+    expectsPctEscrowOfficerSql(sql`${orders.orderType}`),
     inArray(orders.operationalStatus, ['open', 'in_process', 'completed']),
   ];
   if (officerFilter) scopeConditions.push(officerFilter);
@@ -172,6 +175,7 @@ export async function loadEscrowTaskOrderRows(
     .select({
       id: orders.id,
       fileNumber: orders.fileNumber,
+      orderType: orders.orderType,
       escrowOfficerId: orders.escrowOfficerId,
       operationalStatus: orders.operationalStatus,
       openedAt: orders.openedAt,

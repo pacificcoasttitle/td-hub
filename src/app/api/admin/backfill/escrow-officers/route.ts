@@ -5,6 +5,7 @@ import { orders } from '@/lib/db/schema';
 import { getOrderDetails } from '@/lib/integrations/softpro';
 import { loadEscrowOfficers, resolveEscrowOfficerId } from '@/lib/jobs/handlers/import-orders';
 import { getSession } from '@/lib/security/auth';
+import { expectsPctEscrowOfficerSql } from '@/lib/domain/orders/escrow-officer-expectation';
 
 export const maxDuration = 300;
 
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   const eligibleFilter = and(
-    inArray(orders.orderType, ['Title & Escrow', 'Escrow only']),
+    expectsPctEscrowOfficerSql(sql`${orders.orderType}`),
     inArray(orders.operationalStatus, ['open', 'in_process', 'completed']),
     isNull(orders.escrowOfficerId),
   );

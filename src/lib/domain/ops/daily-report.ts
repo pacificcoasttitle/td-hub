@@ -1,5 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
+import { expectsPctEscrowOfficerSql, missingExpectedEscrowOfficerSql } from '@/lib/domain/orders/escrow-officer-expectation';
 
 export type SectionResult<T> =
   | { ok: true; data: T }
@@ -199,6 +200,13 @@ export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): P
   return runSection(async () => {
     // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
     // See: /docs/claude-skills/patterns/drizzle-timestamp-coercion.md
+    const expectedEscrowOfficer = expectsPctEscrowOfficerSql(sql.raw('o.order_type'));
+    const missingExpectedEscrowOfficer = missingExpectedEscrowOfficerSql(sql.raw('o.order_type'), sql.raw('o.escrow_officer_id'));
+    const missingRequiredEnrichment = sql`(
+      nullif(coalesce(op.address, op.full_address), '') is null
+      or o.sales_rep_id is null
+      or (${missingExpectedEscrowOfficer})
+    )`;
     const [row] = await queryRows<{
       synced_from_softpro: unknown;
       created_in_td_hub: unknown;
@@ -215,32 +223,32 @@ export async function getOrderFlowSection(windowStart: Date, windowEnd: Date): P
           where o.created_at >= ${windowStart.toISOString()} and o.created_at < ${windowEnd.toISOString()}
             and nullif(coalesce(op.address, op.full_address), '') is not null
             and o.sales_rep_id is not null
-            and o.escrow_officer_id is not null
+            and (not (${expectedEscrowOfficer}) or o.escrow_officer_id is not null)
         )::int as enriched_fully,
         count(*) filter (
           where o.source = 'softpro_sync'
             and o.operational_status in ('open', 'in_process', 'completed')
-            and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
+            and ${missingRequiredEnrichment}
             and o.last_details_fetch_at >= (${windowEnd.toISOString()}::timestamp - interval '6 hours')
         )::int as pending_enrichment_within_cooldown,
         count(*) filter (
           where o.source = 'softpro_sync'
             and o.operational_status in ('open', 'in_process', 'completed')
             and o.created_at < (${windowEnd.toISOString()}::timestamp - interval '6 hours')
-            and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
+            and ${missingRequiredEnrichment}
         )::int as stuck_over_6_hours,
         count(*) filter (
           where o.source = 'softpro_sync'
             and o.operational_status in ('closed', 'canceled', 'duplicate')
             and o.created_at < (${windowEnd.toISOString()}::timestamp - interval '6 hours')
-            and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
+            and ${missingRequiredEnrichment}
         )::int as stuck_terminal,
         count(*) filter (
           where o.source = 'softpro_sync'
             and o.operational_status in ('open', 'in_process', 'completed')
             and o.created_at >= ${windowStart.toISOString()}
             and o.created_at < (${windowEnd.toISOString()}::timestamp - interval '6 hours')
-            and (nullif(coalesce(op.address, op.full_address), '') is null or o.sales_rep_id is null or o.escrow_officer_id is null)
+            and ${missingRequiredEnrichment}
         )::int as newly_stuck_over_6_hours
       from orders o
       left join order_properties op on op.order_id = o.id
@@ -506,11 +514,12 @@ export async function getContactAutoFlaggingSection(windowStart: Date, windowEnd
 
 export async function getOperationsBacklogSection(_windowStart: Date, _windowEnd: Date): Promise<SectionResult<OperationsBacklogData>> {
   return runSection(async () => {
+    const missingExpectedEscrowOfficer = missingExpectedEscrowOfficerSql(sql.raw('orders.order_type'), sql.raw('orders.escrow_officer_id'));
     const [row] = await queryRows<Record<string, unknown>>(sql`
       select
         (select count(*)::int from orders o left join order_properties op on op.order_id = o.id where nullif(coalesce(op.address, op.full_address), '') is null) as missing_address,
         (select count(*)::int from orders where sales_rep_id is null) as missing_sales_rep,
-        (select count(*)::int from orders where escrow_officer_id is null) as missing_escrow_officer,
+        (select count(*)::int from orders where ${missingExpectedEscrowOfficer}) as missing_escrow_officer,
         (select count(*)::int from contacts c left join companies co on c.flookup_code = co.lookup_code where c.flookup_code is not null and co.id is null) as orphan_contacts,
         (select count(*)::int from companies where is_real_estate_company = true and name = lookup_code) as stub_re_companies
     `);

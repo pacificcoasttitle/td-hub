@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { and, eq, inArray, isNull, SQL } from 'drizzle-orm';
+import { and, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
 import { getOrders } from '@/lib/domain/orders/service';
 import { db } from '@/lib/db/client';
@@ -11,6 +11,7 @@ import {
   loadEscrowTaskOrderRows,
   orderIdsMatchingTaskPriority,
 } from '@/lib/domain/escrow/escrow-tasks-derivation';
+import { missingExpectedEscrowOfficerSql } from '@/lib/domain/orders/escrow-officer-expectation';
 
 const FULL_ACCESS_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
 
@@ -88,7 +89,7 @@ async function buildHubExtraFilter(
 
   if (escrowOfficerIdParam !== undefined && escrowOfficerIdParam !== '') {
     if (escrowOfficerIdParam.toLowerCase() === 'null') {
-      parts.push(isNull(orders.escrowOfficerId));
+      parts.push(missingExpectedEscrowOfficerSql(sql`${orders.orderType}`, sql`${orders.escrowOfficerId}`));
     } else {
       const id = parseInt(escrowOfficerIdParam, 10);
       if (!Number.isFinite(id)) {

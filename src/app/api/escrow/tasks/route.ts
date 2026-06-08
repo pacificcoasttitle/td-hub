@@ -8,6 +8,7 @@ import {
   sortAndCapTasks,
   type EscrowTaskRole,
 } from '@/lib/domain/escrow/escrow-tasks-derivation';
+import { expectsPctEscrowOfficer } from '@/lib/domain/orders/escrow-officer-expectation';
 
 export async function GET() {
   const session = await getSession();
@@ -41,6 +42,7 @@ export async function GET() {
     ? null
     : ordersData.filter((order) => (
       order.escrowOfficerId === null
+      && expectsPctEscrowOfficer(order.orderType)
       && ['open', 'in_process'].includes(order.operationalStatus)
     )).length;
 

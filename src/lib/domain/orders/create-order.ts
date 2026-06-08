@@ -83,6 +83,8 @@ export interface CreateOrderResult {
   error?: string;
 }
 
+const SOFTPRO_CONFIG_ERROR_MESSAGE = 'Order could not be sent to SoftPro — service configuration error';
+
 // ─── Main Entry Point ───────────────────────────────────────────────────────
 
 export async function createAndSendToSoftPro(raw: unknown, userId?: string): Promise<CreateOrderResult> {
@@ -127,7 +129,12 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
 
   const spResult = await softproCreateOrder(softProPayload);
   if (!spResult.success || !spResult.data) {
-    return { success: false, error: spResult.error?.message ?? 'SoftPro create order failed' };
+    return {
+      success: false,
+      error: spResult.error?.code === 'AUTH'
+        ? SOFTPRO_CONFIG_ERROR_MESSAGE
+        : spResult.error?.message ?? 'SoftPro create order failed',
+    };
   }
 
   const fileNumber = spResult.data.orderNumber;

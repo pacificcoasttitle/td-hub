@@ -1,5 +1,4 @@
 import type { CreateOrderInput } from './create-order';
-import { addSoftProUserIdToRecord } from '@/lib/integrations/softpro/auth';
 
 const VALID_USER_TYPES = ['EscrowCompany', 'Lender', 'ListingAgentBroker', 'MortgageBroker'] as const;
 
@@ -160,7 +159,7 @@ export function buildSoftProPayload(
   const titleOfficeLookup = titleOfficer?.lookupCode ?? '';
   const branchCode = resolveBranchCode(input.orderType, titleOfficer, escrowOfficer);
 
-  return addSoftProUserIdToRecord({
+  return {
     baseDetails: {
       OrderType: input.orderType,
       ProjectName: 'PCT',
@@ -233,7 +232,7 @@ export function buildSoftProPayload(
     ...(hasContactData(input.contacts?.mortgageBroker) && {
       mortgageDetails: mapContactSection(input.contacts!.mortgageBroker!),
     }),
-  });
+  };
 }
 
 interface ContactInput {

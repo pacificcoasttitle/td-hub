@@ -1,5 +1,27 @@
 SoftPro OrderCreationController APIs
 
+## Authentication (adapter)
+
+POST /api/authentication/CreateUserToken (anonymous — no X-API-KEY required)
+
+Body:
+
+```json
+{ "UserId": "<service account, e.g. TD_Hub>", "Token": "<generated>", "TokenStatus": 1 }
+```
+
+- Registers/rotates an API key in the adapter's phpNetAuth table.
+- Re-registering an existing UserId expires the prior token.
+
+All other endpoints, once auth is enabled:
+
+- Header: `X-API-KEY: <token>`
+- Write operations (POST/PUT): include `UserId` (this exact casing) in the JSON body.
+
+Casing note: adapter prose sometimes says "UserID"; the adapter's literal JSON uses `UserId`.
+
+Source: SoftPro adapter team written response, May 2026.
+
 1. Open Order
 API URL:
 http://100.29.181.61:3000/api/ordercreation/create

@@ -20,6 +20,8 @@ import {
   buildSoftProHeaders,
   generateSoftProToken,
   getSoftProUserId,
+  redactSoftProAuthFields,
+  SoftProConfigError,
   type RegisterSoftProTokenParams,
   type RegisterSoftProTokenResult,
   type SoftProUserContext,
@@ -121,6 +123,7 @@ async function makeRequest<T>(
     const body = isWrite && options?.body
       ? addSoftProUserIdToWritePayload(options.body, options.userContext)
       : options?.body;
+    const loggedBody = body ? redactSoftProAuthFields(body) : undefined;
 
     const fetchOptions: RequestInit = {
       method,
@@ -155,7 +158,7 @@ async function makeRequest<T>(
         httpStatus: response.status,
         retryable,
         errorCategory: category,
-        requestMeta: { url, method, ...(body ? { payload: body } : { queryParams: options?.queryParams }) },
+        requestMeta: { url, method, ...(loggedBody ? { payload: loggedBody } : { queryParams: options?.queryParams }) },
         responseMeta: { bodyStatus: null, rawSnippet: (rawText ?? '').slice(0, 500) },
       });
       return vendorError<T>(VENDOR, softProCategoryToErrorCode(category), `Non-JSON response (HTTP ${response.status}): ${(rawText ?? '').slice(0, 200)}`, {
@@ -181,7 +184,7 @@ async function makeRequest<T>(
       httpStatus: response.status,
       retryable: success ? false : retryable,
       errorCategory: success ? undefined : category,
-      requestMeta: { url, method, ...(body ? { payload: body } : { queryParams: options?.queryParams }) },
+      requestMeta: { url, method, ...(loggedBody ? { payload: loggedBody } : { queryParams: options?.queryParams }) },
       responseMeta: success
         ? buildSuccessResponseMeta(operation, raw)
         : { status: raw.Status, bodyStatus: raw.Status, message: raw.Message, rawBody: raw },
@@ -203,6 +206,7 @@ async function makeRequest<T>(
   } catch (err) {
     const durationMs = Date.now() - startedAt.getTime();
     const message = err instanceof Error ? err.message : 'Unknown error';
+    const isConfigError = err instanceof SoftProConfigError;
 
     await logRequest({
       operation,
@@ -210,14 +214,18 @@ async function makeRequest<T>(
       requestId,
       startedAt,
       success: false,
-      retryable: true,
-      errorCategory: 'unknown',
-      requestMeta: { url, method, ...(options?.body ? { payload: options.body } : {}) },
+      retryable: !isConfigError,
+      errorCategory: isConfigError ? 'auth' : 'unknown',
+      requestMeta: {
+        url,
+        method,
+        ...(options?.body ? { payload: redactSoftProAuthFields(options.body) } : {}),
+      },
       responseMeta: { bodyStatus: null, error: message },
     });
 
-    return vendorError<T>(VENDOR, 'NETWORK_ERROR', message, {
-      retryable: true,
+    return vendorError<T>(VENDOR, isConfigError ? 'AUTH' : 'NETWORK_ERROR', message, {
+      retryable: !isConfigError,
       requestId,
       durationMs,
     });
@@ -235,6 +243,7 @@ export async function createOrder(
 
   try {
     const payloadWithUserId = addSoftProUserIdToRecord(payload);
+    const loggedPayload = redactSoftProAuthFields(payloadWithUserId);
     const hdrs: Record<string, string> = {
       'Content-Type': 'application/json',
       ...buildSoftProHeaders({ requireToken: true }),
@@ -254,7 +263,7 @@ export async function createOrder(
       operation: 'create_order', requestId, startedAt,
       success: raw.Status === 200,
       httpStatus: response.status,
-      requestMeta: { url, method: 'POST', payload: payloadWithUserId },
+      requestMeta: { url, method: 'POST', payload: loggedPayload },
       responseMeta: raw.Status === 200
         ? { status: raw.Status, message: raw.Message, orderNumber: raw.OrderNumber }
         : { status: raw.Status, message: raw.Message, rawBody: raw },
@@ -269,16 +278,19 @@ export async function createOrder(
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     const durationMs = Date.now() - startedAt.getTime();
+    const isConfigError = err instanceof SoftProConfigError;
 
     await logRequest({
       operation: 'create_order', requestId, startedAt,
-      success: false, errorCategory: 'NETWORK',
+      success: false,
+      retryable: !isConfigError,
+      errorCategory: isConfigError ? 'auth' : 'NETWORK',
       requestMeta: { url, method: 'POST' },
       responseMeta: { error: message },
     });
 
-    return vendorError<{ orderNumber: string }>(VENDOR, 'NETWORK_ERROR', message, {
-      retryable: true, requestId, durationMs,
+    return vendorError<{ orderNumber: string }>(VENDOR, isConfigError ? 'AUTH' : 'NETWORK_ERROR', message, {
+      retryable: !isConfigError, requestId, durationMs,
     });
   }
 }
@@ -293,7 +305,7 @@ export async function registerSoftProToken(
   const token = params.token?.trim() || generateSoftProToken();
   const tokenStatus = params.tokenStatus ?? 1;
   const payload = { UserId: userId, Token: token, TokenStatus: tokenStatus };
-  const loggedPayload = { ...payload, Token: '[redacted]' };
+  const loggedPayload = redactSoftProAuthFields(payload);
 
   try {
     const response = await fetch(url, {

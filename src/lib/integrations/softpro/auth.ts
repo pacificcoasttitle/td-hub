@@ -3,6 +3,14 @@ import type { VendorResult } from '../types';
 export type SoftProUserContext = 'interactive' | 'cron';
 
 const USER_ID_FIELD = 'UserId';
+const REDACTED_AUTH_VALUE = '[redacted]';
+
+export class SoftProConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SoftProConfigError';
+  }
+}
 
 function readEnv(name: string): string | null {
   const value = process.env[name]?.trim();
@@ -12,7 +20,7 @@ function readEnv(name: string): string | null {
 export function getSoftProToken(options: { required?: boolean } = {}): string | null {
   const token = readEnv('SOFTPRO_TOKEN');
   if (!token && options.required) {
-    throw new Error('SOFTPRO_TOKEN is required for SoftPro write operations');
+    throw new SoftProConfigError('SOFTPRO_TOKEN is required for SoftPro write operations');
   }
   return token;
 }
@@ -23,7 +31,7 @@ export function getSoftProUserId(context: SoftProUserContext = 'interactive'): s
     : readEnv('SOFTPRO_USER_ID');
 
   if (!userId) {
-    throw new Error(`SOFTPRO_USER_ID is required for SoftPro ${context} write operations`);
+    throw new SoftProConfigError(`SOFTPRO_USER_ID is required for SoftPro ${context} write operations`);
   }
 
   return userId;
@@ -38,6 +46,8 @@ export function addSoftProUserIdToRecord(
   payload: Record<string, unknown>,
   context: SoftProUserContext = 'interactive',
 ): Record<string, unknown> {
+  // Adapter-auth casing is based on the API team's CreateUserToken example:
+  // { "UserId": "TD_Hub", "Token": "...", "TokenStatus": 1 }.
   return {
     ...payload,
     [USER_ID_FIELD]: getSoftProUserId(context),
@@ -67,6 +77,26 @@ export function addSoftProUserIdToWritePayload(
 
   if (payload !== null && typeof payload === 'object') {
     return addSoftProUserIdToRecord(payload as Record<string, unknown>, context);
+  }
+
+  return payload;
+}
+
+export function redactSoftProAuthFields(payload: unknown): unknown {
+  if (Array.isArray(payload)) {
+    return payload.map((item) => redactSoftProAuthFields(item));
+  }
+
+  if (payload !== null && typeof payload === 'object') {
+    const redacted: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (key === USER_ID_FIELD || key === 'Token') {
+        redacted[key] = REDACTED_AUTH_VALUE;
+      } else {
+        redacted[key] = redactSoftProAuthFields(value);
+      }
+    }
+    return redacted;
   }
 
   return payload;

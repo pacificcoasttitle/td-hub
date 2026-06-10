@@ -5,6 +5,7 @@ import { db } from '@/lib/db/client';
 import { orders, documents, prelimAnalyses } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { analyzePrelim } from '@/lib/tessa';
+import { isTessaManualAnalysisEnabled } from '@/lib/tessa/analysis-config';
 
 const ALLOWED_ROLES = [
   'super_admin', 'admin', 'cs_admin',
@@ -70,6 +71,20 @@ export async function POST(
     }
   }
 
+  if (!isTessaManualAnalysisEnabled()) {
+    console.log(
+      `[TESSA] Manual analysis PAUSED (TESSA_MANUAL_ANALYSIS_ENABLED=false); ` +
+        `rejected analyze request for order ${orderId}`,
+    );
+    return NextResponse.json(
+      {
+        status: 'paused',
+        error: 'TESSA manual analysis is paused (TESSA_MANUAL_ANALYSIS_ENABLED=false)',
+      },
+      { status: 503 },
+    );
+  }
+
   try {
     await db.update(prelimAnalyses)
       .set({
@@ -91,6 +106,17 @@ export async function POST(
       attemptCount: 0,
       force: true,
     });
+
+    if (result.status === 'paused') {
+      return NextResponse.json(
+        {
+          analysisId: result.analysisId,
+          status: 'paused',
+          error: result.error ?? 'TESSA manual analysis is paused',
+        },
+        { status: 503 },
+      );
+    }
 
     if (result.status === 'failed') {
       console.error('[TESSA] Manual route returning failed result', result);

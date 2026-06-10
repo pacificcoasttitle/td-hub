@@ -15,6 +15,11 @@ import { callExtraction, callSummary } from './ai-client';
 import { validateAndRepairExtraction } from './tessa-guardrails';
 import { computeComplexity } from './complexity';
 import type { ExtractedAnalysis, PrelimFacts } from './tessa-types';
+import {
+  isAutomatedTrigger,
+  isTessaLlmAllowed,
+  logAutomatedAnalysisPaused,
+} from './analysis-config';
 
 export interface AnalyzePrelimParams {
   orderId: number;
@@ -88,6 +93,27 @@ export async function analyzePrelim(
   if (existing && !params.force && (existing.status === 'complete' || activeStatuses.includes(existing.status as typeof activeStatuses[number]))) {
     console.log(`[TESSA] Analysis already exists for doc ${params.documentId}: ${existing.status}`);
     return { analysisId: existing.id, status: existing.status };
+  }
+
+  // Kill switch: return before any row mutation so paused prelims stay un-analyzed.
+  if (!isTessaLlmAllowed(params.triggeredBy)) {
+    if (isAutomatedTrigger(params.triggeredBy)) {
+      logAutomatedAnalysisPaused({
+        triggeredBy: params.triggeredBy,
+        orderId: params.orderId,
+        documentId: params.documentId,
+      });
+    } else {
+      console.log(
+        `[TESSA] Manual analysis PAUSED (TESSA_MANUAL_ANALYSIS_ENABLED=false); ` +
+          `skipped order ${params.orderId} doc ${params.documentId}`,
+      );
+    }
+    return {
+      analysisId: existing?.id ?? 0,
+      status: 'paused',
+      error: `TESSA analysis paused for trigger=${params.triggeredBy}`,
+    };
   }
 
   let analysisId: number;
@@ -251,7 +277,7 @@ export async function analyzePrelim(
     await updateRow(analysisId, { status: 'summarizing' });
 
     // (j) LLM summary call
-    const summaryText = await callSummary(extraction);
+    const summaryText = await callSummary(extraction, params.triggeredBy);
 
     // (k) Compute complexity score
     const complexity = computeComplexity(extraction, facts);

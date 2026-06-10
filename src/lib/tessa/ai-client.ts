@@ -14,6 +14,7 @@ import {
   buildSummaryPrompt,
 } from './tessa-prompts';
 import type { ExtractedAnalysis } from './tessa-types';
+import { assertTessaLlmAllowed, type TessaTrigger } from './analysis-config';
 
 const VENDOR = 'anthropic';
 const MODEL = 'claude-sonnet-4-20250514';
@@ -56,7 +57,9 @@ function stripMarkdownFences(text: string): string {
 export async function callExtraction(
   pdfText: string,
   factsJson: string,
+  triggeredBy: TessaTrigger,
 ): Promise<ExtractedAnalysis> {
+  assertTessaLlmAllowed(triggeredBy);
   const client = getClient();
   const requestId = crypto.randomUUID();
   const startedAt = new Date();
@@ -103,7 +106,9 @@ export async function callExtraction(
 
 export async function callSummary(
   extractionJson: ExtractedAnalysis,
+  triggeredBy: TessaTrigger,
 ): Promise<string> {
+  assertTessaLlmAllowed(triggeredBy);
   const client = getClient();
   const requestId = crypto.randomUUID();
   const startedAt = new Date();

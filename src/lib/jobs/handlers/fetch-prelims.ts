@@ -4,6 +4,10 @@ import { sql, and, eq, or, isNull, asc } from 'drizzle-orm';
 import { getAttachedDocuments } from '@/lib/integrations/softpro';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
 import { analyzePrelim } from '@/lib/tessa';
+import {
+  isTessaAutoAnalysisEnabled,
+  logCronCycleAutoAnalysisPaused,
+} from '@/lib/tessa/analysis-config';
 
 export interface FetchPrelimsResult {
   total: number;
@@ -90,6 +94,9 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
   // Skip Phase 2 entirely if Phase 1 already exhausted the time budget.
   let retried = 0;
   if (timedOut) {
+    return { total: ordersWithoutPrelims.length, attempted, fetched, documentsStored, skipped, retried, timedOut, errors };
+  }
+  if (!autoAnalysisEnabled) {
     return { total: ordersWithoutPrelims.length, attempted, fetched, documentsStored, skipped, retried, timedOut, errors };
   }
   try {
@@ -243,13 +250,15 @@ export async function fetchPrelimsForOrder(
       });
 
       try {
-        await analyzePrelim({
-          orderId,
-          documentId: doc!.id,
-          fileNumber,
-          storageKey,
-          triggeredBy: 'cron',
-        });
+        if (isTessaAutoAnalysisEnabled()) {
+          await analyzePrelim({
+            orderId,
+            documentId: doc!.id,
+            fileNumber,
+            storageKey,
+            triggeredBy: 'cron',
+          });
+        }
       } catch (err) {
         console.error('[TESSA] Cron-triggered analysis failed:', {
           orderId,

@@ -9,7 +9,7 @@ import type { SoftProOrderContactsData } from '@/lib/integrations/softpro';
  *
  * Logic by order type:
  * - Title only: escrow officer at external escrow company
- *   (EscrowCompanies.PersonLookupCode)
+ *   (EscrowCompanies.Person.LookupCode)
  * - Title & Escrow: lender contact (Lenders.PersonLookupCode), fallback agent
  * - Escrow only: lender contact, fallback agent
  * - Trustee Sale Guarantee: listing agent
@@ -34,9 +34,12 @@ export async function resolveClientContactId(
     return found?.id ?? null;
   }
 
-  const escrowPersonCode = contactsResponse.EscrowCompanies?.PersonLookupCode;
-  const lenderPersonCode = contactsResponse.Lenders?.PersonLookupCode;
-  const agentPersonCode = contactsResponse.ListingAgentBrokers?.PersonLookupCode;
+  const escrowPersonCode = contactsResponse.EscrowCompanies?.Person?.LookupCode
+    ?? contactsResponse.EscrowCompanies?.PersonLookupCode;
+  const lenderPersonCode = contactsResponse.Lenders?.Person?.LookupCode
+    ?? contactsResponse.Lenders?.PersonLookupCode;
+  const agentPersonCode = contactsResponse.ListingAgentBrokers?.Person?.LookupCode
+    ?? contactsResponse.ListingAgentBrokers?.PersonLookupCode;
 
   if (orderType === 'Title only') {
     return (await lookupBySoftproCode(escrowPersonCode))

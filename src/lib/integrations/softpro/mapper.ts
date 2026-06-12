@@ -2,6 +2,9 @@ import {
   SoftProOrderItem,
   SoftProOrderContactsData,
   SoftProLookupItem,
+  SoftProResolvedCompany,
+  SoftProResolvedPerson,
+  SoftProResolvedRole,
   TITLE_OFFICER_FIELDS,
   parseSoftProDate,
 } from './types';
@@ -50,6 +53,30 @@ export interface MappedOrderContacts {
   titleOfficerName: string | null;
   underwriterCompanyCode: string | null;
   underwriterPersonCode: string | null;
+  parties: {
+    buyer: MappedResolvedParty | null;
+    secondaryBuyer: MappedResolvedParty | null;
+    seller: MappedResolvedParty | null;
+    secondarySeller: MappedResolvedParty | null;
+    escrowCompany: MappedResolvedParty | null;
+    lender: MappedResolvedParty | null;
+    listingAgent: MappedResolvedParty | null;
+    mortgageBroker: MappedResolvedParty | null;
+    payoffLender: MappedResolvedParty | null;
+    titleCompany: MappedResolvedParty | null;
+    underwriter: MappedResolvedParty | null;
+  };
+}
+
+export interface MappedResolvedParty {
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  lookupCode: string | null;
+  companyName: string | null;
+  companyLookupCode: string | null;
+  companyEmail: string | null;
+  companyPhone: string | null;
 }
 
 // ─── Mapped Lookup Entry ────────────────────────────────────────────────────
@@ -122,32 +149,110 @@ export function mapSoftProOrder(item: SoftProOrderItem): MappedOrderData {
 
 // ─── Contacts Mapper ────────────────────────────────────────────────────────
 
-function emptyToNull(value: string | undefined): string | null {
+function nullableString(value: string | null | undefined): string | null {
   if (!value || !value.trim()) return null;
-  return value;
+  return value.trim();
+}
+
+function lookupCode(role: SoftProResolvedRole | null | undefined, field: 'CompanyLookUpCode' | 'PersonLookupCode'): string | null {
+  return nullableString(role?.[field]);
+}
+
+function resolvedParty(
+  person: SoftProResolvedPerson | null | undefined,
+  company: SoftProResolvedCompany | null | undefined,
+  fallbackName?: string | null,
+): MappedResolvedParty | null {
+  const mapped: MappedResolvedParty = {
+    name: nullableString(person?.Name) ?? nullableString(fallbackName),
+    email: nullableString(person?.Email),
+    phone: nullableString(person?.Phone),
+    lookupCode: nullableString(person?.LookupCode),
+    companyName: nullableString(company?.Name),
+    companyLookupCode: nullableString(company?.LookupCode),
+    companyEmail: nullableString(company?.Email),
+    companyPhone: nullableString(company?.Phone),
+  };
+
+  return Object.values(mapped).some((value) => value !== null) ? mapped : null;
+}
+
+function companyOnlyParty(company: SoftProResolvedCompany | null | undefined): MappedResolvedParty | null {
+  return resolvedParty(null, company, null);
 }
 
 /**
  * Map GetOrderContacts response to a structured contacts object.
  */
 export function mapOrderContacts(data: SoftProOrderContactsData): MappedOrderContacts {
+  const primaryBuyer = nullableString(data.buyer?.Person?.PrimaryBorrower)
+    ?? nullableString(data.buyer?.Company?.PrimaryBorrower)
+    ?? nullableString(data.buyer?.PrimaryBorrower)
+    ?? nullableString(data.buyer?.PreimaryBorrower);
+  const secondaryBuyer = nullableString(data.buyer?.Person?.SecondaryBorrower)
+    ?? nullableString(data.buyer?.Company?.SecondaryBorrower)
+    ?? nullableString(data.buyer?.SecondaryBorrower);
+  const primarySeller = nullableString(data.Sellers?.PrimarySeller)
+    ?? nullableString(data.Sellers?.PreimarySeller);
+  const secondarySeller = nullableString(data.Sellers?.SecondarySeller);
+  const escrowCompanyCode = nullableString(data.EscrowCompanies?.Company?.LookupCode)
+    ?? lookupCode(data.EscrowCompanies, 'CompanyLookUpCode');
+  const escrowPersonCode = nullableString(data.EscrowCompanies?.Person?.LookupCode)
+    ?? lookupCode(data.EscrowCompanies, 'PersonLookupCode');
+  const lenderCompanyCode = nullableString(data.Lenders?.Company?.LookupCode)
+    ?? lookupCode(data.Lenders, 'CompanyLookUpCode');
+  const lenderCode = nullableString(data.Lenders?.Person?.LookupCode)
+    ?? lookupCode(data.Lenders, 'PersonLookupCode');
+  const listingAgentCompanyCode = nullableString(data.ListingAgentBrokers?.Company?.LookupCode)
+    ?? lookupCode(data.ListingAgentBrokers, 'CompanyLookUpCode');
+  const listingAgentPersonCode = nullableString(data.ListingAgentBrokers?.Person?.LookupCode)
+    ?? lookupCode(data.ListingAgentBrokers, 'PersonLookupCode');
+  const mortgageBrokerCode = nullableString(data.MortgageBrokers?.Person?.LookupCode)
+    ?? lookupCode(data.MortgageBrokers, 'PersonLookupCode');
+  const payoffLenderCode = nullableString(data.PayoffLenders?.Person?.LookupCode)
+    ?? lookupCode(data.PayoffLenders, 'PersonLookupCode');
+  const titleCompanyCode = nullableString(data.TitleCompanies?.Company?.LookupCode)
+    ?? lookupCode(data.TitleCompanies, 'CompanyLookUpCode');
+  const titleOfficerName = nullableString(data.TitleCompanies?.Person?.Name)
+    ?? nullableString(data.TitleCompanies?.Person?.LookupCode)
+    ?? lookupCode(data.TitleCompanies, 'PersonLookupCode');
+  const underwriterCompanyCode = nullableString(data.Underwriters?.Company?.LookupCode)
+    ?? lookupCode(data.Underwriters, 'CompanyLookUpCode');
+  const underwriterPersonCode = nullableString(data.Underwriters?.Person?.LookupCode)
+    ?? lookupCode(data.Underwriters, 'PersonLookupCode');
+
   return {
-    primaryBuyer: emptyToNull(data.buyer?.PreimaryBorrower),
-    secondaryBuyer: emptyToNull(data.buyer?.SecondaryBorrower),
-    primarySeller: emptyToNull(data.Sellers?.PreimarySeller),
-    secondarySeller: emptyToNull(data.Sellers?.SecondarySeller),
-    escrowCompanyCode: emptyToNull(data.EscrowCompanies?.CompanyLookUpCode),
-    escrowPersonCode: emptyToNull(data.EscrowCompanies?.PersonLookupCode),
-    lenderCompanyCode: emptyToNull(data.Lenders?.CompanyLookUpCode),
-    lenderCode: emptyToNull(data.Lenders?.PersonLookupCode),
-    listingAgentCompanyCode: emptyToNull(data.ListingAgentBrokers?.CompanyLookUpCode),
-    listingAgentPersonCode: emptyToNull(data.ListingAgentBrokers?.PersonLookupCode),
-    mortgageBrokerCode: emptyToNull(data.MortgageBrokers?.PersonLookupCode),
-    payoffLenderCode: emptyToNull(data.PayoffLenders?.PersonLookupCode),
-    titleCompanyCode: emptyToNull(data.TitleCompanies?.CompanyLookUpCode),
-    titleOfficerName: emptyToNull(data.TitleCompanies?.PersonLookupCode),
-    underwriterCompanyCode: emptyToNull(data.Underwriters?.CompanyLookUpCode),
-    underwriterPersonCode: emptyToNull(data.Underwriters?.PersonLookupCode),
+    primaryBuyer,
+    secondaryBuyer,
+    primarySeller,
+    secondarySeller,
+    escrowCompanyCode,
+    escrowPersonCode,
+    lenderCompanyCode,
+    lenderCode,
+    listingAgentCompanyCode,
+    listingAgentPersonCode,
+    mortgageBrokerCode,
+    payoffLenderCode,
+    titleCompanyCode,
+    titleOfficerName,
+    underwriterCompanyCode,
+    underwriterPersonCode,
+    parties: {
+      buyer: resolvedParty(data.buyer?.Person, data.buyer?.Company, primaryBuyer),
+      secondaryBuyer: primaryBuyer !== secondaryBuyer
+        ? resolvedParty(null, data.buyer?.Company, secondaryBuyer)
+        : null,
+      seller: primarySeller ? resolvedParty(null, null, primarySeller) : null,
+      secondarySeller: secondarySeller ? resolvedParty(null, null, secondarySeller) : null,
+      escrowCompany: resolvedParty(data.EscrowCompanies?.Person, data.EscrowCompanies?.Company),
+      lender: resolvedParty(data.Lenders?.Person, data.Lenders?.Company),
+      listingAgent: resolvedParty(data.ListingAgentBrokers?.Person, data.ListingAgentBrokers?.Company),
+      mortgageBroker: resolvedParty(data.MortgageBrokers?.Person, data.MortgageBrokers?.Company),
+      payoffLender: resolvedParty(data.PayoffLenders?.Person, data.PayoffLenders?.Company),
+      titleCompany: resolvedParty(data.TitleCompanies?.Person, data.TitleCompanies?.Company),
+      underwriter: companyOnlyParty(data.Underwriters?.Company),
+    },
   };
 }
 

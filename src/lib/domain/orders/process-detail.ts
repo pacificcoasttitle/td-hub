@@ -1,8 +1,8 @@
 import { db } from '@/lib/db/client';
 import { orders, orderProperties, orderStatusHistory, contacts } from '@/lib/db/schema';
-import { and, eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { parseSoftProDate } from '@/lib/integrations/softpro/types';
-import type { SoftProOrderDetailItem } from '@/lib/integrations/softpro/types';
+import type { SoftProOrderDetailItem, SoftProResolvedPerson } from '@/lib/integrations/softpro/types';
 
 // ─── Shared types ────────────────────────────────────────────────────────────
 
@@ -15,6 +15,10 @@ export interface ContactRecord {
   lastName: string | null;
   fullName: string | null;
   officerName: string | null;
+  softproLookupCode: string | null;
+  sourceId: string | null;
+  email: string | null;
+  phone: string | null;
 }
 
 // ─── Status / type mapping ───────────────────────────────────────────────────
@@ -58,6 +62,10 @@ const officerColumns = {
   lastName: contacts.lastName,
   fullName: contacts.fullName,
   officerName: contacts.officerName,
+  softproLookupCode: contacts.softproLookupCode,
+  sourceId: contacts.sourceId,
+  email: contacts.email,
+  phone: contacts.phone,
 };
 
 export async function loadSalesReps(): Promise<ContactRecord[]> {
@@ -69,15 +77,7 @@ export async function loadTitleOfficers(): Promise<ContactRecord[]> {
 }
 
 export async function loadEscrowOfficers(): Promise<ContactRecord[]> {
-  // Exclude PCT\ login-code rows so the resolver always lands on the
-  // canonical person-code contact, preventing duplicate-row regressions.
-  return db
-    .select(officerColumns)
-    .from(contacts)
-    .where(and(
-      eq(contacts.isEscrowOfficer, true),
-      sql`(${contacts.sourceId} IS NULL OR ${contacts.sourceId} NOT LIKE 'PCT\\%')`,
-    ));
+  return db.select(officerColumns).from(contacts).where(eq(contacts.isEscrowOfficer, true));
 }
 
 // ─── Resolvers ───────────────────────────────────────────────────────────────
@@ -105,6 +105,14 @@ export function resolveTitleOfficerId(titleOfficer: string | null | undefined, o
   const target = normalizeName(titleOfficer);
   for (const o of officers) if (normalizeName(o.officerName) === target) return o.id;
   for (const o of officers) if (constructedName(o) === target) return o.id;
+  return null;
+}
+
+function resolveOfficerIdByLookupCode(lookupCode: string | null | undefined, officers: ContactRecord[]): number | null {
+  if (!lookupCode || !lookupCode.trim()) return null;
+  const target = lookupCode.trim().toLowerCase();
+  for (const o of officers) if (o.softproLookupCode?.trim().toLowerCase() === target) return o.id;
+  for (const o of officers) if (o.sourceId?.trim().toLowerCase() === target) return o.id;
   return null;
 }
 
@@ -161,15 +169,20 @@ export async function processOrderDetail(
   const openedAt = parseSoftProDate(item.ReceivedDate);
   const completedAt = parseSoftProDate(item.CompletedDate);
   const closedAt = operationalStatus === 'closed' ? parseSoftProDate(item.ModifiedDate) : null;
+  const titleOfficerName = item.TitleOfficerContact?.Name?.trim() || item.TitleOfficer;
+  const escrowOfficerName = item.EscrowOfficerContact?.Name?.trim() || item.EscrowOfficer;
 
   const salesRepId = resolveSalesRepId(item.MarketingRep, salesReps);
-  const titleOfficerId = resolveTitleOfficerId(item.TitleOfficer, titleOfficers);
-  const escrowOfficerId = resolveEscrowOfficerId(item.EscrowOfficer, escrowOfficers);
+  const titleOfficerId = resolveOfficerIdByLookupCode(item.TitleOfficerContact?.LookupCode, titleOfficers)
+    ?? resolveTitleOfficerId(titleOfficerName, titleOfficers);
+  const escrowOfficerId = resolveOfficerIdByLookupCode(item.EscrowOfficerContact?.LookupCode, escrowOfficers)
+    ?? resolveEscrowOfficerId(escrowOfficerName, escrowOfficers);
 
-  if (item.EscrowOfficer?.trim() && escrowOfficerId === null) {
+  if (escrowOfficerName?.trim() && escrowOfficerId === null) {
     console.warn('[process-order-detail] Unable to resolve SoftPro escrow officer', {
       fileNumber,
-      escrowOfficer: item.EscrowOfficer,
+      escrowOfficer: escrowOfficerName,
+      escrowOfficerLookupCode: item.EscrowOfficerContact?.LookupCode,
     });
   }
 
@@ -200,6 +213,8 @@ export async function processOrderDetail(
       updatedAt: new Date(),
     }).where(eq(orders.id, existing.id));
 
+    await refreshOfficerContact(titleOfficerId, item.TitleOfficerContact);
+    await refreshOfficerContact(escrowOfficerId, item.EscrowOfficerContact);
     await upsertOrderProperty(existing.id, item);
 
     if (statusChanged) {
@@ -245,7 +260,34 @@ export async function processOrderDetail(
       source: 'softpro_sync',
       notes: 'Imported via GetOrderDetails',
     });
+
+    await refreshOfficerContact(titleOfficerId, item.TitleOfficerContact);
+    await refreshOfficerContact(escrowOfficerId, item.EscrowOfficerContact);
   }
+}
+
+async function refreshOfficerContact(contactId: number | null, resolved: SoftProResolvedPerson | null | undefined): Promise<void> {
+  if (!contactId || !resolved) return;
+
+  const update: Partial<typeof contacts.$inferInsert> = { updatedAt: new Date() };
+  const name = resolved.Name?.trim();
+  const lookupCode = resolved.LookupCode?.trim();
+  const email = resolved.Email?.trim();
+  const phone = resolved.Phone?.trim();
+
+  if (name) {
+    update.fullName = name;
+    update.officerName = name;
+  }
+  if (lookupCode) {
+    update.softproLookupCode = lookupCode;
+    update.sourceId = lookupCode;
+  }
+  if (email) update.email = email;
+  if (phone) update.phone = phone;
+
+  if (Object.keys(update).length === 1) return;
+  await db.update(contacts).set(update).where(eq(contacts.id, contactId));
 }
 
 async function upsertOrderProperty(

@@ -44,46 +44,69 @@ export interface SoftProOrderDetailItem {
   CompletedDate: string;
   ModifiedDate: string;
   MarketingRep: string;
+  EscrowOfficerContact?: SoftProResolvedPerson | null;
+  TitleOfficerContact?: SoftProResolvedPerson | null;
 }
 
 // ─── Order Contacts (from GetOrderContacts) ──────────────────────────────────
-// NOTE: "PreimaryBorrower" is a typo in the real API — preserved exactly.
+// Sprint 1 adapter responses resolve lookup-code roles into nested objects.
+// Some buyer/seller name fields remain role-specific instead of generic Name.
+
+export interface SoftProResolvedPerson {
+  LookupCode?: string | null;
+  Name?: string | null;
+  Email?: string | null;
+  Phone?: string | null;
+}
+
+export interface SoftProResolvedCompany {
+  LookupCode?: string | null;
+  Name?: string | null;
+  Address?: string | null;
+  City?: string | null;
+  State?: string | null;
+  Zip?: string | null;
+  Email?: string | null;
+  Phone?: string | null;
+}
+
+export interface SoftProBuyerRole {
+  Person?: (SoftProResolvedPerson & {
+    PrimaryBorrower?: string | null;
+    SecondaryBorrower?: string | null;
+  }) | null;
+  Company?: (SoftProResolvedCompany & {
+    PrimaryBorrower?: string | null;
+    SecondaryBorrower?: string | null;
+  }) | null;
+  PrimaryBorrower?: string | null;
+  SecondaryBorrower?: string | null;
+  PreimaryBorrower?: string | null;
+}
+
+export interface SoftProSellerRole {
+  PrimarySeller?: string | null;
+  SecondarySeller?: string | null;
+  PreimarySeller?: string | null;
+}
+
+export interface SoftProResolvedRole {
+  Company?: SoftProResolvedCompany | null;
+  Person?: SoftProResolvedPerson | null;
+  CompanyLookUpCode?: string | null;
+  PersonLookupCode?: string | null;
+}
 
 export interface SoftProOrderContactsData {
-  buyer: {
-    PreimaryBorrower: string;
-    SecondaryBorrower: string;
-  };
-  Sellers: {
-    PreimarySeller: string;
-    SecondarySeller: string;
-  };
-  EscrowCompanies: {
-    CompanyLookUpCode: string;
-    PersonLookupCode: string;
-  };
-  Lenders: {
-    CompanyLookUpCode: string;
-    PersonLookupCode: string;
-  };
-  ListingAgentBrokers: {
-    CompanyLookUpCode: string;
-    PersonLookupCode: string;
-  };
-  MortgageBrokers: {
-    PersonLookupCode: string;
-  };
-  PayoffLenders: {
-    PersonLookupCode: string;
-  };
-  TitleCompanies: {
-    CompanyLookUpCode: string;
-    PersonLookupCode: string;
-  };
-  Underwriters: {
-    CompanyLookUpCode: string;
-    PersonLookupCode: string;
-  };
+  buyer: SoftProBuyerRole | null;
+  Sellers: SoftProSellerRole | null;
+  EscrowCompanies: SoftProResolvedRole | null;
+  Lenders: SoftProResolvedRole | null;
+  ListingAgentBrokers: SoftProResolvedRole | null;
+  MortgageBrokers: SoftProResolvedRole | null;
+  PayoffLenders: SoftProResolvedRole | null;
+  TitleCompanies: SoftProResolvedRole | null;
+  Underwriters: SoftProResolvedRole | null;
 }
 
 // ─── Lookup Item (from GetLookuptable) ──────────────────────────────────────

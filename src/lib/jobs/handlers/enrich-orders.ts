@@ -1,8 +1,8 @@
 import { db } from '@/lib/db/client';
-import { orders, contacts, companies } from '@/lib/db/schema';
+import { orders, orderParties, contacts, companies } from '@/lib/db/schema';
 import { eq, and, isNull, or, sql } from 'drizzle-orm';
-import { getOrderContacts } from '@/lib/integrations/softpro';
-import type { SoftProOrderContactsData } from '@/lib/integrations/softpro';
+import { getOrderContacts, mapOrderContacts } from '@/lib/integrations/softpro';
+import type { MappedOrderContacts, MappedResolvedParty } from '@/lib/integrations/softpro';
 import { resolveClientContactId } from '@/lib/domain/orders/client-resolver';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -52,39 +52,54 @@ async function enrichOrder(order: { id: number; fileNumber: string; orderType: s
   }
 
   const data = apiResult.data;
+  const mapped = mapOrderContacts(data);
   const updates: Record<string, number | null> = {};
 
-  const lenderCode = safeGet(data, 'Lenders', 'PersonLookupCode');
-  if (lenderCode) {
-    const id = await resolveContact(lenderCode);
+  const lenderCode = mapped.lenderCode;
+  if (lenderCode || mapped.parties.lender?.name) {
+    const id = await ensureContactFromResolved(mapped.parties.lender, { isLender: true })
+      ?? (lenderCode ? await resolveContact(lenderCode) : null);
     updates.lenderId = id;
-    if (id) result.resolved.lenderId = id;
+    if (id) {
+      result.resolved.lenderId = id;
+      await refreshContactFromResolved(id, mapped.parties.lender);
+    }
     else result.unresolved.push(`Lenders.PersonLookupCode=${lenderCode}`);
   }
 
-  const listingCode = safeGet(data, 'ListingAgentBrokers', 'PersonLookupCode');
-  if (listingCode) {
-    const id = await resolveContact(listingCode);
+  const listingCode = mapped.listingAgentPersonCode;
+  if (listingCode || mapped.parties.listingAgent?.name) {
+    const id = await ensureContactFromResolved(mapped.parties.listingAgent, { isRealEstateAgent: true })
+      ?? (listingCode ? await resolveContact(listingCode) : null);
     updates.listingAgentId = id;
     if (id) {
       result.resolved.listingAgentId = id;
+      await refreshContactFromResolved(id, mapped.parties.listingAgent);
       await flagRealEstateAgentAndCompany(id);
     } else result.unresolved.push(`ListingAgentBrokers.PersonLookupCode=${listingCode}`);
   }
 
-  const titleCompanyCode = safeGet(data, 'TitleCompanies', 'CompanyLookUpCode');
-  if (titleCompanyCode) {
-    const id = await resolveCompany(titleCompanyCode);
+  const titleCompanyCode = mapped.titleCompanyCode;
+  if (titleCompanyCode || mapped.parties.titleCompany?.companyName) {
+    const id = await ensureCompanyFromResolved(mapped.parties.titleCompany)
+      ?? (titleCompanyCode ? await resolveCompany(titleCompanyCode) : null);
     updates.titleCompanyId = id;
-    if (id) result.resolved.titleCompanyId = id;
+    if (id) {
+      result.resolved.titleCompanyId = id;
+      await refreshCompanyFromResolved(id, mapped.parties.titleCompany);
+    }
     else result.unresolved.push(`TitleCompanies.CompanyLookUpCode=${titleCompanyCode}`);
   }
 
-  const underwriterCode = safeGet(data, 'Underwriters', 'CompanyLookUpCode');
-  if (underwriterCode) {
-    const id = await resolveCompany(underwriterCode);
+  const underwriterCode = mapped.underwriterCompanyCode;
+  if (underwriterCode || mapped.parties.underwriter?.companyName) {
+    const id = await ensureCompanyFromResolved(mapped.parties.underwriter, { isUnderwriter: true })
+      ?? (underwriterCode ? await resolveCompany(underwriterCode) : null);
     updates.underwriterId = id;
-    if (id) result.resolved.underwriterId = id;
+    if (id) {
+      result.resolved.underwriterId = id;
+      await refreshCompanyFromResolved(id, mapped.parties.underwriter);
+    }
     else result.unresolved.push(`Underwriters.CompanyLookUpCode=${underwriterCode}`);
   }
 
@@ -106,6 +121,8 @@ async function enrichOrder(order: { id: number; fileNumber: string; orderType: s
   if (hasUpdate) {
     await db.update(orders).set(setFields).where(eq(orders.id, order.id));
   }
+
+  await persistResolvedParties(order.id, mapped);
 
   result.success = true;
   return result;
@@ -166,17 +183,14 @@ export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function safeGet(data: SoftProOrderContactsData, section: keyof SoftProOrderContactsData, field: string): string | null {
-  const obj = data[section] as Record<string, string> | undefined;
-  if (!obj) return null;
-  const val = obj[field];
-  return val && val.trim() ? val.trim() : null;
-}
-
 async function resolveContact(lookupCode: string): Promise<number | null> {
   const [row] = await db.select({ id: contacts.id })
     .from(contacts)
-    .where(eq(contacts.lookupCode, lookupCode))
+    .where(or(
+      eq(contacts.lookupCode, lookupCode),
+      eq(contacts.softproLookupCode, lookupCode),
+      eq(contacts.sourceId, lookupCode),
+    ))
     .limit(1);
   return row?.id ?? null;
 }
@@ -207,7 +221,164 @@ async function flagRealEstateAgentAndCompany(contactId: number): Promise<void> {
 async function resolveCompany(lookupCode: string): Promise<number | null> {
   const [row] = await db.select({ id: companies.id })
     .from(companies)
-    .where(eq(companies.lookupCode, lookupCode))
+    .where(or(
+      eq(companies.lookupCode, lookupCode),
+      eq(companies.sourceId, lookupCode),
+    ))
     .limit(1);
   return row?.id ?? null;
+}
+
+async function refreshContactFromResolved(contactId: number, party: MappedResolvedParty | null): Promise<void> {
+  if (!party) return;
+
+  const update: Partial<typeof contacts.$inferInsert> = { updatedAt: new Date() };
+  if (party.name) update.fullName = party.name;
+  if (party.email) update.email = party.email;
+  if (party.phone) update.phone = party.phone;
+  if (party.companyName) update.companyName = party.companyName;
+  if (party.companyLookupCode) update.flookupCode = party.companyLookupCode;
+  if (party.lookupCode) update.lookupCode = party.lookupCode;
+
+  if (Object.keys(update).length === 1) return;
+  await db.update(contacts).set(update).where(eq(contacts.id, contactId));
+}
+
+async function ensureContactFromResolved(
+  party: MappedResolvedParty | null,
+  flags: Partial<Pick<typeof contacts.$inferInsert, 'isLender' | 'isRealEstateAgent'>> = {},
+): Promise<number | null> {
+  if (!party) return null;
+  const lookup = party.lookupCode;
+  const name = party.name;
+
+  const existingId = lookup ? await resolveContact(lookup) : null;
+  if (existingId) return existingId;
+  if (!name) return null;
+
+  const [inserted] = await db.insert(contacts).values({
+    sourceSystem: 'softpro',
+    sourceId: lookup,
+    lookupCode: lookup,
+    softproLookupCode: lookup,
+    fullName: name,
+    email: party.email,
+    phone: party.phone,
+    companyName: party.companyName,
+    flookupCode: party.companyLookupCode,
+    ...flags,
+  }).returning({ id: contacts.id });
+
+  return inserted?.id ?? null;
+}
+
+async function refreshCompanyFromResolved(companyId: number, party: MappedResolvedParty | null): Promise<void> {
+  if (!party) return;
+
+  const update: Partial<typeof companies.$inferInsert> = { updatedAt: new Date() };
+  if (party.companyName) update.name = party.companyName;
+  if (party.companyEmail) update.email = party.companyEmail;
+  if (party.companyPhone) update.phone = party.companyPhone;
+  if (party.companyLookupCode) update.lookupCode = party.companyLookupCode;
+
+  if (Object.keys(update).length === 1) return;
+  await db.update(companies).set(update).where(eq(companies.id, companyId));
+}
+
+async function ensureCompanyFromResolved(
+  party: MappedResolvedParty | null,
+  flags: Partial<Pick<typeof companies.$inferInsert, 'isEscrowCompany' | 'isUnderwriter'>> = {},
+): Promise<number | null> {
+  if (!party) return null;
+  const lookup = party.companyLookupCode;
+  const name = party.companyName;
+
+  const existingId = lookup ? await resolveCompany(lookup) : null;
+  if (existingId) return existingId;
+  if (!name && !lookup) return null;
+
+  const [inserted] = await db.insert(companies).values({
+    sourceSystem: 'softpro',
+    sourceId: lookup,
+    lookupCode: lookup,
+    name: name ?? lookup!,
+    email: party.companyEmail,
+    phone: party.companyPhone,
+    ...flags,
+  }).returning({ id: companies.id });
+
+  return inserted?.id ?? null;
+}
+
+type PartyRole = typeof orderParties.role.enumValues[number];
+
+interface PartyUpsert {
+  role: PartyRole;
+  isPrimary: boolean;
+  party: MappedResolvedParty | null;
+  contactId?: number | null;
+}
+
+async function persistResolvedParties(orderId: number, mapped: MappedOrderContacts): Promise<void> {
+  const rows: PartyUpsert[] = [
+    { role: 'buyer', isPrimary: true, party: mapped.parties.buyer },
+    { role: 'buyer', isPrimary: false, party: mapped.parties.secondaryBuyer },
+    { role: 'seller', isPrimary: true, party: mapped.parties.seller },
+    { role: 'seller', isPrimary: false, party: mapped.parties.secondarySeller },
+    { role: 'lender', isPrimary: true, party: mapped.parties.lender },
+    { role: 'listing_agent', isPrimary: true, party: mapped.parties.listingAgent },
+    { role: 'escrow_company', isPrimary: true, party: mapped.parties.escrowCompany },
+    { role: 'lender_contact', isPrimary: true, party: mapped.parties.mortgageBroker },
+  ];
+
+  for (const row of rows) {
+    if (!row.party) continue;
+    await upsertResolvedParty(orderId, row);
+  }
+}
+
+async function upsertResolvedParty(orderId: number, row: PartyUpsert): Promise<void> {
+  const externalName = row.party?.name;
+  const externalCompany = row.party?.companyName;
+  const externalEmail = row.party?.email ?? row.party?.companyEmail;
+  const externalPhone = row.party?.phone ?? row.party?.companyPhone;
+
+  if (!externalName && !externalCompany && !externalEmail && !externalPhone) return;
+
+  const contactId = row.contactId ?? (
+    row.party?.lookupCode ? await resolveContact(row.party.lookupCode) : null
+  );
+
+  const [existing] = await db
+    .select({ id: orderParties.id })
+    .from(orderParties)
+    .where(and(
+      eq(orderParties.orderId, orderId),
+      eq(orderParties.role, row.role),
+      eq(orderParties.isPrimary, row.isPrimary),
+    ))
+    .limit(1);
+
+  const values: Partial<typeof orderParties.$inferInsert> = {
+    ...(contactId ? { contactId } : {}),
+    ...(externalName ? { externalName } : {}),
+    ...(externalCompany ? { externalCompany } : {}),
+    ...(externalEmail ? { externalEmail } : {}),
+    ...(externalPhone ? { externalPhone } : {}),
+  };
+
+  if (existing) {
+    await db.update(orderParties).set(values).where(eq(orderParties.id, existing.id));
+  } else {
+    await db.insert(orderParties).values({
+      orderId,
+      role: row.role,
+      isPrimary: row.isPrimary,
+      contactId: contactId ?? null,
+      externalName: externalName ?? null,
+      externalCompany: externalCompany ?? null,
+      externalEmail: externalEmail ?? null,
+      externalPhone: externalPhone ?? null,
+    });
+  }
 }

@@ -254,7 +254,7 @@ async function ensureContactFromResolved(
 
   const existingId = lookup ? await resolveContact(lookup) : null;
   if (existingId) return existingId;
-  if (!name) return null;
+  if (!lookup || !name) return null;
 
   const [inserted] = await db.insert(contacts).values({
     sourceSystem: 'softpro',
@@ -295,13 +295,13 @@ async function ensureCompanyFromResolved(
 
   const existingId = lookup ? await resolveCompany(lookup) : null;
   if (existingId) return existingId;
-  if (!name && !lookup) return null;
+  if (!lookup) return null;
 
   const [inserted] = await db.insert(companies).values({
     sourceSystem: 'softpro',
     sourceId: lookup,
     lookupCode: lookup,
-    name: name ?? lookup!,
+    name: name ?? lookup,
     email: party.companyEmail,
     phone: party.companyPhone,
     ...flags,

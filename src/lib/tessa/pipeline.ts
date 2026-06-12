@@ -243,7 +243,7 @@ export async function analyzePrelim(
     await updateRow(analysisId, { status: 'analyzing' });
 
     // (g) LLM extraction call
-    const rawExtraction = await callExtraction(pdfText, JSON.stringify(facts));
+    const rawExtraction = await callExtraction(pdfText, JSON.stringify(facts), params.triggeredBy);
 
     // Audit trail: persist raw LLM output before guardrails
     await updateRow(analysisId, {

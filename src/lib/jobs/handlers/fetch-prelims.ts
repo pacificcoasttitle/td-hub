@@ -96,7 +96,8 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
   if (timedOut) {
     return { total: ordersWithoutPrelims.length, attempted, fetched, documentsStored, skipped, retried, timedOut, errors };
   }
-  if (!autoAnalysisEnabled) {
+  if (!isTessaAutoAnalysisEnabled()) {
+    logCronCycleAutoAnalysisPaused();
     return { total: ordersWithoutPrelims.length, attempted, fetched, documentsStored, skipped, retried, timedOut, errors };
   }
   try {

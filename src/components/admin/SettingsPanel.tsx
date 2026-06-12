@@ -18,6 +18,7 @@ type SettingsMap = Record<string, Setting[]>;
 const DANGEROUS_KEYS: Record<string, string> = {
   titlepoint_shut_off: 'Are you sure? This will disable all TitlePoint document generation for new orders.',
   maintenance_mode: 'Are you sure? This will show a maintenance message to all non-admin users.',
+  tessa_prelim_enabled: 'Are you sure? Turning this ON exposes AI-generated prelim interpretation to all users (sales reps) and resumes new AI analysis (LLM cost). Turning it OFF hides the feature and stops new analysis. Existing stored analyses are not affected.',
 };
 
 /* ── Panel ─────────────────────────────────────────────────────────────────── */

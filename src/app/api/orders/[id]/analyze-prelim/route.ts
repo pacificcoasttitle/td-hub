@@ -5,7 +5,7 @@ import { db } from '@/lib/db/client';
 import { orders, documents, prelimAnalyses } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { analyzePrelim } from '@/lib/tessa';
-import { isTessaManualAnalysisEnabled } from '@/lib/tessa/analysis-config';
+import { isTessaTriggerAllowed } from '@/lib/tessa/analysis-config';
 
 const ALLOWED_ROLES = [
   'super_admin', 'admin', 'cs_admin',
@@ -71,15 +71,17 @@ export async function POST(
     }
   }
 
-  if (!isTessaManualAnalysisEnabled()) {
+  // Reject if the AI Prelim feature is off (admin DB flag tessa_prelim_enabled
+  // OR the cc5e55b env master-kill). Either-off = off.
+  if (!(await isTessaTriggerAllowed('manual'))) {
     console.log(
-      `[TESSA] Manual analysis PAUSED (TESSA_MANUAL_ANALYSIS_ENABLED=false); ` +
-        `rejected analyze request for order ${orderId}`,
+      `[TESSA] AI Prelim analysis is OFF (tessa_prelim_enabled / env master-kill); ` +
+        `rejected manual analyze request for order ${orderId}`,
     );
     return NextResponse.json(
       {
         status: 'paused',
-        error: 'TESSA manual analysis is paused (TESSA_MANUAL_ANALYSIS_ENABLED=false)',
+        error: 'AI Prelim analysis is currently disabled by an administrator.',
       },
       { status: 503 },
     );

@@ -10,6 +10,7 @@ import { ClosingsDrilldownModal } from './closings-drilldown-modal';
 import { OrderActions } from './order-actions';
 import type { SalesAction } from './order-actions';
 import type { SalesDashboardStats, SalesOrder } from './types';
+import { useTessaPrelimEnabled } from '@/hooks/useTessaPrelimEnabled';
 
 interface Props {
   displayName: string;
@@ -41,6 +42,7 @@ export function DashboardContent({ displayName, role }: Props) {
   const [tessaOrder, setTessaOrder] = useState<SalesOrder | null>(null);
   const [detailOrder, setDetailOrder] = useState<SalesOrder | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const tessaPrelimEnabled = useTessaPrelimEnabled();
 
   function showToast(msg: string) {
     setToast(msg);
@@ -156,7 +158,7 @@ export function DashboardContent({ displayName, role }: Props) {
                         </td>
                         <td className="px-5 py-3 text-gray-500 whitespace-nowrap border-r border-gray-100">{fmtDate(o.openedAt)}</td>
                         <td className="px-2 py-3 text-right">
-                          <OrderActions order={o} onAction={handleOrderAction} />
+                          <OrderActions order={o} onAction={handleOrderAction} tessaPrelimEnabled={tessaPrelimEnabled} />
                         </td>
                       </tr>
                     );

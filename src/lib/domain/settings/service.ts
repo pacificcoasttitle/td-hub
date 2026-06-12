@@ -101,6 +101,15 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     type: 'string',
     defaultValue: 'uat',
   },
+  // ── TESSA (AI Prelim) ──
+  {
+    key: 'tessa_prelim_enabled',
+    label: 'AI Prelim Analysis (TESSA)',
+    description: 'When OFF, the AI Prelim feature is hidden from all users: the "Prelim Summary" / "Regenerate Summary" buttons do not render, no new analysis is triggered from any path, and the manual analyze endpoint rejects. Existing stored analyses are NOT removed. Default OFF. (Env flags TESSA_AUTO_ANALYSIS_ENABLED / TESSA_MANUAL_ANALYSIS_ENABLED remain a master-kill backstop: if either env flag is OFF, TESSA stays off regardless of this toggle.)',
+    category: 'TESSA',
+    type: 'boolean',
+    defaultValue: 'false',
+  },
   // ── System ──
   {
     key: 'maintenance_mode',

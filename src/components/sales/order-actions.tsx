@@ -11,9 +11,16 @@ export type SalesAction =
 interface Props {
   order: SalesOrder;
   onAction: (action: SalesAction, order: SalesOrder) => void;
+  /**
+   * Effective AI Prelim feature flag (admin DB flag AND env master-kill).
+   * When false, the AI-driven "Prelim Summary" / "Regenerate Summary" entry
+   * points are not rendered. Non-AI actions (Review/Update/Get prelim doc)
+   * are unaffected. Defaults to false so the feature ships dark.
+   */
+  tessaPrelimEnabled?: boolean;
 }
 
-export function OrderActions({ order, onAction }: Props) {
+export function OrderActions({ order, onAction, tessaPrelimEnabled = false }: Props) {
   const hasPrelim = !!order.hasPrelim;
 
   return (
@@ -24,15 +31,19 @@ export function OrderActions({ order, onAction }: Props) {
             className="bg-green-600 text-white text-[11px] px-2 py-1 rounded hover:bg-green-700 transition-colors whitespace-nowrap">
             Review Prelim
           </button>
-          <button onClick={() => onAction('prelim_summary', order)}
-            className="bg-blue-600 text-white text-[11px] px-2 py-1 rounded hover:bg-blue-700 transition-colors whitespace-nowrap">
-            Prelim Summary
-          </button>
+          {tessaPrelimEnabled && (
+            <button onClick={() => onAction('prelim_summary', order)}
+              className="bg-blue-600 text-white text-[11px] px-2 py-1 rounded hover:bg-blue-700 transition-colors whitespace-nowrap">
+              Prelim Summary
+            </button>
+          )}
           <Dots>
             <MenuItem onClick={() => onAction('update_prelim', order)}>Update Prelim</MenuItem>
             <MenuItem onClick={() => onAction('view_contacts', order)}>View Contacts</MenuItem>
             <DisabledMenuItem label="View Invoice" hint="Coming soon" />
-            <MenuItem onClick={() => onAction('regenerate_summary', order)}>Regenerate Summary</MenuItem>
+            {tessaPrelimEnabled && (
+              <MenuItem onClick={() => onAction('regenerate_summary', order)}>Regenerate Summary</MenuItem>
+            )}
           </Dots>
         </div>
       ) : (

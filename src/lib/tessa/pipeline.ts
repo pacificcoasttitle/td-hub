@@ -17,7 +17,7 @@ import { computeComplexity } from './complexity';
 import type { ExtractedAnalysis, PrelimFacts } from './tessa-types';
 import {
   isAutomatedTrigger,
-  isTessaLlmAllowed,
+  isTessaTriggerAllowed,
   logAutomatedAnalysisPaused,
 } from './analysis-config';
 
@@ -96,7 +96,8 @@ export async function analyzePrelim(
   }
 
   // Kill switch: return before any row mutation so paused prelims stay un-analyzed.
-  if (!isTessaLlmAllowed(params.triggeredBy)) {
+  // Covers BOTH the cc5e55b env master-kill AND the admin DB flag (tessa_prelim_enabled).
+  if (!(await isTessaTriggerAllowed(params.triggeredBy))) {
     if (isAutomatedTrigger(params.triggeredBy)) {
       logAutomatedAnalysisPaused({
         triggeredBy: params.triggeredBy,

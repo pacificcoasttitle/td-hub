@@ -3,6 +3,7 @@
 import { OrderActions } from './order-actions';
 import type { SalesAction } from './order-actions';
 import type { SalesOrder } from './types';
+import { useTessaPrelimEnabled } from '@/hooks/useTessaPrelimEnabled';
 
 function fmtAddr(o: SalesOrder): string {
   return [o.address, o.city, o.state].filter(Boolean).join(', ') || '—';
@@ -32,6 +33,7 @@ const tdBr = 'border-r border-gray-100';
 export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
   const showRep = role === 'sales_manager';
   const colCount = showRep ? 7 : 6;
+  const tessaPrelimEnabled = useTessaPrelimEnabled();
 
   return (
     <div className="overflow-x-auto">
@@ -99,7 +101,7 @@ export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
                     )}
                     <td className={`px-5 py-3 text-gray-500 whitespace-nowrap ${tdBr}`}>{fmtDate(o.openedAt)}</td>
                     <td className="px-2 py-3 text-right">
-                      <OrderActions order={o} onAction={onAction} />
+                      <OrderActions order={o} onAction={onAction} tessaPrelimEnabled={tessaPrelimEnabled} />
                     </td>
                   </tr>
                 );

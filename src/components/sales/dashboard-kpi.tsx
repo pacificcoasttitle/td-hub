@@ -57,52 +57,46 @@ export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
           )}
 
           {production && (
-            <div className="mt-3 space-y-3">
-              <div className="flex gap-6 flex-wrap">
-                <div>
-                  <p className="text-xs text-white/50">Title</p>
-                  <p className="text-base text-white font-medium">{formatCurrency(production.title)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-white/50">Escrow</p>
-                  <p className="text-base text-white font-medium">{formatCurrency(production.escrow)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-white/50">TSG</p>
-                  <p className="text-base text-white font-medium">{formatCurrency(production.tsg)}</p>
-                </div>
+            <div className="mt-3 flex gap-6 flex-wrap">
+              <div>
+                <p className="text-xs text-white/50">Title</p>
+                <p className="text-base text-white font-medium">{formatCurrency(production.title)}</p>
               </div>
-
-              <div className="flex gap-6 flex-wrap">
-                <div>
-                  <p className="text-xs text-white/50">Purchase</p>
-                  <p className="text-base text-white font-medium">{formatCurrency(production.byDealType.purchase)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-white/50">Refinance</p>
-                  <p className="text-base text-white font-medium">{formatCurrency(production.byDealType.refinance)}</p>
-                </div>
-                {production.byDealType.other > 0 && (
-                  <div>
-                    <p className="text-xs text-white/50">Other</p>
-                    <p className="text-base text-white font-medium">{formatCurrency(production.byDealType.other)}</p>
-                  </div>
-                )}
+              <div>
+                <p className="text-xs text-white/50">Escrow</p>
+                <p className="text-base text-white font-medium">{formatCurrency(production.escrow)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-white/50">TSG</p>
+                <p className="text-base text-white font-medium">{formatCurrency(production.tsg)}</p>
               </div>
             </div>
           )}
 
-          <div
-            className={`mt-3 pt-3 border-t border-white/10 flex items-center gap-2 ${
-              hasMrMtd && projected ? 'justify-between' : 'justify-end'
-            }`}
-          >
-            {hasMrMtd && projected && (
-              <p className="text-sm text-white/50">
-                Projected:{' '}
-                <span className="text-sm font-semibold text-[#F26B2B]">{formatCurrency(projected.revenue)}</span>
-              </p>
-            )}
+          <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-sm text-white/50">
+              {production && (
+                <>
+                  <span>Breakdown: Purchase </span>
+                  <span className="text-sm font-semibold text-[#F26B2B]">{formatCurrency(production.byDealType.purchase)}</span>
+                  <span> · Refi </span>
+                  <span className="text-sm font-semibold text-[#F26B2B]">{formatCurrency(production.byDealType.refinance)}</span>
+                  {production.byDealType.other > 0 && (
+                    <>
+                      <span> · Other </span>
+                      <span className="text-sm font-semibold text-[#F26B2B]">{formatCurrency(production.byDealType.other)}</span>
+                    </>
+                  )}
+                  {hasMrMtd && projected && <span> · </span>}
+                </>
+              )}
+              {hasMrMtd && projected && (
+                <>
+                  <span>Projected: </span>
+                  <span className="text-sm font-semibold text-[#F26B2B]">{formatCurrency(projected.revenue)}</span>
+                </>
+              )}
+            </p>
             <span className="text-sm text-white/50 hover:text-white/80 transition-colors shrink-0">
               View closed files →
             </span>

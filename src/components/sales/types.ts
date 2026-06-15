@@ -25,6 +25,7 @@ export interface SalesDashboardStats {
     title: number;
     escrow: number;
     tsg: number;
+    byDealType: { purchase: number; refinance: number; other: number };
   } | null;
   mtd: {
     revenue: number; opens: number; closed: number;

@@ -57,18 +57,37 @@ export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
           )}
 
           {production && (
-            <div className="flex gap-6 mt-3 flex-wrap">
-              <div>
-                <p className="text-xs text-white/50">Title</p>
-                <p className="text-base text-white font-medium">{formatCurrency(production.title)}</p>
+            <div className="mt-3 space-y-3">
+              <div className="flex gap-6 flex-wrap">
+                <div>
+                  <p className="text-xs text-white/50">Title</p>
+                  <p className="text-base text-white font-medium">{formatCurrency(production.title)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-white/50">Escrow</p>
+                  <p className="text-base text-white font-medium">{formatCurrency(production.escrow)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-white/50">TSG</p>
+                  <p className="text-base text-white font-medium">{formatCurrency(production.tsg)}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-white/50">Escrow</p>
-                <p className="text-base text-white font-medium">{formatCurrency(production.escrow)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-white/50">TSG</p>
-                <p className="text-base text-white font-medium">{formatCurrency(production.tsg)}</p>
+
+              <div className="flex gap-6 flex-wrap">
+                <div>
+                  <p className="text-xs text-white/50">Purchase</p>
+                  <p className="text-base text-white font-medium">{formatCurrency(production.byDealType.purchase)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-white/50">Refinance</p>
+                  <p className="text-base text-white font-medium">{formatCurrency(production.byDealType.refinance)}</p>
+                </div>
+                {production.byDealType.other > 0 && (
+                  <div>
+                    <p className="text-xs text-white/50">Other</p>
+                    <p className="text-base text-white font-medium">{formatCurrency(production.byDealType.other)}</p>
+                  </div>
+                )}
               </div>
             </div>
           )}

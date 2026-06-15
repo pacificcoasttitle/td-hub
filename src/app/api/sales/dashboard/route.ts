@@ -38,6 +38,11 @@ function mapRepFigures(f: RepFigures) {
       title: extractOptionalNumber(f.mtd.titleRevenue),
       escrow: extractOptionalNumber(f.mtd.commissionableEscrow),
       tsg: extractOptionalNumber(f.mtd.tsgRevenue),
+      byDealType: {
+        purchase: extractOptionalNumber(f.mtd.repProductionByDealType?.purchase),
+        refinance: extractOptionalNumber(f.mtd.repProductionByDealType?.refinance),
+        other: extractOptionalNumber(f.mtd.repProductionByDealType?.other),
+      },
     },
     openings: {
       total: f.mtd.opens,

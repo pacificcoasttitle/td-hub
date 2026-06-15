@@ -31,6 +31,12 @@ export interface RepMtdClosingsByType {
   tsg?: MtdRevenueBreakdown;
 }
 
+export interface RepProductionByDealType {
+  purchase: number;
+  refinance: number;
+  other: number;
+}
+
 export interface RepMtdFigures {
   closed: number;
   revenue: number;
@@ -45,6 +51,7 @@ export interface RepMtdFigures {
   titleRevenue?: number;
   commissionableEscrow?: number;
   tsgRevenue?: number;
+  repProductionByDealType?: RepProductionByDealType;
   /** Projected month-end opens/closes counts. Optional — present once MR exposes them. */
   projectedOpens?: number;
   projectedClosings?: number;

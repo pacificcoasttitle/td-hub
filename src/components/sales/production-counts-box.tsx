@@ -57,8 +57,7 @@ export function ProductionCountsBox({ openings, closings }: Props) {
   if (!hasData) {
     return (
       <div className="bg-[#1B2A4A] rounded-xl p-6 flex flex-col items-center justify-center text-center min-h-[200px]">
-        <p className="text-xs text-white/60 uppercase tracking-wider">THIS MONTH</p>
-        <p className="text-[42px] font-semibold text-white/30 leading-none mt-3">—</p>
+        <p className="text-[42px] font-semibold text-white/30 leading-none">—</p>
         <p className="text-sm text-white/50 mt-1">Production data unavailable</p>
       </div>
     );
@@ -76,27 +75,55 @@ export function ProductionCountsBox({ openings, closings }: Props) {
   const openMismatch = openings !== null && openSum !== openTotal;
   const closedMismatch = closings !== null && closedSum !== closedTotal;
 
+  // Projected line is gated on MR exposing the fields — omit entirely otherwise
+  // (no fabricated/zero values).
+  const projectedOpens = typeof openings?.projected === 'number' ? openings.projected : null;
+  const projectedClosings = typeof closings?.projected === 'number' ? closings.projected : null;
+  const showProjected = projectedOpens !== null || projectedClosings !== null;
+
   return (
     <div className="bg-[#1B2A4A] rounded-xl p-6">
-      <p className="text-xs text-white/60 uppercase tracking-wider">THIS MONTH</p>
-
-      <div className="grid grid-cols-2 gap-6 mt-2">
+      <div className="grid grid-cols-2 gap-6">
         <Hero label="OPENED" total={openTotal} lines={openLines} hasData={openings !== null} />
         <Hero label="CLOSED" total={closedTotal} lines={closedLines} hasData={closings !== null} />
       </div>
 
-      {(openMismatch || closedMismatch) && (
-        <p
-          className="mt-4 pt-3 border-t border-white/10 text-[11px] text-amber-300"
-          role="status"
-        >
-          {openMismatch && (
-            <span>Openings by type ({openSum}) does not sum to total ({openTotal}). </span>
+      {(showProjected || openMismatch || closedMismatch) && (
+        <div className="mt-3 pt-3 border-t border-white/10 space-y-1">
+          {showProjected && (
+            <p className="text-sm text-white/50">
+              {projectedOpens !== null && (
+                <>
+                  Proj. opened:{' '}
+                  <span className="text-sm font-semibold text-[#F26B2B]">
+                    {projectedOpens.toLocaleString()}
+                  </span>
+                </>
+              )}
+              {projectedOpens !== null && projectedClosings !== null && (
+                <span className="text-white/30"> · </span>
+              )}
+              {projectedClosings !== null && (
+                <>
+                  Proj. closed:{' '}
+                  <span className="text-sm font-semibold text-[#F26B2B]">
+                    {projectedClosings.toLocaleString()}
+                  </span>
+                </>
+              )}
+            </p>
           )}
-          {closedMismatch && (
-            <span>Closings by type ({closedSum}) does not sum to total ({closedTotal}). </span>
+          {(openMismatch || closedMismatch) && (
+            <p className="text-[11px] text-amber-300" role="status">
+              {openMismatch && (
+                <span>Openings by type ({openSum}) does not sum to total ({openTotal}). </span>
+              )}
+              {closedMismatch && (
+                <span>Closings by type ({closedSum}) does not sum to total ({closedTotal}). </span>
+              )}
+            </p>
           )}
-        </p>
+        </div>
       )}
     </div>
   );
@@ -115,27 +142,28 @@ function Hero({
 }) {
   return (
     <div>
-      <p className="text-[11px] text-white/60 uppercase tracking-wider">{label}</p>
+      <p className="text-xs text-white/60 uppercase tracking-wider">{label}</p>
       {hasData ? (
         <>
-          <p className="text-[42px] font-semibold text-[#F26B2B] leading-none mt-1 tabular-nums">
+          <p className="text-[42px] font-semibold text-[#F26B2B] leading-tight mt-1 tabular-nums">
             {total.toLocaleString()}
           </p>
-          <ul className="mt-3 space-y-1">
-            {lines.map((line) => (
-              <li
-                key={line.label}
-                className="flex items-baseline justify-between text-sm text-white/80"
-              >
-                <span className="text-white/60">{line.label}</span>
-                <span className="font-medium tabular-nums">{line.value.toLocaleString()}</span>
-              </li>
-            ))}
-          </ul>
+          {lines.length > 0 && (
+            <div className="flex gap-6 mt-3 flex-wrap">
+              {lines.map((line) => (
+                <div key={line.label}>
+                  <p className="text-xs text-white/50">{line.label}</p>
+                  <p className="text-base text-white font-medium tabular-nums">
+                    {line.value.toLocaleString()}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       ) : (
         <>
-          <p className="text-[42px] font-semibold text-white/30 leading-none mt-1">—</p>
+          <p className="text-[42px] font-semibold text-white/30 leading-tight mt-1">—</p>
           <p className="text-xs text-white/50 mt-2">No data</p>
         </>
       )}

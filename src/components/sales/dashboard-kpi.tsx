@@ -8,7 +8,11 @@ interface Props {
   loading: boolean;
   stats: SalesDashboardStats | null;
   onOpenClosings: () => void;
-  /** Manager keeps the Ranking box; rep (default) sees the counts-by-type box. */
+  /**
+   * Retained for API compatibility with prior caller; unused — the dashboard
+   * right box is now the counts box for ALL roles. The dedicated Ranking PAGE
+   * remains manager-only (gated upstream in nav + route + API).
+   */
   role?: 'sales_rep' | 'sales_manager';
 }
 
@@ -21,12 +25,7 @@ function pctPart(part: number, total: number): number {
   return Math.round((part / total) * 100);
 }
 
-function closeRatePercent(ratio: SalesDashboardStats['closingRatio']): number | null {
-  if (!ratio || ratio.total <= 0) return null;
-  return Math.round((ratio.closed / ratio.total) * 100);
-}
-
-export function DashboardKpi({ loading, stats, onOpenClosings, role = 'sales_rep' }: Props) {
+export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
   if (loading) {
     return (
       <div className="mb-6">
@@ -34,11 +33,7 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role = 'sales_rep
           <div className="bg-[#1B2A4A]/80 rounded-xl p-6 h-[200px] animate-pulse" />
           <div className="bg-[#1B2A4A]/80 rounded-xl p-6 h-[200px] animate-pulse" />
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {[0, 1, 2].map(i => (
-            <div key={i} className="bg-white border border-gray-200 rounded-xl p-4 h-[100px] animate-pulse" />
-          ))}
-        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-4 h-[100px] animate-pulse" />
       </div>
     );
   }
@@ -47,26 +42,12 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role = 'sales_rep
 
   const mtd = stats.mtd;
   const hasMrMtd = mtd != null;
-  const ranking = stats.ranking;
   const projected = stats.projected;
-  const ratePct = closeRatePercent(stats.closingRatio);
   const yesterday = stats.yesterday;
   const openings = stats.openings;
   const closings = stats.closings;
 
   const typedTotal = hasMrMtd ? typedRevenueTotal(mtd) : 0;
-
-  // Subtitle counts for the small Openings / Closings tiles — distinct per tile,
-  // sourced from the MR-backed by-type shape. Replaces the prior flat
-  // `mtd.purchase / mtd.refinance` strings that were duplicated under both tiles.
-  const openSubtitle = openings
-    ? `${(openings.byType?.purchase ?? 0).toLocaleString()} sale · ${(openings.byType?.refinance ?? 0).toLocaleString()} refi`
-    : '—';
-  const closedSubtitle = closings
-    ? `${(closings.byType?.purchase?.count ?? 0).toLocaleString()} sale · ${(closings.byType?.refinance?.count ?? 0).toLocaleString()} refi`
-    : '—';
-
-  const isManager = role === 'sales_manager';
 
   return (
     <div className="mb-6">
@@ -123,71 +104,30 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role = 'sales_rep
           </div>
         </button>
 
-        {isManager ? (
-          <div className="bg-[#1B2A4A] rounded-xl p-6 flex flex-col items-center justify-center text-center">
-            <p className="text-xs text-white/60 uppercase tracking-wider">YOUR RANKING</p>
-            {ranking ? (
-              <>
-                <p className="text-[64px] font-semibold text-[#F26B2B] leading-none mt-1">#{ranking.position}</p>
-                <p className="text-base text-white/50 mt-1">of {ranking.totalReps} reps</p>
-              </>
-            ) : (
-              <>
-                <p className="text-[64px] font-semibold text-white/30 leading-none mt-1">—</p>
-                <p className="text-sm text-white/50 mt-1">Ranking unavailable</p>
-              </>
-            )}
-            {ratePct !== null && (
-              <div className="mt-3 pt-3 border-t border-white/10 w-full">
-                <p className="text-sm text-white/50 text-center">
-                  <span className="text-sm font-semibold text-[#22C55E]">Close rate: {ratePct}%</span>
-                </p>
-              </div>
-            )}
-          </div>
-        ) : (
-          <ProductionCountsBox openings={openings} closings={closings} />
-        )}
+        <ProductionCountsBox openings={openings} closings={closings} />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-[11px] text-gray-500 uppercase tracking-wide">OPENINGS</p>
-          <div className="flex items-baseline gap-2 mt-1 flex-wrap">
-            <span className="text-[28px] font-semibold text-gray-900">
-              {(openings?.total ?? stats.openOrders).toLocaleString()}
-            </span>
-            <span className="text-xs text-gray-500">{openSubtitle}</span>
-          </div>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-[11px] text-gray-500 uppercase tracking-wide">CLOSINGS</p>
-          <div className="flex items-baseline gap-2 mt-1 flex-wrap">
-            <span className="text-[28px] font-semibold text-gray-900">
-              {(closings?.total ?? stats.closedThisMonth).toLocaleString()}
-            </span>
-            <span className="text-xs text-gray-500">{closedSubtitle}</span>
-          </div>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-[11px] text-gray-500 uppercase tracking-wide">YESTERDAY</p>
-          <div className="flex items-baseline gap-2 mt-1 flex-wrap">
-            {yesterday ? (
-              <>
-                <span className="text-[28px] font-semibold text-gray-900">
-                  {yesterday.closed.toLocaleString()}
-                </span>
-                <span className="text-xs text-gray-500">closed · {formatCurrency(yesterday.revenue)}</span>
-              </>
-            ) : (
-              <>
-                <span className="text-[28px] font-semibold text-gray-400">—</span>
-                <span className="text-xs text-gray-500">No data</span>
-              </>
-            )}
-          </div>
+      <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <p className="text-[11px] text-gray-500 uppercase tracking-wide">YESTERDAY</p>
+        <div className="flex items-baseline gap-2 mt-1 flex-wrap">
+          {yesterday ? (
+            <>
+              <span className="text-[28px] font-semibold text-gray-900 tabular-nums">
+                {yesterday.closed.toLocaleString()}
+              </span>
+              <span className="text-xs text-gray-500">
+                closed · {formatCurrency(yesterday.revenue)}
+                {yesterday.opens > 0 && (
+                  <> · {yesterday.opens.toLocaleString()} opened</>
+                )}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-[28px] font-semibold text-gray-400">—</span>
+              <span className="text-xs text-gray-500">No data</span>
+            </>
+          )}
         </div>
       </div>
     </div>

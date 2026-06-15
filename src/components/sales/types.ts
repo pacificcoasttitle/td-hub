@@ -6,6 +6,8 @@ export interface SalesDashboardStats {
   openings: {
     total: number;
     byType: { purchase: number; refinance: number; other: number };
+    /** Projected month-end openings count, when MR exposes it. */
+    projected?: number;
   } | null;
   closings: {
     total: number;
@@ -15,6 +17,8 @@ export interface SalesDashboardStats {
       escrow: { count: number; revenue: number };
       tsg: { count: number; revenue: number };
     };
+    /** Projected month-end closings count, when MR exposes it. */
+    projected?: number;
   } | null;
   mtd: {
     revenue: number; opens: number; closed: number;

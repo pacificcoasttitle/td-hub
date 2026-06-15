@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, documents } from '@/lib/db/schema';
-import { eq, and, inArray, sql } from 'drizzle-orm';
-import { getScopedStats, getScopedOrders } from '@/lib/domain/orders/scoped-queries';
+import { eq, and, inArray } from 'drizzle-orm';
+import { getScopedOrders } from '@/lib/domain/orders/scoped-queries';
 import { getRepFigures } from '@/lib/integrations/managers-report';
 import { validateSalesAccess, SalesAccessError } from '../_helpers/validate-access';
-import type { RepFigures, MtdBreakdown } from '@/lib/integrations/managers-report/types';
+import type { RepFigures, MtdBreakdown, MtdCountBreakdown, MtdRevenueBreakdown } from '@/lib/integrations/managers-report/types';
+
+type ScopedOrderRow = Awaited<ReturnType<typeof getScopedOrders>>['orders'][number];
+type PrelimRow = { orderId: number };
 
 function extractCount(v: MtdBreakdown): number {
   return typeof v === 'number' ? v : v.count;
@@ -16,10 +19,48 @@ function extractRevenue(v: MtdBreakdown): number {
   return typeof v === 'number' ? v : v.revenue;
 }
 
+function extractOptionalCount(v: MtdCountBreakdown | MtdRevenueBreakdown | undefined): number {
+  return v?.count ?? 0;
+}
+
+function extractOptionalRevenue(v: MtdRevenueBreakdown | undefined): number {
+  return v?.revenue ?? 0;
+}
+
 function mapRepFigures(f: RepFigures) {
   return {
+    openings: {
+      total: f.mtd.opens,
+      byType: {
+        purchase: extractOptionalCount(f.mtd.openingsByType?.purchase),
+        refinance: extractOptionalCount(f.mtd.openingsByType?.refinance),
+        other: extractOptionalCount(f.mtd.openingsByType?.other),
+      },
+    },
+    closings: {
+      total: f.mtd.closed,
+      byType: {
+        purchase: {
+          count: extractOptionalCount(f.mtd.closingsByType?.purchase),
+          revenue: extractOptionalRevenue(f.mtd.closingsByType?.purchase),
+        },
+        refinance: {
+          count: extractOptionalCount(f.mtd.closingsByType?.refinance),
+          revenue: extractOptionalRevenue(f.mtd.closingsByType?.refinance),
+        },
+        escrow: {
+          count: extractOptionalCount(f.mtd.closingsByType?.escrow),
+          revenue: extractOptionalRevenue(f.mtd.closingsByType?.escrow),
+        },
+        tsg: {
+          count: extractOptionalCount(f.mtd.closingsByType?.tsg),
+          revenue: extractOptionalRevenue(f.mtd.closingsByType?.tsg),
+        },
+      },
+    },
     mtd: {
       revenue: f.mtd.revenue,
+      opens: f.mtd.opens,
       closed: f.mtd.closed,
       purchase: extractCount(f.mtd.purchase),
       refinance: extractCount(f.mtd.refinance),
@@ -51,16 +92,13 @@ export async function GET(req: NextRequest) {
     const access = await validateSalesAccess(session, repId);
 
     // "My Stats" = personal. Specific rep = that rep. Team view is on Daily/Ranking pages.
-    const [stats, ordersResult] = await Promise.all([
-      getScopedStats(orders.salesRepId, access.contactId),
-      getScopedOrders({
-        scopeColumn: orders.salesRepId,
-        contactId: access.contactId,
-        page,
-        pageSize,
-        status,
-      }),
-    ]);
+    const ordersResult = await getScopedOrders({
+      scopeColumn: orders.salesRepId,
+      contactId: access.contactId,
+      page,
+      pageSize,
+      status,
+    });
 
     let repFigures: ReturnType<typeof mapRepFigures> | null = null;
     try {
@@ -73,7 +111,7 @@ export async function GET(req: NextRequest) {
     } catch { /* MR API failure is non-blocking */ }
 
     // Enrich orders with prelim availability
-    const orderIds = ordersResult.orders.map(o => o.id);
+    const orderIds = ordersResult.orders.map((o: ScopedOrderRow) => o.id);
     let prelimSet = new Set<number>();
     if (orderIds.length > 0) {
       const prelimRows = await db
@@ -84,19 +122,21 @@ export async function GET(req: NextRequest) {
           eq(documents.category, 'prelim'),
           eq(documents.status, 'active'),
         ));
-      prelimSet = new Set(prelimRows.map(r => r.orderId));
+      prelimSet = new Set(prelimRows.map((r: PrelimRow) => r.orderId));
     }
 
-    const enrichedOrders = ordersResult.orders.map(o => ({
+    const enrichedOrders = ordersResult.orders.map((o: ScopedOrderRow) => ({
       ...o,
       hasPrelim: prelimSet.has(o.id),
     }));
 
     return NextResponse.json({
-      openOrders: stats.open,
-      closedThisMonth: stats.closedThisMonth,
-      pipelineValue: stats.pipelineValue,
-      assignedOrders: stats.assigned,
+      openOrders: repFigures?.openings.total ?? 0,
+      closedThisMonth: repFigures?.closings.total ?? 0,
+      pipelineValue: 0,
+      assignedOrders: 0,
+      openings: repFigures?.openings ?? null,
+      closings: repFigures?.closings ?? null,
       mtd: repFigures?.mtd ?? null,
       yesterday: repFigures?.yesterday ?? null,
       prior: repFigures?.prior ?? null,

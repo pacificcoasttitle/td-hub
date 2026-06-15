@@ -9,6 +9,28 @@ export interface RepDaySnapshot {
 
 export type MtdBreakdown = number | { count: number; revenue: number };
 
+export interface MtdCountBreakdown {
+  count: number;
+}
+
+export interface MtdRevenueBreakdown {
+  count: number;
+  revenue: number;
+}
+
+export interface RepMtdOpeningsByType {
+  purchase?: MtdCountBreakdown;
+  refinance?: MtdCountBreakdown;
+  other?: MtdCountBreakdown;
+}
+
+export interface RepMtdClosingsByType {
+  purchase?: MtdRevenueBreakdown;
+  refinance?: MtdRevenueBreakdown;
+  escrow?: MtdRevenueBreakdown;
+  tsg?: MtdRevenueBreakdown;
+}
+
 export interface RepMtdFigures {
   closed: number;
   revenue: number;
@@ -17,6 +39,8 @@ export interface RepMtdFigures {
   refinance: MtdBreakdown;
   escrow: MtdBreakdown;
   tsg: MtdBreakdown;
+  openingsByType?: RepMtdOpeningsByType;
+  closingsByType?: RepMtdClosingsByType;
 }
 
 export interface RepPriorFigures {

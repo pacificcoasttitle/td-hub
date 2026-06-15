@@ -10,7 +10,26 @@ function mockRepFigures(repName: string, month?: string): RepFigures {
   return {
     rep: repName, month: m,
     yesterday: { date: new Date().toISOString().slice(0, 10), closed: 2, revenue: 4800, opens: 3 },
-    mtd: { closed: 18, revenue: 42500, opens: 24, purchase: 10, refinance: 5, escrow: 2, tsg: 1 },
+    mtd: {
+      closed: 18,
+      revenue: 42500,
+      opens: 24,
+      purchase: 10,
+      refinance: 5,
+      escrow: 2,
+      tsg: 1,
+      openingsByType: {
+        purchase: { count: 10 },
+        refinance: { count: 9 },
+        other: { count: 5 },
+      },
+      closingsByType: {
+        purchase: { count: 10, revenue: 25000 },
+        refinance: { count: 5, revenue: 12000 },
+        escrow: { count: 2, revenue: 4000 },
+        tsg: { count: 1, revenue: 1500 },
+      },
+    },
     prior: { month: PRIOR, closed: 22, revenue: 51200 },
     projected: 56000,
     closingRatio: { created: 30, closed: 18, ratio: 0.6, window: '90d' },

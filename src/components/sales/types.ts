@@ -3,8 +3,21 @@ export interface SalesDashboardStats {
   closedThisMonth: number;
   pipelineValue: number;
   assignedOrders: number;
+  openings: {
+    total: number;
+    byType: { purchase: number; refinance: number; other: number };
+  } | null;
+  closings: {
+    total: number;
+    byType: {
+      purchase: { count: number; revenue: number };
+      refinance: { count: number; revenue: number };
+      escrow: { count: number; revenue: number };
+      tsg: { count: number; revenue: number };
+    };
+  } | null;
   mtd: {
-    revenue: number; closed: number;
+    revenue: number; opens: number; closed: number;
     purchase: number; refinance: number; escrow: number; tsg: number;
     purchaseRevenue: number; refinanceRevenue: number; escrowRevenue: number; tsgRevenue: number;
   } | null;

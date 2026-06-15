@@ -41,6 +41,10 @@ export interface RepMtdFigures {
   tsg: MtdBreakdown;
   openingsByType?: RepMtdOpeningsByType;
   closingsByType?: RepMtdClosingsByType;
+  repTotalProduction?: number;
+  titleRevenue?: number;
+  commissionableEscrow?: number;
+  tsgRevenue?: number;
   /** Projected month-end opens/closes counts. Optional — present once MR exposes them. */
   projectedOpens?: number;
   projectedClosings?: number;

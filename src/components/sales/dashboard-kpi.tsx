@@ -16,15 +16,6 @@ interface Props {
   role?: 'sales_rep' | 'sales_manager';
 }
 
-function typedRevenueTotal(mtd: NonNullable<SalesDashboardStats['mtd']>): number {
-  return (mtd.purchaseRevenue || 0) + (mtd.refinanceRevenue || 0);
-}
-
-function pctPart(part: number, total: number): number {
-  if (total <= 0 || part <= 0) return 0;
-  return Math.round((part / total) * 100);
-}
-
 export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
   if (loading) {
     return (
@@ -42,12 +33,11 @@ export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
 
   const mtd = stats.mtd;
   const hasMrMtd = mtd != null;
+  const production = stats.production;
   const projected = stats.projected;
   const yesterday = stats.yesterday;
   const openings = stats.openings;
   const closings = stats.closings;
-
-  const typedTotal = hasMrMtd ? typedRevenueTotal(mtd) : 0;
 
   return (
     <div className="mb-6">
@@ -57,33 +47,29 @@ export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
           onClick={onOpenClosings}
           className="bg-[#1B2A4A] rounded-xl p-6 cursor-pointer hover:bg-[#233358] transition-colors relative overflow-hidden text-left w-full"
         >
-          <p className="text-xs text-white/60 uppercase tracking-wider">MTD REVENUE</p>
+          <p className="text-xs text-white/60 uppercase tracking-wider">PRODUCTION (MTD)</p>
           <p className="text-[42px] font-semibold text-white leading-tight mt-1">
-            {formatCurrency(hasMrMtd ? mtd.revenue : 0)}
+            {formatCurrency(production ? production.total : 0)}
           </p>
 
-          {!hasMrMtd && (
-            <p className="text-[11px] text-white/50 mt-2">Revenue data from local orders</p>
+          {!production && (
+            <p className="text-[11px] text-white/50 mt-2">Production data unavailable</p>
           )}
 
-          {hasMrMtd && typedTotal > 0 && (
+          {production && (
             <div className="flex gap-6 mt-3 flex-wrap">
-              {(mtd.purchaseRevenue || 0) > 0 && (
-                <div>
-                  <p className="text-xs text-white/50">Purchase</p>
-                  <p className="text-base text-white font-medium">
-                    {formatCurrency(mtd.purchaseRevenue)} ({pctPart(mtd.purchaseRevenue || 0, typedTotal)}%)
-                  </p>
-                </div>
-              )}
-              {(mtd.refinanceRevenue || 0) > 0 && (
-                <div>
-                  <p className="text-xs text-white/50">Refinance</p>
-                  <p className="text-base text-white font-medium">
-                    {formatCurrency(mtd.refinanceRevenue)} ({pctPart(mtd.refinanceRevenue || 0, typedTotal)}%)
-                  </p>
-                </div>
-              )}
+              <div>
+                <p className="text-xs text-white/50">Title</p>
+                <p className="text-base text-white font-medium">{formatCurrency(production.title)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-white/50">Escrow</p>
+                <p className="text-base text-white font-medium">{formatCurrency(production.escrow)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-white/50">TSG</p>
+                <p className="text-base text-white font-medium">{formatCurrency(production.tsg)}</p>
+              </div>
             </div>
           )}
 

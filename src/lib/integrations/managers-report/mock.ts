@@ -18,6 +18,10 @@ function mockRepFigures(repName: string, month?: string): RepFigures {
       refinance: 5,
       escrow: 2,
       tsg: 1,
+      repTotalProduction: 42500,
+      titleRevenue: 37000,
+      commissionableEscrow: 4000,
+      tsgRevenue: 1500,
       openingsByType: {
         purchase: { count: 10 },
         refinance: { count: 9 },

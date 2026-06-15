@@ -20,6 +20,12 @@ export interface SalesDashboardStats {
     /** Projected month-end closings count, when MR exposes it. */
     projected?: number;
   } | null;
+  production: {
+    total: number;
+    title: number;
+    escrow: number;
+    tsg: number;
+  } | null;
   mtd: {
     revenue: number; opens: number; closed: number;
     purchase: number; refinance: number; escrow: number; tsg: number;

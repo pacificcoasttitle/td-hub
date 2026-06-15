@@ -27,8 +27,18 @@ function extractOptionalRevenue(v: MtdRevenueBreakdown | undefined): number {
   return v?.revenue ?? 0;
 }
 
+function extractOptionalNumber(v: number | undefined): number {
+  return v ?? 0;
+}
+
 function mapRepFigures(f: RepFigures) {
   return {
+    production: {
+      total: extractOptionalNumber(f.mtd.repTotalProduction),
+      title: extractOptionalNumber(f.mtd.titleRevenue),
+      escrow: extractOptionalNumber(f.mtd.commissionableEscrow),
+      tsg: extractOptionalNumber(f.mtd.tsgRevenue),
+    },
     openings: {
       total: f.mtd.opens,
       byType: {
@@ -139,6 +149,7 @@ export async function GET(req: NextRequest) {
       assignedOrders: 0,
       openings: repFigures?.openings ?? null,
       closings: repFigures?.closings ?? null,
+      production: repFigures?.production ?? null,
       mtd: repFigures?.mtd ?? null,
       yesterday: repFigures?.yesterday ?? null,
       prior: repFigures?.prior ?? null,

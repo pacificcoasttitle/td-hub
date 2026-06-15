@@ -2,11 +2,14 @@
 
 import { formatCurrency } from '@/components/admin/dashboards/shared';
 import type { SalesDashboardStats } from './types';
+import { ProductionCountsBox } from './production-counts-box';
 
 interface Props {
   loading: boolean;
   stats: SalesDashboardStats | null;
   onOpenClosings: () => void;
+  /** Manager keeps the Ranking box; rep (default) sees the counts-by-type box. */
+  role?: 'sales_rep' | 'sales_manager';
 }
 
 function typedRevenueTotal(mtd: NonNullable<SalesDashboardStats['mtd']>): number {
@@ -23,7 +26,7 @@ function closeRatePercent(ratio: SalesDashboardStats['closingRatio']): number | 
   return Math.round((ratio.closed / ratio.total) * 100);
 }
 
-export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
+export function DashboardKpi({ loading, stats, onOpenClosings, role = 'sales_rep' }: Props) {
   if (loading) {
     return (
       <div className="mb-6">
@@ -48,8 +51,22 @@ export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
   const projected = stats.projected;
   const ratePct = closeRatePercent(stats.closingRatio);
   const yesterday = stats.yesterday;
+  const openings = stats.openings;
+  const closings = stats.closings;
 
   const typedTotal = hasMrMtd ? typedRevenueTotal(mtd) : 0;
+
+  // Subtitle counts for the small Openings / Closings tiles — distinct per tile,
+  // sourced from the MR-backed by-type shape. Replaces the prior flat
+  // `mtd.purchase / mtd.refinance` strings that were duplicated under both tiles.
+  const openSubtitle = openings
+    ? `${(openings.byType?.purchase ?? 0).toLocaleString()} sale · ${(openings.byType?.refinance ?? 0).toLocaleString()} refi`
+    : '—';
+  const closedSubtitle = closings
+    ? `${(closings.byType?.purchase?.count ?? 0).toLocaleString()} sale · ${(closings.byType?.refinance?.count ?? 0).toLocaleString()} refi`
+    : '—';
+
+  const isManager = role === 'sales_manager';
 
   return (
     <div className="mb-6">
@@ -106,39 +123,41 @@ export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
           </div>
         </button>
 
-        <div className="bg-[#1B2A4A] rounded-xl p-6 flex flex-col items-center justify-center text-center">
-          <p className="text-xs text-white/60 uppercase tracking-wider">YOUR RANKING</p>
-          {ranking ? (
-            <>
-              <p className="text-[64px] font-semibold text-[#F26B2B] leading-none mt-1">#{ranking.position}</p>
-              <p className="text-base text-white/50 mt-1">of {ranking.totalReps} reps</p>
-            </>
-          ) : (
-            <>
-              <p className="text-[64px] font-semibold text-white/30 leading-none mt-1">—</p>
-              <p className="text-sm text-white/50 mt-1">Ranking unavailable</p>
-            </>
-          )}
-          {ratePct !== null && (
-            <div className="mt-3 pt-3 border-t border-white/10 w-full">
-              <p className="text-sm text-white/50 text-center">
-                <span className="text-sm font-semibold text-[#22C55E]">Close rate: {ratePct}%</span>
-              </p>
-            </div>
-          )}
-        </div>
+        {isManager ? (
+          <div className="bg-[#1B2A4A] rounded-xl p-6 flex flex-col items-center justify-center text-center">
+            <p className="text-xs text-white/60 uppercase tracking-wider">YOUR RANKING</p>
+            {ranking ? (
+              <>
+                <p className="text-[64px] font-semibold text-[#F26B2B] leading-none mt-1">#{ranking.position}</p>
+                <p className="text-base text-white/50 mt-1">of {ranking.totalReps} reps</p>
+              </>
+            ) : (
+              <>
+                <p className="text-[64px] font-semibold text-white/30 leading-none mt-1">—</p>
+                <p className="text-sm text-white/50 mt-1">Ranking unavailable</p>
+              </>
+            )}
+            {ratePct !== null && (
+              <div className="mt-3 pt-3 border-t border-white/10 w-full">
+                <p className="text-sm text-white/50 text-center">
+                  <span className="text-sm font-semibold text-[#22C55E]">Close rate: {ratePct}%</span>
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <ProductionCountsBox openings={openings} closings={closings} />
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <p className="text-[11px] text-gray-500 uppercase tracking-wide">OPENINGS</p>
           <div className="flex items-baseline gap-2 mt-1 flex-wrap">
-            <span className="text-[28px] font-semibold text-gray-900">{stats.openOrders.toLocaleString()}</span>
-            <span className="text-xs text-gray-500">
-              {hasMrMtd
-                ? `${mtd.purchase.toLocaleString()} sale · ${mtd.refinance.toLocaleString()} refi`
-                : '—'}
+            <span className="text-[28px] font-semibold text-gray-900">
+              {(openings?.total ?? stats.openOrders).toLocaleString()}
             </span>
+            <span className="text-xs text-gray-500">{openSubtitle}</span>
           </div>
         </div>
 
@@ -146,13 +165,9 @@ export function DashboardKpi({ loading, stats, onOpenClosings }: Props) {
           <p className="text-[11px] text-gray-500 uppercase tracking-wide">CLOSINGS</p>
           <div className="flex items-baseline gap-2 mt-1 flex-wrap">
             <span className="text-[28px] font-semibold text-gray-900">
-              {stats.closedThisMonth.toLocaleString()}
+              {(closings?.total ?? stats.closedThisMonth).toLocaleString()}
             </span>
-            <span className="text-xs text-gray-500">
-              {hasMrMtd
-                ? `${mtd.purchase.toLocaleString()} sale · ${mtd.refinance.toLocaleString()} refi`
-                : '—'}
-            </span>
+            <span className="text-xs text-gray-500">{closedSubtitle}</span>
           </div>
         </div>
 

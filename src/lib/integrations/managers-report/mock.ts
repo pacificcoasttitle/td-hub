@@ -29,8 +29,10 @@ function mockRepFigures(repName: string, month?: string): RepFigures {
       },
       openingsByType: {
         purchase: { count: 10 },
-        refinance: { count: 9 },
-        other: { count: 5 },
+        refinance: { count: 5 },
+        escrow: { count: 6 },
+        tsg: { count: 3 },
+        other: { count: 0 },
       },
       closingsByType: {
         purchase: { count: 10, revenue: 25000 },

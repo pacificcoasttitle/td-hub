@@ -21,6 +21,8 @@ export interface MtdRevenueBreakdown {
 export interface RepMtdOpeningsByType {
   purchase?: MtdCountBreakdown;
   refinance?: MtdCountBreakdown;
+  escrow?: MtdCountBreakdown;
+  tsg?: MtdCountBreakdown;
   other?: MtdCountBreakdown;
 }
 

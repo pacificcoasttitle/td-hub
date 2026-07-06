@@ -49,6 +49,8 @@ function mapRepFigures(f: RepFigures) {
       byType: {
         purchase: extractOptionalCount(f.mtd.openingsByType?.purchase),
         refinance: extractOptionalCount(f.mtd.openingsByType?.refinance),
+        escrow: extractOptionalCount(f.mtd.openingsByType?.escrow),
+        tsg: extractOptionalCount(f.mtd.openingsByType?.tsg),
         other: extractOptionalCount(f.mtd.openingsByType?.other),
       },
       ...(typeof f.mtd.projectedOpens === 'number' ? { projected: f.mtd.projectedOpens } : {}),

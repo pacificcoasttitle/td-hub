@@ -5,7 +5,7 @@ export interface SalesDashboardStats {
   assignedOrders: number;
   openings: {
     total: number;
-    byType: { purchase: number; refinance: number; other: number };
+    byType: { purchase: number; refinance: number; escrow: number; tsg: number; other: number };
     /** Projected month-end openings count, when MR exposes it. */
     projected?: number;
   } | null;

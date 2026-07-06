@@ -11,40 +11,53 @@ type Line = { label: string; value: number };
 
 /**
  * Build the lines for the OPENED hero.
- * MR provides byType.{purchase,refinance,other} that already reconciles to total —
- * we render Purchase + Refinance always, plus Other when > 0.
+ * MR provides byType.{purchase,refinance,escrow,tsg,other} that already reconciles
+ * to total. Purchase/Refinance always; Escrow/TSG/Other each only when > 0.
+ * Order: Purchase · Refinance · Escrow · TSG · Other.
+ * "Other" is MR's true residual (byType.other) — never a locally computed catch-all.
  */
 function openingsLines(o: NonNullable<SalesDashboardStats['openings']>): Line[] {
   const purchase = o.byType?.purchase ?? 0;
   const refinance = o.byType?.refinance ?? 0;
+  const escrow = o.byType?.escrow ?? 0;
+  const tsg = o.byType?.tsg ?? 0;
   const other = o.byType?.other ?? 0;
   const lines: Line[] = [
     { label: 'Purchase', value: purchase },
     { label: 'Refinance', value: refinance },
   ];
+  if (escrow > 0) lines.push({ label: 'Escrow', value: escrow });
+  if (tsg > 0) lines.push({ label: 'TSG', value: tsg });
   if (other > 0) lines.push({ label: 'Other', value: other });
   return lines;
 }
 
 /**
  * Build the lines for the CLOSED hero.
- * Purchase + Refinance always, TSG only when count > 0; Escrow folds into Other
- * (deferred from explicit display). Other is computed locally as the remainder
- * so visible lines === closings.total. This is the only locally-computed value.
+ * Purchase/Refinance always; Escrow/TSG each only when count > 0.
+ * Order: Purchase · Refinance · Escrow · TSG.
+ * The four named categories reconcile to closings.total, so the computed
+ * remainder is normally 0. Retained as a > 0 guard: if a future stray category
+ * appears, it surfaces as "Other" rather than silently breaking the sum.
  */
 function closingsLines(c: NonNullable<SalesDashboardStats['closings']>): Line[] {
   const purchaseCount = c.byType?.purchase?.count ?? 0;
   const refinanceCount = c.byType?.refinance?.count ?? 0;
+  const escrowCount = c.byType?.escrow?.count ?? 0;
   const tsgCount = c.byType?.tsg?.count ?? 0;
+  const showEscrow = escrowCount > 0;
   const showTsg = tsgCount > 0;
 
   const lines: Line[] = [
     { label: 'Purchase', value: purchaseCount },
     { label: 'Refinance', value: refinanceCount },
   ];
+  if (showEscrow) lines.push({ label: 'Escrow', value: escrowCount });
   if (showTsg) lines.push({ label: 'TSG', value: tsgCount });
 
-  const shown = purchaseCount + refinanceCount + (showTsg ? tsgCount : 0);
+  const shown = purchaseCount + refinanceCount
+    + (showEscrow ? escrowCount : 0)
+    + (showTsg ? tsgCount : 0);
   const other = Math.max(0, c.total - shown);
   if (other > 0) lines.push({ label: 'Other', value: other });
 

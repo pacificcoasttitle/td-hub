@@ -1,16 +1,22 @@
 import { db } from '@/lib/db/client';
-import { orders, orderParties, contacts, companies } from '@/lib/db/schema';
+import { orders, orderParties, contacts, companies, vendorApiLogs } from '@/lib/db/schema';
 import { eq, and, isNull, or, sql } from 'drizzle-orm';
 import { getOrderContacts, mapOrderContacts } from '@/lib/integrations/softpro';
 import type { MappedOrderContacts, MappedResolvedParty } from '@/lib/integrations/softpro';
+import type { SoftProOrderContactsData } from '@/lib/integrations/softpro/types';
 import { resolveClientContactId } from '@/lib/domain/orders/client-resolver';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+export type EnrichOutcome = 'parties_written' | 'empty_confirmed' | 'fk_only' | 'failed';
+
 export interface EnrichOrdersResult {
   total: number;
-  enriched: number;
-  skipped: number;
+  attempted: number;
+  partiesWritten: number;
+  fkOnly: number;
+  emptyConfirmed: number;
+  failed: number;
   errors: Array<{ fileNumber: string; error: string }>;
 }
 
@@ -20,7 +26,26 @@ export interface EnrichSingleResult {
   fileNumber: string;
   resolved: Record<string, number | null>;
   unresolved: string[];
+  partiesWritten: number;
+  contactsEmptyConfirmed: boolean;
+  outcome: EnrichOutcome;
   error?: string;
+}
+
+interface OrderFkUpdates {
+  lenderId: number | null;
+  listingAgentId: number | null;
+  titleCompanyId: number | null;
+  underwriterId: number | null;
+  clientContactId: number | null;
+}
+
+interface ResolvedPartyIdentity {
+  name: string | null;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  contactId: number | null;
 }
 
 // ─── Single Order Enrichment ─────────────────────────────────────────────────
@@ -30,7 +55,17 @@ export async function enrichSingleOrder(orderId: number): Promise<EnrichSingleRe
     .from(orders).where(eq(orders.id, orderId)).limit(1);
 
   if (!order) {
-    return { success: false, orderId, fileNumber: '', resolved: {}, unresolved: [], error: 'Order not found' };
+    return {
+      success: false,
+      orderId,
+      fileNumber: '',
+      resolved: {},
+      unresolved: [],
+      partiesWritten: 0,
+      contactsEmptyConfirmed: false,
+      outcome: 'failed',
+      error: 'Order not found',
+    };
   }
 
   return enrichOrder(order);
@@ -43,17 +78,29 @@ async function enrichOrder(order: { id: number; fileNumber: string; orderType: s
     fileNumber: order.fileNumber,
     resolved: {},
     unresolved: [],
+    partiesWritten: 0,
+    contactsEmptyConfirmed: false,
+    outcome: 'failed',
   };
+
+  const startedAt = new Date();
 
   const apiResult = await getOrderContacts(order.fileNumber);
   if (!apiResult.success || !apiResult.data) {
     result.error = apiResult.error?.message ?? 'GetOrderContacts returned no data';
+    await logEnrichAttempt(order.id, order.fileNumber, startedAt, result);
     return result;
   }
 
   const data = apiResult.data;
   const mapped = mapOrderContacts(data);
-  const updates: Record<string, number | null> = {};
+  const updates: OrderFkUpdates = {
+    lenderId: null,
+    listingAgentId: null,
+    titleCompanyId: null,
+    underwriterId: null,
+    clientContactId: null,
+  };
 
   const lenderCode = mapped.lenderCode;
   if (lenderCode || mapped.parties.lender?.name) {
@@ -118,13 +165,35 @@ async function enrichOrder(order: { id: number; fileNumber: string; orderType: s
     }
   }
 
-  if (hasUpdate) {
+  const contactsEmptyConfirmed = softProContactsEmpty(data, mapped);
+  result.contactsEmptyConfirmed = contactsEmptyConfirmed;
+  setFields.contactsEmptyConfirmed = contactsEmptyConfirmed;
+
+  if (hasUpdate || contactsEmptyConfirmed) {
     await db.update(orders).set(setFields).where(eq(orders.id, order.id));
   }
 
-  await persistResolvedParties(order.id, mapped);
+  result.partiesWritten = await persistResolvedParties(order.id, mapped, updates);
 
-  result.success = true;
+  if (result.partiesWritten > 0) {
+    result.outcome = 'parties_written';
+    result.success = true;
+    await db.update(orders)
+      .set({ contactsEmptyConfirmed: false, updatedAt: new Date() })
+      .where(eq(orders.id, order.id));
+    result.contactsEmptyConfirmed = false;
+  } else if (contactsEmptyConfirmed) {
+    result.outcome = 'empty_confirmed';
+    result.success = true;
+  } else if (Object.keys(result.resolved).length > 0) {
+    result.outcome = 'fk_only';
+    result.success = false;
+  } else {
+    result.outcome = 'failed';
+    result.success = false;
+  }
+
+  await logEnrichAttempt(order.id, order.fileNumber, startedAt, result);
   return result;
 }
 
@@ -137,6 +206,10 @@ export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
     .where(
       and(
         or(
+          isNull(orders.contactsEmptyConfirmed),
+          eq(orders.contactsEmptyConfirmed, false),
+        ),
+        or(
           and(
             isNull(orders.lenderId),
             isNull(orders.listingAgentId),
@@ -144,6 +217,7 @@ export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
             isNull(orders.underwriterId),
           ),
           isNull(orders.clientContactId),
+          sql`NOT EXISTS (SELECT 1 FROM ${orderParties} op WHERE op.order_id = ${orders.id})`,
         ),
         or(
           isNull(orders.lastContactsFetchAt),
@@ -154,9 +228,15 @@ export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
     .orderBy(sql`${orders.lastContactsFetchAt} ASC NULLS FIRST`)
     .limit(200);
 
-  let enriched = 0;
-  let skipped = 0;
-  const errors: EnrichOrdersResult['errors'] = [];
+  const stats: EnrichOrdersResult = {
+    total: unenriched.length,
+    attempted: 0,
+    partiesWritten: 0,
+    fkOnly: 0,
+    emptyConfirmed: 0,
+    failed: 0,
+    errors: [],
+  };
 
   for (const order of unenriched) {
     try {
@@ -164,24 +244,97 @@ export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
         .set({ lastContactsFetchAt: sql`NOW()` })
         .where(eq(orders.id, order.id));
 
+      stats.attempted++;
       const result = await enrichOrder(order);
-      if (result.success && Object.keys(result.resolved).length > 0) {
-        enriched++;
-      } else {
-        skipped++;
+
+      switch (result.outcome) {
+        case 'parties_written':
+          stats.partiesWritten++;
+          break;
+        case 'empty_confirmed':
+          stats.emptyConfirmed++;
+          break;
+        case 'fk_only':
+          stats.fkOnly++;
+          break;
+        case 'failed':
+          stats.failed++;
+          if (result.error) {
+            stats.errors.push({ fileNumber: order.fileNumber, error: result.error });
+          }
+          break;
       }
     } catch (err) {
-      errors.push({
+      stats.failed++;
+      stats.errors.push({
         fileNumber: order.fileNumber,
         error: err instanceof Error ? err.message : 'Unknown error',
       });
     }
   }
 
-  return { total: unenriched.length, enriched, skipped, errors };
+  return stats;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function softProContactsEmpty(data: SoftProOrderContactsData, mapped: MappedOrderContacts): boolean {
+  const hasParty = Object.values(mapped.parties).some((party) => party !== null);
+  const hasLookupCode = [
+    mapped.escrowCompanyCode,
+    mapped.escrowPersonCode,
+    mapped.lenderCompanyCode,
+    mapped.lenderCode,
+    mapped.listingAgentCompanyCode,
+    mapped.listingAgentPersonCode,
+    mapped.mortgageBrokerCode,
+    mapped.payoffLenderCode,
+    mapped.titleCompanyCode,
+    mapped.underwriterCompanyCode,
+    mapped.underwriterPersonCode,
+  ].some((code) => code !== null);
+  const hasBorrowerSeller = [
+    mapped.primaryBuyer,
+    mapped.secondaryBuyer,
+    mapped.primarySeller,
+    mapped.secondarySeller,
+  ].some((name) => name !== null);
+
+  if (hasParty || hasLookupCode || hasBorrowerSeller) return false;
+
+  const rawKeys = Object.keys(data);
+  return rawKeys.length === 0;
+}
+
+async function logEnrichAttempt(
+  orderId: number,
+  fileNumber: string,
+  startedAt: Date,
+  result: EnrichSingleResult,
+): Promise<void> {
+  try {
+    await db.insert(vendorApiLogs).values({
+      vendor: 'softpro',
+      operation: 'enrich_order_contacts',
+      orderId,
+      requestId: crypto.randomUUID(),
+      startedAt,
+      endedAt: new Date(),
+      success: result.outcome !== 'failed',
+      requestMeta: {
+        fileNumber,
+        outcome: result.outcome,
+        partiesWritten: result.partiesWritten,
+        contactsEmptyConfirmed: result.contactsEmptyConfirmed,
+        fkResolved: Object.keys(result.resolved),
+        unresolved: result.unresolved,
+        error: result.error ?? null,
+      } as Record<string, unknown>,
+    });
+  } catch {
+    /* logging must not break enrichment */
+  }
+}
 
 async function resolveContact(lookupCode: string): Promise<number | null> {
   const [row] = await db.select({ id: contacts.id })
@@ -193,6 +346,143 @@ async function resolveContact(lookupCode: string): Promise<number | null> {
     ))
     .limit(1);
   return row?.id ?? null;
+}
+
+async function loadContactIdentity(contactId: number): Promise<ResolvedPartyIdentity> {
+  const [row] = await db.select({
+    id: contacts.id,
+    fullName: contacts.fullName,
+    email: contacts.email,
+    phone: contacts.phone,
+    companyName: contacts.companyName,
+  })
+    .from(contacts)
+    .where(eq(contacts.id, contactId))
+    .limit(1);
+
+  if (!row) {
+    return { name: null, company: null, email: null, phone: null, contactId: null };
+  }
+
+  return {
+    name: row.fullName,
+    company: row.companyName,
+    email: row.email,
+    phone: row.phone,
+    contactId: row.id,
+  };
+}
+
+async function loadCompanyIdentity(companyId: number): Promise<ResolvedPartyIdentity> {
+  const [row] = await db.select({
+    name: companies.name,
+    email: companies.email,
+    phone: companies.phone,
+  })
+    .from(companies)
+    .where(eq(companies.id, companyId))
+    .limit(1);
+
+  if (!row) {
+    return { name: null, company: null, email: null, phone: null, contactId: null };
+  }
+
+  return {
+    name: null,
+    company: row.name,
+    email: row.email,
+    phone: row.phone,
+    contactId: null,
+  };
+}
+
+async function resolvePartyIdentityFromMaster(
+  party: MappedResolvedParty,
+  fkContactId?: number | null,
+  fkCompanyId?: number | null,
+): Promise<ResolvedPartyIdentity> {
+  let identity: ResolvedPartyIdentity = {
+    name: party.name,
+    company: party.companyName,
+    email: party.email ?? party.companyEmail,
+    phone: party.phone ?? party.companyPhone,
+    contactId: null,
+  };
+
+  if (party.lookupCode) {
+    const [contact] = await db.select({
+      id: contacts.id,
+      fullName: contacts.fullName,
+      email: contacts.email,
+      phone: contacts.phone,
+      companyName: contacts.companyName,
+    })
+      .from(contacts)
+      .where(or(
+        eq(contacts.lookupCode, party.lookupCode),
+        eq(contacts.softproLookupCode, party.lookupCode),
+        eq(contacts.sourceId, party.lookupCode),
+      ))
+      .limit(1);
+
+    if (contact) {
+      identity = {
+        name: identity.name ?? contact.fullName,
+        company: identity.company ?? contact.companyName,
+        email: identity.email ?? contact.email,
+        phone: identity.phone ?? contact.phone,
+        contactId: contact.id,
+      };
+    }
+  }
+
+  if (party.companyLookupCode) {
+    const [company] = await db.select({
+      name: companies.name,
+      email: companies.email,
+      phone: companies.phone,
+    })
+      .from(companies)
+      .where(or(
+        eq(companies.lookupCode, party.companyLookupCode),
+        eq(companies.sourceId, party.companyLookupCode),
+      ))
+      .limit(1);
+
+    if (company) {
+      identity = {
+        name: identity.name,
+        company: identity.company ?? company.name,
+        email: identity.email ?? company.email,
+        phone: identity.phone ?? company.phone,
+        contactId: identity.contactId,
+      };
+    }
+  }
+
+  if (fkContactId) {
+    const fkIdentity = await loadContactIdentity(fkContactId);
+    identity = {
+      name: identity.name ?? fkIdentity.name,
+      company: identity.company ?? fkIdentity.company,
+      email: identity.email ?? fkIdentity.email,
+      phone: identity.phone ?? fkIdentity.phone,
+      contactId: identity.contactId ?? fkIdentity.contactId,
+    };
+  }
+
+  if (fkCompanyId) {
+    const fkIdentity = await loadCompanyIdentity(fkCompanyId);
+    identity = {
+      name: identity.name ?? fkIdentity.name,
+      company: identity.company ?? fkIdentity.company,
+      email: identity.email ?? fkIdentity.email,
+      phone: identity.phone ?? fkIdentity.phone,
+      contactId: identity.contactId,
+    };
+  }
+
+  return identity;
 }
 
 async function flagRealEstateAgentAndCompany(contactId: number): Promise<void> {
@@ -317,37 +607,54 @@ interface PartyUpsert {
   isPrimary: boolean;
   party: MappedResolvedParty | null;
   contactId?: number | null;
+  companyId?: number | null;
 }
 
-async function persistResolvedParties(orderId: number, mapped: MappedOrderContacts): Promise<void> {
+async function persistResolvedParties(
+  orderId: number,
+  mapped: MappedOrderContacts,
+  updates: OrderFkUpdates,
+): Promise<number> {
   const rows: PartyUpsert[] = [
     { role: 'buyer', isPrimary: true, party: mapped.parties.buyer },
     { role: 'buyer', isPrimary: false, party: mapped.parties.secondaryBuyer },
     { role: 'seller', isPrimary: true, party: mapped.parties.seller },
     { role: 'seller', isPrimary: false, party: mapped.parties.secondarySeller },
-    { role: 'lender', isPrimary: true, party: mapped.parties.lender },
-    { role: 'listing_agent', isPrimary: true, party: mapped.parties.listingAgent },
+    { role: 'lender', isPrimary: true, party: mapped.parties.lender, contactId: updates.lenderId },
+    { role: 'listing_agent', isPrimary: true, party: mapped.parties.listingAgent, contactId: updates.listingAgentId },
     { role: 'escrow_company', isPrimary: true, party: mapped.parties.escrowCompany },
     { role: 'lender_contact', isPrimary: true, party: mapped.parties.mortgageBroker },
+    { role: 'other', isPrimary: true, party: mapped.parties.titleCompany, companyId: updates.titleCompanyId },
+    { role: 'other', isPrimary: false, party: mapped.parties.underwriter, companyId: updates.underwriterId },
   ];
 
+  let written = 0;
   for (const row of rows) {
-    if (!row.party) continue;
-    await upsertResolvedParty(orderId, row);
+    if (!row.party && !row.contactId && !row.companyId) continue;
+    if (await upsertResolvedParty(orderId, row)) written++;
   }
+  return written;
 }
 
-async function upsertResolvedParty(orderId: number, row: PartyUpsert): Promise<void> {
-  const externalName = row.party?.name;
-  const externalCompany = row.party?.companyName;
-  const externalEmail = row.party?.email ?? row.party?.companyEmail;
-  const externalPhone = row.party?.phone ?? row.party?.companyPhone;
+async function upsertResolvedParty(orderId: number, row: PartyUpsert): Promise<boolean> {
+  if (!row.party && !row.contactId && !row.companyId) return false;
 
-  if (!externalName && !externalCompany && !externalEmail && !externalPhone) return;
+  const identity = row.party
+    ? await resolvePartyIdentityFromMaster(row.party, row.contactId, row.companyId)
+    : await (async (): Promise<ResolvedPartyIdentity> => {
+      if (row.contactId) return loadContactIdentity(row.contactId);
+      if (row.companyId) return loadCompanyIdentity(row.companyId);
+      return { name: null, company: null, email: null, phone: null, contactId: null };
+    })();
 
-  const contactId = row.contactId ?? (
-    row.party?.lookupCode ? await resolveContact(row.party.lookupCode) : null
-  );
+  const externalName = identity.name;
+  const externalCompany = identity.company;
+  const externalEmail = identity.email;
+  const externalPhone = identity.phone;
+
+  if (!externalName && !externalCompany && !externalEmail && !externalPhone) return false;
+
+  const contactId = identity.contactId ?? row.contactId ?? null;
 
   const [existing] = await db
     .select({ id: orderParties.id })
@@ -381,4 +688,6 @@ async function upsertResolvedParty(orderId: number, row: PartyUpsert): Promise<v
       externalPhone: externalPhone ?? null,
     });
   }
+
+  return true;
 }

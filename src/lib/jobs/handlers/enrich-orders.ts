@@ -1,5 +1,5 @@
 import { db } from '@/lib/db/client';
-import { orders, orderParties, contacts, companies, vendorApiLogs } from '@/lib/db/schema';
+import { orders, orderParties, contacts, companies, vendorApiLogs, jobs } from '@/lib/db/schema';
 import { eq, and, isNull, or, sql } from 'drizzle-orm';
 import { getOrderContacts, mapOrderContacts } from '@/lib/integrations/softpro';
 import type { MappedOrderContacts, MappedResolvedParty } from '@/lib/integrations/softpro';
@@ -17,6 +17,11 @@ export interface EnrichOrdersResult {
   fkOnly: number;
   emptyConfirmed: number;
   failed: number;
+  batchLimit: number;
+  timeBudgetMs: number;
+  stoppedEarly: boolean;
+  singleFlightSkipped: boolean;
+  runningJobId: number | null;
   errors: Array<{ fileNumber: string; error: string }>;
 }
 
@@ -46,6 +51,72 @@ interface ResolvedPartyIdentity {
   email: string | null;
   phone: string | null;
   contactId: number | null;
+}
+
+interface EnrichOrdersPayload {
+  __jobId?: unknown;
+}
+
+const ENRICH_ORDERS_MAX_DURATION_MS = 300_000;
+const DEFAULT_ENRICH_ORDERS_BATCH_SIZE = 25;
+const DEFAULT_ENRICH_ORDERS_TIME_BUDGET_MS = Math.floor(ENRICH_ORDERS_MAX_DURATION_MS * 0.8);
+export const ENRICH_ORDERS_RUNNING_WINDOW_MS = 10 * 60 * 1000;
+
+function positiveIntegerFromEnv(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
+}
+
+function enrichOrdersBatchLimit(): number {
+  return positiveIntegerFromEnv('SOFTPRO_ENRICH_ORDERS_BATCH_SIZE', DEFAULT_ENRICH_ORDERS_BATCH_SIZE);
+}
+
+function enrichOrdersTimeBudgetMs(): number {
+  return positiveIntegerFromEnv('SOFTPRO_ENRICH_ORDERS_TIME_BUDGET_MS', DEFAULT_ENRICH_ORDERS_TIME_BUDGET_MS);
+}
+
+function emptyEnrichOrdersResult(
+  batchLimit: number,
+  timeBudgetMs: number,
+  overrides: Partial<Pick<EnrichOrdersResult, 'singleFlightSkipped' | 'runningJobId'>> = {},
+): EnrichOrdersResult {
+  return {
+    total: 0,
+    attempted: 0,
+    partiesWritten: 0,
+    fkOnly: 0,
+    emptyConfirmed: 0,
+    failed: 0,
+    batchLimit,
+    timeBudgetMs,
+    stoppedEarly: false,
+    singleFlightSkipped: overrides.singleFlightSkipped ?? false,
+    runningJobId: overrides.runningJobId ?? null,
+    errors: [],
+  };
+}
+
+async function findPriorRunningEnrichOrderJob(currentJobId: number | null): Promise<{ id: number } | null> {
+  const activeSince = new Date(Date.now() - ENRICH_ORDERS_RUNNING_WINDOW_MS);
+  const idFilter = currentJobId === null
+    ? sql``
+    : sql`AND ${jobs.id} < ${currentJobId}`;
+
+  const [runningJob] = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(sql`
+      ${jobs.status} = 'running'
+      AND ${jobs.jobType} IN ('softpro.enrich_orders', 'enrich-orders')
+      AND ${jobs.startedAt} >= ${activeSince}
+      ${idFilter}
+    `)
+    .limit(1);
+
+  return runningJob ?? null;
 }
 
 // ─── Single Order Enrichment ─────────────────────────────────────────────────
@@ -199,7 +270,20 @@ async function enrichOrder(order: { id: number; fileNumber: string; orderType: s
 
 // ─── Batch Enrichment ────────────────────────────────────────────────────────
 
-export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
+export async function handleEnrichOrders(payload: EnrichOrdersPayload = {}): Promise<EnrichOrdersResult> {
+  const startedAt = Date.now();
+  const batchLimit = enrichOrdersBatchLimit();
+  const timeBudgetMs = enrichOrdersTimeBudgetMs();
+  const currentJobId = typeof payload.__jobId === 'number' ? payload.__jobId : null;
+  const runningJob = await findPriorRunningEnrichOrderJob(currentJobId);
+
+  if (runningJob) {
+    return emptyEnrichOrdersResult(batchLimit, timeBudgetMs, {
+      singleFlightSkipped: true,
+      runningJobId: runningJob.id,
+    });
+  }
+
   const unenriched = await db
     .select({ id: orders.id, fileNumber: orders.fileNumber, orderType: orders.orderType })
     .from(orders)
@@ -226,7 +310,7 @@ export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
       )
     )
     .orderBy(sql`${orders.lastContactsFetchAt} ASC NULLS FIRST`)
-    .limit(200);
+    .limit(batchLimit);
 
   const stats: EnrichOrdersResult = {
     total: unenriched.length,
@@ -235,10 +319,20 @@ export async function handleEnrichOrders(): Promise<EnrichOrdersResult> {
     fkOnly: 0,
     emptyConfirmed: 0,
     failed: 0,
+    batchLimit,
+    timeBudgetMs,
+    stoppedEarly: false,
+    singleFlightSkipped: false,
+    runningJobId: null,
     errors: [],
   };
 
   for (const order of unenriched) {
+    if (Date.now() - startedAt >= timeBudgetMs) {
+      stats.stoppedEarly = true;
+      break;
+    }
+
     try {
       await db.update(orders)
         .set({ lastContactsFetchAt: sql`NOW()` })

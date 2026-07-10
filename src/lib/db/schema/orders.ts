@@ -69,6 +69,7 @@ export const orders = pgTable('orders', {
   lastDetailsFetchAt: timestamp('last_details_fetch_at'),
   detailsAttemptCount: integer('details_attempt_count').notNull().default(0),
   lastContactsFetchAt: timestamp('last_contacts_fetch_at'),
+  contactsEmptyConfirmed: boolean('contacts_empty_confirmed').notNull().default(false),
   isImported: boolean('is_imported').notNull().default(false),
 
   dupOverride: boolean('dup_override').notNull().default(false),

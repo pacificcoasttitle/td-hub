@@ -119,7 +119,7 @@ async function executeJob(req: NextRequest, payload: Record<string, unknown>) {
   }
 
   if (ENRICH_ORDER_JOB_NAMES.has(jobName)) {
-    const activeSince = new Date(Date.now() - ENRICH_ORDERS_RUNNING_WINDOW_MS);
+    const activeSince = new Date(Date.now() - ENRICH_ORDERS_RUNNING_WINDOW_MS).toISOString();
     const [runningJob] = await db
       .select({
         id: jobs.id,

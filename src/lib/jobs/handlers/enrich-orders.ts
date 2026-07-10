@@ -100,7 +100,7 @@ function emptyEnrichOrdersResult(
 }
 
 async function findPriorRunningEnrichOrderJob(currentJobId: number | null): Promise<{ id: number } | null> {
-  const activeSince = new Date(Date.now() - ENRICH_ORDERS_RUNNING_WINDOW_MS);
+  const activeSince = new Date(Date.now() - ENRICH_ORDERS_RUNNING_WINDOW_MS).toISOString();
   const idFilter = currentJobId === null
     ? sql``
     : sql`AND ${jobs.id} < ${currentJobId}`;

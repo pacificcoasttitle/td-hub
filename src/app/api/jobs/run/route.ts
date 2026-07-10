@@ -4,13 +4,13 @@ import { z } from 'zod';
 export const maxDuration = 300;
 import { db } from '@/lib/db/client';
 import { jobs } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { handleSyncOrders } from '@/lib/jobs/handlers/sync-orders';
 import type { SyncOrdersPayload } from '@/lib/jobs/handlers/sync-orders';
 import { handleSyncContacts } from '@/lib/jobs/handlers/sync-contacts';
 import type { SyncContactsPayload } from '@/lib/jobs/handlers/sync-contacts';
 import { handleTitlePointPoll } from '@/lib/jobs/handlers/titlepoint-poll';
-import { handleEnrichOrders } from '@/lib/jobs/handlers/enrich-orders';
+import { ENRICH_ORDERS_RUNNING_WINDOW_MS, handleEnrichOrders } from '@/lib/jobs/handlers/enrich-orders';
 import { handleEnrichOrderDetails } from '@/lib/jobs/handlers/enrich-order-details';
 import { importOrdersFromSoftPro } from '@/lib/jobs/handlers/import-orders';
 import { handleResolveOfficers } from '@/lib/jobs/handlers/resolve-order-officers';
@@ -41,17 +41,19 @@ const payloadSchema = z.record(z.string(), z.unknown()).default({});
 
 type JobHandler = (payload: Record<string, unknown>) => Promise<unknown>;
 
+const ENRICH_ORDER_JOB_NAMES = new Set(['softpro.enrich_orders', 'enrich-orders']);
+
 const JOB_HANDLERS: Record<string, JobHandler> = {
   'softpro.sync_recent_orders': (payload) =>
     handleSyncOrders(payload as unknown as SyncOrdersPayload),
   'softpro.sync_contacts': (payload) =>
     handleSyncContacts(payload as unknown as SyncContactsPayload),
-  'softpro.enrich_orders': () =>
-    handleEnrichOrders(),
+  'softpro.enrich_orders': (payload) =>
+    handleEnrichOrders(payload),
   'softpro.enrich_order_details': () =>
     handleEnrichOrderDetails(),
-  'enrich-orders': () =>
-    handleEnrichOrders(),
+  'enrich-orders': (payload) =>
+    handleEnrichOrders(payload),
   'resolve_officers': () =>
     handleResolveOfficers(),
   'titlepoint.poll': (payload) =>
@@ -116,6 +118,33 @@ async function executeJob(req: NextRequest, payload: Record<string, unknown>) {
     return NextResponse.json({ error: `Unknown job: ${jobName}` }, { status: 400 });
   }
 
+  if (ENRICH_ORDER_JOB_NAMES.has(jobName)) {
+    const activeSince = new Date(Date.now() - ENRICH_ORDERS_RUNNING_WINDOW_MS);
+    const [runningJob] = await db
+      .select({
+        id: jobs.id,
+        jobType: jobs.jobType,
+        startedAt: jobs.startedAt,
+      })
+      .from(jobs)
+      .where(sql`
+        ${jobs.status} = 'running'
+        AND ${jobs.jobType} IN ('softpro.enrich_orders', 'enrich-orders')
+        AND ${jobs.startedAt} >= ${activeSince}
+      `)
+      .limit(1);
+
+    if (runningJob) {
+      return NextResponse.json({
+        success: true,
+        job: jobName,
+        skipped: true,
+        reason: 'softpro.enrich_orders already running',
+        runningJob,
+      });
+    }
+  }
+
   const [job] = await db
     .insert(jobs)
     .values({ jobType: jobName, status: 'running', payload, startedAt: new Date(), attempts: 1 })
@@ -124,7 +153,10 @@ async function executeJob(req: NextRequest, payload: Record<string, unknown>) {
   const jobId = job!.id;
 
   try {
-    const result = await handler(payload);
+    const handlerPayload = ENRICH_ORDER_JOB_NAMES.has(jobName)
+      ? { ...payload, __jobId: jobId }
+      : payload;
+    const result = await handler(handlerPayload);
     try { await db.update(jobs).set({ status: 'completed', endedAt: new Date() }).where(eq(jobs.id, jobId)); } catch { /* tracking */ }
     return NextResponse.json({ success: true, job: jobName, jobId, result });
   } catch (err) {

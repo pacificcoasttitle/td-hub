@@ -302,8 +302,15 @@ function softProContactsEmpty(data: SoftProOrderContactsData, mapped: MappedOrde
 
   if (hasParty || hasLookupCode || hasBorrowerSeller) return false;
 
-  const rawKeys = Object.keys(data);
-  return rawKeys.length === 0;
+  return softProValueEmpty(data);
+}
+
+function softProValueEmpty(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  if (Array.isArray(value)) return value.every(softProValueEmpty);
+  if (typeof value === 'object') return Object.values(value).every(softProValueEmpty);
+  return false;
 }
 
 async function logEnrichAttempt(

@@ -33,6 +33,38 @@
       "schedule": "0 3 * * *"
     },
     {
+      "path": "/api/jobs/run?name=softpro.sync_contacts.order_contact_person",
+      "schedule": "5 * * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=softpro.sync_contacts.title_officer",
+      "schedule": "15 */3 * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=softpro.sync_contacts.escrow_officer",
+      "schedule": "25 */3 * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=softpro.sync_contacts.sales_rep",
+      "schedule": "35 */3 * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=softpro.sync_contacts.escrow_company",
+      "schedule": "45 */3 * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=softpro.sync_contacts.lender",
+      "schedule": "55 */3 * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=softpro.sync_contacts.mortgage_broker",
+      "schedule": "10 1-23/3 * * *"
+    },
+    {
+      "path": "/api/jobs/run?name=softpro.sync_contacts.underwriter",
+      "schedule": "20 1-23/3 * * *"
+    },
+    {
       "path": "/api/jobs/run?name=jobs.watchdog",
       "schedule": "*/15 * * * *"
     },

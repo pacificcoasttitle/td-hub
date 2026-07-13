@@ -21,6 +21,23 @@ export interface SyncContactsResult {
 
 type SyncRow = SoftProLookupItem;
 
+export const SYNC_CONTACT_ENTITY_TYPES = [
+  'Order Contact - Person',
+  'Title Officer',
+  'Escrow Officer',
+  'Sales Rep',
+  'Escrow Company',
+  'Lender',
+  'Mortgage Broker',
+  'Underwriter',
+] as const;
+
+export type SyncContactEntityType = typeof SYNC_CONTACT_ENTITY_TYPES[number];
+
+interface SyncContactRowsOptions {
+  deactivateExistingSalesReps?: boolean;
+}
+
 function str(item: SyncRow, key: string): string | null {
   const v = item[key];
   return v && v.trim() ? v.trim() : null;
@@ -31,6 +48,10 @@ function emptyResult(entityType: string, error?: string): SyncContactsResult {
     entityType, totalFetched: 0, created: 0, updated: 0, skipped: 0,
     errors: error ? [{ lookupCode: '*', error }] : [],
   };
+}
+
+export function isSyncContactEntityType(entityType: string): entityType is SyncContactEntityType {
+  return (SYNC_CONTACT_ENTITY_TYPES as readonly string[]).includes(entityType);
 }
 
 // ─── Sync 1: Open Contacts (userType=Order Contact - Person) ─────────────
@@ -204,27 +225,20 @@ async function syncEscrowOfficers(items: SyncRow[]): Promise<SyncContactsResult>
 
 // ─── Sync 4: Sales Reps (DIFFERENT ENDPOINT) ────────────────────────────
 
-async function syncSalesReps(): Promise<SyncContactsResult> {
+async function syncSalesRepRows(
+  items: SyncRow[],
+  options: SyncContactRowsOptions = {}
+): Promise<SyncContactsResult> {
   const entityType = 'Sales Rep';
 
-  let result;
-  try {
-    result = await getSalesReps();
-  } catch (err) {
-    return emptyResult(entityType, `GetOrderMarketingRep failed: ${err instanceof Error ? err.message : 'timeout/hang'}`);
-  }
-
-  if (!result.success || !result.data) {
-    return emptyResult(entityType, result.error?.message ?? 'GetOrderMarketingRep returned no data');
-  }
-
-  const items = result.data;
   let created = 0, updated = 0, skipped = 0;
   const errors: SyncContactsResult['errors'] = [];
 
-  await db.update(contacts)
-    .set({ isActive: false, updatedAt: new Date() })
-    .where(eq(contacts.isSalesRep, true));
+  if (options.deactivateExistingSalesReps) {
+    await db.update(contacts)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(contacts.isSalesRep, true));
+  }
 
   for (const item of items) {
     const code = str(item, 'LookUpCode') ?? str(item, 'LookupCode');
@@ -459,60 +473,106 @@ const COMPANY_CONFIGS: Record<string, CompanySyncConfig> = {
 
 // ─── Main Handler ────────────────────────────────────────────────────────
 
-const VALID_ENTITY_TYPES = [
-  'Order Contact - Person',
-  'Title Officer',
-  'Escrow Officer',
-  'Sales Rep',
-  'Escrow Company',
-  'Lender',
-  'Mortgage Broker',
-  'Underwriter',
-];
+export async function fetchSyncContactRows(
+  entityType: SyncContactEntityType
+): Promise<{ items: SyncRow[]; error: string | null }> {
+  if (entityType === 'Sales Rep') {
+    try {
+      const result = await getSalesReps();
+      if (!result.success || !result.data) {
+        return { items: [], error: result.error?.message ?? 'GetOrderMarketingRep returned no data' };
+      }
+      return { items: result.data, error: null };
+    } catch (err) {
+      return {
+        items: [],
+        error: `GetOrderMarketingRep failed: ${err instanceof Error ? err.message : 'timeout/hang'}`,
+      };
+    }
+  }
+
+  const adapterResult = await getLookupTable(entityType);
+  if (!adapterResult.success || !adapterResult.data) {
+    return { items: [], error: adapterResult.error?.message ?? 'Failed to fetch lookup table' };
+  }
+
+  return { items: adapterResult.data, error: null };
+}
+
+export function getSyncContactLookupCode(
+  entityType: SyncContactEntityType,
+  item: SyncRow
+): string | null {
+  switch (entityType) {
+    case 'Order Contact - Person':
+      return str(item, 'LookupCode');
+    case 'Title Officer':
+      return str(item, 'Title officer/Examiner');
+    case 'Escrow Officer':
+      return str(item, 'Escrow officer/Closer');
+    case 'Sales Rep':
+      return str(item, 'LookUpCode') ?? str(item, 'LookupCode');
+    case 'Escrow Company':
+    case 'Mortgage Broker':
+    case 'Underwriter':
+      return str(item, SPACED.lookupCode);
+    case 'Lender':
+      return str(item, CAMEL.lookupCode);
+  }
+}
+
+export function sortSyncContactRows(
+  entityType: SyncContactEntityType,
+  items: SyncRow[]
+): SyncRow[] {
+  return [...items].sort((a, b) => {
+    const aCode = getSyncContactLookupCode(entityType, a) ?? '';
+    const bCode = getSyncContactLookupCode(entityType, b) ?? '';
+    return aCode.localeCompare(bCode);
+  });
+}
+
+export async function syncContactRows(
+  entityType: SyncContactEntityType,
+  items: SyncRow[],
+  options: SyncContactRowsOptions = {}
+): Promise<SyncContactsResult> {
+  switch (entityType) {
+    case 'Order Contact - Person':
+      return syncOpenContacts(items);
+    case 'Title Officer':
+      return syncTitleOfficers(items);
+    case 'Escrow Officer':
+      return syncEscrowOfficers(items);
+    case 'Sales Rep':
+      return syncSalesRepRows(items, options);
+    default: {
+      const config = COMPANY_CONFIGS[entityType];
+      if (config) {
+        return syncCompanyType(config, items);
+      }
+      return emptyResult(entityType, `No handler for: ${entityType}`);
+    }
+  }
+}
 
 export async function handleSyncContacts(
   payload: SyncContactsPayload
 ): Promise<SyncContactsResult> {
   const { entityType } = payload;
 
-  if (!VALID_ENTITY_TYPES.includes(entityType)) {
+  if (!isSyncContactEntityType(entityType)) {
     return emptyResult(entityType, `Invalid entity type: ${entityType}`);
   }
 
-  let result: SyncContactsResult;
-
-  if (entityType === 'Sales Rep') {
-    result = await syncSalesReps();
-  } else {
-    const userType = entityType;
-    const adapterResult = await getLookupTable(userType);
-
-    if (!adapterResult.success || !adapterResult.data) {
-      return emptyResult(entityType, adapterResult.error?.message ?? 'Failed to fetch lookup table');
-    }
-
-    const items = adapterResult.data;
-
-    switch (entityType) {
-      case 'Order Contact - Person':
-        result = await syncOpenContacts(items);
-        break;
-      case 'Title Officer':
-        result = await syncTitleOfficers(items);
-        break;
-      case 'Escrow Officer':
-        result = await syncEscrowOfficers(items);
-        break;
-      default: {
-        const config = COMPANY_CONFIGS[entityType];
-        if (config) {
-          result = await syncCompanyType(config, items);
-        } else {
-          return emptyResult(entityType, `No handler for: ${entityType}`);
-        }
-      }
-    }
+  const fetched = await fetchSyncContactRows(entityType);
+  if (fetched.error) {
+    return emptyResult(entityType, fetched.error);
   }
+
+  const result = await syncContactRows(entityType, fetched.items, {
+    deactivateExistingSalesReps: entityType === 'Sales Rep',
+  });
 
   await reconcileEscrowOfficerFlagsFromOrders();
   return result;

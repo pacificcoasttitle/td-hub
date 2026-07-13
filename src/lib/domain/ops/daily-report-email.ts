@@ -46,7 +46,7 @@ export function renderDailyReportHtml(report: DailyReport): string {
       <a href="${escapeAttr(dashboardUrl)}" style="color:${NAVY};font-weight:700;text-decoration:none;">View live dashboard</a>
       <div style="margin-top:16px;padding:16px;border:1px solid ${BORDER};border-left:6px solid ${statusColor};border-radius:6px;">
         <div style="font-size:20px;font-weight:700;color:${statusColor};">${report.summary.statusEmoji} ${escapeHtml(titleCase(report.summary.status))}</div>
-        <p style="margin:8px 0 0;color:${MUTED};font-size:13px;">Orders synced: <strong>${report.summary.totalOrdersSynced}</strong> · Prelims analyzed: <strong>${report.summary.totalPrelimsAnalyzed}</strong> · Sections loaded: <strong>${report.sectionsLoaded}/13</strong></p>
+        <p style="margin:8px 0 0;color:${MUTED};font-size:13px;">Orders synced: <strong>${report.summary.totalOrdersSynced}</strong> · Prelims analyzed: <strong>${report.summary.totalPrelimsAnalyzed}</strong> · Sections loaded: <strong>${report.sectionsLoaded}/14</strong></p>
       </div>
     </div>
     <div style="padding:0 24px 24px;">
@@ -102,20 +102,32 @@ export function renderDailyReportHtml(report: DailyReport): string {
         ['Orphan contacts', d.orphanContacts],
         ['Real estate companies with stub names', d.stubRealEstateCompanies],
       ]))}
-      ${renderSectionHtml('11. TESSA Prelim Analysis (24h)', report.tessaPrelimAnalysis, (d) => metricGrid([
+      ${renderSectionHtml('11. Enrichment Coverage', report.enrichmentCoverage, (d) => `
+        ${metricGrid([
+          ['Zero-party orders', d.zeroPartyTotal],
+          ['Zero-party unconfirmed', d.zeroPartyUnconfirmed],
+          ['Empty-confirmed orders', d.emptyConfirmedTotal],
+          ['FK-only stuck', d.fkOnlyStuck],
+          ['Orders with real participant', d.ordersWithRealParticipant],
+          ['Current enrichment backlog', d.currentBacklogSize],
+          ['Last completed enrich_orders', d.minutesSinceLastCompleted === null ? 'Never' : `${d.minutesSinceLastCompleted} min ago`],
+        ])}
+        ${d.alerts.length > 0 ? `<p style="margin:10px 0 0;color:${RED};font-weight:700;font-size:13px;">${escapeHtml(d.alerts.join(' '))}</p>` : ''}
+      `)}
+      ${renderSectionHtml('12. TESSA Prelim Analysis (24h)', report.tessaPrelimAnalysis, (d) => metricGrid([
         ['Prelims auto-analyzed by cron', d.autoAnalyzedByCron],
         ['Prelims analyzed on-demand', d.analyzedOnDemand],
         ['Total successful analyses', d.totalSuccessfulAnalyses],
         ['Total failed analyses', d.totalFailedAnalyses],
         ['Backlog fetched, not analyzed', d.backlogFetchedNotAnalyzed],
       ]))}
-      ${renderSectionHtml('12. Security & Access (24h)', report.securityAccess, (d) => metricGrid([
+      ${renderSectionHtml('13. Security & Access (24h)', report.securityAccess, (d) => metricGrid([
         ['Failed login attempts', d.failedLoginAttempts],
         ['401/403 spikes', d.unauthorizedSpikes],
         ['Service role token usage', d.serviceRoleTokenUsage],
         ['Role escalations', d.roleEscalations],
       ]))}
-      ${renderSectionHtml('13. Failures Detail (24h)', report.failuresDetail, (d) => renderFailureRows(d))}
+      ${renderSectionHtml('14. Failures Detail (24h)', report.failuresDetail, (d) => renderFailureRows(d))}
     </div>
   </div>
 </body>
@@ -132,7 +144,7 @@ export function renderDailyReportText(report: DailyReport): string {
     `TL;DR: ${report.summary.statusEmoji} ${titleCase(report.summary.status)}`,
     `Orders synced: ${report.summary.totalOrdersSynced}`,
     `Prelims analyzed: ${report.summary.totalPrelimsAnalyzed}`,
-    `Sections loaded: ${report.sectionsLoaded}/13`,
+    `Sections loaded: ${report.sectionsLoaded}/14`,
     '',
     'ATTENTION REQUIRED',
     ...report.summary.attentionItems.map((item) => `- ${item}`),
@@ -184,20 +196,30 @@ export function renderDailyReportText(report: DailyReport): string {
       `Orphan contacts: ${d.orphanContacts}`,
       `Real estate companies with stub names: ${d.stubRealEstateCompanies}`,
     ]),
-    sectionText('11. TESSA Prelim Analysis (24h)', report.tessaPrelimAnalysis, (d) => [
+    sectionText('11. Enrichment Coverage', report.enrichmentCoverage, (d) => [
+      `Zero-party orders: ${d.zeroPartyTotal}`,
+      `Zero-party unconfirmed: ${d.zeroPartyUnconfirmed}`,
+      `Empty-confirmed orders: ${d.emptyConfirmedTotal}`,
+      `FK-only stuck: ${d.fkOnlyStuck}`,
+      `Orders with real participant: ${d.ordersWithRealParticipant}`,
+      `Current enrichment backlog: ${d.currentBacklogSize}`,
+      `Last completed enrich_orders: ${d.minutesSinceLastCompleted === null ? 'Never' : `${d.minutesSinceLastCompleted} min ago`}`,
+      `Alerts: ${d.alerts.length === 0 ? 'None' : d.alerts.join(' ')}`,
+    ]),
+    sectionText('12. TESSA Prelim Analysis (24h)', report.tessaPrelimAnalysis, (d) => [
       `Prelims auto-analyzed by cron: ${d.autoAnalyzedByCron}`,
       `Prelims analyzed on-demand: ${d.analyzedOnDemand}`,
       `Total successful analyses: ${d.totalSuccessfulAnalyses}`,
       `Total failed analyses: ${d.totalFailedAnalyses}`,
       `Backlog fetched, not analyzed: ${d.backlogFetchedNotAnalyzed}`,
     ]),
-    sectionText('12. Security & Access (24h)', report.securityAccess, (d) => [
+    sectionText('13. Security & Access (24h)', report.securityAccess, (d) => [
       `Failed login attempts: ${d.failedLoginAttempts}`,
       `401/403 spikes: ${d.unauthorizedSpikes}`,
       `Service role token usage: ${d.serviceRoleTokenUsage}`,
       `Role escalations: ${d.roleEscalations}`,
     ]),
-    sectionText('13. Failures Detail (24h)', report.failuresDetail, (d) => [
+    sectionText('14. Failures Detail (24h)', report.failuresDetail, (d) => [
       `Total distinct failure groups in last 24h: ${d.distinctCount}. Showing top ${d.limit} by occurrence count.`,
       ...(d.rows.length === 0
         ? ['No failures found.']

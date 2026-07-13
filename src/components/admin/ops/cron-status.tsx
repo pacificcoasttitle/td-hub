@@ -12,6 +12,21 @@ interface CronJob {
   avgDurationMs: number;
 }
 
+interface EnrichmentCoverage {
+  ok: boolean;
+  data?: {
+    zeroPartyTotal: number;
+    zeroPartyUnconfirmed: number;
+    emptyConfirmedTotal: number;
+    fkOnlyStuck: number;
+    ordersWithRealParticipant: number;
+    currentBacklogSize: number;
+    minutesSinceLastCompleted: number | null;
+    alerts: string[];
+  };
+  error?: string;
+}
+
 const JOB_LABELS: Record<string, string> = {
   'softpro.sync_recent_orders': 'Sync Recent Orders',
   'softpro.enrich_orders': 'Enrich Orders',
@@ -47,6 +62,7 @@ function fmtMs(ms: number): string {
 
 export function CronStatus({ month, year }: { month: number; year: number }) {
   const [crons, setCrons] = useState<CronJob[]>([]);
+  const [coverage, setCoverage] = useState<EnrichmentCoverage | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
@@ -62,12 +78,16 @@ export function CronStatus({ month, year }: { month: number; year: number }) {
           });
           setCrons(sorted);
         }
+        if (d?.enrichmentCoverage) setCoverage(d.enrichmentCoverage);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [month, year]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timeout = setTimeout(load, 0);
+    return () => clearTimeout(timeout);
+  }, [load]);
   useEffect(() => {
     const iv = setInterval(load, 60_000);
     return () => clearInterval(iv);
@@ -76,6 +96,32 @@ export function CronStatus({ month, year }: { month: number; year: number }) {
   return (
     <section>
       <h2 className="text-lg font-semibold text-gray-900 mb-3">Scheduled jobs</h2>
+      {coverage?.ok && coverage.data && (
+        <div className={`mb-4 rounded-lg border p-4 ${coverage.data.alerts.length > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Enrichment Coverage</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Real residue: {coverage.data.zeroPartyUnconfirmed} zero-party unconfirmed · {coverage.data.emptyConfirmedTotal} empty-confirmed · {coverage.data.fkOnlyStuck} FK-only stuck
+              </p>
+            </div>
+            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${coverage.data.alerts.length > 0 ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}`}>
+              {coverage.data.alerts.length > 0 ? 'Attention' : 'Healthy'}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+            <CoverageStat label="Zero-party total" value={coverage.data.zeroPartyTotal} />
+            <CoverageStat label="Current backlog" value={coverage.data.currentBacklogSize} />
+            <CoverageStat label="Real participants" value={coverage.data.ordersWithRealParticipant} />
+            <CoverageStat label="Last enrich run" value={coverage.data.minutesSinceLastCompleted === null ? 'Never' : `${coverage.data.minutesSinceLastCompleted}m ago`} />
+          </div>
+          {coverage.data.alerts.length > 0 && (
+            <ul className="mt-3 list-disc pl-5 text-xs text-amber-800">
+              {coverage.data.alerts.map((alert) => <li key={alert}>{alert}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -125,5 +171,14 @@ export function CronStatus({ month, year }: { month: number; year: number }) {
         </div>
       </div>
     </section>
+  );
+}
+
+function CoverageStat({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-md bg-gray-50 border border-gray-100 px-3 py-2">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className="text-lg font-semibold text-gray-900 tabular-nums">{value}</p>
+    </div>
   );
 }

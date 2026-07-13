@@ -3,6 +3,7 @@ import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { jobs } from '@/lib/db/schema';
 import { sql, gte, and, lt } from 'drizzle-orm';
+import { getEnrichmentCoverageSection } from '@/lib/domain/ops/daily-report';
 
 const ADMIN_ROLES = ['super_admin', 'admin'];
 
@@ -33,7 +34,8 @@ export async function GET(req: NextRequest) {
     const monthStart = new Date(year, month - 1, 1);
     const monthEnd = new Date(year, month, 1);
 
-    const rows = await db
+    const [rows, enrichmentCoverage] = await Promise.all([
+      db
       .select({
         jobType: jobs.jobType,
         runs: sql<number>`count(*)::int`,
@@ -54,7 +56,9 @@ export async function GET(req: NextRequest) {
       })
       .from(jobs)
       .where(and(gte(jobs.createdAt, monthStart), lt(jobs.createdAt, monthEnd)))
-      .groupBy(jobs.jobType);
+      .groupBy(jobs.jobType),
+      getEnrichmentCoverageSection(),
+    ]);
 
     const crons = rows.map((r) => ({
       jobType: r.jobType,
@@ -66,7 +70,7 @@ export async function GET(req: NextRequest) {
       avgDurationMs: r.avgDurationMs,
     }));
 
-    return NextResponse.json({ crons });
+    return NextResponse.json({ crons, enrichmentCoverage });
   } catch (err) {
     console.error('[OPS] crons error:', err);
     return NextResponse.json(

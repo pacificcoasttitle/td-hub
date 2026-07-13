@@ -67,7 +67,7 @@ function EnrichButton() {
       const res = await fetch('/api/orders/enrich', { method: 'POST' });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? `Failed (${res.status})`);
-      const msg = `Enriched ${body?.enriched ?? 0} orders (${body?.skipped ?? 0} skipped, ${body?.errors?.length ?? 0} errors)`;
+      const msg = `Enriched ${body?.partiesWritten ?? 0} with parties (${body?.fkOnly ?? 0} FK-only, ${body?.emptyConfirmed ?? 0} empty-confirmed, ${body?.errors?.length ?? 0} errors)`;
       setToast({ ok: true, msg });
     } catch (e) {
       setToast({ ok: false, msg: e instanceof Error ? e.message : 'Enrichment failed' });
@@ -148,22 +148,27 @@ export default function OrdersPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-    const apiParams = new URLSearchParams({
-      page: String(currentPage),
-      pageSize: String(PAGE_SIZE),
-      sortBy: currentSortBy,
-      sortDir: currentSortDir,
-    });
-    if (currentStatus) apiParams.set('status', currentStatus);
-    if (currentSearch) apiParams.set('search', currentSearch);
-    fetch(`/api/orders?${apiParams}`, { signal: controller.signal })
-      .then((res) => { if (!res.ok) throw new Error(`Failed to load orders (${res.status})`); return res.json() as Promise<OrderListResponse>; })
-      .then(setData)
-      .catch((err) => { if (err.name !== 'AbortError') setError(err.message); })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
+    const timeout = setTimeout(() => {
+      setLoading(true);
+      setError(null);
+      const apiParams = new URLSearchParams({
+        page: String(currentPage),
+        pageSize: String(PAGE_SIZE),
+        sortBy: currentSortBy,
+        sortDir: currentSortDir,
+      });
+      if (currentStatus) apiParams.set('status', currentStatus);
+      if (currentSearch) apiParams.set('search', currentSearch);
+      fetch(`/api/orders?${apiParams}`, { signal: controller.signal })
+        .then((res) => { if (!res.ok) throw new Error(`Failed to load orders (${res.status})`); return res.json() as Promise<OrderListResponse>; })
+        .then(setData)
+        .catch((err) => { if (err.name !== 'AbortError') setError(err.message); })
+        .finally(() => setLoading(false));
+    }, 0);
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
   }, [currentPage, currentStatus, currentSearch, currentSortBy, currentSortDir]);
 
   function handleSearchChange(value: string) {

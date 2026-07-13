@@ -23,6 +23,7 @@ export interface DailyReport {
   growth: SectionResult<GrowthData>;
   contactAutoFlagging: SectionResult<ContactAutoFlaggingData>;
   operationsBacklog: SectionResult<OperationsBacklogData>;
+  enrichmentCoverage: SectionResult<EnrichmentCoverageData>;
   tessaPrelimAnalysis: SectionResult<TessaPrelimAnalysisData>;
   securityAccess: SectionResult<SecurityAccessData>;
   failuresDetail: SectionResult<FailuresDetailData>;
@@ -129,6 +130,18 @@ export interface OperationsBacklogData {
   stubRealEstateCompanies: number;
 }
 
+export interface EnrichmentCoverageData {
+  zeroPartyTotal: number;
+  zeroPartyUnconfirmed: number;
+  emptyConfirmedTotal: number;
+  fkOnlyStuck: number;
+  ordersWithRealParticipant: number;
+  currentBacklogSize: number;
+  lastCompletedAt: Date | null;
+  minutesSinceLastCompleted: number | null;
+  alerts: string[];
+}
+
 export interface TessaPrelimAnalysisData {
   autoAnalyzedByCron: number;
   analyzedOnDemand: number;
@@ -162,6 +175,9 @@ export interface FailuresDetailData {
 }
 
 const TRACKED_VENDORS = ['softpro', 'titlepoint', 'sitex', 'westcor', 'fnf', 'sendgrid', 'anthropic', 'claude'];
+const ZERO_PARTY_UNCONFIRMED_BASELINE = 17;
+const FK_ONLY_STUCK_BASELINE = 16;
+const ENRICHMENT_BACKLOG_STALL_MINUTES = 30;
 
 async function queryRows<T extends Record<string, unknown>>(statement: SQL<unknown>): Promise<T[]> {
   const rows = await db.execute(statement);
@@ -534,6 +550,112 @@ export async function getOperationsBacklogSection(_windowStart: Date, _windowEnd
   });
 }
 
+export function evaluateEnrichmentCoverageAlerts(data: Omit<EnrichmentCoverageData, 'alerts'>): string[] {
+  const alerts: string[] = [];
+
+  if (data.zeroPartyUnconfirmed > ZERO_PARTY_UNCONFIRMED_BASELINE) {
+    alerts.push(`Zero-party unconfirmed orders rose above baseline: ${data.zeroPartyUnconfirmed} > ${ZERO_PARTY_UNCONFIRMED_BASELINE}.`);
+  }
+
+  if (data.fkOnlyStuck > FK_ONLY_STUCK_BASELINE) {
+    alerts.push(`FK-only stuck orders grew above baseline: ${data.fkOnlyStuck} > ${FK_ONLY_STUCK_BASELINE}.`);
+  }
+
+  if (data.currentBacklogSize > 0 && data.minutesSinceLastCompleted === null) {
+    alerts.push(`Enrichment backlog is ${data.currentBacklogSize}, but no completed enrich_orders run was found.`);
+  } else if (
+    data.currentBacklogSize > 0
+    && data.minutesSinceLastCompleted !== null
+    && data.minutesSinceLastCompleted > ENRICHMENT_BACKLOG_STALL_MINUTES
+  ) {
+    alerts.push(`Enrichment backlog may be stalled: ${data.currentBacklogSize} orders pending, last completed run ${data.minutesSinceLastCompleted} min ago.`);
+  }
+
+  return alerts;
+}
+
+export async function getEnrichmentCoverageSection(): Promise<SectionResult<EnrichmentCoverageData>> {
+  return runSection(async () => {
+    const [row] = await queryRows<Record<string, unknown>>(sql`
+      with eligible_orders as (
+        select *
+        from orders
+        where operational_status not in ('canceled', 'duplicate')
+      ),
+      order_party_counts as (
+        select
+          order_id,
+          count(*)::int as party_count,
+          count(*) filter (
+            where role in ('buyer', 'seller', 'lender', 'lender_contact', 'listing_agent')
+          )::int as real_participant_count
+        from order_parties
+        group by order_id
+      ),
+      current_backlog as (
+        select count(*)::int as count
+        from orders o
+        where coalesce(o.contacts_empty_confirmed, false) = false
+          and (
+            not exists (select 1 from order_parties op where op.order_id = o.id)
+            or o.client_contact_id is null
+          )
+      ),
+      last_completed_enrich as (
+        select coalesce(ended_at, started_at, created_at) as completed_at
+        from jobs
+        where job_type in ('softpro.enrich_orders', 'enrich-orders')
+          and status = 'completed'
+        order by coalesce(ended_at, started_at, created_at) desc
+        limit 1
+      )
+      select
+        count(*) filter (where coalesce(opc.party_count, 0) = 0)::int as zero_party_total,
+        count(*) filter (
+          where coalesce(opc.party_count, 0) = 0
+            and coalesce(eo.contacts_empty_confirmed, false) = false
+        )::int as zero_party_unconfirmed,
+        count(*) filter (where coalesce(eo.contacts_empty_confirmed, false) = true)::int as empty_confirmed_total,
+        count(*) filter (
+          where coalesce(opc.party_count, 0) = 0
+            and coalesce(eo.contacts_empty_confirmed, false) = false
+            and (
+              eo.lender_id is not null
+              or eo.listing_agent_id is not null
+              or eo.title_company_id is not null
+              or eo.underwriter_id is not null
+              or eo.client_contact_id is not null
+            )
+        )::int as fk_only_stuck,
+        count(*) filter (where coalesce(opc.real_participant_count, 0) > 0)::int as orders_with_real_participant,
+        (select count from current_backlog)::int as current_backlog_size,
+        (select completed_at from last_completed_enrich) as last_completed_at
+      from eligible_orders eo
+      left join order_party_counts opc on opc.order_id = eo.id
+    `);
+    const lastCompletedAt = toDate(row?.last_completed_at);
+    const minutesSinceLastCompleted = lastCompletedAt
+      ? Math.floor((Date.now() - lastCompletedAt.getTime()) / 60_000)
+      : null;
+
+    const data = {
+      zeroPartyTotal: toNumber(row?.zero_party_total),
+      zeroPartyUnconfirmed: toNumber(row?.zero_party_unconfirmed),
+      emptyConfirmedTotal: toNumber(row?.empty_confirmed_total),
+      fkOnlyStuck: toNumber(row?.fk_only_stuck),
+      ordersWithRealParticipant: toNumber(row?.orders_with_real_participant),
+      currentBacklogSize: toNumber(row?.current_backlog_size),
+      lastCompletedAt,
+      minutesSinceLastCompleted,
+    };
+
+    return {
+      ...data,
+      alerts: evaluateEnrichmentCoverageAlerts(data),
+    };
+  });
+}
+
 export async function getTessaPrelimAnalysisSection(windowStart: Date, windowEnd: Date): Promise<SectionResult<TessaPrelimAnalysisData>> {
   return runSection(async () => {
     // Date.toISOString() required: raw sql templates need ISO strings, not Date objects.
@@ -653,6 +775,7 @@ export async function buildDailyReport(): Promise<DailyReport> {
     growth,
     contactAutoFlagging,
     operationsBacklog,
+    enrichmentCoverage,
     tessaPrelimAnalysis,
     securityAccess,
     failuresDetail,
@@ -667,6 +790,7 @@ export async function buildDailyReport(): Promise<DailyReport> {
     getGrowthSection(windowStart, windowEnd),
     getContactAutoFlaggingSection(windowStart, windowEnd),
     getOperationsBacklogSection(windowStart, windowEnd),
+    getEnrichmentCoverageSection(),
     getTessaPrelimAnalysisSection(windowStart, windowEnd),
     getSecurityAccessSection(windowStart, windowEnd),
     getFailuresDetailSection(windowStart, windowEnd),
@@ -674,7 +798,7 @@ export async function buildDailyReport(): Promise<DailyReport> {
 
   const sections = [
     orderFlow, syncHealth, prelims, cpls, vendorApiHealth, notifications, users, growth,
-    contactAutoFlagging, operationsBacklog, tessaPrelimAnalysis, securityAccess, failuresDetail,
+    contactAutoFlagging, operationsBacklog, enrichmentCoverage, tessaPrelimAnalysis, securityAccess, failuresDetail,
   ];
 
   return {
@@ -689,6 +813,7 @@ export async function buildDailyReport(): Promise<DailyReport> {
       prelims,
       vendorApiHealth,
       notifications,
+      enrichmentCoverage,
       sections,
     }),
     orderFlow,
@@ -701,6 +826,7 @@ export async function buildDailyReport(): Promise<DailyReport> {
     growth,
     contactAutoFlagging,
     operationsBacklog,
+    enrichmentCoverage,
     tessaPrelimAnalysis,
     securityAccess,
     failuresDetail,
@@ -713,6 +839,7 @@ function computeSummary(input: {
   prelims: SectionResult<PrelimsData>;
   vendorApiHealth: SectionResult<VendorApiHealthData>;
   notifications: SectionResult<NotificationsData>;
+  enrichmentCoverage: SectionResult<EnrichmentCoverageData>;
   sections: SectionResult<unknown>[];
 }): SummaryData {
   const attentionItems: string[] = [];
@@ -754,6 +881,11 @@ function computeSummary(input: {
   if (input.orderFlow.ok && input.orderFlow.data.newlyStuckOver6Hours > 50) {
     attention = true;
     attentionItems.push(`${input.orderFlow.data.newlyStuckOver6Hours} orders synced in the last 24h are now >6h old and still missing required enrichment.`);
+  }
+
+  if (input.enrichmentCoverage.ok && input.enrichmentCoverage.data.alerts.length > 0) {
+    attention = true;
+    attentionItems.push(...input.enrichmentCoverage.data.alerts);
   }
 
   const failedSections = input.sections.filter((section) => !section.ok).length;

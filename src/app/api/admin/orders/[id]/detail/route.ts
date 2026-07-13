@@ -148,7 +148,7 @@ export async function GET(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    // Buyer / seller from order_parties
+    // External parties come from order_parties; header FKs below remain for internal staff assignments.
     const parties = await db
       .select({
         role: orderParties.role,
@@ -159,7 +159,22 @@ export async function GET(
         externalPhone: orderParties.externalPhone,
       })
       .from(orderParties)
-      .where(eq(orderParties.orderId, orderId));
+      .where(eq(orderParties.orderId, orderId))
+      .orderBy(
+        sql`case ${orderParties.role}
+          when 'buyer' then 1
+          when 'seller' then 2
+          when 'lender' then 3
+          when 'lender_contact' then 4
+          when 'listing_agent' then 5
+          when 'escrow_company' then 6
+          when 'other' then 7
+          else 99
+        end`,
+        sql`case when ${orderParties.isPrimary} then 0 else 1 end`,
+        asc(orderParties.createdAt),
+        asc(orderParties.id),
+      );
 
     const buyerParty = parties.find((p) => p.role === 'buyer' && p.isPrimary)
       ?? parties.find((p) => p.role === 'buyer')
@@ -222,6 +237,7 @@ export async function GET(
         propertyType: row.propType,
       },
       parties: {
+        items: parties,
         buyer: formatParty(buyerParty),
         seller: formatParty(sellerParty),
         escrowOfficer: row.eoId ? {

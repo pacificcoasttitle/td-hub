@@ -23,6 +23,8 @@ export const CONTACT_SYNC_JOB_CONFIGS = {
   'softpro.sync_contacts.escrow_company': 'Escrow Company',
   'softpro.sync_contacts.lender': 'Lender',
   'softpro.sync_contacts.mortgage_broker': 'Mortgage Broker',
+  'softpro.sync_contacts.title_company': 'TitleCompany',
+  'softpro.sync_contacts.selling_agent_broker': 'SellingAgentBroker',
   'softpro.sync_contacts.underwriter': 'Underwriter',
 } as const satisfies Record<string, SyncContactEntityType>;
 

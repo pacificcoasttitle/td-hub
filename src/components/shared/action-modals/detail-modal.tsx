@@ -15,6 +15,16 @@ interface OrderDetail {
   transactionType: string | null; productType: string | null; salesPrice: string | null; loanAmount: string | null;
   openedAt: string | null; closedAt: string | null;
   lenderName: string | null; escrowCompanyName: string | null;
+  parties: OrderParty[];
+}
+
+interface OrderParty {
+  role: string;
+  isPrimary: boolean;
+  externalName: string | null;
+  externalCompany: string | null;
+  externalEmail: string | null;
+  externalPhone: string | null;
 }
 
 interface AdminDetailResponse {
@@ -28,6 +38,7 @@ interface AdminDetailResponse {
     county: string | null; apn: string | null; legalDescription: string | null;
   };
   parties?: {
+    items?: OrderParty[];
     buyer?: { firstName: string | null; lastName: string | null } | null;
     seller?: { firstName: string | null; lastName: string | null } | null;
     lender?: { name: string | null } | null;
@@ -106,50 +117,59 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
   const visibleTabs = isClient ? TABS.filter((t) => t !== 'Milestones') : TABS;
 
   useEffect(() => {
-    if (!open) { setTab('Overview'); return; }
-    setLoading(true);
-    Promise.all([
-      fetch(detailUrl).then((r) => r.ok ? r.json() : null),
-      fetch(`${base}/documents`).then((r) => r.ok ? r.json() : { documents: [] }),
-    ]).then(([o, d]) => { setOrder(normalizeOrderDetail(o)); setDocs(d?.documents ?? []); })
-      .catch(() => {}).finally(() => setLoading(false));
+    const timeout = setTimeout(() => {
+      if (!open) { setTab('Overview'); return; }
+      setLoading(true);
+      Promise.all([
+        fetch(detailUrl).then((r) => r.ok ? r.json() : null),
+        fetch(`${base}/documents`).then((r) => r.ok ? r.json() : { documents: [] }),
+      ]).then(([o, d]) => { setOrder(normalizeOrderDetail(o)); setDocs(d?.documents ?? []); })
+        .catch(() => {}).finally(() => setLoading(false));
+    }, 0);
+    return () => clearTimeout(timeout);
   }, [open, base, detailUrl]);
 
   useEffect(() => {
     if (!open) return;
-    setFees(null);
-    setFeesError(null);
-    setFeesLoading(true);
-    setExpandedInvoices(new Set());
+    const timeout = setTimeout(() => {
+      setFees(null);
+      setFeesError(null);
+      setFeesLoading(true);
+      setExpandedInvoices(new Set());
 
-    fetch(`${base}/fees`)
-      .then(async (r) => {
-        const body = await r.json().catch(() => null);
-        if (!r.ok || body?.success === false) {
-          throw new Error(body?.error ?? `Failed to load fees (${r.status})`);
-        }
-        return body?.data as FeesData | undefined;
-      })
-      .then((data) => setFees(data ?? { invoices: [], grandTotal: 0 }))
-      .catch((err: unknown) => setFeesError(err instanceof Error ? err.message : 'Failed to load fees'))
-      .finally(() => setFeesLoading(false));
+      fetch(`${base}/fees`)
+        .then(async (r) => {
+          const body = await r.json().catch(() => null);
+          if (!r.ok || body?.success === false) {
+            throw new Error(body?.error ?? `Failed to load fees (${r.status})`);
+          }
+          return body?.data as FeesData | undefined;
+        })
+        .then((data) => setFees(data ?? { invoices: [], grandTotal: 0 }))
+        .catch((err: unknown) => setFeesError(err instanceof Error ? err.message : 'Failed to load fees'))
+        .finally(() => setFeesLoading(false));
+    }, 0);
+    return () => clearTimeout(timeout);
   }, [open, base]);
 
   useEffect(() => {
     if (!open || isClient) return;
-    setMilestones([]);
-    setMilestonesError(null);
-    setMilestonesLoading(true);
+    const timeout = setTimeout(() => {
+      setMilestones([]);
+      setMilestonesError(null);
+      setMilestonesLoading(true);
 
-    fetch(`/api/orders/${orderId}/milestones`)
-      .then(async (r) => {
-        const body = await r.json().catch(() => null);
-        if (!r.ok) throw new Error(body?.error ?? `Failed to load milestones (${r.status})`);
-        return body?.milestones as Milestone[] | undefined;
-      })
-      .then((items) => setMilestones(items ?? []))
-      .catch((err: unknown) => setMilestonesError(err instanceof Error ? err.message : 'Failed to load milestones'))
-      .finally(() => setMilestonesLoading(false));
+      fetch(`/api/orders/${orderId}/milestones`)
+        .then(async (r) => {
+          const body = await r.json().catch(() => null);
+          if (!r.ok) throw new Error(body?.error ?? `Failed to load milestones (${r.status})`);
+          return body?.milestones as Milestone[] | undefined;
+        })
+        .then((items) => setMilestones(items ?? []))
+        .catch((err: unknown) => setMilestonesError(err instanceof Error ? err.message : 'Failed to load milestones'))
+        .finally(() => setMilestonesLoading(false));
+    }, 0);
+    return () => clearTimeout(timeout);
   }, [open, isClient, orderId]);
 
   const seller = order ? [order.sellerFirstName, order.sellerLastName].filter(Boolean).join(' ') : '';
@@ -197,12 +217,7 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
               </div>
             )}
             {tab === 'Parties' && (
-              <div className="grid grid-cols-2 gap-3">
-                <F l="Seller" v={seller || '—'} />
-                <F l="Buyer / Borrower" v={buyer || '—'} />
-                <F l="Lender" v={order.lenderName ?? '—'} />
-                <F l="Escrow Company" v={order.escrowCompanyName ?? '—'} />
-              </div>
+              <PartiesTab parties={order.parties} />
             )}
             {tab === 'Documents' && (
               docs.length > 0 ? <DocGroups docs={docs} isClient={isClient} /> : (
@@ -272,6 +287,7 @@ function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse |
       closedAt: data.closedAt ?? null,
       lenderName: null,
       escrowCompanyName: null,
+      parties: [],
     };
   }
 
@@ -299,11 +315,77 @@ function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse |
     closedAt: data.order.closedAt ?? null,
     lenderName: data.parties?.lender?.name ?? null,
     escrowCompanyName: data.parties?.escrowOfficer?.name ?? null,
+    parties: data.parties?.items ?? [],
   };
 }
 
 function F({ l, v }: { l: string; v: string }) {
   return <div className="px-3 py-2.5 bg-gray-50 rounded-lg"><p className="text-[10px] uppercase tracking-wider text-[#6B7280]">{l}</p><p className="text-sm font-medium text-[#1A1A2E] mt-0.5 truncate">{v}</p></div>;
+}
+
+function PartiesTab({ parties }: { parties: OrderParty[] }) {
+  if (parties.length === 0) {
+    return (
+      <div className="p-8 text-center bg-gray-50 rounded-lg">
+        <p className="text-sm font-medium text-[#1A1A2E]">No parties found</p>
+        <p className="text-xs text-[#6B7280] mt-1">SoftPro confirmed this order has no external parties yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {parties.map((party, index) => (
+        <PartyField key={`${party.role}-${index}`} party={party} />
+      ))}
+    </div>
+  );
+}
+
+function PartyField({ party }: { party: OrderParty }) {
+  const company = party.externalCompany?.trim() || null;
+  const person = party.externalName?.trim() || null;
+  const primaryLine = company ?? person ?? '—';
+  const secondaryLine = company && person ? person : null;
+
+  return (
+    <div className="px-3 py-2.5 bg-gray-50 rounded-lg">
+      <div className="flex items-center gap-1.5">
+        <p className="text-[10px] uppercase tracking-wider text-[#6B7280]">{partyLabel(party)}</p>
+        {party.isPrimary && <span className="text-[10px] font-medium text-[#6B7280] normal-case">(Primary)</span>}
+      </div>
+      <p className="text-sm font-medium text-[#1A1A2E] mt-0.5 truncate">{primaryLine}</p>
+      {secondaryLine && <p className="text-xs text-[#4B5563] mt-0.5 truncate">{secondaryLine}</p>}
+      {(party.externalEmail || party.externalPhone) && (
+        <div className="text-xs text-[#6B7280] mt-1 space-y-px">
+          {party.externalEmail && <p className="truncate">{party.externalEmail}</p>}
+          {party.externalPhone && <p>{party.externalPhone}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function partyLabel(party: OrderParty): string {
+  switch (party.role) {
+    case 'buyer':
+    case 'borrower':
+      return 'Buyer / Borrower';
+    case 'seller':
+      return 'Seller';
+    case 'lender':
+      return 'Lender';
+    case 'lender_contact':
+      return 'Lender Contact';
+    case 'listing_agent':
+      return 'Listing Agent';
+    case 'escrow_company':
+      return 'Escrow Company';
+    case 'other':
+      return party.isPrimary ? 'Title Company' : 'Underwriter';
+    default:
+      return party.role.replace(/_/g, ' ');
+  }
 }
 
 function money(value: number | string | null | undefined): string {

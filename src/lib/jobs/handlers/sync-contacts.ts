@@ -287,6 +287,7 @@ async function syncSalesRepRows(
 interface CompanySyncConfig {
   entityType: string;
   userType: string;
+  companyType: string;
   contactFlag: 'isEscrow' | 'isLender' | 'isMortgageBroker' | 'isUnderwriter';
   companyFlag: 'isEscrowCompany' | 'isLender' | 'isMortgageBroker' | 'isUnderwriter';
   useSpacedFields: boolean;
@@ -377,6 +378,7 @@ async function syncCompanyType(config: CompanySyncConfig, items: SyncRow[]): Pro
         lookupCode: code,
         name: str(item, f.name) ?? code,
         payeeName: str(item, f.payeeName),
+        companyType: config.companyType,
         address1: str(item, f.address1),
         address2: str(item, f.address2),
         city: str(item, f.city),
@@ -444,6 +446,7 @@ const COMPANY_CONFIGS: Record<string, CompanySyncConfig> = {
   'Escrow Company': {
     entityType: 'Escrow Company',
     userType: 'Escrow Company',
+    companyType: 'escrow_company',
     contactFlag: 'isEscrow',
     companyFlag: 'isEscrowCompany',
     useSpacedFields: true,
@@ -451,6 +454,7 @@ const COMPANY_CONFIGS: Record<string, CompanySyncConfig> = {
   'Lender': {
     entityType: 'Lender',
     userType: 'Lender',
+    companyType: 'lender',
     contactFlag: 'isLender',
     companyFlag: 'isLender',
     useSpacedFields: false,
@@ -458,6 +462,7 @@ const COMPANY_CONFIGS: Record<string, CompanySyncConfig> = {
   'Mortgage Broker': {
     entityType: 'Mortgage Broker',
     userType: 'Mortgage Broker',
+    companyType: 'mortgage_broker',
     contactFlag: 'isMortgageBroker',
     companyFlag: 'isMortgageBroker',
     useSpacedFields: true,
@@ -465,6 +470,7 @@ const COMPANY_CONFIGS: Record<string, CompanySyncConfig> = {
   'Underwriter': {
     entityType: 'Underwriter',
     userType: 'Underwriter',
+    companyType: 'underwriter',
     contactFlag: 'isUnderwriter',
     companyFlag: 'isUnderwriter',
     useSpacedFields: true,

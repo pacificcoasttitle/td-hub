@@ -3,6 +3,7 @@ import { contacts, companies } from '@/lib/db/schema';
 import { and, eq, or, sql } from 'drizzle-orm';
 import { getLookupTable, getSalesReps } from '@/lib/integrations/softpro';
 import type { SoftProLookupItem } from '@/lib/integrations/softpro';
+import { COMPANY_TYPE_MAP } from '@/lib/domain/contacts/company-constants';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,6 +30,8 @@ export const SYNC_CONTACT_ENTITY_TYPES = [
   'Escrow Company',
   'Lender',
   'Mortgage Broker',
+  'TitleCompany',
+  'SellingAgentBroker',
   'Underwriter',
 ] as const;
 
@@ -288,8 +291,8 @@ interface CompanySyncConfig {
   entityType: string;
   userType: string;
   companyType: string;
-  contactFlag: 'isEscrow' | 'isLender' | 'isMortgageBroker' | 'isUnderwriter';
-  companyFlag: 'isEscrowCompany' | 'isLender' | 'isMortgageBroker' | 'isUnderwriter';
+  contactFlag?: 'isEscrow' | 'isLender' | 'isMortgageBroker' | 'isRealEstateAgent' | 'isUnderwriter';
+  companyFlag: 'isEscrowCompany' | 'isLender' | 'isMortgageBroker' | 'isRealEstateCompany' | 'isTitleCompany' | 'isUnderwriter';
   useSpacedFields: boolean;
   extraCompanyFields?: (item: SyncRow) => Record<string, string | null>;
 }
@@ -352,13 +355,15 @@ async function syncCompanyType(config: CompanySyncConfig, items: SyncRow[]): Pro
       const [existingContact] = await db.select({ id: contacts.id })
         .from(contacts).where(eq(contacts.flookupCode, code)).limit(1);
 
-      const contactVals = {
+      const contactVals: Record<string, unknown> = {
         flookupCode: code,
         companyName: str(item, f.name),
-        [config.contactFlag]: true,
         isActive: true,
         updatedAt: new Date(),
       };
+      if (config.contactFlag) {
+        contactVals[config.contactFlag] = true;
+      }
 
       if (existingContact) {
         await db.update(contacts).set(contactVals).where(eq(contacts.id, existingContact.id));
@@ -467,6 +472,21 @@ const COMPANY_CONFIGS: Record<string, CompanySyncConfig> = {
     companyFlag: 'isMortgageBroker',
     useSpacedFields: true,
   },
+  'TitleCompany': {
+    entityType: 'TitleCompany',
+    userType: COMPANY_TYPE_MAP.title_company,
+    companyType: 'title_company',
+    companyFlag: 'isTitleCompany',
+    useSpacedFields: false,
+  },
+  'SellingAgentBroker': {
+    entityType: 'SellingAgentBroker',
+    userType: COMPANY_TYPE_MAP.real_estate_company,
+    companyType: 'real_estate_company',
+    contactFlag: 'isRealEstateAgent',
+    companyFlag: 'isRealEstateCompany',
+    useSpacedFields: false,
+  },
   'Underwriter': {
     entityType: 'Underwriter',
     userType: 'Underwriter',
@@ -497,7 +517,7 @@ export async function fetchSyncContactRows(
     }
   }
 
-  const adapterResult = await getLookupTable(entityType);
+  const adapterResult = await getLookupTable(COMPANY_CONFIGS[entityType]?.userType ?? entityType);
   if (!adapterResult.success || !adapterResult.data) {
     return { items: [], error: adapterResult.error?.message ?? 'Failed to fetch lookup table' };
   }
@@ -519,9 +539,11 @@ export function getSyncContactLookupCode(
     case 'Sales Rep':
       return str(item, 'LookUpCode') ?? str(item, 'LookupCode');
     case 'Escrow Company':
+    case 'TitleCompany':
+    case 'SellingAgentBroker':
     case 'Mortgage Broker':
     case 'Underwriter':
-      return str(item, SPACED.lookupCode);
+      return str(item, CAMEL.lookupCode) ?? str(item, SPACED.lookupCode);
     case 'Lender':
       return str(item, CAMEL.lookupCode);
   }

@@ -180,6 +180,7 @@ export const companies = pgTable('companies', {
   isLender: boolean('is_lender').notNull().default(false),
   isMortgageBroker: boolean('is_mortgage_broker').notNull().default(false),
   isRealEstateCompany: boolean('is_real_estate_company').notNull().default(false),
+  isTitleCompany: boolean('is_title_company').notNull().default(false),
   isUnderwriter: boolean('is_underwriter').notNull().default(false),
 
   surveysDisabled: boolean('surveys_disabled').notNull().default(false),

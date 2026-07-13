@@ -30,7 +30,6 @@ export const SYNC_CONTACT_ENTITY_TYPES = [
   'Escrow Company',
   'Lender',
   'Mortgage Broker',
-  'TitleCompany',
   'SellingAgentBroker',
   'Underwriter',
 ] as const;
@@ -292,7 +291,7 @@ interface CompanySyncConfig {
   userType: string;
   companyType: string;
   contactFlag?: 'isEscrow' | 'isLender' | 'isMortgageBroker' | 'isRealEstateAgent' | 'isUnderwriter';
-  companyFlag: 'isEscrowCompany' | 'isLender' | 'isMortgageBroker' | 'isRealEstateCompany' | 'isTitleCompany' | 'isUnderwriter';
+  companyFlag: 'isEscrowCompany' | 'isLender' | 'isMortgageBroker' | 'isRealEstateCompany' | 'isUnderwriter';
   useSpacedFields: boolean;
   extraCompanyFields?: (item: SyncRow) => Record<string, string | null>;
 }
@@ -472,20 +471,13 @@ const COMPANY_CONFIGS: Record<string, CompanySyncConfig> = {
     companyFlag: 'isMortgageBroker',
     useSpacedFields: true,
   },
-  'TitleCompany': {
-    entityType: 'TitleCompany',
-    userType: COMPANY_TYPE_MAP.title_company,
-    companyType: 'title_company',
-    companyFlag: 'isTitleCompany',
-    useSpacedFields: false,
-  },
   'SellingAgentBroker': {
     entityType: 'SellingAgentBroker',
     userType: COMPANY_TYPE_MAP.real_estate_company,
     companyType: 'real_estate_company',
     contactFlag: 'isRealEstateAgent',
     companyFlag: 'isRealEstateCompany',
-    useSpacedFields: false,
+    useSpacedFields: true,
   },
   'Underwriter': {
     entityType: 'Underwriter',
@@ -539,7 +531,6 @@ export function getSyncContactLookupCode(
     case 'Sales Rep':
       return str(item, 'LookUpCode') ?? str(item, 'LookupCode');
     case 'Escrow Company':
-    case 'TitleCompany':
     case 'SellingAgentBroker':
     case 'Mortgage Broker':
     case 'Underwriter':

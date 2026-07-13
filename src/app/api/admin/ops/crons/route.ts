@@ -23,7 +23,6 @@ const CRON_SCHEDULES: Record<string, string> = {
   'softpro.sync_contacts.escrow_company': 'Every 3h :45 UTC (:45 PT offset by -7/-8h), 16h per-type cooldown',
   'softpro.sync_contacts.lender': 'Every 3h :55 UTC (:55 PT offset by -7/-8h), 16h per-type cooldown',
   'softpro.sync_contacts.mortgage_broker': 'Every 3h :10 UTC on 1/4/7... UTC (:10 PT offset by -7/-8h), 16h per-type cooldown',
-  'softpro.sync_contacts.title_company': 'Every 3h :30 UTC on 1/4/7... UTC (:30 PT offset by -7/-8h), 16h per-type cooldown',
   'softpro.sync_contacts.selling_agent_broker': 'Every 3h :40 UTC on 1/4/7... UTC (:40 PT offset by -7/-8h), 16h per-type cooldown',
   'softpro.sync_contacts.underwriter': 'Every 3h :20 UTC on 1/4/7... UTC (:20 PT offset by -7/-8h), 16h per-type cooldown',
   'import-orders': 'Manual only (date-range timeouts)',

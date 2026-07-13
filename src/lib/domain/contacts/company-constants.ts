@@ -5,8 +5,8 @@ export const COMPANY_TYPE_MAP: Record<string, string> = {
   lender: 'Lender',
   mortgage_broker: 'Mortgage Broker',
   realtor: 'Real Estate',
-  real_estate_company: 'SellingAgentBroker',
-  title_company: 'TitleCompany',
+  real_estate_company: 'Selling Agent/Broker',
+  title_company: 'Title Company',
   underwriter: 'Underwriter',
 };
 
@@ -20,6 +20,8 @@ export const DISPLAY_TO_TYPE: Record<string, string> = {
   'Real Estate': 'real_estate_company',
   'ListingAgentBroker': 'real_estate_company',
   'SellingAgentBroker': 'real_estate_company',
+  'Listing Agent/Broker': 'real_estate_company',
+  'Selling Agent/Broker': 'real_estate_company',
   'Title Company': 'title_company',
   'TitleCompany': 'title_company',
   'Underwriter': 'underwriter',

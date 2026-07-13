@@ -80,8 +80,6 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleSyncContactType('softpro.sync_contacts.lender'),
   'softpro.sync_contacts.mortgage_broker': () =>
     handleSyncContactType('softpro.sync_contacts.mortgage_broker'),
-  'softpro.sync_contacts.title_company': () =>
-    handleSyncContactType('softpro.sync_contacts.title_company'),
   'softpro.sync_contacts.selling_agent_broker': () =>
     handleSyncContactType('softpro.sync_contacts.selling_agent_broker'),
   'softpro.sync_contacts.underwriter': () =>

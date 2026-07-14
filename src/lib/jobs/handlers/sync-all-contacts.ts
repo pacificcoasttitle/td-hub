@@ -113,7 +113,10 @@ export async function handleSyncContactType(
     });
 
   try {
-    const fetched = await fetchSyncContactRows(entityType);
+    const syncStartedAt = new Date();
+    const fetched = await fetchSyncContactRows(entityType, {
+      modifiedSince: existingState?.lastSyncedAt?.toISOString() ?? null,
+    });
     if (fetched.error) {
       throw new Error(`${jobType}: ${fetched.error}`);
     }
@@ -144,6 +147,7 @@ export async function handleSyncContactType(
         .set({
           status: 'completed',
           cursorLookupCode: null,
+          lastSyncedAt: now,
           lastCompletedAt: new Date(),
           nextAllowedAt,
           totalFetched: fetched.items.length,
@@ -184,6 +188,7 @@ export async function handleSyncContactType(
       .set({
         status,
         cursorLookupCode: completed ? null : lastCursor,
+        lastSyncedAt: completed ? syncStartedAt : existingState?.lastSyncedAt ?? null,
         lastCompletedAt: completed ? new Date() : existingState?.lastCompletedAt ?? null,
         nextAllowedAt,
         totalFetched: fetched.items.length,

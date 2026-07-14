@@ -115,6 +115,21 @@ export interface SoftProOrderContactsData {
 
 export type SoftProLookupItem = Record<string, string>;
 
+export interface SoftProLookupTableRequest {
+  userType: string;
+  modifiedSince?: string;
+  Page?: number;
+  pageSize?: number;
+}
+
+export interface SoftProLookupTablePage {
+  items: SoftProLookupItem[];
+  hasMore: boolean;
+  page: number;
+  pageSize: number;
+  modifiedSince: string | null;
+}
+
 // Known field names for the Title Officer entity type
 export const TITLE_OFFICER_FIELDS = {
   code: 'Title officer/Examiner',

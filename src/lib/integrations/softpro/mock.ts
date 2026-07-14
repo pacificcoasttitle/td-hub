@@ -127,10 +127,31 @@ export async function getAttachedDocuments(
 
 export async function getLookupTable(
   userType: string
-): Promise<VendorResult<SoftProLookupItem[]>> {
+): Promise<VendorResult<SoftProLookupItem[]>>;
+export async function getLookupTable(
+  params: import('./types').SoftProLookupTableRequest
+): Promise<VendorResult<import('./types').SoftProLookupTablePage>>;
+export async function getLookupTable(
+  input: string | import('./types').SoftProLookupTableRequest
+): Promise<VendorResult<SoftProLookupItem[] | import('./types').SoftProLookupTablePage>> {
   await new Promise((r) => setTimeout(r, 50));
+  const userType = typeof input === 'string' ? input : input.userType;
   const items = MOCK_LOOKUP_ITEMS[userType] ?? [];
-  return vendorSuccess(items, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 50 });
+  if (typeof input === 'string') {
+    return vendorSuccess(items, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 50 });
+  }
+
+  const page = input.Page ?? 1;
+  const pageSize = input.pageSize ?? 1000;
+  const start = (page - 1) * pageSize;
+  const pagedItems = items.slice(start, start + pageSize);
+  return vendorSuccess({
+    items: pagedItems,
+    hasMore: start + pageSize < items.length,
+    page,
+    pageSize,
+    modifiedSince: input.modifiedSince ?? null,
+  }, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 50 });
 }
 
 export async function addNotes(

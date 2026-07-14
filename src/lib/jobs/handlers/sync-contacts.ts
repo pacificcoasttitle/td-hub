@@ -40,6 +40,11 @@ interface SyncContactRowsOptions {
   deactivateExistingSalesReps?: boolean;
 }
 
+interface FetchSyncContactRowsOptions {
+  modifiedSince?: string | null;
+  pageSize?: number;
+}
+
 function str(item: SyncRow, key: string): string | null {
   const v = item[key];
   return v && v.trim() ? v.trim() : null;
@@ -492,7 +497,8 @@ const COMPANY_CONFIGS: Record<string, CompanySyncConfig> = {
 // ─── Main Handler ────────────────────────────────────────────────────────
 
 export async function fetchSyncContactRows(
-  entityType: SyncContactEntityType
+  entityType: SyncContactEntityType,
+  options: FetchSyncContactRowsOptions = {},
 ): Promise<{ items: SyncRow[]; error: string | null }> {
   if (entityType === 'Sales Rep') {
     try {
@@ -509,12 +515,30 @@ export async function fetchSyncContactRows(
     }
   }
 
-  const adapterResult = await getLookupTable(COMPANY_CONFIGS[entityType]?.userType ?? entityType);
-  if (!adapterResult.success || !adapterResult.data) {
-    return { items: [], error: adapterResult.error?.message ?? 'Failed to fetch lookup table' };
+  const userType = COMPANY_CONFIGS[entityType]?.userType ?? entityType;
+  const pageSize = options.pageSize ?? 1000;
+  const items: SyncRow[] = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore) {
+    const adapterResult = await getLookupTable({
+      userType,
+      Page: page,
+      pageSize,
+      ...(options.modifiedSince ? { modifiedSince: options.modifiedSince } : {}),
+    });
+
+    if (!adapterResult.success || !adapterResult.data) {
+      return { items: [], error: adapterResult.error?.message ?? 'Failed to fetch lookup table' };
+    }
+
+    items.push(...adapterResult.data.items);
+    hasMore = adapterResult.data.hasMore;
+    page += 1;
   }
 
-  return { items: adapterResult.data, error: null };
+  return { items, error: null };
 }
 
 export function getSyncContactLookupCode(

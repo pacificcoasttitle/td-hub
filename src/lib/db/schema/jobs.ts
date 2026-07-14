@@ -33,6 +33,7 @@ export const contactSyncState = pgTable('contact_sync_state', {
   jobType: varchar('job_type', { length: 100 }).notNull(),
   status: varchar('status', { length: 20 }).notNull().default('idle'),
   cursorLookupCode: varchar('cursor_lookup_code', { length: 200 }),
+  lastSyncedAt: timestamp('last_synced_at'),
   lastStartedAt: timestamp('last_started_at'),
   lastCompletedAt: timestamp('last_completed_at'),
   nextAllowedAt: timestamp('next_allowed_at'),

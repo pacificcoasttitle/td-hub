@@ -4,6 +4,8 @@ import {
   SoftProOrderItem,
   SoftProOrderDetailItem,
   SoftProLookupItem,
+  SoftProLookupTablePage,
+  SoftProLookupTableRequest,
   SoftProOrderContactsData,
   SoftProAttachedDocument,
   SoftProFeeResponse,
@@ -624,13 +626,152 @@ export async function uploadDocument(params: {
   });
 }
 
+export async function getLookupTable(userType: string): Promise<VendorResult<SoftProLookupItem[]>>;
+export async function getLookupTable(params: SoftProLookupTableRequest): Promise<VendorResult<SoftProLookupTablePage>>;
 export async function getLookupTable(
-  userType: string
-): Promise<VendorResult<SoftProLookupItem[]>> {
-  return makeRequest<SoftProLookupItem[]>('GET', SOFTPRO_ENDPOINTS.getLookupTable, {
-    queryParams: { userType },
-    operation: 'get_lookup_table',
-  });
+  input: string | SoftProLookupTableRequest,
+): Promise<VendorResult<SoftProLookupItem[] | SoftProLookupTablePage>> {
+  if (typeof input === 'string') {
+    return makeRequest<SoftProLookupItem[]>('GET', SOFTPRO_ENDPOINTS.getLookupTable, {
+      queryParams: { userType: input },
+      operation: 'get_lookup_table',
+    });
+  }
+
+  const page = input.Page ?? 1;
+  const pageSize = input.pageSize ?? 1000;
+  const queryParams: Record<string, string> = {
+    userType: input.userType,
+    Page: String(page),
+    pageSize: String(pageSize),
+  };
+  if (input.modifiedSince) {
+    queryParams.modifiedSince = input.modifiedSince;
+  }
+
+  const requestId = crypto.randomUUID();
+  const startedAt = new Date();
+  const url = getBaseUrl() + SOFTPRO_ENDPOINTS.getLookupTable + '?' + new URLSearchParams(queryParams).toString();
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...buildSoftProHeaders({ requireToken: false }),
+      },
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    let parsed: unknown;
+    let rawText: string | undefined;
+    try {
+      rawText = await response.text();
+      parsed = JSON.parse(rawText) as unknown;
+    } catch {
+      const durationMs = Date.now() - startedAt.getTime();
+      const category = categorizeSoftProResponse({
+        httpStatus: response.status,
+        message: rawText,
+      });
+      const retryable = isRetryableSoftProError(category);
+      await logRequest({
+        operation: 'get_lookup_table',
+        requestId,
+        startedAt,
+        success: false,
+        httpStatus: response.status,
+        retryable,
+        errorCategory: category,
+        requestMeta: { url, method: 'GET', queryParams },
+        responseMeta: { bodyStatus: null, rawSnippet: (rawText ?? '').slice(0, 500) },
+      });
+      return vendorError<SoftProLookupTablePage>(
+        VENDOR,
+        softProCategoryToErrorCode(category),
+        `Non-JSON response (HTTP ${response.status}): ${(rawText ?? '').slice(0, 200)}`,
+        { httpStatus: response.status, requestId, durationMs, retryable },
+      );
+    }
+
+    const raw = parsed as SoftProResponse<SoftProLookupItem[]> & {
+      HasMore?: boolean;
+      hasMore?: boolean;
+      Page?: number;
+      pageSize?: number;
+    };
+    const success = raw.Status === 200 && response.status < 400 && Array.isArray(raw.data);
+    const category = categorizeSoftProResponse({
+      bodyStatus: raw.Status,
+      httpStatus: response.status,
+      message: raw.Message,
+    });
+    const retryable = isRetryableSoftProError(category);
+    const durationMs = Date.now() - startedAt.getTime();
+    const pageData: SoftProLookupTablePage = {
+      items: Array.isArray(raw.data) ? raw.data : [],
+      hasMore: raw.HasMore === true || raw.hasMore === true,
+      page: typeof raw.Page === 'number' ? raw.Page : page,
+      pageSize: typeof raw.pageSize === 'number' ? raw.pageSize : pageSize,
+      modifiedSince: input.modifiedSince ?? null,
+    };
+
+    await logRequest({
+      operation: 'get_lookup_table',
+      requestId,
+      startedAt,
+      success,
+      httpStatus: response.status,
+      retryable: success ? false : retryable,
+      errorCategory: success ? undefined : category,
+      requestMeta: { url, method: 'GET', queryParams },
+      responseMeta: success
+        ? {
+          status: raw.Status,
+          bodyStatus: raw.Status,
+          message: raw.Message,
+          resultCount: pageData.items.length,
+          hasMore: pageData.hasMore,
+          page: pageData.page,
+          pageSize: pageData.pageSize,
+          modifiedSince: pageData.modifiedSince,
+        }
+        : { status: raw.Status, bodyStatus: raw.Status, message: raw.Message, rawBody: raw },
+    });
+
+    if (success) {
+      return vendorSuccess(pageData, { requestId, durationMs });
+    }
+
+    return vendorError<SoftProLookupTablePage>(
+      VENDOR,
+      softProCategoryToErrorCode(category),
+      raw.Message || 'SoftPro lookup table failed',
+      { httpStatus: response.status, requestId, durationMs, retryable },
+    );
+  } catch (err) {
+    const durationMs = Date.now() - startedAt.getTime();
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    const isConfigError = err instanceof SoftProConfigError;
+
+    await logRequest({
+      operation: 'get_lookup_table',
+      requestId,
+      startedAt,
+      success: false,
+      retryable: !isConfigError,
+      errorCategory: isConfigError ? 'auth' : 'unknown',
+      requestMeta: { url, method: 'GET', queryParams },
+      responseMeta: { bodyStatus: null, error: message },
+    });
+
+    return vendorError<SoftProLookupTablePage>(
+      VENDOR,
+      isConfigError ? 'AUTH' : 'NETWORK_ERROR',
+      message,
+      { retryable: !isConfigError, requestId, durationMs },
+    );
+  }
 }
 
 export async function addNotes(

@@ -1,6 +1,8 @@
 export * from './types';
 export * from './mapper';
 export * from './auth';
+import type { VendorResult } from '../types';
+import type { SoftProLookupItem, SoftProLookupTablePage, SoftProLookupTableRequest } from './types';
 
 const useMock = !process.env.SOFTPRO_API_URL;
 
@@ -61,13 +63,21 @@ export async function getAttachedDocuments(orderNumber: string) {
   return client.getAttachedDocuments(orderNumber);
 }
 
-export async function getLookupTable(userType: Parameters<typeof import('./client').getLookupTable>[0]) {
+export async function getLookupTable(userType: string): Promise<VendorResult<SoftProLookupItem[]>>;
+export async function getLookupTable(params: SoftProLookupTableRequest): Promise<VendorResult<SoftProLookupTablePage>>;
+export async function getLookupTable(
+  params: string | SoftProLookupTableRequest,
+): Promise<VendorResult<SoftProLookupItem[] | SoftProLookupTablePage>> {
   if (useMock) {
     const mock = await import('./mock');
-    return mock.getLookupTable(userType);
+    return typeof params === 'string'
+      ? mock.getLookupTable(params)
+      : mock.getLookupTable(params);
   }
   const client = await import('./client');
-  return client.getLookupTable(userType);
+  return typeof params === 'string'
+    ? client.getLookupTable(params)
+    : client.getLookupTable(params);
 }
 
 export async function uploadDocument(params: Parameters<typeof import('./client').uploadDocument>[0]) {

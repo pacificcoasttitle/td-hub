@@ -10,6 +10,7 @@ import OrderTitlePoint from '@/components/admin/order-titlepoint';
 import { OrderOverviewTab } from '@/components/admin/order-tabs/order-overview-tab';
 import { OrderPropertyTab } from '@/components/admin/order-tabs/order-property-tab';
 import { OrderHistoryTab } from '@/components/admin/order-tabs/order-history-tab';
+import { DeliverPrelimModal } from '@/components/shared/action-modals';
 
 interface OrderProperty {
   address: string | null;
@@ -52,6 +53,9 @@ interface OrderDetail {
   property: OrderProperty | null;
   parties: unknown[];
   statusHistory: StatusHistoryEntry[];
+  documents?: {
+    prelim?: { exists: boolean };
+  };
 }
 
 const TABS = ['Overview', 'Property', 'Documents', 'Fees', 'Vendor Actions', 'History'] as const;
@@ -78,6 +82,7 @@ export default function OrderDetailPage() {
   const [syncSuccess, setSyncSuccess] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ match: boolean; changes: { field: string; old: string; new: string }[] } | null>(null);
+  const [deliverPrelimOpen, setDeliverPrelimOpen] = useState(false);
 
   const fetchOrder = useCallback(
     (signal?: AbortSignal) =>
@@ -93,8 +98,11 @@ export default function OrderDetailPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      setLoading(true);
+      setError(null);
+    });
     fetchOrder(controller.signal)
       .catch((err) => { if (err.name !== 'AbortError') setError(err.message); })
       .finally(() => setLoading(false));
@@ -154,6 +162,12 @@ export default function OrderDetailPage() {
 
   if (!order) return null;
 
+  const deliverStatus = (order.softproStatus ?? order.operationalStatus ?? '').toLowerCase().trim();
+  const canDeliverPrelim = !!order.documents?.prelim?.exists && !['canceled', 'cancelled', 'duplicate'].includes(deliverStatus);
+  const orderAddress = order.property?.fullAddress
+    ?? [order.property?.address, order.property?.city, order.property?.state].filter(Boolean).join(', ')
+    ?? '';
+
   return (
     <div className="p-6">
       <BackLink />
@@ -167,6 +181,12 @@ export default function OrderDetailPage() {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {order.softproLastSyncedAt && <p className="text-xs text-[#6B7280]">Last synced {formatDateTime(order.softproLastSyncedAt)}</p>}
+          {canDeliverPrelim && (
+            <button onClick={() => setDeliverPrelimOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-semibold bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] transition-colors">
+              Deliver Prelim
+            </button>
+          )}
           <button onClick={handleVerifySync} disabled={verifying || syncing}
             className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium border border-[#1B2A4A] text-[#1B2A4A] rounded-lg hover:bg-[#1B2A4A]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
             <svg className={`h-3.5 w-3.5 ${verifying ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -247,6 +267,13 @@ export default function OrderDetailPage() {
           </div>
         )}
       </div>
+      <DeliverPrelimModal
+        open={deliverPrelimOpen}
+        onClose={() => setDeliverPrelimOpen(false)}
+        orderId={order.id}
+        fileNumber={order.fileNumber}
+        address={orderAddress}
+      />
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  CplModal, PrelimModal, ProposedInsuredModal, NotesModal, DetailModal,
+  CplModal, PrelimModal, ProposedInsuredModal, NotesModal, DetailModal, DeliverPrelimModal,
 } from '@/components/shared/action-modals';
 import { STATUS_OPTS, STATUS_LABELS, TH, StatusBadge, DocBadges, ActionsDropdown } from './orders-hub-parts';
 import type { OrderDocuments } from './orders-hub-parts';
@@ -19,6 +19,7 @@ export interface HubOrder {
   propertyCity: string | null;
   propertyState: string | null;
   operationalStatus: string | null;
+  softproStatus?: string | null;
   transactionType: string | null;
   openedAt: string | null;
   clientContactId?: number | null;
@@ -32,8 +33,8 @@ export interface HubOrder {
   escrowOfficerName?: string | null;
 }
 
-export type ActionType = 'cpl' | 'prelim' | 'proposed' | 'notes' | 'detail' | 'fees' | 'resync' | 'retry_tp';
-type ModalType = 'cpl' | 'prelim' | 'proposed' | 'notes' | 'detail' | null;
+export type ActionType = 'cpl' | 'prelim' | 'deliver_prelim' | 'proposed' | 'notes' | 'detail' | 'fees' | 'resync' | 'retry_tp';
+type ModalType = 'cpl' | 'prelim' | 'deliver_prelim' | 'proposed' | 'notes' | 'detail' | null;
 
 export interface OrdersHubTableProps {
   fetchUrl: string;
@@ -110,7 +111,10 @@ export function OrdersHubTable({
       .finally(() => setLoading(false));
   }, [fetchUrl, page, pageSize, status, search]);
 
-  useEffect(() => { setLoading(true); fetchOrders(); }, [fetchOrders]);
+  useEffect(() => {
+    queueMicrotask(() => setLoading(true));
+    fetchOrders();
+  }, [fetchOrders]);
   useEffect(() => {
     if (!pollMs || pollMs <= 0) return;
     const id = setInterval(() => { if (!document.hidden) fetchOrders(); }, pollMs);
@@ -132,12 +136,14 @@ export function OrdersHubTable({
   }, [isClient]);
 
   useEffect(() => {
-    setPage(1);
+    queueMicrotask(() => setPage(1));
   }, [fetchUrl]);
 
   useEffect(() => {
-    setSelectedMap(new Map());
-    onSelectedOrdersChange?.([]);
+    queueMicrotask(() => {
+      setSelectedMap(new Map());
+      onSelectedOrdersChange?.([]);
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, status, fetchUrl]);
 
@@ -291,6 +297,8 @@ export function OrdersHubTable({
                         <ActionsDropdown
                           orderId={o.id}
                           hasProperty={!!(o.propertyStreet || o.propertyCity)}
+                          softproStatus={o.softproStatus}
+                          operationalStatus={o.operationalStatus}
                           documents={o.documents}
                           actions={actions}
                           isClient={isClient}
@@ -328,6 +336,7 @@ export function OrdersHubTable({
         <>
           {actions.includes('cpl') && <CplModal open={modal === 'cpl'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} isClient={isClient} accentColor={accentColor} />}
           {actions.includes('prelim') && <PrelimModal open={modal === 'prelim'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} isClient={isClient} accentColor={accentColor} />}
+          {actions.includes('deliver_prelim') && <DeliverPrelimModal open={modal === 'deliver_prelim'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} accentColor={accentColor} />}
           {actions.includes('proposed') && <ProposedInsuredModal open={modal === 'proposed'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} accentColor={accentColor} />}
           {actions.includes('notes') && <NotesModal open={modal === 'notes'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} isClient={isClient} accentColor={accentColor} />}
           {actions.includes('detail') && <DetailModal open={modal === 'detail'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} isClient={isClient} accentColor={accentColor} />}

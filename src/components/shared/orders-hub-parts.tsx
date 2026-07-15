@@ -7,12 +7,13 @@ import React, { useState, useRef, useEffect } from 'react';
 export interface DocCatFull { exists: boolean; count: number; latestId: number | null; latestCreatedAt: string | null }
 interface DocCatBool { exists: boolean }
 export interface OrderDocuments {
-  cpl: DocCatFull; proposedInsured: DocCatFull;
+  cpl: DocCatFull; prelim: DocCatFull; proposedInsured: DocCatFull;
   legalVesting: DocCatBool; tax: DocCatBool; grantDeed: DocCatBool;
 }
 
 const DOC_BADGE_CONFIG: { key: keyof OrderDocuments; label: string; bg: string; text: string }[] = [
   { key: 'cpl',             label: 'CPL', bg: 'bg-purple-100', text: 'text-purple-700' },
+  { key: 'prelim',          label: 'Prelim', bg: 'bg-blue-100', text: 'text-blue-700' },
   { key: 'proposedInsured', label: 'PI',  bg: 'bg-teal-100',   text: 'text-teal-700' },
   { key: 'legalVesting',    label: 'LV',  bg: 'bg-blue-100',   text: 'text-blue-700' },
   { key: 'tax',             label: 'Tax', bg: 'bg-green-100',  text: 'text-green-700' },
@@ -80,6 +81,8 @@ export function ActionBtn({ icon, title, onClick }: { icon: string; title: strin
 export interface ActionsDropdownProps {
   orderId: number;
   hasProperty: boolean;
+  softproStatus?: string | null;
+  operationalStatus?: string | null;
   documents?: OrderDocuments;
   actions: string[];
   isClient: boolean;
@@ -112,7 +115,7 @@ function Divider() {
 }
 
 export function ActionsDropdown({
-  orderId, hasProperty, documents, actions, isClient, onOpenModal, feesHref, onRefresh,
+  orderId, hasProperty, softproStatus, operationalStatus, documents, actions, isClient, onOpenModal, feesHref, onRefresh,
 }: ActionsDropdownProps) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<'resync' | 'retry_tp' | null>(null);
@@ -128,10 +131,13 @@ export function ActionsDropdown({
   }, [open]);
 
   const hasCpl = !!documents?.cpl?.exists;
+  const hasPrelim = !!documents?.prelim?.exists;
   const hasPI = !!documents?.proposedInsured?.exists;
   const cplId = hasCpl ? (documents!.cpl as DocCatFull).latestId : null;
   const piId = hasPI ? (documents!.proposedInsured as DocCatFull).latestId : null;
   const dlBase = isClient ? '/api/client' : '/api';
+  const statusForDelivery = (softproStatus ?? operationalStatus ?? '').toLowerCase().trim();
+  const canDeliverPrelim = hasPrelim && !['canceled', 'cancelled', 'duplicate'].includes(statusForDelivery);
 
   function act(fn: () => void) { fn(); setOpen(false); }
 
@@ -158,6 +164,7 @@ export function ActionsDropdown({
   const showCpl = actions.includes('cpl');
   const showPI = actions.includes('proposed');
   const showPrelim = actions.includes('prelim');
+  const showDeliverPrelim = actions.includes('deliver_prelim') && canDeliverPrelim;
   const showNotes = actions.includes('notes');
   const showDetail = actions.includes('detail');
   const showFees = actions.includes('fees') && !!feesHref;
@@ -210,9 +217,10 @@ export function ActionsDropdown({
             )
           )}
 
-          {(showPrelim || showNotes || showFees) && (showCpl || showPI) && <Divider />}
+          {(showPrelim || showDeliverPrelim || showNotes || showFees) && (showCpl || showPI) && <Divider />}
 
           {showPrelim && <MenuItem label="Find Prelim" onClick={() => act(() => onOpenModal('prelim'))} />}
+          {showDeliverPrelim && <MenuItem label="Deliver Prelim" onClick={() => act(() => onOpenModal('deliver_prelim'))} />}
           {showNotes && <MenuItem label="Order Notes" onClick={() => act(() => onOpenModal('notes'))} />}
           {showFees && <MenuItem label="Fee Estimate" onClick={() => act(() => { window.location.href = feesHref!; })} />}
 

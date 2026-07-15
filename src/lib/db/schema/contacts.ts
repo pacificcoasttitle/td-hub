@@ -206,6 +206,22 @@ export const contactCompanyLinks = pgTable('contact_company_links', {
   contactCompanyIdx: index('ccl_contact_company_idx').on(table.contactId, table.companyId),
 }));
 
+// ─── Officer Default CC Recipients ───────────────────────────────────────────
+
+export const officerCcDefaults = pgTable('officer_cc_defaults', {
+  id: serial('id').primaryKey(),
+  officerContactId: integer('officer_contact_id')
+    .notNull()
+    .references(() => contacts.id, { onDelete: 'cascade' }),
+  ccName: varchar('cc_name', { length: 200 }),
+  ccEmail: varchar('cc_email', { length: 200 }).notNull(),
+  ccLabel: varchar('cc_label', { length: 100 }),
+  createdBy: varchar('created_by', { length: 64 }).references(() => profiles.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  officerIdx: index('officer_cc_defaults_officer_idx').on(table.officerContactId),
+}));
+
 // ─── Relations ───────────────────────────────────────────────────────────────
 
 export const profilesRelations = relations(profiles, ({ one }) => ({

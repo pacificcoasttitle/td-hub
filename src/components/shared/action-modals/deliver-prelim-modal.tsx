@@ -21,12 +21,20 @@ interface PrelimRecipientWarning {
   source?: string;
 }
 
+interface PrelimDeliveryMode {
+  mode: 'test' | 'live' | 'blocked';
+  armed: boolean;
+  message: string;
+  testRecipient?: string;
+}
+
 export interface PrelimRecipientResolution {
   to: PrelimRecipient | null;
   cc: PrelimCcRecipient[];
   warnings: PrelimRecipientWarning[];
   blocked: boolean;
   blockReason?: string;
+  deliveryMode?: PrelimDeliveryMode;
 }
 
 export interface EditableRecipient extends PrelimCcRecipient {
@@ -65,6 +73,7 @@ export function getDeliverPrelimSendDisabledReason({
   if (loading) return 'Resolving recipients...';
   if (error) return 'Resolve recipients before sending.';
   if (resolution?.blocked) return resolution.blockReason ?? 'Delivery is blocked.';
+  if (resolution?.deliveryMode && !resolution.deliveryMode.armed) return resolution.deliveryMode.message;
   if (!resolution?.to) return 'No primary recipient resolved.';
   return '';
 }
@@ -113,6 +122,12 @@ export function addAdHocCcRecipient({
 
 export function removeCcRecipient(current: EditableRecipient[], key: string): EditableRecipient[] {
   return current.filter((item) => item.key !== key);
+}
+
+export function getDeliveryModeClassName(mode: PrelimDeliveryMode | undefined): string {
+  if (mode?.mode === 'live') return 'border-red-200 bg-red-50 text-red-700';
+  if (mode?.mode === 'test') return 'border-amber-200 bg-amber-50 text-amber-800';
+  return 'border-gray-200 bg-gray-50 text-gray-700';
 }
 
 export function buildDeliverPrelimPayload(to: PrelimRecipient, ccRecipients: EditableRecipient[]) {
@@ -303,15 +318,15 @@ export function DeliverPrelimModal({
   return (
     <ModalShell open={open} onClose={onClose} title="Deliver Prelim" subtitle={`${fileNumber} · ${address}`} wide accentColor={accentColor}>
       <div className="space-y-4 p-5">
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Review recipients before sending. Test environments can set PRELIM_DELIVERY_TEST_RECIPIENT to send only to the override address.
-        </div>
-
         {loading && <p className="py-8 text-center text-sm text-[#6B7280]">Resolving prelim recipients...</p>}
         {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
         {resolution && !loading && (
           <>
+            <div className={`rounded-lg border px-3 py-2 text-sm font-medium ${getDeliveryModeClassName(resolution.deliveryMode)}`}>
+              {resolution.deliveryMode?.message ?? 'prelim delivery not armed'}
+            </div>
+
             {resolution.blocked && (
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {resolution.blockReason ?? 'Send is blocked.'}

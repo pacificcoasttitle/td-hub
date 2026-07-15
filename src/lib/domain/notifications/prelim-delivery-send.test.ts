@@ -109,9 +109,11 @@ vi.mock('@/lib/integrations/sendgrid/client', () => ({
 
 describe('sendPrelimDeliveryEmail', () => {
   const originalOverride = process.env.PRELIM_DELIVERY_TEST_RECIPIENT;
+  const originalLive = process.env.PRELIM_DELIVERY_LIVE;
 
   beforeEach(() => {
     process.env.PRELIM_DELIVERY_TEST_RECIPIENT = 'safe-test@example.com';
+    delete process.env.PRELIM_DELIVERY_LIVE;
     orderContextRows.splice(0, orderContextRows.length, {
       fileNumber: '12345-PCT',
       propertyAddress: '123 Main St, Downey, CA 90241',
@@ -160,7 +162,16 @@ describe('sendPrelimDeliveryEmail', () => {
   });
 
   afterEach(() => {
-    process.env.PRELIM_DELIVERY_TEST_RECIPIENT = originalOverride;
+    if (originalOverride === undefined) {
+      delete process.env.PRELIM_DELIVERY_TEST_RECIPIENT;
+    } else {
+      process.env.PRELIM_DELIVERY_TEST_RECIPIENT = originalOverride;
+    }
+    if (originalLive === undefined) {
+      delete process.env.PRELIM_DELIVERY_LIVE;
+    } else {
+      process.env.PRELIM_DELIVERY_LIVE = originalLive;
+    }
     vi.clearAllMocks();
   });
 
@@ -198,6 +209,11 @@ describe('sendPrelimDeliveryEmail', () => {
 
     expect(result).toMatchObject({
       messageId: 'sg-message-id',
+      deliveryMode: {
+        mode: 'test',
+        armed: true,
+        testRecipient: 'safe-test@example.com',
+      },
       testMode: true,
       sentTo: ['safe-test@example.com'],
       sentCc: [],
@@ -212,8 +228,9 @@ describe('sendPrelimDeliveryEmail', () => {
     });
   });
 
-  it('sends to the real resolved To and CC when the test override is unset', async () => {
+  it('sends to the real resolved To and CC when live delivery is explicitly armed', async () => {
     delete process.env.PRELIM_DELIVERY_TEST_RECIPIENT;
+    process.env.PRELIM_DELIVERY_LIVE = 'true';
 
     const result = await sendPrelimDeliveryEmail(123, {
       to: { email: 'eo@example.com', name: 'Escrow Officer', role: 'escrow_officer' },
@@ -235,10 +252,27 @@ describe('sendPrelimDeliveryEmail', () => {
     expect(emailParams.text).not.toContain('TEST — would have gone to:');
     expect(emailParams.to).not.toBe('safe-test@example.com');
     expect(result).toMatchObject({
+      deliveryMode: {
+        mode: 'live',
+        armed: true,
+      },
       testMode: false,
       sentTo: ['eo@example.com'],
       sentCc: ['title@example.com', 'assistant@example.com'],
     });
+  });
+
+  it('blocks without sending when neither test override nor live arming is set', async () => {
+    delete process.env.PRELIM_DELIVERY_TEST_RECIPIENT;
+    delete process.env.PRELIM_DELIVERY_LIVE;
+
+    await expect(sendPrelimDeliveryEmail(123, {
+      to: { email: 'eo@example.com', name: 'Escrow Officer', role: 'escrow_officer' },
+      cc: [],
+    })).rejects.toThrow('prelim delivery not armed');
+
+    expect(downloadFile).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it('falls back to open orders as Reply-To when no title officer email resolves', async () => {

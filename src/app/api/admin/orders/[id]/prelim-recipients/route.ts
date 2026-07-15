@@ -4,6 +4,7 @@ import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/permissions';
 import { resolvePrelimRecipients } from '@/lib/domain/notifications/prelim-recipient-resolution';
 import { getPrelimDeliveryEligibility } from '@/lib/domain/notifications/prelim-delivery-eligibility';
+import { getPrelimDeliveryMode } from '@/lib/domain/notifications/prelim-delivery-mode';
 
 const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
 const paramSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -36,12 +37,16 @@ export async function GET(
     if (eligibility.blocked) {
       return NextResponse.json({
         ...resolution,
+        deliveryMode: getPrelimDeliveryMode(),
         blocked: true,
         blockReason: eligibility.blockReason,
       });
     }
 
-    return NextResponse.json(resolution);
+    return NextResponse.json({
+      ...resolution,
+      deliveryMode: getPrelimDeliveryMode(),
+    });
   } catch (err) {
     return NextResponse.json(
       { error: 'Failed to resolve prelim recipients', detail: err instanceof Error ? err.message : 'Unknown' },

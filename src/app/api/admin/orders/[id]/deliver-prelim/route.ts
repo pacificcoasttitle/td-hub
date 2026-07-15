@@ -4,7 +4,11 @@ import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/permissions';
 import { resolvePrelimRecipients } from '@/lib/domain/notifications/prelim-recipient-resolution';
 import { getPrelimDeliveryEligibility } from '@/lib/domain/notifications/prelim-delivery-eligibility';
-import { sendPrelimDeliveryEmail, type ReviewedPrelimRecipients } from '@/lib/domain/notifications/prelim-delivery-send';
+import { PRELIM_DELIVERY_NOT_ARMED } from '@/lib/domain/notifications/prelim-delivery-mode';
+import {
+  sendPrelimDeliveryEmail,
+  type ReviewedPrelimRecipients,
+} from '@/lib/domain/notifications/prelim-delivery-send';
 
 const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant'];
 const paramSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -98,6 +102,10 @@ export async function POST(
       warnings: result.resolvedRecipients.warnings,
     });
   } catch (err) {
+    if (err instanceof Error && err.message === PRELIM_DELIVERY_NOT_ARMED) {
+      return NextResponse.json({ error: PRELIM_DELIVERY_NOT_ARMED }, { status: 409 });
+    }
+
     return NextResponse.json(
       { error: 'Prelim delivery failed', detail: err instanceof Error ? err.message : 'Unknown' },
       { status: 500 },

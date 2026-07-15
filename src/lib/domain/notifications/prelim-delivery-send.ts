@@ -9,6 +9,11 @@ import {
   type PrelimRecipient,
   type PrelimRecipientResolution,
 } from './prelim-recipient-resolution';
+import {
+  getPrelimDeliveryMode,
+  PRELIM_DELIVERY_NOT_ARMED,
+  type PrelimDeliveryMode,
+} from './prelim-delivery-mode';
 
 const FROM_EMAIL = 'openorders@pct.com';
 const PRELIM_CATEGORY = 'prelim';
@@ -20,6 +25,7 @@ export interface ReviewedPrelimRecipients {
 
 export interface PrelimDeliveryResult {
   messageId: string;
+  deliveryMode: PrelimDeliveryMode;
   testMode: boolean;
   sentTo: string[];
   sentCc: string[];
@@ -233,13 +239,17 @@ export async function sendPrelimDeliveryEmail(
     throw new Error(resolvedRecipients.blockReason ?? 'No valid prelim recipient resolved');
   }
 
+  const deliveryMode = getPrelimDeliveryMode();
+  if (!deliveryMode.armed) {
+    throw new Error(PRELIM_DELIVERY_NOT_ARMED);
+  }
+
   const [context, prelimAttachment] = await Promise.all([
     loadOrderEmailContext(orderId),
     loadPrelimPdfAttachment(orderId),
   ]);
 
-  const testRecipient = process.env.PRELIM_DELIVERY_TEST_RECIPIENT?.trim();
-  const testMode = Boolean(testRecipient);
+  const testMode = deliveryMode.mode === 'test';
   const { html, text, subject } = buildEmailContent({
     context,
     intendedRecipients: reviewedRecipients,
@@ -248,8 +258,8 @@ export async function sendPrelimDeliveryEmail(
   const replyTo = context.titleOfficerEmail?.trim() || FROM_EMAIL;
 
   const sendResult = await sendEmail({
-    to: testRecipient || reviewedRecipients.to.email,
-    cc: testRecipient ? [] : reviewedRecipients.cc.map((recipient) => recipient.email),
+    to: testMode ? deliveryMode.testRecipient : reviewedRecipients.to.email,
+    cc: testMode ? [] : reviewedRecipients.cc.map((recipient) => recipient.email),
     from: FROM_EMAIL,
     replyTo,
     subject,
@@ -264,9 +274,10 @@ export async function sendPrelimDeliveryEmail(
 
   return {
     messageId: sendResult.data.messageId,
+    deliveryMode,
     testMode,
-    sentTo: [testRecipient || reviewedRecipients.to.email],
-    sentCc: testRecipient ? [] : reviewedRecipients.cc.map((recipient) => recipient.email),
+    sentTo: [testMode ? deliveryMode.testRecipient : reviewedRecipients.to.email],
+    sentCc: testMode ? [] : reviewedRecipients.cc.map((recipient) => recipient.email),
     intendedRecipients: reviewedRecipients,
     resolvedRecipients,
     from: FROM_EMAIL,

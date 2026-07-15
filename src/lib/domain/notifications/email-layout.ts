@@ -1,4 +1,5 @@
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hub.pctitle.com';
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? 'https://hub.pctitle.com').replace(/\/+$/, '');
+const PCT_WEBSITE_URL = 'https://www.pct.com';
 
 export const PCT_NAVY = '#1B2A4A';
 export const PCT_ORANGE = '#F26B2B';
@@ -9,6 +10,9 @@ export const BORDER_SOFT = '#D7DDE5';
 export const BG_LIGHT = '#F8F9FA';
 export const CARD_BG = '#FFFFFF';
 export const ORANGE_TINT = '#FFF4EE';
+export const PCT_LIGHT_LOGO_PATH = '/logo2-light.png';
+export const PCT_DARK_LOGO_PATH = '/logo2-dark.png';
+export const PCT_LIGHT_LOGO_URL = `${APP_URL}${PCT_LIGHT_LOGO_PATH}`;
 
 export function esc(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -35,7 +39,7 @@ export function emailLayout(title: string, bodyHtml: string): string {
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${CARD_BG};border-radius:16px;overflow:hidden;border:1px solid ${BORDER_SOFT};">
   <tr><td style="background:${PCT_NAVY};padding:20px 32px;">
     <table width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td style="color:#FFFFFF;font-size:20px;font-weight:bold;letter-spacing:.5px;">Pacific Coast Title</td>
+      <td><img src="${PCT_LIGHT_LOGO_URL}" height="30" alt="Pacific Coast Title" style="display:block;height:30px;width:auto;border:0;outline:none;text-decoration:none;"/></td>
       <td align="right" style="color:${PCT_ORANGE};font-size:12px;text-transform:uppercase;letter-spacing:1px;">${esc(title)}</td>
     </tr></table>
   </td></tr>
@@ -43,7 +47,7 @@ export function emailLayout(title: string, bodyHtml: string): string {
   <tr><td style="padding:0 32px 24px;border-top:1px solid ${BORDER_SOFT};">
     <p style="font-size:12px;color:${TEXT_MUTED};margin:16px 0 0;">
       Pacific Coast Title Company &bull; Automated notification<br/>
-      <a href="${APP_URL}" style="color:${PCT_ORANGE};text-decoration:none;">hub.pctitle.com</a>
+      <a href="${PCT_WEBSITE_URL}" style="color:${PCT_ORANGE};text-decoration:none;">www.pct.com</a>
     </p>
   </td></tr>
 </table>

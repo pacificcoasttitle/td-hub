@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BG_LIGHT,
   BORDER_SOFT,
   CARD_BG,
   PCT_NAVY,
   PCT_ORANGE,
+  PCT_DARK_LOGO_PATH,
+  PCT_LIGHT_LOGO_URL,
   TEXT_MUTED,
   TEXT_PRIMARY,
   button,
@@ -13,8 +15,6 @@ import {
   esc,
 } from './email-layout';
 import { orderConfirmationTemplate, type FullConfirmationData } from './confirmation-template';
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hub.pctitle.com';
 
 function legacyEsc(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -41,7 +41,7 @@ function legacyLayout(title: string, body: string): string {
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${CARD_BG};border-radius:16px;overflow:hidden;border:1px solid ${BORDER_SOFT};">
   <tr><td style="background:${PCT_NAVY};padding:20px 32px;">
     <table width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td style="color:#FFFFFF;font-size:20px;font-weight:bold;letter-spacing:.5px;">Pacific Coast Title</td>
+      <td><img src="${PCT_LIGHT_LOGO_URL}" height="30" alt="Pacific Coast Title" style="display:block;height:30px;width:auto;border:0;outline:none;text-decoration:none;"/></td>
       <td align="right" style="color:${PCT_ORANGE};font-size:12px;text-transform:uppercase;letter-spacing:1px;">${legacyEsc(title)}</td>
     </tr></table>
   </td></tr>
@@ -49,7 +49,7 @@ function legacyLayout(title: string, body: string): string {
   <tr><td style="padding:0 32px 24px;border-top:1px solid ${BORDER_SOFT};">
     <p style="font-size:12px;color:${TEXT_MUTED};margin:16px 0 0;">
       Pacific Coast Title Company &bull; Automated notification<br/>
-      <a href="${APP_URL}" style="color:${PCT_ORANGE};text-decoration:none;">hub.pctitle.com</a>
+      <a href="https://www.pct.com" style="color:${PCT_ORANGE};text-decoration:none;">www.pct.com</a>
     </p>
   </td></tr>
 </table>
@@ -108,19 +108,40 @@ const confirmationFixture: FullConfirmationData = {
 };
 
 describe('emailLayout', () => {
-  it('matches the legacy private confirmation layout and helpers exactly', () => {
+  it('renders the shared branded shell and helpers', () => {
     const body = '<p>Body & content</p>';
+    const html = emailLayout('Order Confirmation', body);
 
     expect(esc('A & "B" < C > D')).toBe(legacyEsc('A & "B" < C > D'));
     expect(detailsRow('Label', 'Value & <x>')).toBe(legacyRow('Label', 'Value & <x>'));
     expect(button('Open', 'https://hub.pctitle.com/orders')).toBe(legacyButton('Open', 'https://hub.pctitle.com/orders'));
-    expect(emailLayout('Order Confirmation', body)).toBe(legacyLayout('Order Confirmation', body));
+    expect(html).toBe(legacyLayout('Order Confirmation', body));
+    expect(PCT_LIGHT_LOGO_URL).toMatch(/^https?:\/\//);
+    expect(html).toContain(`<img src="${PCT_LIGHT_LOGO_URL}" height="30" alt="Pacific Coast Title"`);
+    expect(html).toContain('<a href="https://www.pct.com" style="color:#F26B2B;text-decoration:none;">www.pct.com</a>');
+    expect(html).not.toContain('hub.pctitle.com</a>');
+    expect(PCT_DARK_LOGO_PATH).toBe('/logo2-dark.png');
   });
 
-  it('keeps rendered order-confirmation HTML wrapped by the exact legacy shell', () => {
+  it('keeps rendered order-confirmation HTML wrapped by the shared shell', () => {
     const rendered = orderConfirmationTemplate(confirmationFixture);
     const body = extractLayoutBody(rendered.html);
 
     expect(rendered.html).toBe(legacyLayout('Order Confirmation', body));
+  });
+
+  it('normalizes trailing slashes before appending the logo path', async () => {
+    const previous = process.env.NEXT_PUBLIC_APP_URL;
+    process.env.NEXT_PUBLIC_APP_URL = 'https://td-hub.vercel.app/';
+    vi.resetModules();
+    const layout = await import('./email-layout');
+
+    expect(layout.PCT_LIGHT_LOGO_URL).toBe('https://td-hub.vercel.app/logo2-light.png');
+    expect(layout.emailLayout('Sample', '<p>Body</p>')).toContain('src="https://td-hub.vercel.app/logo2-light.png"');
+    expect(layout.emailLayout('Sample', '<p>Body</p>')).not.toContain('td-hub.vercel.app//logo2-light.png');
+
+    if (previous === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
+    else process.env.NEXT_PUBLIC_APP_URL = previous;
+    vi.resetModules();
   });
 });

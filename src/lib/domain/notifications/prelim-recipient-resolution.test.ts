@@ -4,6 +4,7 @@ type OrderRow = {
   id: number;
   escrowOfficerId: number | null;
   titleOfficerId: number | null;
+  salesRepId: number | null;
 };
 
 type ContactRow = {
@@ -21,32 +22,17 @@ type PartyRow = {
   externalEmail: string | null;
 };
 
-type OfficerCcDefaultRow = {
-  id: number;
-  officerContactId: number;
-  ccName: string | null;
-  ccEmail: string;
-  ccLabel: string | null;
-  createdBy: string | null;
-  createdAt: Date;
-};
-
 const {
   contactsById,
-  defaultsByOfficerId,
-  getOfficerCcDefaults,
   orderRows,
   partyRows,
 } = vi.hoisted(() => {
   const contactsById = new Map<number, ContactRow>();
-  const defaultsByOfficerId = new Map<number, OfficerCcDefaultRow[]>();
   const orderRows = new Map<number, OrderRow>();
   const partyRows: PartyRow[] = [];
 
   return {
     contactsById,
-    defaultsByOfficerId,
-    getOfficerCcDefaults: vi.fn(async (officerContactId: number) => defaultsByOfficerId.get(officerContactId) ?? []),
     orderRows,
     partyRows,
   };
@@ -139,11 +125,8 @@ vi.mock('@/lib/db/schema', () => ({
     id: 'orders.id',
     escrowOfficerId: 'orders.escrow_officer_id',
     titleOfficerId: 'orders.title_officer_id',
+    salesRepId: 'orders.sales_rep_id',
   },
-}));
-
-vi.mock('@/lib/domain/contacts/officer-cc-defaults', () => ({
-  getOfficerCcDefaults,
 }));
 
 vi.mock('@/lib/db/client', () => ({
@@ -179,51 +162,32 @@ function addOrder(row: OrderRow) {
   orderRows.set(row.id, row);
 }
 
-function addDefault(row: Omit<OfficerCcDefaultRow, 'createdAt' | 'createdBy' | 'id'>) {
-  const existing = defaultsByOfficerId.get(row.officerContactId) ?? [];
-  existing.push({
-    id: existing.length + 1,
-    createdAt: new Date('2026-07-15T18:00:00.000Z'),
-    createdBy: null,
-    ...row,
-  });
-  defaultsByOfficerId.set(row.officerContactId, existing);
-}
-
 describe('resolvePrelimRecipients', () => {
   beforeEach(() => {
     contactsById.clear();
-    defaultsByOfficerId.clear();
-    getOfficerCcDefaults.mockClear();
     orderRows.clear();
     partyRows.splice(0, partyRows.length);
   });
 
-  it('resolves internal escrow officer TO with title rep and one officer CC default', async () => {
-    addOrder({ id: 100, escrowOfficerId: 10, titleOfficerId: 11 });
+  it('resolves internal escrow officer TO with sales rep CC only', async () => {
+    addOrder({ id: 100, escrowOfficerId: 10, titleOfficerId: 11, salesRepId: 12 });
     addContact({ id: 10, email: 'eo@example.com', fullName: 'Escrow Officer' });
-    addContact({ id: 11, email: 'title@example.com', fullName: 'Title Rep' });
-    addDefault({
-      officerContactId: 10,
-      ccName: 'Escrow Assistant',
-      ccEmail: 'assistant@example.com',
-      ccLabel: 'Assistant',
-    });
+    addContact({ id: 11, email: 'title@example.com', fullName: 'Title Officer' });
+    addContact({ id: 12, email: 'rep@example.com', fullName: 'Sales Rep' });
 
     const result = await resolvePrelimRecipients(100);
 
     expect(result.blocked).toBe(false);
     expect(result.to).toEqual({ email: 'eo@example.com', name: 'Escrow Officer', role: 'escrow_officer' });
     expect(result.cc).toEqual([
-      { email: 'title@example.com', name: 'Title Rep', role: 'title_rep', source: 'title_officer' },
-      { email: 'assistant@example.com', name: 'Escrow Assistant', role: 'Assistant', source: 'officer_cc_defaults' },
+      { email: 'rep@example.com', name: 'Sales Rep', role: 'sales_rep', source: 'sales_rep' },
     ]);
     expect(result.warnings).toEqual([]);
-    expect(getOfficerCcDefaults).toHaveBeenCalledWith(10);
   });
 
   it('resolves an external escrow deal TO from the escrow_company party', async () => {
-    addOrder({ id: 101, escrowOfficerId: null, titleOfficerId: null });
+    addOrder({ id: 101, escrowOfficerId: null, titleOfficerId: null, salesRepId: 12 });
+    addContact({ id: 12, email: 'rep@example.com', fullName: 'Sales Rep' });
     partyRows.push({
       orderId: 101,
       role: 'escrow_company',
@@ -237,12 +201,13 @@ describe('resolvePrelimRecipients', () => {
 
     expect(result.blocked).toBe(false);
     expect(result.to).toEqual({ email: 'external@example.com', name: 'External Escrow', role: 'escrow_company' });
-    expect(result.cc).toEqual([]);
-    expect(getOfficerCcDefaults).not.toHaveBeenCalled();
+    expect(result.cc).toEqual([
+      { email: 'rep@example.com', name: 'Sales Rep', role: 'sales_rep', source: 'sales_rep' },
+    ]);
   });
 
   it('blocks when no internal or external escrow recipient resolves', async () => {
-    addOrder({ id: 102, escrowOfficerId: null, titleOfficerId: null });
+    addOrder({ id: 102, escrowOfficerId: null, titleOfficerId: null, salesRepId: null });
 
     const result = await resolvePrelimRecipients(102);
 
@@ -253,7 +218,7 @@ describe('resolvePrelimRecipients', () => {
   });
 
   it('blocks when the escrow officer email is invalid', async () => {
-    addOrder({ id: 103, escrowOfficerId: 10, titleOfficerId: null });
+    addOrder({ id: 103, escrowOfficerId: 10, titleOfficerId: null, salesRepId: null });
     addContact({ id: 10, email: 'not-an-email', fullName: 'Escrow Officer' });
 
     const result = await resolvePrelimRecipients(103);
@@ -265,15 +230,10 @@ describe('resolvePrelimRecipients', () => {
     ]);
   });
 
-  it('warns and proceeds when a CC address is invalid', async () => {
-    addOrder({ id: 104, escrowOfficerId: 10, titleOfficerId: null });
+  it('warns and proceeds when the sales rep CC address is invalid', async () => {
+    addOrder({ id: 104, escrowOfficerId: 10, titleOfficerId: null, salesRepId: 12 });
     addContact({ id: 10, email: 'eo@example.com', fullName: 'Escrow Officer' });
-    addDefault({
-      officerContactId: 10,
-      ccName: 'Bad Assistant',
-      ccEmail: 'bad-address',
-      ccLabel: 'Assistant',
-    });
+    addContact({ id: 12, email: 'bad-address', fullName: 'Sales Rep' });
 
     const result = await resolvePrelimRecipients(104);
 
@@ -281,20 +241,15 @@ describe('resolvePrelimRecipients', () => {
     expect(result.to).toEqual({ email: 'eo@example.com', name: 'Escrow Officer', role: 'escrow_officer' });
     expect(result.cc).toEqual([]);
     expect(result.warnings).toMatchObject([
-      { code: 'invalid_email', email: 'bad-address', role: 'Assistant', source: 'officer_cc_defaults' },
+      { code: 'invalid_email', email: 'bad-address', role: 'sales_rep', source: 'sales_rep' },
     ]);
   });
 
   it('dedupes TO from CC case-insensitively', async () => {
-    addOrder({ id: 105, escrowOfficerId: 10, titleOfficerId: 11 });
+    addOrder({ id: 105, escrowOfficerId: 10, titleOfficerId: 11, salesRepId: 12 });
     addContact({ id: 10, email: 'Primary@example.com', fullName: 'Escrow Officer' });
     addContact({ id: 11, email: 'primary@example.com', fullName: 'Title Rep' });
-    addDefault({
-      officerContactId: 10,
-      ccName: 'Escrow Assistant',
-      ccEmail: 'PRIMARY@example.com',
-      ccLabel: 'Assistant',
-    });
+    addContact({ id: 12, email: 'primary@example.com', fullName: 'Sales Rep' });
 
     const result = await resolvePrelimRecipients(105, [
       { email: 'primary@example.com', name: 'Operator Add', role: 'operator' },

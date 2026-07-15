@@ -8,6 +8,7 @@ import {
   isTessaAutoAnalysisEnabled,
   logCronCycleAutoAnalysisPaused,
 } from '@/lib/tessa/analysis-config';
+import { maybeAutoDeliverPrelim } from '@/lib/domain/notifications/prelim-auto-delivery';
 
 export interface FetchPrelimsResult {
   total: number;
@@ -241,13 +242,20 @@ export async function fetchPrelimsForOrder(
         status: 'active',
         description: `Prelim fetched from SoftPro for ${fileNumber}`,
         createdBy: 'job:fetch_prelims',
-      }).returning({ id: documents.id });
+      }).returning({ id: documents.id, createdAt: documents.createdAt });
 
       await db.insert(documentAudit).values({
         documentId: doc!.id,
         action: 'uploaded',
         byUserId: 'job:fetch_prelims',
         meta: { source: 'softpro_fetch', sourceUrl: url, storageKey, sizeBytes: buffer.length } as Record<string, unknown>,
+      });
+
+      await maybeAutoDeliverPrelim({
+        orderId,
+        documentId: doc!.id,
+        documentCreatedAt: doc!.createdAt,
+        triggeredBy: 'fetch_prelims',
       });
 
       try {

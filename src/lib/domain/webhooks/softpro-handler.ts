@@ -4,6 +4,7 @@ import { documents, documentAudit, orders, orderStatusHistory, eventOutbox, vend
 import { eq } from 'drizzle-orm';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
 import { analyzePrelim } from '@/lib/tessa';
+import { maybeAutoDeliverPrelim } from '@/lib/domain/notifications/prelim-auto-delivery';
 import { getSetting } from '@/lib/domain/settings/service';
 
 // ─── Zod Schemas ────────────────────────────────────────────────────────────
@@ -81,7 +82,7 @@ async function storeDocument(params: {
   filename: string;
   category: 'prelim' | 'policy';
   sourceUrl: string;
-}): Promise<{ documentId: number; storageKey: string }> {
+}): Promise<{ documentId: number; storageKey: string; createdAt: Date }> {
   const ts = Date.now();
   const storageKey = `${params.category}/${params.fileNumber}/${ts}_${params.filename}`;
 
@@ -110,7 +111,7 @@ async function storeDocument(params: {
       description: `Received via SoftPro ${params.category} webhook`,
       createdBy: 'webhook:softpro',
     })
-    .returning({ id: documents.id });
+    .returning({ id: documents.id, createdAt: documents.createdAt });
 
   await db.insert(documentAudit).values({
     documentId: doc!.id,
@@ -125,7 +126,7 @@ async function storeDocument(params: {
     } as Record<string, unknown>,
   });
 
-  return { documentId: doc!.id, storageKey };
+  return { documentId: doc!.id, storageKey, createdAt: doc!.createdAt };
 }
 
 // ─── Prelim Handler ─────────────────────────────────────────────────────────
@@ -154,13 +155,20 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
   for (const url of payload.data) {
     try {
       const { buffer, filename } = await downloadFromUrl(url);
-      const { documentId, storageKey } = await storeDocument({
+      const { documentId, storageKey, createdAt } = await storeDocument({
         orderId: order.id,
         fileNumber: order.fileNumber,
         buffer,
         filename,
         category: 'prelim',
         sourceUrl: url,
+      });
+
+      await maybeAutoDeliverPrelim({
+        orderId: order.id,
+        documentId,
+        documentCreatedAt: createdAt,
+        triggeredBy: 'softpro_webhook',
       });
 
       await db.insert(eventOutbox).values({

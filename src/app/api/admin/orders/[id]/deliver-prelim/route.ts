@@ -85,6 +85,11 @@ export async function POST(
     const result = await sendPrelimDeliveryEmail(
       orderId,
       normalizeReviewedRecipients(parsedBody.data, currentResolution.to),
+      {
+        id: session.id,
+        name: session.displayName ?? session.email ?? session.id,
+        email: session.email,
+      },
     );
 
     return NextResponse.json({
@@ -99,6 +104,8 @@ export async function POST(
       replyTo: result.replyTo,
       subject: result.subject,
       attachment: result.attachment,
+      writeback: result.writeback,
+      warning: result.warning,
       warnings: result.resolvedRecipients.warnings,
     });
   } catch (err) {

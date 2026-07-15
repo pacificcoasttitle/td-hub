@@ -14,6 +14,7 @@ import {
   PRELIM_DELIVERY_NOT_ARMED,
   type PrelimDeliveryMode,
 } from './prelim-delivery-mode';
+import { writePrelimDeliveryProofs, type PrelimDeliveryWritebackResult } from './prelim-delivery-writeback';
 
 const FROM_EMAIL = 'openorders@pct.com';
 const PRELIM_CATEGORY = 'prelim';
@@ -21,6 +22,12 @@ const PRELIM_CATEGORY = 'prelim';
 export interface ReviewedPrelimRecipients {
   to: PrelimRecipient;
   cc: Array<PrelimCcRecipient | (PrelimRecipient & { source?: string })>;
+}
+
+export interface PrelimDeliveryActor {
+  id: string;
+  name: string;
+  email?: string | null;
 }
 
 export interface PrelimDeliveryResult {
@@ -40,6 +47,8 @@ export interface PrelimDeliveryResult {
     contentType: string;
     sizeBytes: number;
   };
+  writeback: PrelimDeliveryWritebackResult | null;
+  warning?: string;
 }
 
 interface OrderEmailContext {
@@ -233,6 +242,7 @@ async function loadPrelimPdfAttachment(orderId: number): Promise<PrelimDocumentA
 export async function sendPrelimDeliveryEmail(
   orderId: number,
   reviewedRecipients: ReviewedPrelimRecipients,
+  actor: PrelimDeliveryActor,
 ): Promise<PrelimDeliveryResult> {
   const resolvedRecipients = await resolvePrelimRecipients(orderId);
   if (resolvedRecipients.blocked || !resolvedRecipients.to) {
@@ -272,6 +282,23 @@ export async function sendPrelimDeliveryEmail(
     throw new Error(sendResult.error?.message ?? 'SendGrid prelim delivery failed');
   }
 
+  let writeback: PrelimDeliveryWritebackResult | null = null;
+  let warning: string | undefined;
+  try {
+    writeback = await writePrelimDeliveryProofs({
+      orderId,
+      fileNumber: context.fileNumber,
+      documentId: prelimAttachment.documentId,
+      sendgridMessageId: sendResult.data.messageId,
+      recipients: reviewedRecipients,
+      actor,
+      deliveryMode,
+    });
+    warning = writeback.warning;
+  } catch (err) {
+    warning = err instanceof Error ? err.message : 'Prelim delivery writeback failed';
+  }
+
   return {
     messageId: sendResult.data.messageId,
     deliveryMode,
@@ -289,5 +316,7 @@ export async function sendPrelimDeliveryEmail(
       contentType: prelimAttachment.contentType,
       sizeBytes: prelimAttachment.sizeBytes,
     },
+    writeback,
+    warning,
   };
 }

@@ -7,6 +7,7 @@ const {
   prelimDocRows,
   resolvePrelimRecipients,
   sendEmail,
+  writePrelimDeliveryProofs,
 } = vi.hoisted(() => ({
   downloadFile: vi.fn(),
   orderContextRows: [] as Array<{
@@ -32,6 +33,7 @@ const {
   }>,
   resolvePrelimRecipients: vi.fn(),
   sendEmail: vi.fn(),
+  writePrelimDeliveryProofs: vi.fn(),
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -107,6 +109,10 @@ vi.mock('@/lib/integrations/sendgrid/client', () => ({
   sendEmail,
 }));
 
+vi.mock('./prelim-delivery-writeback', () => ({
+  writePrelimDeliveryProofs,
+}));
+
 describe('sendPrelimDeliveryEmail', () => {
   const originalOverride = process.env.PRELIM_DELIVERY_TEST_RECIPIENT;
   const originalLive = process.env.PRELIM_DELIVERY_LIVE;
@@ -159,6 +165,14 @@ describe('sendPrelimDeliveryEmail', () => {
       success: true,
       data: { messageId: 'sg-message-id' },
     });
+    writePrelimDeliveryProofs.mockResolvedValue({
+      deliveredAt: '2026-07-15T20:00:00.000Z',
+      deliveredAtPt: '2026-07-15 13:00 PT',
+      softproNoteId: 'prelim-delivery-12345-PCT-1780000000000',
+      addNotesStatus: 200,
+      addNotesMessage: 'Note added successfully to the file',
+      softproSynced: true,
+    });
   });
 
   afterEach(() => {
@@ -176,12 +190,17 @@ describe('sendPrelimDeliveryEmail', () => {
   });
 
   it('sends only to the test override while showing real intended recipients and attaching the prelim PDF', async () => {
-    const result = await sendPrelimDeliveryEmail(123, {
+    const reviewedRecipients = {
       to: { email: 'eo@example.com', name: 'Escrow Officer', role: 'escrow_officer' },
       cc: [
         { email: 'title@example.com', name: 'Title Rep', role: 'title_rep', source: 'title_officer' },
         { email: 'assistant@example.com', name: 'Assistant', role: 'Assistant', source: 'officer_cc_defaults' },
       ],
+    };
+    const result = await sendPrelimDeliveryEmail(123, reviewedRecipients, {
+      id: 'user-1',
+      name: 'PCT User',
+      email: 'user@pct.com',
     });
 
     expect(downloadFile).toHaveBeenCalledWith('prelim/prelim-report.pdf');
@@ -226,6 +245,14 @@ describe('sendPrelimDeliveryEmail', () => {
         sizeBytes: Buffer.from('%PDF smoke test').length,
       },
     });
+    expect(writePrelimDeliveryProofs).toHaveBeenCalledWith(expect.objectContaining({
+      orderId: 123,
+      fileNumber: '12345-PCT',
+      documentId: 2,
+      sendgridMessageId: 'sg-message-id',
+      recipients: reviewedRecipients,
+      actor: { id: 'user-1', name: 'PCT User', email: 'user@pct.com' },
+    }));
   });
 
   it('sends to the real resolved To and CC when live delivery is explicitly armed', async () => {
@@ -238,6 +265,9 @@ describe('sendPrelimDeliveryEmail', () => {
         { email: 'title@example.com', name: 'Title Rep', role: 'title_rep', source: 'title_officer' },
         { email: 'assistant@example.com', name: 'Assistant', role: 'Assistant', source: 'officer_cc_defaults' },
       ],
+    }, {
+      id: 'user-1',
+      name: 'PCT User',
     });
 
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
@@ -269,6 +299,9 @@ describe('sendPrelimDeliveryEmail', () => {
     await expect(sendPrelimDeliveryEmail(123, {
       to: { email: 'eo@example.com', name: 'Escrow Officer', role: 'escrow_officer' },
       cc: [],
+    }, {
+      id: 'user-1',
+      name: 'PCT User',
     })).rejects.toThrow('prelim delivery not armed');
 
     expect(downloadFile).not.toHaveBeenCalled();
@@ -293,6 +326,9 @@ describe('sendPrelimDeliveryEmail', () => {
     const result = await sendPrelimDeliveryEmail(123, {
       to: { email: 'eo@example.com', name: 'Escrow Officer', role: 'escrow_officer' },
       cc: [],
+    }, {
+      id: 'user-1',
+      name: 'PCT User',
     });
 
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
@@ -315,6 +351,9 @@ describe('sendPrelimDeliveryEmail', () => {
     await expect(sendPrelimDeliveryEmail(123, {
       to: { email: 'eo@example.com', name: 'Escrow Officer', role: 'escrow_officer' },
       cc: [],
+    }, {
+      id: 'user-1',
+      name: 'PCT User',
     })).rejects.toThrow('S3 download failed');
 
     expect(downloadFile).toHaveBeenCalledWith('prelim/prelim-report.pdf');

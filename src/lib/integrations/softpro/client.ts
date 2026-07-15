@@ -774,18 +774,25 @@ export async function getLookupTable(
   }
 }
 
+export interface SoftProAddNotesResponseItem {
+  Status?: number;
+  Message?: string;
+  Id?: string;
+  [key: string]: unknown;
+}
+
 export async function addNotes(
   orderNumber: string,
   text: string,
   noteId?: string,
-): Promise<VendorResult<{ success: boolean }>> {
+): Promise<VendorResult<SoftProAddNotesResponseItem[]>> {
   const body = [{
     OrderNumber: orderNumber,
     Text: text,
     ...(noteId ? { Id: noteId } : {}),
   }];
 
-  return makeRequest<{ success: boolean }>('POST', SOFTPRO_ENDPOINTS.addNote, {
+  return makeRequest<SoftProAddNotesResponseItem[]>('POST', SOFTPRO_ENDPOINTS.addNote, {
     body,
     operation: 'add_notes',
     bodyShape: 'array',

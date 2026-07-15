@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, serial, text, varchar, integer, decimal,
-  timestamp, boolean, jsonb, uniqueIndex, index,
+  timestamp, boolean, uniqueIndex, index,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { branches, contacts, companies, profiles } from './contacts';
@@ -180,6 +180,7 @@ export const orderNotes = pgTable('order_notes', {
   authorId: varchar('author_id', { length: 64 }).references(() => profiles.id),
   isSyncedToSoftpro: boolean('is_synced_to_softpro').notNull().default(false),
   softproNoteId: varchar('softpro_note_id', { length: 100 }),
+  syncedAt: timestamp('synced_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (table) => ({
   orderIdx: index('order_notes_order_idx').on(table.orderId),

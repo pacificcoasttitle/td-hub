@@ -48,7 +48,7 @@ export const documents = pgTable('documents', {
 
 export const docActionEnum = pgEnum('doc_action', [
   'uploaded', 'downloaded', 'viewed', 'deleted',
-  'attached_to_softpro', 'attach_failed', 'generated',
+  'attached_to_softpro', 'attach_failed', 'generated', 'delivered',
 ]);
 
 export const documentAudit = pgTable('document_audit', {

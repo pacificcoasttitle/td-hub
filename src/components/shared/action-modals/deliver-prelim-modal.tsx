@@ -303,9 +303,12 @@ export function DeliverPrelimModal({
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? `Prelim delivery failed (${res.status})`);
+      const writeback = body?.writeback;
       setSendMessage(
-        body?.messageId
-          ? `Prelim sent. Message ID: ${body.messageId}`
+        body?.messageId && writeback?.deliveredAtPt
+          ? `Delivered ${writeback.deliveredAtPt} to ${1 + ccRecipients.length} recipients · SendGrid ${body.messageId}\nSoftPro note ${writeback.softproSynced ? `added ${writeback.deliveredAtPt} ✓` : `pending/failed ${writeback.deliveredAtPt}`}`
+          : body?.messageId
+            ? `Prelim sent. Message ID: ${body.messageId}`
           : 'Prelim delivery request completed.',
       );
     } catch (err) {
@@ -403,7 +406,11 @@ export function DeliverPrelimModal({
               {draftError && <p className="mt-2 text-xs text-red-600">{draftError}</p>}
             </section>
 
-            {sendMessage && <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{sendMessage}</div>}
+            {sendMessage && (
+              <div className="whitespace-pre-line rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                {sendMessage}
+              </div>
+            )}
 
             <DeliverPrelimFooter
               sendDisabledReason={sendDisabledReason}

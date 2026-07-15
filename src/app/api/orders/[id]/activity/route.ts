@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/permissions';
 import { db } from '@/lib/db/client';
-import { documentAudit, documents, vendorApiLogs, titlePointData } from '@/lib/db/schema';
+import { adminActivityLogs, documentAudit, documents, vendorApiLogs, titlePointData } from '@/lib/db/schema';
 import { orderStatusHistory } from '@/lib/db/schema';
 import { eq, desc, and } from 'drizzle-orm';
 
 interface ActivityItem {
-  type: 'document' | 'status_change' | 'vendor_call' | 'titlepoint';
+  type: 'document' | 'status_change' | 'vendor_call' | 'titlepoint' | 'prelim_delivery';
   timestamp: Date;
   summary: string;
   meta: Record<string, unknown>;
@@ -46,7 +46,7 @@ export async function GET(
       return NextResponse.json({ activity: cached.data.slice(0, limit) });
     }
 
-    const [docAuditRows, statusRows, vendorRows, tpRows] = await Promise.all([
+    const [docAuditRows, statusRows, vendorRows, tpRows, prelimDeliveryRows] = await Promise.all([
       db.select({
         action: documentAudit.action,
         performedAt: documentAudit.performedAt,
@@ -96,6 +96,20 @@ export async function GET(
         .where(eq(titlePointData.orderId, orderId))
         .orderBy(desc(titlePointData.createdAt))
         .limit(5),
+
+      db.select({
+        createdAt: adminActivityLogs.createdAt,
+        userId: adminActivityLogs.userId,
+        meta: adminActivityLogs.meta,
+      })
+        .from(adminActivityLogs)
+        .where(and(
+          eq(adminActivityLogs.action, 'prelim_delivered'),
+          eq(adminActivityLogs.entityType, 'order'),
+          eq(adminActivityLogs.entityId, String(orderId)),
+        ))
+        .orderBy(desc(adminActivityLogs.createdAt))
+        .limit(5),
     ]);
 
     const items: ActivityItem[] = [];
@@ -134,6 +148,24 @@ export async function GET(
         timestamp: r.createdAt,
         summary: `TitlePoint ${r.searchType ?? 'search'}: ${r.status ?? 'unknown'}`,
         meta: { searchType: r.searchType, status: r.status, message: r.message },
+      });
+    }
+
+    for (const r of prelimDeliveryRows) {
+      const meta = (r.meta ?? {}) as Record<string, unknown>;
+      const recipientCount = typeof meta.recipient_count === 'number' ? meta.recipient_count : 0;
+      const deliveredAtPt = typeof meta.delivered_at_pt === 'string' ? meta.delivered_at_pt : r.createdAt.toISOString();
+      const sendgridMessageId = typeof meta.sendgrid_message_id === 'string' ? meta.sendgrid_message_id : 'unknown';
+      const addNotesStatus = typeof meta.addnotes_status === 'number' ? meta.addnotes_status : null;
+      const softproProof = addNotesStatus === 200
+        ? `SoftPro note added ${deliveredAtPt} ✓`
+        : `SoftPro note pending/failed ${deliveredAtPt}`;
+
+      items.push({
+        type: 'prelim_delivery',
+        timestamp: r.createdAt,
+        summary: `Delivered ${deliveredAtPt} to ${recipientCount} recipients · SendGrid ${sendgridMessageId} AND ${softproProof}`,
+        meta: { ...meta, userId: r.userId },
       });
     }
 

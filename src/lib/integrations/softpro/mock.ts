@@ -157,15 +157,20 @@ export async function getLookupTable(
 export async function addNotes(
   _orderNumber: string,
   _text: string,
-  _noteId?: string,
-): Promise<VendorResult<{ success: boolean }>> {
+  noteId?: string,
+): Promise<VendorResult<Array<{ Status: number; Message: string; Id?: string }>>> {
   await new Promise((r) => setTimeout(r, 30));
-  return vendorSuccess({ success: true }, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 30 });
+  return vendorSuccess([{
+    Status: 200,
+    Message: 'Note added successfully to the file',
+    Id: noteId,
+  }], { requestId: 'mock-' + crypto.randomUUID(), durationMs: 30 });
 }
 
 export async function getFees(
   _orderNumber: string,
 ): Promise<VendorResult<SoftProFeeResponse>> {
+  void _orderNumber;
   await new Promise((r) => setTimeout(r, 40));
   const mockFees: SoftProFeeResponse = [
     {

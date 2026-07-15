@@ -42,6 +42,7 @@ const DOT_COLORS: Record<string, string> = {
   status: 'bg-amber-500',
   vendor: 'bg-purple-500',
   error: 'bg-red-500',
+  prelim_delivery: 'bg-green-600',
 };
 
 /* ── Component ─────────────────────────────────────────────────────────────── */
@@ -112,13 +113,15 @@ export function ActivityFeed({ fetchUrl, emptyMessage = 'No activity yet on this
 }
 
 function Skeleton() {
+  const widths = ['64%', '76%', '58%', '82%', '70%'];
+
   return (
     <div className="divide-y divide-gray-100 animate-pulse">
       {Array.from({ length: 5 }).map((_, i) => (
         <div key={i} className="flex items-start gap-3 px-4 py-3">
           <div className="w-2.5 h-2.5 rounded-full bg-gray-200 mt-1.5" />
           <div className="flex-1 space-y-1.5">
-            <div className="h-3.5 bg-gray-100 rounded" style={{ width: `${55 + Math.random() * 30}%` }} />
+            <div className="h-3.5 bg-gray-100 rounded" style={{ width: widths[i] }} />
             <div className="h-3 bg-gray-100 rounded w-24" />
           </div>
         </div>

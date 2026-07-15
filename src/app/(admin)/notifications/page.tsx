@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { ConfigTab } from '@/components/admin/notifications/config-tab';
-import { LogTab } from '@/components/admin/notifications/log-tab';
+import { DeliveryLogTab } from '@/components/admin/notifications/delivery-log-tab';
 
 type Tab = 'config' | 'log';
 
@@ -18,7 +18,7 @@ export default function NotificationsPage() {
 
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-6">
-          {([['config', 'Configuration'], ['log', 'Log']] as const).map(([key, label]) => (
+          {([['config', 'Configuration'], ['log', 'Delivery Log']] as const).map(([key, label]) => (
             <button key={key} onClick={() => setTab(key)}
               className={`pb-3 text-sm font-medium transition-colors relative ${tab === key ? 'text-[#1B2A4A]' : 'text-[#6B7280] hover:text-[#1A1A2E]'}`}>
               {label}
@@ -29,7 +29,7 @@ export default function NotificationsPage() {
       </div>
 
       {tab === 'config' && <ConfigTab />}
-      {tab === 'log' && <LogTab />}
+      {tab === 'log' && <DeliveryLogTab />}
     </div>
   );
 }

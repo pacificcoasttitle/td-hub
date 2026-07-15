@@ -82,6 +82,24 @@ function clientName(c: { fullName: string | null; officerName: string | null; fi
   return null;
 }
 
+function orderPartySearchExists(term: string): SQL {
+  return sql`exists (
+    select 1
+    from ${orderParties}
+    left join ${contacts} party_contact on ${orderParties.contactId} = party_contact.id
+    where ${orderParties.orderId} = ${orders.id}
+      and ${orderParties.role} in ('buyer', 'seller', 'lender', 'lender_contact', 'buyer_agent', 'listing_agent')
+      and (
+        ${orderParties.externalName} ilike ${term}
+        or ${orderParties.externalCompany} ilike ${term}
+        or party_contact.full_name ilike ${term}
+        or party_contact.officer_name ilike ${term}
+        or party_contact.company_name ilike ${term}
+        or party_contact.email ilike ${term}
+      )
+  )`;
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const SORT_COLUMNS: Record<string, any> = {
   openedAt: orders.openedAt,
@@ -130,6 +148,7 @@ export async function getOrders(
         ilike(clientContact.fullName, term),
         ilike(clientContact.email, term),
         ilike(clientContact.companyName, term),
+        orderPartySearchExists(term),
       )!
     );
   }
@@ -170,6 +189,7 @@ export async function getOrders(
       .select({ count: sql<number>`count(*)` })
       .from(orders)
       .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
+      .leftJoin(clientContact, eq(orders.clientContactId, clientContact.id))
       .where(where),
   ]);
 

@@ -33,7 +33,7 @@ export interface OrderListResponse {
   pageSize: number;
 }
 
-export const PAGE_SIZE = 25;
+export const DEFAULT_PAGE_SIZE = 25;
 
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 
@@ -70,12 +70,13 @@ const EMAIL_COLORS: Record<string, string> = {
 /* ── OrderTable ────────────────────────────────────────────────────────────── */
 
 export function OrderTable({
-  orders, loading, error, currentPage, totalPages, total, onPageChange, onRowClick,
+  orders, loading, error, currentPage, pageSize, totalPages, total, onPageChange, onRowClick,
 }: {
   orders: Order[] | undefined;
   loading: boolean;
   error: string | null;
   currentPage: number;
+  pageSize: number;
   totalPages: number;
   total: number;
   onPageChange: (page: number) => void;
@@ -119,7 +120,7 @@ export function OrderTable({
                       <OrderRow
                         key={order.id}
                         order={order}
-                        rowNum={(currentPage - 1) * PAGE_SIZE + idx + 1}
+                        rowNum={(currentPage - 1) * pageSize + idx + 1}
                         onClick={() => onRowClick(order.id)}
                         onAction={(type) => setModal({ type, order })}
                       />
@@ -141,8 +142,8 @@ export function OrderTable({
         <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50/40">
           <p className="text-sm text-[#6B7280]">
             Showing{' '}
-            <span className="font-medium text-[#1A1A2E]">{(currentPage - 1) * PAGE_SIZE + 1}</span>–
-            <span className="font-medium text-[#1A1A2E]">{Math.min(currentPage * PAGE_SIZE, total)}</span>{' '}
+            <span className="font-medium text-[#1A1A2E]">{(currentPage - 1) * pageSize + 1}</span>–
+            <span className="font-medium text-[#1A1A2E]">{Math.min(currentPage * pageSize, total)}</span>{' '}
             of <span className="font-medium text-[#1A1A2E]">{total}</span>
           </p>
           <div className="flex items-center gap-1">

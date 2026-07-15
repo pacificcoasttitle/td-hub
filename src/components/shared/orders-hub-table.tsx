@@ -35,6 +35,7 @@ export interface HubOrder {
 
 export type ActionType = 'cpl' | 'prelim' | 'deliver_prelim' | 'proposed' | 'notes' | 'detail' | 'fees' | 'resync' | 'retry_tp';
 type ModalType = 'cpl' | 'prelim' | 'deliver_prelim' | 'proposed' | 'notes' | 'detail' | null;
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
 
 export interface OrdersHubTableProps {
   fetchUrl: string;
@@ -68,6 +69,7 @@ export function OrdersHubTable({
 }: OrdersHubTableProps) {
   const [orders, setOrders] = useState<HubOrder[]>([]);
   const [page, setPage] = useState(1);
+  const [currentPageSize, setCurrentPageSize] = useState(pageSize);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [internalSearch, setInternalSearch] = useState('');
@@ -92,7 +94,7 @@ export function OrdersHubTable({
 
   const fetchOrders = useCallback(() => {
     const params = new URLSearchParams({
-      page: String(page), pageSize: String(pageSize),
+      page: String(page), pageSize: String(currentPageSize),
       sortBy: 'openedAt', sortDir: 'desc',
     });
     if (status) params.set('status', status);
@@ -109,7 +111,7 @@ export function OrdersHubTable({
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [fetchUrl, page, pageSize, status, search]);
+  }, [fetchUrl, page, currentPageSize, status, search]);
 
   useEffect(() => {
     queueMicrotask(() => setLoading(true));
@@ -138,6 +140,13 @@ export function OrdersHubTable({
   useEffect(() => {
     queueMicrotask(() => setPage(1));
   }, [fetchUrl]);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setCurrentPageSize(pageSize);
+      setPage(1);
+    });
+  }, [pageSize]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -318,10 +327,26 @@ export function OrdersHubTable({
 
       {/* Pagination */}
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-t border-gray-200 bg-white text-sm">
-        <span className="text-[#6B7280]">
-          {total} orders
-          {selectedMap.size > 0 && <> · <span className="text-[#F26B2B] font-medium">{selectedMap.size} selected</span></>}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-[#6B7280]">
+            {total} orders
+            {selectedMap.size > 0 && <> · <span className="text-[#F26B2B] font-medium">{selectedMap.size} selected</span></>}
+          </span>
+          <label className="inline-flex items-center gap-1.5 text-xs text-[#6B7280]">
+            Show
+            <select
+              value={currentPageSize}
+              onChange={(e) => {
+                setCurrentPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              className="h-8 px-2 border border-gray-200 rounded-md text-xs bg-white text-[#1A1A2E] outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20"
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+            per page
+          </label>
+        </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}
             className="px-3 h-8 border border-gray-200 rounded-md text-[#4B5563] hover:bg-gray-50 disabled:opacity-30 transition-colors text-xs font-medium">‹ Prev</button>

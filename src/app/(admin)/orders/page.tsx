@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { OrderFilters } from '@/components/admin/order-filters';
-import { OrderTable, PAGE_SIZE } from '@/components/admin/order-table';
+import { DEFAULT_PAGE_SIZE, OrderTable } from '@/components/admin/order-table';
 import type { OrderListResponse } from '@/components/admin/order-table';
 
 function ImportButton() {
@@ -103,6 +103,8 @@ const SORT_OPTIONS = [
   { label: 'Created By', value: 'createdBy:asc' },
 ];
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
+
 function parseSortKey(key: string): { sortBy: string; sortDir: string } {
   const [sortBy, sortDir] = key.split(':');
   return { sortBy: sortBy ?? 'openedAt', sortDir: sortDir ?? 'desc' };
@@ -118,6 +120,8 @@ export default function OrdersPage() {
   const currentSortBy = searchParams.get('sortBy') ?? 'openedAt';
   const currentSortDir = searchParams.get('sortDir') ?? 'desc';
   const currentSortKey = `${currentSortBy}:${currentSortDir}`;
+  const rawPageSize = Number(searchParams.get('pageSize') ?? DEFAULT_PAGE_SIZE);
+  const currentPageSize = PAGE_SIZE_OPTIONS.includes(rawPageSize) ? rawPageSize : DEFAULT_PAGE_SIZE;
 
   const [data, setData] = useState<OrderListResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -126,14 +130,16 @@ export default function OrdersPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const buildUrl = useCallback(
-    (overrides: { page?: number; status?: string; search?: string; sortBy?: string; sortDir?: string }) => {
+    (overrides: { page?: number; pageSize?: number; status?: string; search?: string; sortBy?: string; sortDir?: string }) => {
       const params = new URLSearchParams();
       const page = overrides.page ?? currentPage;
+      const pageSize = overrides.pageSize ?? currentPageSize;
       const status = overrides.status ?? currentStatus;
       const search = overrides.search ?? currentSearch;
       const sortBy = overrides.sortBy ?? currentSortBy;
       const sortDir = overrides.sortDir ?? currentSortDir;
       if (page > 1) params.set('page', String(page));
+      if (pageSize !== DEFAULT_PAGE_SIZE) params.set('pageSize', String(pageSize));
       if (status) params.set('status', status);
       if (search) params.set('search', search);
       if (sortBy !== 'openedAt' || sortDir !== 'desc') {
@@ -143,7 +149,7 @@ export default function OrdersPage() {
       const qs = params.toString();
       return qs ? `/orders?${qs}` : '/orders';
     },
-    [currentPage, currentStatus, currentSearch, currentSortBy, currentSortDir],
+    [currentPage, currentPageSize, currentStatus, currentSearch, currentSortBy, currentSortDir],
   );
 
   useEffect(() => {
@@ -153,7 +159,7 @@ export default function OrdersPage() {
       setError(null);
       const apiParams = new URLSearchParams({
         page: String(currentPage),
-        pageSize: String(PAGE_SIZE),
+        pageSize: String(currentPageSize),
         sortBy: currentSortBy,
         sortDir: currentSortDir,
       });
@@ -169,7 +175,7 @@ export default function OrdersPage() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [currentPage, currentStatus, currentSearch, currentSortBy, currentSortDir]);
+  }, [currentPage, currentPageSize, currentStatus, currentSearch, currentSortBy, currentSortDir]);
 
   function handleSearchChange(value: string) {
     setSearchInput(value);
@@ -182,7 +188,7 @@ export default function OrdersPage() {
     router.push(buildUrl({ sortBy, sortDir, page: 1 }));
   }
 
-  const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
+  const totalPages = data ? Math.ceil(data.total / currentPageSize) : 0;
 
   return (
     <div className="p-6">
@@ -209,11 +215,26 @@ export default function OrdersPage() {
         onSortChange={handleSortChange}
       />
 
+      <div className="flex justify-end mb-3">
+        <label className="inline-flex items-center gap-2 text-sm text-[#6B7280]">
+          Show
+          <select
+            value={currentPageSize}
+            onChange={(e) => router.push(buildUrl({ pageSize: Number(e.target.value), page: 1 }))}
+            className="h-9 px-2 border border-gray-200 rounded-lg text-sm bg-white text-[#1A1A2E] outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20"
+          >
+            {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
+          </select>
+          per page
+        </label>
+      </div>
+
       <OrderTable
         orders={data?.orders}
         loading={loading}
         error={error}
         currentPage={currentPage}
+        pageSize={currentPageSize}
         totalPages={totalPages}
         total={data?.total ?? 0}
         onPageChange={(page) => router.push(buildUrl({ page }))}

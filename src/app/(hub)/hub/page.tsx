@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { OrdersHubTable, type HubOrder, type ActionType } from '@/components/shared/orders-hub-table';
 import { CplModal } from '@/components/shared/action-modals/cpl-modal';
 import { PrelimModal } from '@/components/shared/action-modals/prelim-modal';
@@ -26,6 +27,7 @@ function oAddr(o: HubOrder | QuickResult) {
 }
 
 export default function HubPage() {
+  const router = useRouter();
   const [selectedOrders, setSelectedOrders] = useState<HubOrder[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [tableSearch, setTableSearch] = useState('');
@@ -199,7 +201,7 @@ export default function HubPage() {
             <div className="absolute z-30 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
               {qsResults.map((r) => (
                 <button key={r.id} onClick={() => {
-                  setSearchQuery(r.fileNumber); setTableSearch(r.fileNumber); setQsOpen(false);
+                  setQsOpen(false); router.push(`/orders/${r.id}`);
                 }}
                   className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0">
                   <span className="text-xs font-mono font-semibold text-[#1A1A2E]">{r.fileNumber}</span>

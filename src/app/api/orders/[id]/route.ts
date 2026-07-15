@@ -3,7 +3,7 @@ import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/permissions';
 import { getOrderById } from '@/lib/domain/orders/service';
 import { db } from '@/lib/db/client';
-import { contacts, companies, orderExternalRefs } from '@/lib/db/schema';
+import { contacts, companies, documents, orderExternalRefs } from '@/lib/db/schema';
 import { eq, and, like } from 'drizzle-orm';
 
 export async function GET(
@@ -79,7 +79,25 @@ export async function GET(
       cplData[row.refType] = row.refValue;
     }
 
-    return NextResponse.json({ ...order, lenderContact, cplData, underwriter: underwriterCompany });
+    const [prelimDoc] = await db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(and(
+        eq(documents.orderId, orderId),
+        eq(documents.category, 'prelim'),
+        eq(documents.status, 'active'),
+      ))
+      .limit(1);
+
+    return NextResponse.json({
+      ...order,
+      lenderContact,
+      cplData,
+      underwriter: underwriterCompany,
+      documents: {
+        prelim: { exists: !!prelimDoc },
+      },
+    });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

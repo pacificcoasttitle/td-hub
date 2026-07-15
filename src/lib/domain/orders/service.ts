@@ -30,7 +30,7 @@ interface DocCategoryStatus {
 }
 interface DocCategoryBool { exists: boolean }
 interface OrderDocuments {
-  cpl: DocCategoryStatus; proposedInsured: DocCategoryStatus;
+  cpl: DocCategoryStatus; prelim: DocCategoryStatus; proposedInsured: DocCategoryStatus;
   legalVesting: DocCategoryBool; tax: DocCategoryBool; grantDeed: DocCategoryBool;
 }
 
@@ -211,10 +211,10 @@ export async function getOrders(
 
 function emptyDocuments(): OrderDocuments {
   const full = { exists: false, count: 0, latestId: null, latestCreatedAt: null };
-  return { cpl: { ...full }, proposedInsured: { ...full }, legalVesting: { exists: false }, tax: { exists: false }, grantDeed: { exists: false } };
+  return { cpl: { ...full }, prelim: { ...full }, proposedInsured: { ...full }, legalVesting: { exists: false }, tax: { exists: false }, grantDeed: { exists: false } };
 }
 
-const DOC_CATS = ['cpl', 'proposed_insured', 'legal_vesting', 'tax', 'grant_deed'] as const;
+const DOC_CATS = ['cpl', 'prelim', 'proposed_insured', 'legal_vesting', 'tax', 'grant_deed'] as const;
 
 async function batchDocumentStatus(orderIds: number[]): Promise<Map<number, OrderDocuments>> {
   if (orderIds.length === 0) return new Map();
@@ -237,6 +237,7 @@ async function batchDocumentStatus(orderIds: number[]): Promise<Map<number, Orde
     const cnt = Number(r.cnt);
     const full = { exists: cnt > 0, count: cnt, latestId: r.latestId ? Number(r.latestId) : null, latestCreatedAt: r.latestAt ?? null };
     if (r.category === 'cpl') d.cpl = full;
+    else if (r.category === 'prelim') d.prelim = full;
     else if (r.category === 'proposed_insured') d.proposedInsured = full;
     else if (r.category === 'legal_vesting') d.legalVesting = { exists: cnt > 0 };
     else if (r.category === 'tax') d.tax = { exists: cnt > 0 };

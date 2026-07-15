@@ -8,6 +8,7 @@ import { PrelimModal } from '@/components/shared/action-modals/prelim-modal';
 import { ProposedInsuredModal } from '@/components/shared/action-modals/proposed-insured-modal';
 import { NotesModal } from '@/components/shared/action-modals/notes-modal';
 import { DetailModal } from '@/components/shared/action-modals/detail-modal';
+import { DeliverPrelimModal } from '@/components/shared/action-modals/deliver-prelim-modal';
 import { BatchProcessModal, type BatchResult } from '@/components/shared/batch-process-modal';
 import { QuickActionButton } from '@/components/admin/hub/quick-action-button';
 import { EscrowTaskCards } from '@/components/escrow/escrow-task-cards';
@@ -18,7 +19,7 @@ import {
 import type { TaskPriority } from '@/lib/domain/escrow/tasks';
 
 interface QuickResult { id: number; fileNumber: string; propertyStreet: string | null; propertyCity: string | null; propertyState: string | null; operationalStatus: string | null; }
-type ModalType = 'cpl' | 'prelim' | 'proposed' | 'notes' | 'detail' | null;
+type ModalType = 'cpl' | 'prelim' | 'deliver_prelim' | 'proposed' | 'notes' | 'detail' | null;
 
 function oAddr(o: HubOrder | QuickResult) {
   return [o.propertyStreet, o.propertyCity, o.propertyState].filter(Boolean).join(', ') || '—';
@@ -46,8 +47,10 @@ export default function HubPage() {
 
   useEffect(() => {
     if (role !== 'escrow_assistant') {
-      setPriorityFilter(null);
-      setOfficerFilter(null);
+      queueMicrotask(() => {
+        setPriorityFilter(null);
+        setOfficerFilter(null);
+      });
     }
   }, [role]);
 
@@ -225,7 +228,7 @@ export default function HubPage() {
       {/* ─── Orders Table (checkboxes, no internal search/status) ─── */}
       <OrdersHubTable
         fetchUrl={ordersFetchUrl}
-        actions={['cpl', 'proposed', 'prelim', 'notes', 'detail', 'retry_tp', 'resync']}
+        actions={['cpl', 'proposed', 'prelim', 'deliver_prelim', 'notes', 'detail', 'retry_tp', 'resync']}
         compact
         accentColor="#F26B2B"
         showSearch={false}
@@ -244,6 +247,7 @@ export default function HubPage() {
       {/* ─── Single-Order Modals (opened from row actions or single-select quick action) ─── */}
       <CplModal open={modal === 'cpl'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />
       <PrelimModal open={modal === 'prelim'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />
+      <DeliverPrelimModal open={modal === 'deliver_prelim'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />
       <ProposedInsuredModal open={modal === 'proposed'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />
       <NotesModal open={modal === 'notes'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />
       <DetailModal open={modal === 'detail'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />

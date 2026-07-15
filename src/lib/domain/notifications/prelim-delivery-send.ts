@@ -4,6 +4,16 @@ import { contacts, documents, orderProperties, orders } from '@/lib/db/schema';
 import { downloadFile } from '@/lib/integrations/s3/client';
 import { sendEmail, type SendGridAttachment } from '@/lib/integrations/sendgrid/client';
 import {
+  BORDER_SOFT,
+  ORANGE_TINT,
+  PCT_NAVY,
+  PCT_ORANGE,
+  TEXT_PRIMARY,
+  detailsRow,
+  emailLayout,
+  esc,
+} from './email-layout';
+import {
   resolvePrelimRecipients,
   type PrelimCcRecipient,
   type PrelimRecipient,
@@ -68,15 +78,6 @@ interface PrelimDocumentAttachment {
   attachment: SendGridAttachment;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 function detailValue(value: string | null | undefined): string {
   const trimmed = value?.trim();
   return trimmed || 'Not available';
@@ -103,52 +104,72 @@ function buildTestBlock(intendedRecipients: ReviewedPrelimRecipients): { text: s
     text: `TEST — would have gone to:\n${lines.join('\n')}`,
     html: `<div style="border:2px solid #b45309;background:#fffbeb;padding:12px;margin:0 0 16px;">
       <strong>TEST — would have gone to:</strong>
-      <ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>
+      <ul>${lines.map((line) => `<li>${esc(line)}</li>`).join('')}</ul>
     </div>`,
   };
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function buildEmailContent(params: {
   context: OrderEmailContext;
+  attachment: Pick<PrelimDocumentAttachment, 'sizeBytes'>;
   intendedRecipients: ReviewedPrelimRecipients;
   testMode: boolean;
 }): { html: string; text: string; subject: string } {
-  const { context, intendedRecipients, testMode } = params;
+  const { attachment, context, intendedRecipients, testMode } = params;
   const propertyAddress = detailValue(context.propertyAddress);
   const titleOfficer = detailValue(context.titleOfficerName);
   const titleOfficerContact = [
-    context.titleOfficerEmail,
-    context.titleOfficerPhone,
-  ].filter((value): value is string => Boolean(value?.trim())).join(' | ');
+    titleOfficer,
+    context.titleOfficerEmail?.trim(),
+    context.titleOfficerPhone?.trim(),
+  ].filter((value): value is string => Boolean(value)).join(' · ');
   const testBlock = testMode ? buildTestBlock(intendedRecipients) : null;
 
   const subject = `Preliminary Title Report — ${propertyAddress} — File ${context.fileNumber}`;
   const intro = 'The Preliminary Title Report for the property below is attached.';
-  const guidance = 'Please review it carefully. If you have any questions regarding this prelim, contact the title unit — reply to this email or call the number below.';
+  const review = 'Please review it carefully.';
+  const guidance = 'Questions about this prelim? Contact the title unit — reply to this email or call the number below.';
+  const attachmentLabel = `Preliminary Title Report.pdf · ${formatBytes(attachment.sizeBytes)}`;
   const details = [
     ['Property', propertyAddress],
-    ['File #', context.fileNumber],
-    ['Escrow #', context.fileNumber],
+    ['File number', context.fileNumber],
+    ['Escrow number', context.fileNumber],
     ['APN', detailValue(context.apn)],
-    ['Title Officer', titleOfficerContact ? `${titleOfficer} (${titleOfficerContact})` : titleOfficer],
+    ['Title officer', titleOfficerContact],
   ];
 
   const text = [
     testBlock?.text,
+    'Hello,',
     intro,
-    guidance,
+    review,
+    '',
+    attachmentLabel,
     '',
     ...details.map(([label, value]) => `${label}: ${value}`),
+    '',
+    guidance,
   ].filter(Boolean).join('\n');
 
-  const detailRows = details
-    .map(([label, value]) => `<tr><th align="left" style="padding:4px 12px 4px 0;">${escapeHtml(label)}</th><td style="padding:4px 0;">${escapeHtml(value)}</td></tr>`)
-    .join('');
+  const detailRows = details.map(([label, value]) => detailsRow(label, value)).join('');
 
-  const html = `${testBlock?.html ?? ''}
-    <p>${escapeHtml(intro)}</p>
-    <p>${escapeHtml(guidance)}</p>
-    <table role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">${detailRows}</table>`;
+  const body = `${testBlock?.html ?? ''}
+    <p style="margin:0 0 10px;font-size:16px;font-weight:700;color:${PCT_NAVY};">Hello,</p>
+    <p style="margin:0 0 18px;font-size:15px;color:${TEXT_PRIMARY};line-height:1.6;">${esc(intro)} <b>${esc(review)}</b></p>
+    <div style="display:inline-block;border:1px solid ${BORDER_SOFT};border-radius:999px;padding:9px 14px;margin:0 0 20px;background:#FFFFFF;color:${TEXT_PRIMARY};font-size:13px;font-weight:700;">
+      <span style="color:${PCT_ORANGE};font-size:15px;margin-right:8px;">▣</span>${esc(attachmentLabel)}
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border-radius:10px;margin:0 0 20px;border:1px solid ${BORDER_SOFT};">${detailRows}</table>
+    <div style="background:${ORANGE_TINT};border-left:3px solid ${PCT_ORANGE};padding:14px 16px;margin:0 0 4px;">
+      <p style="margin:0;font-size:14px;color:${TEXT_PRIMARY};line-height:1.6;"><strong>Questions about this prelim?</strong> Contact the title unit — reply to this email or call the number below.</p>
+    </div>`;
+  const html = emailLayout('Preliminary Title Report', body);
 
   return { html, text, subject };
 }
@@ -262,6 +283,7 @@ export async function sendPrelimDeliveryEmail(
   const testMode = deliveryMode.mode === 'test';
   const { html, text, subject } = buildEmailContent({
     context,
+    attachment: prelimAttachment,
     intendedRecipients: reviewedRecipients,
     testMode,
   });

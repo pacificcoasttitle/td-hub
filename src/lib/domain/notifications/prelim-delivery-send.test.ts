@@ -220,11 +220,26 @@ describe('sendPrelimDeliveryEmail', () => {
       ],
     }));
     const emailParams = sendEmail.mock.calls[0]?.[0];
+    expect(emailParams.html).toContain('Pacific Coast Title');
+    expect(emailParams.html).toContain('Preliminary Title Report');
     expect(emailParams.html).toContain('TEST — would have gone to:');
+    expect(emailParams.html.indexOf('TEST — would have gone to:')).toBeLessThan(emailParams.html.indexOf('Hello,'));
     expect(emailParams.html).toContain('TO: Escrow Officer &lt;eo@example.com&gt;');
     expect(emailParams.html).toContain('CC: Title Rep &lt;title@example.com&gt;');
+    expect(emailParams.html).toContain('The Preliminary Title Report for the property below is attached. <b>Please review it carefully.</b>');
+    expect(emailParams.html).toContain('Preliminary Title Report.pdf · 15 B');
+    expect(emailParams.html).toContain('Property');
+    expect(emailParams.html).toContain('123 Main St, Downey, CA 90241');
+    expect(emailParams.html).toContain('Questions about this prelim?');
     expect(emailParams.text).toContain('CC: Assistant <assistant@example.com> (Assistant via officer_cc_defaults)');
+    expect(emailParams.text).toContain('Hello,');
+    expect(emailParams.text).toContain('The Preliminary Title Report for the property below is attached.');
+    expect(emailParams.text).toContain('Please review it carefully.');
+    expect(emailParams.text).toContain('Preliminary Title Report.pdf · 15 B');
     expect(emailParams.text).toContain('APN: 999-111-222');
+    expect(emailParams.html).toContain('Title Unit 42 · unit42@pct.com · 562-555-0100');
+    expect(emailParams.text).toContain('Title officer: Title Unit 42 · unit42@pct.com · 562-555-0100');
+    expect(emailParams.text).toContain('Questions about this prelim? Contact the title unit — reply to this email or call the number below.');
 
     expect(result).toMatchObject({
       messageId: 'sg-message-id',
@@ -279,6 +294,8 @@ describe('sendPrelimDeliveryEmail', () => {
     }));
     const emailParams = sendEmail.mock.calls[0]?.[0];
     expect(emailParams.html).not.toContain('TEST — would have gone to:');
+    expect(emailParams.html).toContain('Preliminary Title Report.pdf · 15 B');
+    expect(emailParams.html).toContain('background:#FFF4EE;border-left:3px solid #F26B2B');
     expect(emailParams.text).not.toContain('TEST — would have gone to:');
     expect(emailParams.to).not.toBe('safe-test@example.com');
     expect(result).toMatchObject({

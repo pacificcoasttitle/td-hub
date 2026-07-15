@@ -61,6 +61,16 @@ export interface PrelimDeliveryResult {
   warning?: string;
 }
 
+export interface PrelimDeliverySampleData {
+  fileNumber: string;
+  propertyAddress: string | null;
+  apn: string | null;
+  titleOfficerName: string | null;
+  titleOfficerEmail: string | null;
+  titleOfficerPhone: string | null;
+  attachmentSizeBytes: number;
+}
+
 interface OrderEmailContext {
   fileNumber: string;
   propertyAddress: string | null;
@@ -172,6 +182,28 @@ function buildEmailContent(params: {
   const html = emailLayout('Preliminary Title Report', body);
 
   return { html, text, subject };
+}
+
+export function prelimDeliverySampleTemplate(data: PrelimDeliverySampleData): { subject: string; html: string; text: string } {
+  return buildEmailContent({
+    context: {
+      fileNumber: data.fileNumber,
+      propertyAddress: data.propertyAddress,
+      apn: data.apn,
+      titleOfficerName: data.titleOfficerName,
+      titleOfficerEmail: data.titleOfficerEmail,
+      titleOfficerPhone: data.titleOfficerPhone,
+    },
+    attachment: { sizeBytes: data.attachmentSizeBytes },
+    intendedRecipients: {
+      to: { email: 'escrow.officer@example.com', name: 'Escrow Officer', role: 'escrow_officer' },
+      cc: [
+        { email: 'title.unit@example.com', name: 'Title Unit', role: 'title_rep', source: 'title_officer' },
+        { email: 'assistant@example.com', name: 'Escrow Assistant', role: 'Assistant', source: 'officer_cc_defaults' },
+      ],
+    },
+    testMode: false,
+  });
 }
 
 async function loadOrderEmailContext(orderId: number): Promise<OrderEmailContext> {

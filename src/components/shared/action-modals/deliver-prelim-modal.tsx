@@ -10,7 +10,7 @@ interface PrelimRecipient {
 }
 
 interface PrelimCcRecipient extends PrelimRecipient {
-  source: 'title_officer' | 'officer_cc_defaults' | 'ad_hoc';
+  source: 'sales_rep' | 'ad_hoc';
 }
 
 interface PrelimRecipientWarning {

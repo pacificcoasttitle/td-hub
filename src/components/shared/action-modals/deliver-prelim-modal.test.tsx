@@ -21,7 +21,7 @@ const blockedResolution: PrelimRecipientResolution = {
 const validResolution: PrelimRecipientResolution = {
   to: { email: 'eo@example.com', name: 'Escrow Officer', role: 'escrow_officer' },
   cc: [
-    { email: 'title@example.com', name: 'Title Rep', role: 'title_rep', source: 'title_officer' },
+    { email: 'rep@example.com', name: 'Sales Rep', role: 'sales_rep', source: 'sales_rep' },
   ],
   warnings: [],
   blocked: false,
@@ -66,13 +66,13 @@ describe('DeliverPrelimModal review state', () => {
 
     expect(added.error).toBe('');
     expect(buildDeliverPrelimPayload(validResolution.to!, added.recipients).cc).toEqual([
-      { email: 'title@example.com', name: 'Title Rep', role: 'title_rep', source: 'title_officer' },
+      { email: 'rep@example.com', name: 'Sales Rep', role: 'sales_rep', source: 'sales_rep' },
       { email: 'assistant@example.com', name: 'Escrow Assistant', role: 'assistant', source: 'ad_hoc' },
     ]);
 
     const removed = removeCcRecipient(added.recipients, 'ad_hoc:assistant@example.com:test');
     expect(buildDeliverPrelimPayload(validResolution.to!, removed).cc).toEqual([
-      { email: 'title@example.com', name: 'Title Rep', role: 'title_rep', source: 'title_officer' },
+      { email: 'rep@example.com', name: 'Sales Rep', role: 'sales_rep', source: 'sales_rep' },
     ]);
   });
 });

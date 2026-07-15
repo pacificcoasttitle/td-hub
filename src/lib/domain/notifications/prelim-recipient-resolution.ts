@@ -1,7 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { contacts, orderParties, orders } from '@/lib/db/schema';
-import { getOfficerCcDefaults } from '@/lib/domain/contacts/officer-cc-defaults';
 
 export interface PrelimRecipient {
   email: string;
@@ -10,7 +9,7 @@ export interface PrelimRecipient {
 }
 
 export interface PrelimCcRecipient extends PrelimRecipient {
-  source: 'title_officer' | 'officer_cc_defaults' | 'ad_hoc';
+  source: 'sales_rep' | 'ad_hoc';
 }
 
 export interface PrelimRecipientWarning {
@@ -113,7 +112,7 @@ export async function resolvePrelimRecipients(
     .select({
       id: orders.id,
       escrowOfficerId: orders.escrowOfficerId,
-      titleOfficerId: orders.titleOfficerId,
+      salesRepId: orders.salesRepId,
     })
     .from(orders)
     .where(eq(orders.id, orderId))
@@ -186,35 +185,16 @@ export async function resolvePrelimRecipients(
     cc.push({ ...recipient, email, source });
   };
 
-  if (order.titleOfficerId) {
-    const titleOfficer = await getContactRecipient(order.titleOfficerId);
-    if (isValidEmail(titleOfficer?.email)) {
+  if (order.salesRepId) {
+    const salesRep = await getContactRecipient(order.salesRepId);
+    if (isValidEmail(salesRep?.email)) {
       addCc({
-        email: titleOfficer.email,
-        name: titleOfficer.fullName,
-        role: 'title_rep',
-      }, 'title_officer');
+        email: salesRep.email,
+        name: salesRep.fullName,
+        role: 'sales_rep',
+      }, 'sales_rep');
     } else {
-      warnings.push(invalidEmailWarning('title_rep', titleOfficer?.email, 'title_officer'));
-    }
-  }
-
-  if (order.escrowOfficerId) {
-    const defaults = await getOfficerCcDefaults(order.escrowOfficerId);
-    for (const defaultRecipient of defaults) {
-      if (isValidEmail(defaultRecipient.ccEmail)) {
-        addCc({
-          email: defaultRecipient.ccEmail,
-          name: defaultRecipient.ccName,
-          role: defaultRecipient.ccLabel ?? 'officer_cc_default',
-        }, 'officer_cc_defaults');
-      } else {
-        warnings.push(invalidEmailWarning(
-          defaultRecipient.ccLabel ?? 'officer_cc_default',
-          defaultRecipient.ccEmail,
-          'officer_cc_defaults',
-        ));
-      }
+      warnings.push(invalidEmailWarning('sales_rep', salesRep?.email, 'sales_rep'));
     }
   }
 

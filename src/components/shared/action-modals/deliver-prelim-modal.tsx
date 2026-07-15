@@ -287,10 +287,14 @@ export function DeliverPrelimModal({
         body: JSON.stringify(buildDeliverPrelimPayload(resolution.to, ccRecipients)),
       });
       const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error ?? `Delivery stub failed (${res.status})`);
-      setSendMessage(body?.message ?? 'D4 stub accepted the reviewed recipients. No email was sent.');
+      if (!res.ok) throw new Error(body?.error ?? `Prelim delivery failed (${res.status})`);
+      setSendMessage(
+        body?.messageId
+          ? `Prelim sent. Message ID: ${body.messageId}`
+          : 'Prelim delivery request completed.',
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delivery stub failed');
+      setError(err instanceof Error ? err.message : 'Prelim delivery failed');
     } finally {
       setSending(false);
     }
@@ -300,7 +304,7 @@ export function DeliverPrelimModal({
     <ModalShell open={open} onClose={onClose} title="Deliver Prelim" subtitle={`${fileNumber} · ${address}`} wide accentColor={accentColor}>
       <div className="space-y-4 p-5">
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          D4 review mode only. Send posts to a stub endpoint and does not send email.
+          Review recipients before sending. Test environments can set PRELIM_DELIVERY_TEST_RECIPIENT to send only to the override address.
         </div>
 
         {loading && <p className="py-8 text-center text-sm text-[#6B7280]">Resolving prelim recipients...</p>}

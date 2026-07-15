@@ -19,6 +19,7 @@ export interface SendEmailParams {
   html: string;
   text?: string;
   from?: string;
+  replyTo?: string;
   attachments?: SendGridAttachment[];
 }
 
@@ -70,6 +71,7 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
   const from = params.from ?? getFromEmail();
   const toList = toArray(params.to).filter(Boolean);
   const ccList = toArray(params.cc).filter(Boolean);
+  const replyTo = params.replyTo?.trim();
 
   if (toList.length === 0) {
     return vendorError<SendEmailResult>(VENDOR, 'NO_RECIPIENTS', 'No recipients specified', { requestId });
@@ -81,7 +83,7 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
       requestId,
       startedAt,
       success: true,
-      requestMeta: { to: toList, cc: ccList, subject: params.subject, from, mock: true },
+      requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo, mock: true },
     });
     return vendorSuccess({ messageId: `mock-${requestId}` }, { requestId, durationMs: 0 });
   }
@@ -99,6 +101,7 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
       ...(params.text ? [{ type: 'text/plain', value: params.text }] : []),
       { type: 'text/html', value: params.html },
     ],
+    ...(replyTo ? { reply_to: { email: replyTo } } : {}),
   };
 
   if (params.attachments && params.attachments.length > 0) {
@@ -130,7 +133,7 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
         requestId,
         startedAt,
         success: true,
-        requestMeta: { to: toList, cc: ccList, subject: params.subject, from },
+        requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo },
         responseMeta: { status: response.status, messageId },
       });
       return vendorSuccess({ messageId }, { requestId, durationMs });
@@ -143,7 +146,7 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
       startedAt,
       success: false,
       errorCategory: 'API_ERROR',
-      requestMeta: { to: toList, cc: ccList, subject: params.subject, from },
+      requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo },
       responseMeta: { status: response.status, body: errorBody },
     });
 
@@ -163,7 +166,7 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
       startedAt,
       success: false,
       errorCategory: 'NETWORK',
-      requestMeta: { to: toList, subject: params.subject },
+      requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo },
       responseMeta: { error: message },
     });
 

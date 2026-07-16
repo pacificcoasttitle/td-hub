@@ -57,10 +57,16 @@ export function ConfirmationsModal({ orderId, fileNumber, open, onClose }: Props
   }, [open, onClose]);
 
   useEffect(() => {
-    if (!open) { setData(null); setError(null); return; }
+    if (!open) {
+      queueMicrotask(() => { setData(null); setError(null); });
+      return;
+    }
     const ac = new AbortController();
-    setLoading(true);
-    setError(null);
+    queueMicrotask(() => {
+      if (ac.signal.aborted) return;
+      setLoading(true);
+      setError(null);
+    });
     fetch(`/api/admin/orders/${orderId}/confirmations`, { signal: ac.signal })
       .then(r => { if (!r.ok) throw new Error(`Failed (${r.status})`); return r.json(); })
       .then(setData)
@@ -185,21 +191,39 @@ function Timeline({ entries }: { entries: Confirmation[] }) {
   return (
     <div>
       <SH>History</SH>
-      <div className="space-y-2.5">
+      <div className="space-y-3">
         {sorted.map(entry => {
           const recipientCount = entry.emailDetails?.to.length ?? 0;
           const stCls = STATUS_CLS[entry.status] ?? 'bg-gray-100 text-gray-600';
+          const docs = entry.attachedDocuments ?? [];
           return (
-            <div key={entry.id} className="flex items-center gap-3 text-sm">
-              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize shrink-0 ${stCls}`}>
-                {entry.status}
-              </span>
-              <span className="text-gray-600">
-                {recipientCount > 0 ? `Sent to ${recipientCount} recipient${recipientCount !== 1 ? 's' : ''}` : entry.eventType?.replace(/_/g, ' ') || '—'}
-              </span>
-              <span className="text-gray-400 text-xs ml-auto whitespace-nowrap" title={fmtAbsolute(entry.createdAt)}>
-                {fmtRelative(entry.createdAt)}
-              </span>
+            <div key={entry.id} className="rounded-lg border border-gray-100 px-3 py-2.5">
+              <div className="flex items-center gap-3 text-sm">
+                <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize shrink-0 ${stCls}`}>
+                  {entry.status}
+                </span>
+                <span className="text-gray-600">
+                  {recipientCount > 0 ? `Sent to ${recipientCount} recipient${recipientCount !== 1 ? 's' : ''}` : entry.eventType?.replace(/_/g, ' ') || '—'}
+                </span>
+                <span className="text-gray-400 text-xs ml-auto whitespace-nowrap" title={fmtAbsolute(entry.createdAt)}>
+                  {fmtRelative(entry.createdAt)}
+                </span>
+              </div>
+              {docs.length > 0 ? (
+                <ul className="mt-2 space-y-1 pl-1">
+                  {docs.map((doc) => {
+                    const [label, cls] = CAT_BADGE[doc.category] ?? [doc.category.replace(/_/g, ' '), 'bg-gray-100 text-gray-600'];
+                    return (
+                      <li key={`${entry.id}-${doc.id}`} className="flex items-center gap-2 text-xs">
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium capitalize shrink-0 ${cls}`}>{label}</span>
+                        <span className="text-[#1A1A2E] truncate">{doc.filename}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="mt-1.5 text-xs text-gray-400">No attachments for this send</p>
+              )}
             </div>
           );
         })}

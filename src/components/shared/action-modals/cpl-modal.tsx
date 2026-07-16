@@ -32,7 +32,12 @@ interface OrderApiResponse {
   underwriter?: { name?: string; lookupCode?: string } | null;
 }
 
-interface ExistingCpl { id: number; fileName: string; createdAt: string; }
+interface ExistingCpl {
+  id: number;
+  fileName?: string | null;
+  filename?: string | null;
+  createdAt: string;
+}
 interface LenderResult { id: number; companyName: string; address?: string; city?: string; state?: string; zip?: string; }
 
 const UNDERWRITER_LABELS: Record<Underwriter, string> = {
@@ -120,17 +125,21 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
 
   useEffect(() => {
     if (!open) return;
-    setLoading(true); setResult(null); setLenderType('new'); setTxType(''); setBranchId(null);
-    setLenderCompany(''); setLenderContact(''); setAssignmentClause('');
-    setLenderAddr(''); setLenderCity(''); setLenderState(''); setLenderZip('');
-    setPropStreet(''); setPropCity(''); setPropState(''); setPropZip('');
-    setLoanNumber(''); setLoanAmount(''); setSalesAmount(''); setBorrower('');
-    setLenderExpanded(true); setPropertyExpanded(true);
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      setLoading(true); setResult(null); setLenderType('new'); setTxType(''); setBranchId(null);
+      setLenderCompany(''); setLenderContact(''); setAssignmentClause('');
+      setLenderAddr(''); setLenderCity(''); setLenderState(''); setLenderZip('');
+      setPropStreet(''); setPropCity(''); setPropState(''); setPropZip('');
+      setLoanNumber(''); setLoanAmount(''); setSalesAmount(''); setBorrower('');
+      setLenderExpanded(true); setPropertyExpanded(true);
+    });
     const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
     const docUrl = isClient ? `${base}/cpl` : `${base}/documents?category=cpl`;
     Promise.all([
-      fetch(base).then((r) => r.ok ? r.json() : null),
-      fetch(docUrl).then((r) => r.ok ? r.json() : { documents: [] }),
+      fetch(base, { signal: controller.signal }).then((r) => r.ok ? r.json() : null),
+      fetch(docUrl, { signal: controller.signal }).then((r) => r.ok ? r.json() : { documents: [] }),
     ]).then(([od, docData]) => {
       if (docData?.documents) setExistingCpls(docData.documents);
 
@@ -180,8 +189,11 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
         setLenderExpanded(!(lc?.companyName ?? lenderParty?.externalCompany));
         setPropertyExpanded(!prop?.address);
       }
-    }).catch(() => {}).finally(() => setLoading(false));
-  }, [open, orderId]);
+    }).catch((err) => {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+    }).finally(() => setLoading(false));
+    return () => controller.abort();
+  }, [open, orderId, isClient]);
 
   function handleLenderSearch(v: string) {
     setLenderSearch(v);
@@ -345,6 +357,24 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
             className="w-full h-12 bg-[#F26B2B] text-white text-sm font-semibold rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors">
             {generating ? 'Generating…' : isRegen ? 'Regenerate CPL' : 'Generate CPL'}
           </button>
+
+          {/* ── Existing Documents ── */}
+          {existingCpls.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2">Existing Documents</p>
+              <div className="space-y-1.5">
+                {existingCpls.map((d) => (
+                  <div key={d.id} className="flex items-center justify-between px-3 py-2.5 bg-gray-50 rounded-lg">
+                    <div className="min-w-0">
+                      <p className="text-sm text-[#1A1A2E] truncate">{d.filename ?? d.fileName ?? 'CPL.pdf'}</p>
+                      <p className="text-xs text-[#6B7280]">{new Date(d.createdAt).toLocaleDateString()}</p>
+                    </div>
+                    <a href={`${isClient ? '/api/client' : '/api'}/documents/${d.id}/download`} className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">Download</a>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </ModalShell>

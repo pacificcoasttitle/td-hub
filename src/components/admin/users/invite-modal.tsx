@@ -56,8 +56,8 @@ export function InviteModal({ onClose, onSuccess }: { onClose: () => void; onSuc
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error ?? 'Failed to send invite');
-      setResult({ ok: true, message: `Invite sent to ${email}` });
       onSuccess();
+      onClose();
     } catch (err) {
       setResult({ ok: false, message: err instanceof Error ? err.message : 'Failed' });
     } finally { setSending(false); }

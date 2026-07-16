@@ -74,6 +74,7 @@ export async function GET(
         category: documents.category,
         filename: documents.filename,
         sizeBytes: documents.sizeBytes,
+        createdAt: documents.createdAt,
       })
       .from(documents)
       .where(
@@ -86,7 +87,8 @@ export async function GET(
 
     const confirmations = outboxRows.map((event) => {
       const isProcessed = !!event.publishedAt;
-      const matchedLog = findClosestLog(sgLogs, event.publishedAt ?? event.createdAt);
+      const eventTime = event.publishedAt ?? event.createdAt;
+      const matchedLog = findClosestLog(sgLogs, eventTime);
 
       let emailDetails: Record<string, unknown> | null = null;
       if (matchedLog) {
@@ -107,6 +109,17 @@ export async function GET(
         };
       }
 
+      // Bind docs that existed at/before this confirmation — do not share the
+      // full current document set across every history row.
+      const attachedDocuments = docRows
+        .filter((d) => !d.createdAt || d.createdAt.getTime() <= eventTime.getTime())
+        .map((d) => ({
+          id: d.id,
+          category: d.category,
+          filename: d.filename,
+          sizeBytes: d.sizeBytes ?? null,
+        }));
+
       return {
         id: event.id,
         eventType: event.eventType,
@@ -114,12 +127,7 @@ export async function GET(
         createdAt: event.createdAt.toISOString(),
         processedAt: event.publishedAt?.toISOString() ?? null,
         emailDetails,
-        attachedDocuments: docRows.map((d) => ({
-          id: d.id,
-          category: d.category,
-          filename: d.filename,
-          sizeBytes: d.sizeBytes ?? null,
-        })),
+        attachedDocuments,
       };
     });
 

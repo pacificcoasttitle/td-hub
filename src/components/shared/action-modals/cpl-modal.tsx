@@ -57,10 +57,11 @@ function detectUnderwriter(order: OrderApiResponse): Underwriter {
   return 'westcor';
 }
 
-export function CplModal({ open, onClose, orderId, fileNumber, address, isClient }: {
+export function CplModal({ open, onClose, orderId, fileNumber, address, isClient, onSuccess }: {
   open: boolean; onClose: () => void;
   orderId: number; fileNumber: string; address: string;
   isClient?: boolean; accentColor?: string;
+  onSuccess?: () => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [underwriter, setUnderwriter] = useState<Underwriter>('westcor');
@@ -217,6 +218,7 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
       const body = await res.json();
       if (!res.ok || !body.success) throw new Error(body.error ?? body.details?.[0] ?? 'Generation failed');
       setResult({ ok: true, docId: body.documentId });
+      onSuccess?.();
     } catch (err) {
       setResult({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
     } finally { setGenerating(false); }

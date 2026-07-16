@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export interface SiteXPropertyResult {
   apn: string | null;
@@ -35,6 +35,15 @@ interface PropertyConfirmModalProps {
 
 type ModalState = 'confirm' | 'loading' | 'multi' | 'not-found';
 
+/** Fresh modal session — used on open so reopen never inherits a prior step. */
+export function initialPropertyConfirmState(): {
+  state: ModalState;
+  locations: SiteXLocation[];
+  pickingIndex: number | null;
+} {
+  return { state: 'confirm', locations: [], pickingIndex: null };
+}
+
 export function PropertyConfirmModal({
   open,
   address,
@@ -46,6 +55,17 @@ export function PropertyConfirmModal({
   const [state, setState] = useState<ModalState>('confirm');
   const [locations, setLocations] = useState<SiteXLocation[]>([]);
   const [pickingIndex, setPickingIndex] = useState<number | null>(null);
+
+  // Reset step + form whenever the modal opens (or address changes while open).
+  useEffect(() => {
+    if (!open) return;
+    queueMicrotask(() => {
+      const next = initialPropertyConfirmState();
+      setState(next.state);
+      setLocations(next.locations);
+      setPickingIndex(next.pickingIndex);
+    });
+  }, [open, address.street, address.city, address.state, address.zip]);
 
   if (!open) return null;
 
@@ -121,9 +141,10 @@ export function PropertyConfirmModal({
   }
 
   function resetState() {
-    setState('confirm');
-    setLocations([]);
-    setPickingIndex(null);
+    const next = initialPropertyConfirmState();
+    setState(next.state);
+    setLocations(next.locations);
+    setPickingIndex(next.pickingIndex);
   }
 
   function handleReject() {

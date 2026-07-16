@@ -217,6 +217,7 @@ export function DeliverPrelimModal({
   fileNumber,
   address,
   accentColor = '#F26B2B',
+  onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
@@ -224,6 +225,7 @@ export function DeliverPrelimModal({
   fileNumber: string;
   address: string;
   accentColor?: string;
+  onSuccess?: () => void;
 }) {
   const [resolution, setResolution] = useState<PrelimRecipientResolution | null>(null);
   const [ccRecipients, setCcRecipients] = useState<EditableRecipient[]>([]);
@@ -311,6 +313,7 @@ export function DeliverPrelimModal({
             ? `Prelim sent. Message ID: ${body.messageId}`
           : 'Prelim delivery request completed.',
       );
+      onSuccess?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Prelim delivery failed');
     } finally {

@@ -29,10 +29,11 @@ interface ProposedInsuredPrefill {
 interface ExistingDoc { id: number; fileName?: string | null; filename?: string | null; createdAt: string; }
 interface LenderResult { id: number; companyName: string; lookupCode?: string; assignmentClause?: string; address?: string; city?: string; state?: string; zip?: string; }
 
-export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, address, isClient, accentColor }: {
+export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, address, isClient, accentColor, onSuccess }: {
   open: boolean; onClose: () => void;
   orderId: number; fileNumber: string; address: string;
   isClient?: boolean; accentColor?: string;
+  onSuccess?: () => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -186,6 +187,7 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
       const r2 = await fetch(piRefreshUrl);
       const d2 = await r2.json();
       setExistingDocs(d2.documents ?? []);
+      onSuccess?.();
     } catch (err) {
       setResult({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
     } finally { setGenerating(false); }

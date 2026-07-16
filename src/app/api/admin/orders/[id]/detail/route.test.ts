@@ -2,14 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   applyVisibilityMock,
-  canAccessOrderMock,
-  canAccessSalesScopedOrderMock,
+  canAccessOrderDetailResourceMock,
   getOrderReadModelMock,
   getSessionMock,
 } = vi.hoisted(() => ({
   applyVisibilityMock: vi.fn(),
-  canAccessOrderMock: vi.fn(),
-  canAccessSalesScopedOrderMock: vi.fn(),
+  canAccessOrderDetailResourceMock: vi.fn(),
   getOrderReadModelMock: vi.fn(),
   getSessionMock: vi.fn(),
 }));
@@ -19,9 +17,7 @@ vi.mock('@/lib/security/auth', () => ({
 }));
 
 vi.mock('@/lib/security/permissions', () => ({
-  canAccessOrder: canAccessOrderMock,
-  canAccessSalesScopedOrder: canAccessSalesScopedOrderMock,
-  isSalesScopedRole: (role: string) => role === 'sales_rep' || role === 'sales_manager',
+  canAccessOrderDetailResource: canAccessOrderDetailResourceMock,
 }));
 
 vi.mock('@/lib/domain/orders/read-model', () => ({
@@ -99,23 +95,21 @@ describe('GET /api/admin/orders/[id]/detail sales scope', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getSessionMock.mockResolvedValue({ id: 'manager-1', role: 'sales_manager', contactId: 10 });
-    canAccessOrderMock.mockResolvedValue(false);
-    canAccessSalesScopedOrderMock.mockResolvedValue(true);
+    canAccessOrderDetailResourceMock.mockResolvedValue(true);
     getOrderReadModelMock.mockResolvedValue(readModel());
     applyVisibilityMock.mockImplementation((model) => model);
   });
 
-  it('uses the sales-scoped predicate for sales manager detail access', async () => {
+  it('uses the DC-2 detail-resource gate for sales manager detail access', async () => {
     const response = await GET({} as never, { params: Promise.resolve({ id: '123' }) });
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body.order.fileNumber).toBe('20012345-OCT');
-    expect(canAccessSalesScopedOrderMock).toHaveBeenCalledWith(
+    expect(canAccessOrderDetailResourceMock).toHaveBeenCalledWith(
       { id: 'manager-1', role: 'sales_manager', contactId: 10 },
       123,
     );
-    expect(canAccessOrderMock).not.toHaveBeenCalled();
     expect(getOrderReadModelMock).toHaveBeenCalledWith(123);
     expect(applyVisibilityMock).toHaveBeenCalledWith(expect.objectContaining({ id: 123 }), 'staff');
   });

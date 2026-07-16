@@ -154,3 +154,17 @@ export async function canAccessOrder(
       return false;
   }
 }
+
+/**
+ * DC-2 detail/tab access gate used by order detail and its nested subresources.
+ * Sales roles use canAccessSalesScopedOrder (own + directly-managed reps).
+ * All other roles use canAccessOrder. No broader grant.
+ */
+export async function canAccessOrderDetailResource(
+  session: SessionUser,
+  orderId: number,
+): Promise<boolean> {
+  return isSalesScopedRole(session.role)
+    ? canAccessSalesScopedOrder(session, orderId)
+    : canAccessOrder(session, orderId);
+}

@@ -15,6 +15,7 @@ describe('order status formatter', () => {
     expect(statusLabel('closed')).toBe('Closed');
     expect(statusLabel('canceled')).toBe('Canceled');
     expect(statusLabel('duplicate')).toBe('Duplicate');
+    expect(statusLabel('hold')).toBe('Hold');
   });
 
   it('assigns the canonical semantic palette', () => {
@@ -24,6 +25,15 @@ describe('order status formatter', () => {
     expect(statusColor('closed')).toBe('bg-green-50 text-green-700 border-green-200');
     expect(statusColor('canceled')).toBe('bg-red-50 text-red-700 border-red-200');
     expect(statusColor('duplicate')).toBe('bg-gray-100 text-gray-600 border-gray-200');
+    expect(statusColor('hold')).toBe('bg-orange-50 text-orange-700 border-orange-200');
+  });
+
+  it('renders hold via the shared badge used by Admin/Hub/Sales/Client', () => {
+    expect(statusBadge('hold')).toEqual({
+      label: 'Hold',
+      color: 'bg-orange-50 text-orange-700 border-orange-200',
+    });
+    expect(STATUS_FILTER_OPTIONS).toContainEqual({ value: 'hold', label: 'Hold' });
   });
 
   it('keeps filter options in full enum order', () => {

@@ -122,7 +122,12 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      await processOrderDetail(detail, { salesReps, titleOfficers, escrowOfficers });
+      await processOrderDetail(detail, {
+        salesReps,
+        titleOfficers,
+        escrowOfficers,
+        preserveExistingOnEmpty: true,
+      });
       enriched++;
     } catch (err) {
       errors.push({

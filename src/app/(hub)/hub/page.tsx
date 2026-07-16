@@ -179,7 +179,7 @@ export default function HubPage() {
           <option value="open">Open</option>
           <option value="in_process">In Process</option>
           <option value="closed">Closed</option>
-          <option value="cancelled">Cancelled</option>
+          <option value="canceled">Canceled</option>
         </select>
 
         {/* Single Search Bar */}

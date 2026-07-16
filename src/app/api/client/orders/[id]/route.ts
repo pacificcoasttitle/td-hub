@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db/client';
-import { orders, orderProperties, documents } from '@/lib/db/schema';
-import { eq, desc, and } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/client-scope';
+import { applyVisibility, getOrderReadModel } from '@/lib/domain/orders/read-model';
 
 export async function GET(
   _req: NextRequest,
@@ -26,48 +24,31 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    const result = await db
-      .select()
-      .from(orders)
-      .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
-      .where(eq(orders.id, orderId))
-      .limit(1);
-
-    if (result.length === 0) {
+    const model = await getOrderReadModel(orderId);
+    if (!model) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
+    const visible = applyVisibility(model, 'client');
 
-    const docs = await db
-      .select({
-        id: documents.id,
-        filename: documents.filename,
-        category: documents.category,
-        sizeBytes: documents.sizeBytes,
-        createdAt: documents.createdAt,
-      })
-      .from(documents)
-      .where(and(eq(documents.orderId, orderId), eq(documents.status, 'active')))
-      .orderBy(desc(documents.createdAt));
-
-    const row = result[0]!;
     return NextResponse.json({
-      id: row.orders.id,
-      fileNumber: row.orders.fileNumber,
-      operationalStatus: row.orders.operationalStatus,
-      transactionType: row.orders.transactionType,
-      openedAt: row.orders.openedAt,
-      completedAt: row.orders.completedAt,
-      closedAt: row.orders.closedAt,
-      property: row.order_properties
+      id: visible.id,
+      fileNumber: visible.fileNumber,
+      operationalStatus: visible.status.value,
+      transactionType: visible.transactionType,
+      openedAt: visible.dates.openedAt,
+      completedAt: visible.dates.completedAt,
+      closedAt: visible.dates.closedAt,
+      property: visible.property.addressFormatted !== '—'
         ? {
-            address: row.order_properties.address,
-            city: row.order_properties.city,
-            state: row.order_properties.state,
-            county: row.order_properties.county,
-            fullAddress: row.order_properties.fullAddress,
+            address: visible.property.line1,
+            city: visible.property.city,
+            state: visible.property.state,
+            zip: visible.property.zip,
+            county: visible.property.county === '—' ? null : visible.property.county,
+            fullAddress: visible.property.addressFormatted,
           }
         : null,
-      documents: docs,
+      documents: visible.documents.active,
     });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

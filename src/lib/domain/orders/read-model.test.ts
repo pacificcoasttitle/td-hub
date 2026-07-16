@@ -139,9 +139,9 @@ const baseData: OrderReadModelData = {
     salesRep: { name: 'Ryan Rep', email: 'ryan@pct.com' },
   },
   documents: [
-    { id: 10, category: 'prelim', filename: 'prelim-v1.pdf', createdAt: '2026-07-16T17:00:00.000Z' },
-    { id: 11, category: 'prelim', filename: 'prelim-v2.pdf', createdAt: '2026-07-17T17:00:00.000Z' },
-    { id: 12, category: 'cpl', filename: 'cpl.pdf', createdAt: '2026-07-16T19:00:00.000Z' },
+    { id: 10, category: 'prelim', filename: 'prelim-v1.pdf', sizeBytes: 1000, createdAt: '2026-07-16T17:00:00.000Z' },
+    { id: 11, category: 'prelim', filename: 'prelim-v2.pdf', sizeBytes: 2000, createdAt: '2026-07-17T17:00:00.000Z' },
+    { id: 12, category: 'cpl', filename: 'cpl.pdf', sizeBytes: null, createdAt: '2026-07-16T19:00:00.000Z' },
   ],
   statusHistory: [
     { status: 'recording_confirmation', notes: 'Recording confirmed', changedAt: '2026-07-18T18:00:00.000Z' },
@@ -214,6 +214,11 @@ describe('buildOrderReadModel', () => {
 describe('document summary', () => {
   it('groups active documents by category with latest metadata', () => {
     expect(summarizeActiveDocuments(baseData.documents)).toEqual({
+      active: [
+        { id: 10, category: 'prelim', filename: 'prelim-v1.pdf', sizeBytes: 1000, createdAt: 'Jul 16, 2026' },
+        { id: 11, category: 'prelim', filename: 'prelim-v2.pdf', sizeBytes: 2000, createdAt: 'Jul 17, 2026' },
+        { id: 12, category: 'cpl', filename: 'cpl.pdf', sizeBytes: null, createdAt: 'Jul 16, 2026' },
+      ],
       activeByCategory: {
         prelim: {
           count: 2,

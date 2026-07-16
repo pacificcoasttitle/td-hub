@@ -100,6 +100,13 @@ export interface OrderReadModelAssignment {
 }
 
 export interface OrderReadModelDocuments {
+  active: Array<{
+    id: number;
+    filename: string;
+    category: string;
+    sizeBytes: number | null;
+    createdAt: string;
+  }>;
   activeByCategory: Record<string, {
     count: number;
     latestId: number | null;
@@ -172,6 +179,7 @@ export interface OrderReadModelDocumentSource {
   id: number;
   category: string;
   filename: string;
+  sizeBytes?: number | null;
   createdAt: Date | string | null;
 }
 
@@ -281,6 +289,13 @@ export function summarizeActiveDocuments(docs: OrderReadModelDocumentSource[]): 
   }
 
   return {
+    active: docs.map((doc) => ({
+      id: doc.id,
+      filename: doc.filename,
+      category: doc.category,
+      sizeBytes: doc.sizeBytes ?? null,
+      createdAt: formatOrderDate(doc.createdAt),
+    })),
     activeByCategory,
     prelimAvailable: Boolean(activeByCategory.prelim?.count),
     activeCount: docs.length,
@@ -415,6 +430,7 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
         id: documents.id,
         category: documents.category,
         filename: documents.filename,
+        sizeBytes: documents.sizeBytes,
         createdAt: documents.createdAt,
       })
       .from(documents)

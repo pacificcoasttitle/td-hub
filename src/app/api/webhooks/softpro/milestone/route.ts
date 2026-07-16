@@ -5,16 +5,27 @@ import {
   milestonePayloadSchema,
   handleMilestoneWebhook,
 } from '@/lib/domain/webhooks/softpro-handler';
-
-// TODO: Add webhook signature verification once SoftPro supports auth headers
+import {
+  logSoftProWebhookRejection,
+  softProWebhookUnauthorizedResponse,
+  verifySoftProWebhookRequest,
+} from '@/lib/security/softpro-webhook-auth';
 
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
   const startedAt = new Date();
-  let rawBody: unknown;
 
+  const rawBodyText = await req.text();
+  const auth = verifySoftProWebhookRequest(req.headers, rawBodyText);
+  if (!auth.ok) {
+    logSoftProWebhookRejection('/api/webhooks/softpro/milestone', auth.reason);
+    await logWebhook(requestId, startedAt, 'webhook_milestone_auth_rejected', null, false, auth.reason);
+    return softProWebhookUnauthorizedResponse(auth.reason);
+  }
+
+  let rawBody: unknown;
   try {
-    rawBody = await req.json();
+    rawBody = JSON.parse(rawBodyText);
   } catch {
     return NextResponse.json({ success: false, error: 'Invalid JSON' });
   }

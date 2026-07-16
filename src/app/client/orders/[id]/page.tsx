@@ -341,13 +341,14 @@ function EmptyStateFees() {
 
 /* ─── Inline Notes Tab ─────────────────────────────────────────────────────── */
 
-interface Note { id: number; content: string; createdAt: string; author: string; }
+interface Note { id: number; body: string; createdAt: string; authorName?: string | null; }
 
 function NotesTabContent({ orderId }: { orderId: number }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [noteText, setNoteText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`/api/client/orders/${orderId}/notes`).then((r) => r.ok ? r.json() : { notes: [] })
@@ -357,13 +358,24 @@ function NotesTabContent({ orderId }: { orderId: number }) {
   async function handleAddNote() {
     if (!noteText.trim()) return;
     setSaving(true);
+    setSaveError(null);
     try {
-      const res = await fetch(`/api/client/orders/${orderId}/notes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: noteText.trim() }) });
-      if (!res.ok) return;
+      const res = await fetch(`/api/client/orders/${orderId}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: noteText.trim() }),
+      });
       const body = await res.json().catch(() => null);
+      if (!res.ok || body?.success === false) {
+        throw new Error(body?.error ?? `Failed to add note (${res.status})`);
+      }
       if (body?.note) setNotes((prev) => [body.note, ...prev]);
       setNoteText('');
-    } catch { /* noop */ } finally { setSaving(false); }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to add note');
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (loading) return <div className="bg-white rounded-xl border border-[#E5E7EB] p-8 animate-pulse"><div className="h-20 bg-gray-100 rounded mb-4" /><div className="h-4 w-48 bg-gray-100 rounded" /></div>;
@@ -379,6 +391,7 @@ function NotesTabContent({ orderId }: { orderId: number }) {
           rows={3}
           className="w-full h-24 px-4 py-3 border border-[#E5E7EB] rounded-lg text-sm text-[#1B2A4A] placeholder:text-[#9CA3AF] resize-none focus:outline-none focus:ring-2 focus:ring-[#F26B2B]/20 focus:border-[#F26B2B]"
         />
+        {saveError && <p className="mt-2 text-xs text-red-600">{saveError}</p>}
         <button
           onClick={handleAddNote}
           disabled={saving || !noteText.trim()}
@@ -393,10 +406,10 @@ function NotesTabContent({ orderId }: { orderId: number }) {
           {notes.map((n) => (
             <div key={n.id} className="bg-white rounded-xl border border-[#E5E7EB] p-5">
               <div className="flex items-center justify-between mb-3">
-                <span className="font-medium text-[#1B2A4A]">{n.author}</span>
+                <span className="font-medium text-[#1B2A4A]">{n.authorName ?? 'Unknown'}</span>
                 <span className="text-sm text-[#6B7280]">{fmtDate(n.createdAt)}</span>
               </div>
-              <p className="text-sm text-[#4B5563] leading-relaxed whitespace-pre-wrap">{n.content}</p>
+              <p className="text-sm text-[#4B5563] leading-relaxed whitespace-pre-wrap">{n.body}</p>
             </div>
           ))}
         </div>

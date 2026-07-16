@@ -36,9 +36,11 @@ const TP_STATUS_COLORS: Record<string, string> = {
 export function OrderPropertyTab({
   property,
   orderId,
+  onPropertyUpdated,
 }: {
   property: OrderProperty | null;
   orderId: number;
+  onPropertyUpdated?: () => void | Promise<void>;
 }) {
   const [lookupOpen, setLookupOpen] = useState(false);
   const [tpSearches, setTpSearches] = useState<TitlePointSearch[]>([]);
@@ -65,6 +67,7 @@ export function OrderPropertyTab({
         {lookupOpen && (
           <PropertyLookupModal
             orderId={orderId}
+            onSuccess={onPropertyUpdated}
             onClose={() => setLookupOpen(false)}
           />
         )}
@@ -159,6 +162,7 @@ export function OrderPropertyTab({
       {lookupOpen && (
         <PropertyLookupModal
           orderId={orderId}
+          onSuccess={onPropertyUpdated}
           onClose={() => setLookupOpen(false)}
         />
       )}
@@ -176,9 +180,11 @@ function formatShortDate(iso: string): string {
 
 function PropertyLookupModal({
   orderId,
+  onSuccess,
   onClose,
 }: {
   orderId: number;
+  onSuccess?: () => void | Promise<void>;
   onClose: () => void;
 }) {
   const [inputValue, setInputValue] = useState('');
@@ -206,7 +212,9 @@ function PropertyLookupModal({
         const body = await res.json().catch(() => null);
         throw new Error(body?.error ?? `Lookup failed (${res.status})`);
       }
-      setResult({ type: 'success', message: 'Property data updated. Refresh to see changes.' });
+      setResult({ type: 'success', message: 'Property data updated.' });
+      await onSuccess?.();
+      onClose();
     } catch (err) {
       setResult({ type: 'error', message: err instanceof Error ? err.message : 'Property lookup failed' });
     } finally {

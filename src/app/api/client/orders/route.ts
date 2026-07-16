@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
 
     const accessibleIds = await getAccessibleOrderIds(session.id);
     if (Array.isArray(accessibleIds) && accessibleIds.length === 0) {
-      return NextResponse.json({ orders: [], total: 0, page: params.page, pageSize: params.pageSize });
+      return NextResponse.json({ orders: [], total: 0, page: params.page, pageSize: params.pageSize, totalPages: 0 });
     }
 
     const conditions: SQL[] = [];
@@ -82,11 +82,18 @@ export async function GET(req: NextRequest) {
         .where(where),
     ]);
 
+    const total = Number(countResult[0]?.count ?? 0);
     return NextResponse.json({
-      orders: rows,
-      total: Number(countResult[0]?.count ?? 0),
+      orders: rows.map((row) => ({
+        ...row,
+        propertyStreet: row.address,
+        propertyCity: row.city,
+        propertyState: row.state,
+      })),
+      total,
       page: params.page,
       pageSize: params.pageSize,
+      totalPages: Math.ceil(total / params.pageSize),
     });
   } catch (err) {
     if (err instanceof z.ZodError) {

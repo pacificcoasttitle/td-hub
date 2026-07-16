@@ -168,7 +168,9 @@ describe('resyncFromSoftPro', () => {
       orderNumber: '20018881-OCT',
       orderId: 42,
     });
-    expect(processOrderDetailMock).toHaveBeenCalledWith(detail, expect.any(Object));
+    expect(processOrderDetailMock).toHaveBeenCalledWith(detail, expect.objectContaining({
+      preserveExistingOnEmpty: true,
+    }));
     expect(enrichSingleOrderMock).toHaveBeenCalledWith(42);
     expect(result).toMatchObject({
       success: true,
@@ -216,7 +218,10 @@ describe('resyncFromSoftPro', () => {
 
     const result = await resyncFromSoftPro(42);
 
-    expect(processOrderDetailMock).toHaveBeenCalled();
+    expect(processOrderDetailMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ preserveExistingOnEmpty: true }),
+    );
     expect(result).toMatchObject({ success: true, updated: false, changes: [] });
   });
 

@@ -183,7 +183,12 @@ export async function resyncFromSoftPro(orderId: number): Promise<ResyncFromSoft
     loadEscrowOfficers(),
   ]);
 
-  await processOrderDetail(detail, { salesReps, titleOfficers, escrowOfficers });
+  await processOrderDetail(detail, {
+    salesReps,
+    titleOfficers,
+    escrowOfficers,
+    preserveExistingOnEmpty: true,
+  });
 
   const enrich = await enrichSingleOrder(order.id);
   const after = await loadSnapshot(order.id);

@@ -149,6 +149,12 @@ export interface ProcessOrderDetailOptions {
   salesReps?: ContactRecord[];
   titleOfficers?: ContactRecord[];
   escrowOfficers?: ContactRecord[];
+  /**
+   * When true (resync), empty SoftPro string fields omit the column on
+   * existing-order updates so prior values are preserved. Default false
+   * keeps import/webhook behavior: empty → null.
+   */
+  preserveExistingOnEmpty?: boolean;
 }
 
 export async function processOrderDetail(
@@ -158,10 +164,14 @@ export async function processOrderDetail(
   const fileNumber = item.OrderNumber;
   if (!fileNumber) return;
 
+  const preserveExistingOnEmpty = options.preserveExistingOnEmpty === true;
+  const emptyField = preserveExistingOnEmpty ? undefined : null;
+
   const salesReps = options.salesReps ?? await loadSalesReps();
   const titleOfficers = options.titleOfficers ?? await loadTitleOfficers();
   const escrowOfficers = options.escrowOfficers ?? await loadEscrowOfficers();
 
+  const orderStatusPresent = Boolean(item.OrderStatus?.trim());
   const operationalStatus = mapStatus(item.OrderStatus ?? 'open');
   const softproStatus = (item.OrderStatus ?? 'open').toLowerCase().trim();
   const transactionType = mapTransactionType(item.TransactionType);
@@ -193,16 +203,18 @@ export async function processOrderDetail(
     .limit(1);
 
   if (existing) {
-    const statusChanged = existing.operationalStatus !== operationalStatus;
+    // Resync: never reset status to 'open' when SoftPro omits OrderStatus.
+    const shouldUpdateStatus = !(preserveExistingOnEmpty && !orderStatusPresent);
+    const statusChanged = shouldUpdateStatus && existing.operationalStatus !== operationalStatus;
 
     await db.update(orders).set({
-      softproStatus,
-      operationalStatus,
-      transactionType,
-      productType: item.ProductType || null,
-      orderType: item.OrderType || null,
+      ...(shouldUpdateStatus ? { softproStatus, operationalStatus } : {}),
+      // Drizzle mapUpdateSet filters undefined → column omitted (preserves existing).
+      transactionType: transactionType || emptyField,
+      productType: item.ProductType || emptyField,
+      orderType: item.OrderType || emptyField,
       salesPrice: salesPrice ?? undefined,
-      marketingSource: item.MarketingSource || null,
+      marketingSource: item.MarketingSource || emptyField,
       salesRepId: salesRepId ?? undefined,
       titleOfficerId: titleOfficerId ?? undefined,
       escrowOfficerId: escrowOfficerId ?? undefined,

@@ -4,6 +4,7 @@ import { OrderActions } from './order-actions';
 import type { SalesAction } from './order-actions';
 import type { SalesOrder } from './types';
 import { useTessaPrelimEnabled } from '@/hooks/useTessaPrelimEnabled';
+import { statusBadge } from '@/lib/domain/orders/status-format';
 
 function fmtAddr(o: SalesOrder): string {
   return [o.address, o.city, o.state].filter(Boolean).join(', ') || '—';
@@ -82,6 +83,7 @@ export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
               ))
             : orders.map(o => {
                 const addr = fmtAddr(o);
+                const status = statusBadge(o.operationalStatus);
                 return (
                   <tr key={o.id} className="hover:bg-gray-50 transition-colors">
                     <td className={`px-5 py-3 font-medium text-blue-600 whitespace-nowrap ${tdBr}`}>{o.fileNumber}</td>
@@ -89,8 +91,8 @@ export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
                       {addr}
                     </td>
                     <td className={`px-5 py-3 whitespace-nowrap ${tdBr}`}>
-                      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize bg-gray-100 text-gray-700">
-                        {(o.operationalStatus ?? '—').replace(/_/g, ' ')}
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium border ${status.color}`}>
+                        {status.label}
                       </span>
                     </td>
                     <td className={`px-5 py-3 text-gray-700 whitespace-nowrap truncate ${tdBr}`}>{orderTypeLabel(o)}</td>

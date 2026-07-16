@@ -11,6 +11,7 @@ import { OrderOverviewTab } from '@/components/admin/order-tabs/order-overview-t
 import { OrderPropertyTab } from '@/components/admin/order-tabs/order-property-tab';
 import { OrderHistoryTab } from '@/components/admin/order-tabs/order-history-tab';
 import { DeliverPrelimModal } from '@/components/shared/action-modals';
+import { statusBadge } from '@/lib/domain/orders/status-format';
 
 interface OrderProperty {
   address: string | null;
@@ -60,15 +61,6 @@ interface OrderDetail {
 
 const TABS = ['Overview', 'Property', 'Documents', 'Fees', 'Vendor Actions', 'History'] as const;
 type Tab = (typeof TABS)[number];
-
-const STATUS_COLORS: Record<string, string> = {
-  open: 'bg-blue-100 text-blue-800',
-  in_process: 'bg-amber-100 text-amber-800',
-  completed: 'bg-green-100 text-green-800',
-  closed: 'bg-slate-100 text-slate-800',
-  canceled: 'bg-red-100 text-red-800',
-  duplicate: 'bg-gray-100 text-gray-600',
-};
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -290,8 +282,8 @@ function BackLink() {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const color = STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-600';
-  return <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${color}`}>{status.replace(/_/g, ' ')}</span>;
+  const badge = statusBadge(status);
+  return <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium border ${badge.color}`}>{badge.label}</span>;
 }
 
 function DetailSkeleton() {

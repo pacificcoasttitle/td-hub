@@ -1,3 +1,5 @@
+import { statusBadge } from '@/lib/domain/orders/status-format';
+
 export const CATEGORY_LABELS: Record<string, string> = {
   cpl: 'CPL',
   proposed_insured: 'Proposed Insured',
@@ -26,14 +28,10 @@ export const CATEGORY_STYLES: Record<string, string> = {
   supporting: 'bg-gray-100 text-gray-600',
 };
 
-export const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  open: { bg: 'bg-[#DBEAFE]', text: 'text-[#1E40AF]', label: 'Open' },
-  in_process: { bg: 'bg-[#FEF3C7]', text: 'text-[#92400E]', label: 'In Process' },
-  completed: { bg: 'bg-[#D1FAE5]', text: 'text-[#065F46]', label: 'Completed' },
-  closed: { bg: 'bg-[#F1F5F9]', text: 'text-[#475569]', label: 'Closed' },
-  canceled: { bg: 'bg-[#FEE2E2]', text: 'text-[#991B1B]', label: 'Canceled' },
-  duplicate: { bg: 'bg-[#F3F4F6]', text: 'text-[#4B5563]', label: 'Duplicate' },
-};
+export function getStatusStyle(status: string | null | undefined): { label: string; className: string } {
+  const badge = statusBadge(status);
+  return { label: badge.label, className: badge.color };
+}
 
 export function getStatusBanner(status: string): { label: string; bg: string; text: string; icon: string } {
   const isComplete = status === 'completed' || status === 'closed';

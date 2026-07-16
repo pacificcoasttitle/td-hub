@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { statusBadge } from '@/lib/domain/orders/status-format';
 
 /* ── Document Badge Types ──────────────────────────────────────────────────── */
 
@@ -42,26 +43,13 @@ export function DocBadges({ docs }: { docs?: OrderDocuments }) {
   );
 }
 
-/* ── Status Helpers ────────────────────────────────────────────────────────── */
-
-export const STATUS_OPTS = ['', 'open', 'in_process', 'closed', 'canceled'];
-export const STATUS_LABELS: Record<string, string> = { open: 'Open', in_process: 'In Process', closed: 'Closed', canceled: 'Canceled' };
-export const STATUS_COLORS: Record<string, string> = {
-  open: 'bg-blue-50 text-blue-700 border-blue-200',
-  in_process: 'bg-amber-50 text-amber-700 border-amber-200',
-  closed: 'bg-green-50 text-green-700 border-green-200',
-  canceled: 'bg-gray-100 text-gray-500 border-gray-200',
-};
-
 export function TH({ children, center }: { children: React.ReactNode; center?: boolean }) {
   return <th className={`${center ? 'text-center' : 'text-left'} px-4 py-3 font-semibold text-[#6B7280] uppercase tracking-wide text-xs`}>{children}</th>;
 }
 
 export function StatusBadge({ status }: { status: string | null }) {
-  const s = status?.toLowerCase() ?? '';
-  const color = STATUS_COLORS[s] ?? 'bg-gray-100 text-gray-500 border-gray-200';
-  const label = STATUS_LABELS[s] ?? status ?? '—';
-  return <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-medium border whitespace-nowrap ${color}`}>{label}</span>;
+  const badge = statusBadge(status?.toLowerCase());
+  return <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-medium border whitespace-nowrap ${badge.color}`}>{badge.label}</span>;
 }
 
 export function ActionBtn({ icon, title, onClick }: { icon: string; title: string; onClick: () => void }) {

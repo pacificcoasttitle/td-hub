@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { statusLabel } from '@/lib/domain/orders/status-format';
 
 interface OpeningRow {
   id: number;
@@ -53,20 +54,23 @@ export function OpeningsDrilldownModal({ isOpen, onClose, month, year, repId }: 
 
   useEffect(() => {
     if (!isOpen) return;
-    setLoading(true);
-    setData(null);
-    const params = new URLSearchParams({
-      page: '1',
-      pageSize: '50',
-      month: String(month),
-      year: String(year),
-    });
-    if (repId) params.set('repId', String(repId));
-    fetch(`/api/sales/orders?${params}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) setData(d); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    const timeout = setTimeout(() => {
+      setLoading(true);
+      setData(null);
+      const params = new URLSearchParams({
+        page: '1',
+        pageSize: '50',
+        month: String(month),
+        year: String(year),
+      });
+      if (repId) params.set('repId', String(repId));
+      fetch(`/api/sales/orders?${params}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d) setData(d); })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }, 0);
+    return () => clearTimeout(timeout);
   }, [isOpen, month, year, repId]);
 
   if (!isOpen) return null;
@@ -114,7 +118,7 @@ export function OpeningsDrilldownModal({ isOpen, onClose, month, year, repId }: 
                 <tr key={o.id} className="hover:bg-gray-50">
                   <td className="py-2.5 pr-3 text-blue-600 font-medium whitespace-nowrap">{o.fileNumber}</td>
                   <td className="py-2.5 px-3 text-gray-700 max-w-[220px] truncate">{fmtAddr(o)}</td>
-                  <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap capitalize">{(o.operationalStatus ?? '—').replace(/_/g, ' ')}</td>
+                  <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap">{statusLabel(o.operationalStatus)}</td>
                   <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap">{orderTypeLabel(o)}</td>
                   <td className="py-2.5 pl-3 text-center text-gray-600 whitespace-nowrap tabular-nums">{fmtDate(o.openedAt)}</td>
                 </tr>

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ModalShell } from './modal-shell';
 import { ActivityFeed } from '@/components/shared/activity-feed';
 import { NotesTab } from './notes-tab';
+import { statusLabel } from '@/lib/domain/orders/status-format';
 
 interface OrderDetail {
   id: number; fileNumber: string; operationalStatus: string;
@@ -194,7 +195,7 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
           <div className="p-5">
             {tab === 'Overview' && (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <F l="Status" v={order.operationalStatus ?? '—'} />
+                <F l="Status" v={statusLabel(order.operationalStatus)} />
                 <F l="Transaction" v={order.transactionType ?? '—'} />
                 <F l="Product" v={order.productType ?? '—'} />
                 <F l="Opened" v={order.openedAt ? new Date(order.openedAt).toLocaleDateString() : '—'} />

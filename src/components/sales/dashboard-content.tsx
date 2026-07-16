@@ -11,6 +11,7 @@ import { OrderActions } from './order-actions';
 import type { SalesAction } from './order-actions';
 import type { SalesDashboardStats, SalesOrder } from './types';
 import { useTessaPrelimEnabled } from '@/hooks/useTessaPrelimEnabled';
+import { statusBadge } from '@/lib/domain/orders/status-format';
 
 interface Props {
   displayName: string;
@@ -85,9 +86,15 @@ export function DashboardContent({ displayName, role }: Props) {
       .finally(() => setLoading(false));
   }, [repId, ordersPage]);
 
-  useEffect(() => { setOrdersPage(1); }, [repId]);
+  useEffect(() => {
+    const timeout = setTimeout(() => setOrdersPage(1), 0);
+    return () => clearTimeout(timeout);
+  }, [repId]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    const timeout = setTimeout(fetchData, 0);
+    return () => clearTimeout(timeout);
+  }, [fetchData]);
 
   return (
     <div>
@@ -148,13 +155,14 @@ export function DashboardContent({ displayName, role }: Props) {
                   ))
                 : stats?.orders.map(o => {
                     const addr = fmtAddr(o);
+                    const status = statusBadge(o.operationalStatus);
                     return (
                       <tr key={o.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-5 py-3 font-medium text-blue-600 whitespace-nowrap border-r border-gray-100">{o.fileNumber}</td>
                         <td className="px-4 py-3 text-gray-900 truncate max-w-[180px] border-r border-gray-100" title={addr}>{addr}</td>
                         <td className="px-5 py-3 whitespace-nowrap border-r border-gray-100">
-                          <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize bg-gray-100 text-gray-700">
-                            {(o.operationalStatus ?? '—').replace(/_/g, ' ')}
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium border ${status.color}`}>
+                            {status.label}
                           </span>
                         </td>
                         <td className="px-5 py-3 text-gray-500 whitespace-nowrap border-r border-gray-100">{fmtDate(o.openedAt)}</td>

@@ -1,5 +1,7 @@
 'use client';
 
+import { statusBadge } from '@/lib/domain/orders/status-format';
+
 interface OrderDetail {
   fileNumber: string;
   operationalStatus: string;
@@ -22,15 +24,6 @@ const SOURCE_LABELS: Record<string, string> = {
   webhook: 'Webhook',
   manual_entry: 'Manual Entry',
   web_form: 'Web Form',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  open: 'bg-blue-100 text-blue-800',
-  in_process: 'bg-amber-100 text-amber-800',
-  completed: 'bg-green-100 text-green-800',
-  closed: 'bg-slate-100 text-slate-800',
-  canceled: 'bg-red-100 text-red-800',
-  duplicate: 'bg-gray-100 text-gray-600',
 };
 
 export function OrderOverviewTab({ order }: { order: OrderDetail }) {
@@ -64,8 +57,8 @@ export function OrderOverviewTab({ order }: { order: OrderDetail }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const color = STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-600';
-  return <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${color}`}>{status.replace(/_/g, ' ')}</span>;
+  const badge = statusBadge(status);
+  return <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium border ${badge.color}`}>{badge.label}</span>;
 }
 
 export function SectionHeading({ children }: { children: React.ReactNode }) {

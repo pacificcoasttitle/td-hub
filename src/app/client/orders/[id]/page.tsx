@@ -5,7 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { OrderTimeline } from '@/components/client/order-timeline';
 import { DocumentsTab } from '@/components/client/order-detail/documents-tab';
-import { STATUS_STYLES, formatDate as fmtDate } from '@/components/client/order-detail/helpers';
+import { formatDate as fmtDate, getStatusStyle } from '@/components/client/order-detail/helpers';
 import { ActivityFeed } from '@/components/shared/activity-feed';
 
 interface Document {
@@ -43,6 +43,10 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
+type ClientOrderDocument = { id: number; filename: string; createdAt: string; category: string | null };
+
+const SKELETON_LINE_WIDTHS = ['68%', '52%', '74%', '46%', '61%'];
+
 export default function ClientOrderDetailPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -56,7 +60,10 @@ export default function ClientOrderDetailPage() {
   });
 
   useEffect(() => {
-    if (tabParam && TABS.some((t) => t.id === tabParam)) setActiveTab(tabParam as TabId);
+    const timeout = setTimeout(() => {
+      if (tabParam && TABS.some((t) => t.id === tabParam)) setActiveTab(tabParam as TabId);
+    }, 0);
+    return () => clearTimeout(timeout);
   }, [tabParam]);
 
   useEffect(() => {
@@ -91,7 +98,7 @@ export default function ClientOrderDetailPage() {
   const addr = order.property?.fullAddress
     ?? [order.property?.address, order.property?.city, order.property?.state].filter(Boolean).join(', ')
     ?? null;
-  const s = STATUS_STYLES[order.operationalStatus] ?? { bg: 'bg-[#F3F4F6]', text: 'text-[#4B5563]', label: order.operationalStatus };
+  const status = getStatusStyle(order.operationalStatus);
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -110,8 +117,8 @@ export default function ClientOrderDetailPage() {
               {addr ?? 'Property details pending'}
             </h1>
           </div>
-          <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium flex-shrink-0 ${s.bg} ${s.text}`}>
-            {s.label}
+          <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium flex-shrink-0 border ${status.className}`}>
+            {status.label}
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-sm text-[#4B5563]">
@@ -178,7 +185,7 @@ function CplTabContent({ orderId }: { orderId: number }) {
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     fetch(`/api/client/orders/${orderId}/documents`).then((r) => r.ok ? r.json() : { documents: [] })
-      .then((d) => setDocs((d.documents ?? []).filter((doc: any) => doc.category === 'cpl')))
+      .then((d) => setDocs(((d.documents ?? []) as ClientOrderDocument[]).filter((doc) => doc.category === 'cpl')))
       .catch(() => {}).finally(() => setLoading(false));
   }, [orderId]);
 
@@ -219,7 +226,7 @@ function PrelimTabContent({ orderId }: { orderId: number }) {
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     fetch(`/api/client/orders/${orderId}/documents`).then((r) => r.ok ? r.json() : { documents: [] })
-      .then((d) => setDocs((d.documents ?? []).filter((doc: any) => doc.category === 'prelim')))
+      .then((d) => setDocs(((d.documents ?? []) as ClientOrderDocument[]).filter((doc) => doc.category === 'prelim')))
       .catch(() => {}).finally(() => setLoading(false));
   }, [orderId]);
 
@@ -415,7 +422,7 @@ function DetailSkeleton() {
         {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-4 w-16 bg-gray-100 rounded" />)}
       </div>
       <div className="bg-white rounded-xl border border-[#E5E7EB] p-8">
-        <div className="space-y-6">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-4 bg-gray-100 rounded" style={{ width: `${40 + Math.random() * 40}%` }} />)}</div>
+        <div className="space-y-6">{SKELETON_LINE_WIDTHS.map((width) => <div key={width} className="h-4 bg-gray-100 rounded" style={{ width }} />)}</div>
       </div>
     </div>
   );

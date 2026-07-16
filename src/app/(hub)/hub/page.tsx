@@ -18,6 +18,7 @@ import {
   type OfficerFilterValue,
 } from '@/components/escrow/officer-filter-chips';
 import type { TaskPriority } from '@/lib/domain/escrow/tasks';
+import { STATUS_FILTER_OPTIONS } from '@/lib/domain/orders/status-format';
 
 interface QuickResult { id: number; fileNumber: string; propertyStreet: string | null; propertyCity: string | null; propertyState: string | null; operationalStatus: string | null; }
 type ModalType = 'cpl' | 'prelim' | 'deliver_prelim' | 'proposed' | 'notes' | 'detail' | null;
@@ -176,10 +177,9 @@ export default function HubPage() {
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
           className="h-9 px-2 border border-gray-200 rounded-lg text-xs bg-white outline-none focus:border-[#F26B2B] shrink-0">
           <option value="">All Status</option>
-          <option value="open">Open</option>
-          <option value="in_process">In Process</option>
-          <option value="closed">Closed</option>
-          <option value="canceled">Canceled</option>
+          {STATUS_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
         </select>
 
         {/* Single Search Bar */}

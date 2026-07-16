@@ -4,9 +4,10 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   CplModal, PrelimModal, ProposedInsuredModal, NotesModal, DetailModal, DeliverPrelimModal,
 } from '@/components/shared/action-modals';
-import { STATUS_OPTS, STATUS_LABELS, TH, StatusBadge, DocBadges, ActionsDropdown } from './orders-hub-parts';
+import { TH, StatusBadge, DocBadges, ActionsDropdown } from './orders-hub-parts';
 import type { OrderDocuments } from './orders-hub-parts';
 import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
+import { STATUS_FILTER_OPTIONS } from '@/lib/domain/orders/status-format';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -206,7 +207,7 @@ export function OrdersHubTable({
             <select value={internalStatus} onChange={(e) => { setInternalStatus(e.target.value); setPage(1); }}
               className="h-9 px-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20">
               <option value="">All Status</option>
-              {STATUS_OPTS.filter(Boolean).map((s) => <option key={s} value={s}>{STATUS_LABELS[s] ?? s}</option>)}
+              {STATUS_FILTER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           )}
           {showSearch && externalSearch === undefined && (

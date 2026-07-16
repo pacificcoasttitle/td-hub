@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { EmptyState } from '@/components/client/empty-state';
-import { STATUS_STYLES, formatDate } from '@/components/client/order-detail/helpers';
+import { formatDate, getStatusStyle } from '@/components/client/order-detail/helpers';
 import { OrdersHubTable } from '@/components/shared/orders-hub-table';
 
 interface Order {
@@ -24,7 +24,6 @@ interface Profile {
 
 export default function ClientDashboardPage() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
 
@@ -34,7 +33,7 @@ export default function ClientDashboardPage() {
       fetch('/api/client/profile').then((r) => r.ok ? r.json() : null),
     ])
       .then(([orderData, prof]) => {
-        if (orderData) { setOrders(orderData.orders ?? []); setTotal(orderData.total ?? 0); }
+        if (orderData) setOrders(orderData.orders ?? []);
         if (prof) setProfile(prof);
       })
       .catch(() => {})
@@ -124,14 +123,14 @@ export default function ClientDashboardPage() {
 
 function FileCard({ order }: { order: Order }) {
   const addr = [order.address, order.city, order.state].filter(Boolean).join(', ');
-  const s = STATUS_STYLES[order.operationalStatus] ?? { bg: 'bg-[#F3F4F6]', text: 'text-[#4B5563]', label: order.operationalStatus };
+  const status = getStatusStyle(order.operationalStatus);
 
   return (
     <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm hover:shadow-md transition-shadow p-6">
       <div className="flex items-start justify-between mb-4">
         <span className="font-mono text-sm text-[#4B5563] tracking-wide">{order.fileNumber}</span>
-        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${s.bg} ${s.text}`}>
-          {s.label}
+        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${status.className}`}>
+          {status.label}
         </span>
       </div>
 

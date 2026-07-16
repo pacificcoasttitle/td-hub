@@ -1,20 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-
-function toInternalValue(label: string): string {
-  return label.toLowerCase().trim().replace(/\s+/g, '_');
-}
-
-const FALLBACK_OPTIONS = [
-  { value: '', label: 'All Statuses' },
-  { value: 'open', label: 'Open' },
-  { value: 'in_process', label: 'In Process' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'closed', label: 'Closed' },
-  { value: 'canceled', label: 'Canceled' },
-  { value: 'duplicate', label: 'Duplicate' },
-];
+import { STATUS_FILTER_OPTIONS } from '@/lib/domain/orders/status-format';
 
 export interface SortOption { label: string; value: string }
 
@@ -33,23 +19,6 @@ export function OrderFilters({
   currentSort?: string;
   onSortChange?: (value: string) => void;
 }) {
-  const [options, setOptions] = useState(FALLBACK_OPTIONS);
-
-  useEffect(() => {
-    fetch('/api/orders/statuses')
-      .then((r) => r.ok ? r.json() : null)
-      .then((body) => {
-        if (body?.statuses?.length) {
-          const live = [
-            { value: '', label: 'All Statuses' },
-            ...body.statuses.map((s: string) => ({ value: toInternalValue(s), label: s })),
-          ];
-          setOptions(live);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
   return (
     <div className="flex items-center gap-3 mb-4">
       <div className="relative flex-1 max-w-sm">
@@ -65,7 +34,7 @@ export function OrderFilters({
         />
       </div>
       <select value={currentStatus} onChange={(e) => onStatusChange(e.target.value)} className={SEL}>
-        {options.map((opt) => (
+        {[{ value: '', label: 'All Statuses' }, ...STATUS_FILTER_OPTIONS].map((opt) => (
           <option key={opt.value} value={opt.value}>{opt.label}</option>
         ))}
       </select>

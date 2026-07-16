@@ -6,17 +6,9 @@ import { RepSelector } from './rep-selector';
 import { SalesOrdersTable } from './sales-orders-table';
 import { useSalesOrderActions } from './use-sales-order-actions';
 import type { SalesOrder } from './types';
+import { STATUS_FILTER_OPTIONS } from '@/lib/domain/orders/status-format';
 
 const PAGE_SIZE = 25;
-const STATUS_OPTIONS = [
-  { value: '', label: 'All statuses' },
-  { value: 'open', label: 'Open' },
-  { value: 'in_process', label: 'In process' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'closed', label: 'Closed' },
-  { value: 'canceled', label: 'Canceled' },
-  { value: 'duplicate', label: 'Duplicate' },
-] as const;
 
 interface ApiResponse {
   orders: SalesOrder[];
@@ -46,7 +38,10 @@ export function SalesOrdersClient({ role }: Props) {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  useEffect(() => { setPage(1); }, [debouncedSearch, status, repId]);
+  useEffect(() => {
+    const timeout = setTimeout(() => setPage(1), 0);
+    return () => clearTimeout(timeout);
+  }, [debouncedSearch, status, repId]);
 
   const fetchOrders = useCallback(() => {
     setLoading(true);
@@ -69,7 +64,10 @@ export function SalesOrdersClient({ role }: Props) {
       .finally(() => setLoading(false));
   }, [page, status, debouncedSearch, repId]);
 
-  useEffect(() => { fetchOrders(); }, [fetchOrders]);
+  useEffect(() => {
+    const timeout = setTimeout(fetchOrders, 0);
+    return () => clearTimeout(timeout);
+  }, [fetchOrders]);
 
   const last = Math.min(page * PAGE_SIZE, total);
   const first = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -91,8 +89,9 @@ export function SalesOrdersClient({ role }: Props) {
             className="h-9 px-3 border border-gray-200 rounded-lg text-sm bg-white text-gray-900
                        focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A] sm:order-2"
           >
-            {STATUS_OPTIONS.map(o => (
-              <option key={o.value || 'all'} value={o.value}>{o.label}</option>
+            <option value="">All statuses</option>
+            {STATUS_FILTER_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
           <div className="relative sm:order-1 sm:min-w-[220px]">

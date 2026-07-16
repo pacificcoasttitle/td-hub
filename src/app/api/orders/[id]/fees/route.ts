@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
-import { canAccessOrder } from '@/lib/security/permissions';
+import { canAccessOrderDetailResource } from '@/lib/security/permissions';
 import { getOrderByIdSimple } from '@/lib/domain/orders/service';
 import { getFees } from '@/lib/integrations/softpro';
 
@@ -20,8 +20,7 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
     }
 
-    const canAccess = await canAccessOrder(session, orderId);
-    if (!canAccess) {
+    if (!(await canAccessOrderDetailResource(session, orderId))) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 

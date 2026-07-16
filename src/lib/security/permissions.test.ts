@@ -44,6 +44,7 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 import {
+  canAccessOrderDetailResource,
   canAccessSalesScopedOrder,
   getSalesScopedContactIds,
 } from './permissions';
@@ -97,6 +98,41 @@ describe('sales-scoped order permissions', () => {
     query.rows.push([]);
 
     await expect(canAccessSalesScopedOrder(session('sales_rep', 10), 999)).resolves.toBe(false);
+    expect(getManagedRepIdsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('canAccessOrderDetailResource (DC-2 tab gate)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    query.rows = [];
+    getManagedRepIdsMock.mockResolvedValue([]);
+  });
+
+  it('allows a manager to access a direct-report order via sales scope', async () => {
+    getManagedRepIdsMock.mockResolvedValueOnce([20]);
+    query.rows.push([{ id: 123 }]);
+
+    await expect(canAccessOrderDetailResource(session('sales_manager', 10), 123)).resolves.toBe(true);
+    expect(getManagedRepIdsMock).toHaveBeenCalledWith(10);
+  });
+
+  it('denies a manager on a non-team order (no over-grant)', async () => {
+    getManagedRepIdsMock.mockResolvedValueOnce([20]);
+    query.rows.push([]);
+
+    await expect(canAccessOrderDetailResource(session('sales_manager', 10), 999)).resolves.toBe(false);
+  });
+
+  it('allows a sales rep only on their own order', async () => {
+    query.rows.push([{ id: 55 }]);
+    await expect(canAccessOrderDetailResource(session('sales_rep', 10), 55)).resolves.toBe(true);
+    expect(getManagedRepIdsMock).not.toHaveBeenCalled();
+  });
+
+  it('denies a sales rep on another rep order', async () => {
+    query.rows.push([]);
+    await expect(canAccessOrderDetailResource(session('sales_rep', 10), 999)).resolves.toBe(false);
     expect(getManagedRepIdsMock).not.toHaveBeenCalled();
   });
 });

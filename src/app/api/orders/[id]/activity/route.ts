@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
-import { canAccessOrder } from '@/lib/security/permissions';
+import { canAccessOrderDetailResource } from '@/lib/security/permissions';
 import { db } from '@/lib/db/client';
 import { adminActivityLogs, documentAudit, documents, vendorApiLogs, titlePointData } from '@/lib/db/schema';
 import { orderStatusHistory } from '@/lib/db/schema';
@@ -32,7 +32,7 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
     }
 
-    if (!(await canAccessOrder(session, orderId))) {
+    if (!(await canAccessOrderDetailResource(session, orderId))) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 

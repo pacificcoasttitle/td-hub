@@ -13,7 +13,7 @@ function fmtAddr(o: SalesOrder): string {
 }
 
 function orderTypeLabel(o: SalesOrder): string {
-  return o.transactionType ?? o.orderType ?? o.productType ?? '—';
+  return o.type ?? o.transactionType ?? o.orderType ?? o.productType ?? '—';
 }
 
 interface Props {

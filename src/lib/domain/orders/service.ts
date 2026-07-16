@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import { orders, orderProperties, orderParties, orderStatusHistory, contacts, companies, profiles, documents } from '@/lib/db/schema';
 import { eq, desc, sql, ilike, or, and, inArray, SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
+import { contactName, projectListRow, type ListRow } from './list-row';
 
 const salesRepContact = alias(contacts, 'sales_rep');
 const titleOfficerContact = alias(contacts, 'title_officer');
@@ -35,26 +36,7 @@ interface OrderDocuments {
 }
 
 export interface OrderListResult {
-  orders: Array<typeof orders.$inferSelect & {
-    property: typeof orderProperties.$inferSelect | null;
-    propertyStreet: string | null;
-    propertyCity: string | null;
-    propertyState: string | null;
-    clientContactId: number | null;
-    clientName: string | null;
-    clientEmail: string | null;
-    clientCompany: string | null;
-    salesRepName: string | null;
-    titleOfficerName: string | null;
-    escrowOfficerName: string | null;
-    lenderName: string | null;
-    listingAgentName: string | null;
-    titleCompanyName: string | null;
-    underwriterName: string | null;
-    createdByName: string | null;
-    openedBy: string | null;
-    documents: OrderDocuments;
-  }>;
+  orders: ListRow[];
   total: number;
   totalPages: number;
   page: number;
@@ -62,25 +44,6 @@ export interface OrderListResult {
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
-
-function contactName(c: { fullName: string | null; officerName: string | null; firstName: string | null; lastName: string | null; companyName: string | null } | null): string | null {
-  if (!c) return null;
-  if (c.fullName) return c.fullName;
-  if (c.officerName) return c.officerName;
-  const parts = [c.firstName, c.lastName].filter(Boolean);
-  if (parts.length > 0) return parts.join(' ');
-  if (c.companyName) return c.companyName;
-  return null;
-}
-
-function clientName(c: { fullName: string | null; officerName: string | null; firstName: string | null; lastName: string | null } | null): string | null {
-  if (!c) return null;
-  const parts = [c.firstName, c.lastName].filter(Boolean);
-  if (parts.length > 0) return parts.join(' ');
-  if (c.fullName) return c.fullName;
-  if (c.officerName) return c.officerName;
-  return null;
-}
 
 function orderPartySearchExists(term: string): SQL {
   return sql`exists (
@@ -198,26 +161,35 @@ export async function getOrders(
 
   const total = Number(countResult[0]?.count ?? 0);
 
-  const mapped = orderRows.map((row) => ({
-    ...row.orders,
+  const mapped = orderRows.map((row) => projectListRow({
+    id: row.orders.id,
+    fileNumber: row.orders.fileNumber,
+    operationalStatus: row.orders.operationalStatus,
+    transactionType: row.orders.transactionType,
+    orderType: row.orders.orderType,
+    productType: row.orders.productType,
+    openedAt: row.orders.openedAt,
+    closedAt: row.orders.closedAt,
+    salesPrice: row.orders.salesPrice,
+    source: row.orders.source,
+    emailStatus: row.orders.emailStatus,
+    dupOverride: row.orders.dupOverride,
     property: row.order_properties,
-    propertyStreet: row.order_properties?.address ?? null,
-    propertyCity: row.order_properties?.city ?? null,
-    propertyState: row.order_properties?.state ?? null,
+    salesRep: row.sales_rep,
+    clientContact: row.client_contact,
     clientContactId: row.orders.clientContactId,
-    clientName: clientName(row.client_contact),
-    clientEmail: row.client_contact?.email ?? null,
-    clientCompany: row.client_contact?.companyName ?? null,
-    salesRepName: contactName(row.sales_rep),
-    titleOfficerName: contactName(row.title_officer),
-    escrowOfficerName: contactName(row.escrow_officer),
-    lenderName: contactName(row.lender_contact),
-    listingAgentName: contactName(row.listing_agent),
-    titleCompanyName: row.title_company?.name ?? null,
-    underwriterName: row.underwriter_company?.name ?? null,
     createdByName: row.created_by_profile?.displayName ?? null,
-    openedBy: row.opened_by?.name ?? null,
     documents: docMap.get(row.orders.id) ?? emptyDocuments(),
+    extras: {
+      ...row.orders,
+      titleOfficerName: contactName(row.title_officer),
+      escrowOfficerName: contactName(row.escrow_officer),
+      lenderName: contactName(row.lender_contact),
+      listingAgentName: contactName(row.listing_agent),
+      titleCompanyName: row.title_company?.name ?? null,
+      underwriterName: row.underwriter_company?.name ?? null,
+      openedBy: row.opened_by?.name ?? null,
+    },
   }));
 
   return {

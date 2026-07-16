@@ -50,6 +50,7 @@ export interface SalesOrder {
   transactionType: string | null;
   productType?: string | null;
   orderType?: string | null;
+  type?: string | null;
   openedAt: string | null;
   address: string | null;
   city: string | null;

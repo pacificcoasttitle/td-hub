@@ -16,6 +16,7 @@ export interface Order {
   fileNumber: string;
   operationalStatus: string;
   transactionType: string | null;
+  type?: string | null;
   productType?: string | null;
   salesRepId: number | null;
   salesRepName?: string | null;
@@ -212,7 +213,7 @@ function OrderRow({ order, rowNum, onClick, onAction }: {
       <td className="px-4 py-3 font-mono font-medium text-[#1B2A4A] whitespace-nowrap">{order.fileNumber}</td>
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap" title={fullAddr}>{truncAddr}</td>
       <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap tabular-nums">{formatOrderDate(order.openedAt)}</td>
-      <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.transactionType ?? '—'}</td>
+      <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.type ?? order.transactionType ?? '—'}</td>
       <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{order.productType ?? '—'}</td>
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.salesRepName ?? '—'}</td>
       <td className={`px-4 py-3 whitespace-nowrap ${createdByClass}`}>{createdByDisplay}</td>

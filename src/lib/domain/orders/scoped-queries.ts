@@ -2,12 +2,14 @@ import { db } from '@/lib/db/client';
 import { orders, orderProperties, documents, contacts, profiles } from '@/lib/db/schema';
 import { eq, desc, sql, and, SQL, inArray, or, ilike } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
+import { projectListRow } from './list-row';
 
 type ScopeColumn = typeof orders.salesRepId | typeof orders.titleOfficerId | typeof orders.escrowOfficerId;
 
 // ─── Scoped Order List ──────────────────────────────────────────────────────
 
 const salesRepContact = alias(contacts, 'sales_rep_contact');
+const clientContact = alias(contacts, 'client_contact');
 const createdByProfile = alias(profiles, 'created_by_profile');
 
 export interface ScopedOrderListParams {
@@ -81,9 +83,10 @@ export async function getScopedOrders(params: ScopedOrderListParams) {
 
   const orderJoin = eq(orders.id, orderProperties.orderId);
   const repJoin = eq(orders.salesRepId, salesRepContact.id);
+  const clientJoin = eq(orders.clientContactId, clientContact.id);
   const createdByJoin = eq(orders.createdBy, createdByProfile.id);
 
-  const [rows, countResult] = await Promise.all([
+  const [rawRows, countResult] = await Promise.all([
     db.select({
       id: orders.id, fileNumber: orders.fileNumber,
       operationalStatus: orders.operationalStatus, transactionType: orders.transactionType,
@@ -91,13 +94,25 @@ export async function getScopedOrders(params: ScopedOrderListParams) {
       salesPrice: orders.salesPrice, openedAt: orders.openedAt,
       closedAt: orders.closedAt, completedAt: orders.completedAt,
       address: orderProperties.address, city: orderProperties.city,
-      state: orderProperties.state, fullAddress: orderProperties.fullAddress,
-      salesRepName: salesRepContact.fullName,
+      state: orderProperties.state, zip: orderProperties.zip, fullAddress: orderProperties.fullAddress,
+      salesRepFullName: salesRepContact.fullName,
+      salesRepOfficerName: salesRepContact.officerName,
+      salesRepFirstName: salesRepContact.firstName,
+      salesRepLastName: salesRepContact.lastName,
+      salesRepCompanyName: salesRepContact.companyName,
+      clientContactId: orders.clientContactId,
+      clientFullName: clientContact.fullName,
+      clientOfficerName: clientContact.officerName,
+      clientFirstName: clientContact.firstName,
+      clientLastName: clientContact.lastName,
+      clientCompanyName: clientContact.companyName,
+      clientEmail: clientContact.email,
       createdByName: createdByProfile.displayName,
     })
       .from(orders)
       .leftJoin(orderProperties, orderJoin)
       .leftJoin(salesRepContact, repJoin)
+      .leftJoin(clientContact, clientJoin)
       .leftJoin(createdByProfile, createdByJoin)
       .where(where)
       .orderBy(desc(orders.openedAt))
@@ -108,6 +123,45 @@ export async function getScopedOrders(params: ScopedOrderListParams) {
       .leftJoin(orderProperties, orderJoin)
       .where(where),
   ]);
+
+  const rows = rawRows.map((row) => projectListRow({
+    id: row.id,
+    fileNumber: row.fileNumber,
+    operationalStatus: row.operationalStatus,
+    transactionType: row.transactionType,
+    orderType: row.orderType,
+    productType: row.productType,
+    openedAt: row.openedAt,
+    closedAt: row.closedAt,
+    salesPrice: row.salesPrice,
+    property: {
+      address: row.address,
+      city: row.city,
+      state: row.state,
+      zip: row.zip,
+      fullAddress: row.fullAddress,
+    },
+    salesRep: {
+      fullName: row.salesRepFullName,
+      officerName: row.salesRepOfficerName,
+      firstName: row.salesRepFirstName,
+      lastName: row.salesRepLastName,
+      companyName: row.salesRepCompanyName,
+    },
+    clientContact: {
+      fullName: row.clientFullName,
+      officerName: row.clientOfficerName,
+      firstName: row.clientFirstName,
+      lastName: row.clientLastName,
+      companyName: row.clientCompanyName,
+      email: row.clientEmail,
+    },
+    clientContactId: row.clientContactId,
+    createdByName: row.createdByName,
+    extras: {
+      completedAt: row.completedAt,
+    },
+  }));
 
   return { orders: rows, total: Number(countResult[0]?.total ?? 0), page, pageSize };
 }

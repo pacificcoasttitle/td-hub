@@ -12,6 +12,7 @@ interface Order {
   fileNumber: string;
   operationalStatus: string;
   transactionType: string | null;
+  type?: string | null;
   openedAt: string | null;
   address: string | null;
   city: string | null;
@@ -125,6 +126,7 @@ export default function ClientDashboardPage() {
 function FileCard({ order }: { order: Order }) {
   const addr = formatOrderAddress(order);
   const status = getStatusStyle(order.operationalStatus);
+  const type = order.type ?? order.transactionType;
 
   return (
     <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm hover:shadow-md transition-shadow p-6">
@@ -144,8 +146,8 @@ function FileCard({ order }: { order: Order }) {
       </div>
 
       <div className="flex items-center gap-4 text-sm text-[#4B5563] mb-6">
-        {order.transactionType && <span className="capitalize">{order.transactionType.replace(/_/g, ' ')}</span>}
-        {order.transactionType && order.openedAt && <span className="w-1 h-1 rounded-full bg-[#D1D5DB]" />}
+        {type && <span className="capitalize">{type.replace(/_/g, ' ')}</span>}
+        {type && order.openedAt && <span className="w-1 h-1 rounded-full bg-[#D1D5DB]" />}
         {order.openedAt && <span>Opened {formatDate(order.openedAt)}</span>}
       </div>
 

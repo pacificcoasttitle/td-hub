@@ -25,6 +25,7 @@ export interface HubOrder {
   operationalStatus: string | null;
   softproStatus?: string | null;
   transactionType: string | null;
+  type?: string | null;
   openedAt: string | null;
   clientContactId?: number | null;
   clientName?: string | null;
@@ -299,7 +300,7 @@ export function OrdersHubTable({
                     )}
                   </td>
                   <td className={`px-4 ${cellPy}`}><StatusBadge status={o.operationalStatus} /></td>
-                  <td className={`px-4 ${cellPy} text-[#4B5563] capitalize`}>{o.transactionType?.replace(/_/g, ' ') ?? '—'}</td>
+                  <td className={`px-4 ${cellPy} text-[#4B5563] capitalize`}>{(o.type ?? o.transactionType)?.replace(/_/g, ' ') ?? '—'}</td>
                   {showEscrowOfficerColumn && (
                     <td className={`px-4 ${cellPy} whitespace-nowrap`}>
                       {o.escrowOfficerName

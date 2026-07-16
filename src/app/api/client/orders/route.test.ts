@@ -50,12 +50,24 @@ vi.mock('@/lib/security/client-scope', () => ({
 }));
 
 vi.mock('@/lib/db/schema', () => ({
+  contacts: {
+    __table: 'contacts',
+    id: 'contacts.id',
+    fullName: 'contacts.full_name',
+    officerName: 'contacts.officer_name',
+    firstName: 'contacts.first_name',
+    lastName: 'contacts.last_name',
+    companyName: 'contacts.company_name',
+    email: 'contacts.email',
+  },
   orderProperties: {
     __table: 'order_properties',
     orderId: 'order_properties.order_id',
     address: 'order_properties.address',
     city: 'order_properties.city',
     state: 'order_properties.state',
+    zip: 'order_properties.zip',
+    fullAddress: 'order_properties.full_address',
   },
   orders: {
     __table: 'orders',
@@ -63,14 +75,44 @@ vi.mock('@/lib/db/schema', () => ({
     fileNumber: 'orders.file_number',
     operationalStatus: 'orders.operational_status',
     transactionType: 'orders.transaction_type',
+    orderType: 'orders.order_type',
+    productType: 'orders.product_type',
     openedAt: 'orders.opened_at',
+    closedAt: 'orders.closed_at',
     createdBy: 'orders.created_by',
+    clientContactId: 'orders.client_contact_id',
+    salesRepId: 'orders.sales_rep_id',
   },
   profiles: {
     __table: 'profiles',
     id: 'profiles.id',
     displayName: 'profiles.display_name',
   },
+}));
+
+vi.mock('@/lib/domain/orders/list-row', () => ({
+  projectListRow: vi.fn((source: {
+    id: number;
+    fileNumber: string;
+    operationalStatus: string;
+    transactionType: string | null;
+    property: { address: string | null; city: string | null; state: string | null };
+    clientContact?: { fullName?: string | null; companyName?: string | null };
+  }) => ({
+    id: source.id,
+    fileNumber: source.fileNumber,
+    operationalStatus: source.operationalStatus,
+    transactionType: source.transactionType,
+    type: source.transactionType ?? '—',
+    address: source.property.address,
+    city: source.property.city,
+    state: source.property.state,
+    propertyStreet: source.property.address,
+    propertyCity: source.property.city,
+    propertyState: source.property.state,
+    clientName: source.clientContact?.fullName ?? null,
+    clientCompany: source.clientContact?.companyName ?? null,
+  })),
 }));
 
 vi.mock('@/lib/db/client', () => ({

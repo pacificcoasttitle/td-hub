@@ -128,10 +128,10 @@ export function DashboardContent({ displayName, role }: Props) {
           <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
             <colgroup>
               <col style={{ width: '110px' }} />
-              <col style={{ width: '180px' }} />
-              <col style={{ width: '90px' }} />
-              <col style={{ width: '90px' }} />
               <col style={{ width: '160px' }} />
+              <col style={{ width: '90px' }} />
+              <col style={{ width: '90px' }} />
+              <col style={{ width: '280px' }} />
             </colgroup>
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/60">
@@ -162,7 +162,7 @@ export function DashboardContent({ displayName, role }: Props) {
                           </span>
                         </td>
                         <td className="px-5 py-3 text-gray-500 whitespace-nowrap border-r border-gray-100">{formatOrderDate(o.openedAt)}</td>
-                        <td className="px-2 py-3 text-right">
+                        <td className="px-2 py-3 text-right align-middle">
                           <OrderActions order={o} onAction={handleOrderAction} tessaPrelimEnabled={tessaPrelimEnabled} />
                         </td>
                       </tr>

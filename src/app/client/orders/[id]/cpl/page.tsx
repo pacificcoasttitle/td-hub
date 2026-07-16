@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { formatDate, formatFileSize } from '@/components/client/order-detail/helpers';
-import { EmptyState } from '@/components/client/empty-state';
 
 interface CplDoc {
   id: number;
@@ -13,9 +12,20 @@ interface CplDoc {
   createdAt: string;
 }
 
+interface ClientDocument extends CplDoc {
+  category?: string | null;
+}
+
 interface OrderInfo {
   fileNumber: string;
-  underwriter: string | null;
+}
+
+interface CplBranch {
+  id: number;
+  code: string;
+  name: string;
+  underwriter: string;
+  underwriterCode: string;
 }
 
 const UNDERWRITERS = [
@@ -24,15 +34,35 @@ const UNDERWRITERS = [
   { value: 'natic', label: 'NATIC', abbr: 'NA' },
 ];
 
+function filterCplDocuments(data: { documents?: ClientDocument[] } | null): CplDoc[] {
+  return (data?.documents ?? []).filter((doc) => doc.category === 'cpl');
+}
+
 export default function ClientCplPage() {
   const params = useParams<{ id: string }>();
   const orderId = params.id;
   const [order, setOrder] = useState<OrderInfo | null>(null);
   const [docs, setDocs] = useState<CplDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [underwriter, setUnderwriter] = useState('');
+  const [underwriter, setUnderwriter] = useState('westcor');
+  const [branches, setBranches] = useState<CplBranch[]>([]);
+  const [branchId, setBranchId] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<{ type: 'success' | 'error'; message: string; docId?: number } | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/cpl-branches?underwriter=${encodeURIComponent(underwriter)}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        const list: CplBranch[] = d?.branches ?? [];
+        setBranches(list);
+        setBranchId((current) => list.some((branch) => branch.id === current) ? current : null);
+      })
+      .catch(() => {
+        setBranches([]);
+        setBranchId(null);
+      });
+  }, [underwriter]);
 
   useEffect(() => {
     Promise.all([
@@ -40,9 +70,12 @@ export default function ClientCplPage() {
       fetch(`/api/client/orders/${orderId}/documents`).then((r) => r.ok ? r.json() : { documents: [] }),
     ])
       .then(([o, d]) => {
-        if (o) { setOrder({ fileNumber: o.fileNumber, underwriter: o.underwriter ?? null }); setUnderwriter(o.underwriter ?? ''); }
-        const cplDocs = (d.documents ?? []).filter((doc: any) => doc.category === 'cpl');
-        setDocs(cplDocs);
+        if (o) {
+          setOrder({ fileNumber: o.fileNumber });
+          setUnderwriter(o.underwriter ?? 'westcor');
+          setBranchId(o.branchId ?? null);
+        }
+        setDocs(filterCplDocuments(d));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -52,16 +85,19 @@ export default function ClientCplPage() {
     setGenerating(true);
     setResult(null);
     try {
-      const res = await fetch(`/api/client/orders/${orderId}/cpl/generate`, {
+      const res = await fetch(`/api/client/orders/${orderId}/cpl`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ underwriter }),
+        body: JSON.stringify({ underwriter, branchId }),
       });
       const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error ?? `CPL generation failed (${res.status})`);
+      if (!res.ok || !body?.success) {
+        const details = Array.isArray(body?.details) ? body.details.join('; ') : null;
+        throw new Error(body?.error ?? details ?? `CPL generation failed (${res.status})`);
+      }
       setResult({ type: 'success', message: 'Your CPL has been generated.', docId: body.documentId });
       fetch(`/api/client/orders/${orderId}/documents`).then((r) => r.ok ? r.json() : null).then((d) => {
-        if (d?.documents) setDocs(d.documents.filter((doc: any) => doc.category === 'cpl'));
+        setDocs(filterCplDocuments(d));
       }).catch(() => {});
     } catch (err) {
       setResult({ type: 'error', message: err instanceof Error ? err.message : 'CPL generation failed' });
@@ -123,7 +159,10 @@ export default function ClientCplPage() {
           {UNDERWRITERS.map((uw) => (
             <button
               key={uw.value}
-              onClick={() => setUnderwriter(uw.value)}
+              onClick={() => {
+                setUnderwriter(uw.value);
+                setBranchId(null);
+              }}
               className={`flex items-center gap-4 p-4 rounded-xl border-2 transition-all text-left ${
                 underwriter === uw.value ? 'border-[#F26B2B] bg-[#F26B2B]/5' : 'border-[#E5E7EB] hover:border-[#D1D5DB]'
               }`}
@@ -143,9 +182,30 @@ export default function ClientCplPage() {
           ))}
         </div>
 
+        <div className="mb-6">
+          <label className="block text-xs font-medium uppercase tracking-wider text-[#6B7280] mb-2">
+            Branch
+          </label>
+          <select
+            value={branchId ?? ''}
+            onChange={(e) => setBranchId(e.target.value ? Number(e.target.value) : null)}
+            className="w-full h-11 px-3 border border-[#E5E7EB] rounded-lg text-sm bg-white text-[#1B2A4A] outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20"
+          >
+            <option value="">Select branch…</option>
+            {branches.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {[branch.code, branch.name].filter(Boolean).join(' — ') || `Branch ${branch.id}`}
+              </option>
+            ))}
+          </select>
+          {underwriter && branches.length === 0 && (
+            <p className="mt-2 text-xs text-amber-600">No CPL branches are configured for this underwriter.</p>
+          )}
+        </div>
+
         <button
           onClick={handleGenerate}
-          disabled={generating || !underwriter}
+          disabled={generating || !underwriter || !branchId}
           className="w-full px-5 py-3 text-sm font-medium bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 disabled:cursor-not-allowed transition-colors h-12 inline-flex items-center justify-center gap-2"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>

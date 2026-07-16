@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrder, isStaff } from '@/lib/security/permissions';
-import { getOrderById } from '@/lib/domain/orders/service';
+import { resyncFromSoftPro } from '@/lib/domain/orders/resync-from-softpro';
 
 export async function POST(
   _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
   if (!session) {
@@ -28,22 +28,33 @@ export async function POST(
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    const order = await getOrderById(orderId);
-    if (!order) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    const result = await resyncFromSoftPro(orderId);
+    if (!result.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: result.error ?? 'Resync failed — SoftPro re-pull did not complete',
+          orderId: result.orderId,
+          fileNumber: result.fileNumber,
+        },
+        { status: result.error === 'Order not found' ? 404 : 502 },
+      );
     }
 
-    // TODO: Builder agent — wire up single-order resync via SoftPro adapter
-    // Expected flow:
-    //   1. Call softpro.getOrders with this order's fileNumber
-    //   2. Run upsertFromSoftPro with the result
-    //   3. Return updated order
-    // For now, return success so the UI flow is testable end-to-end.
-
-    return NextResponse.json({ success: true, orderId });
+    return NextResponse.json({
+      success: true,
+      orderId: result.orderId,
+      fileNumber: result.fileNumber,
+      updated: result.updated,
+      changes: result.changes,
+      partiesWritten: result.partiesWritten,
+      message: result.updated
+        ? `Resynced from SoftPro — ${result.changes.length} change${result.changes.length === 1 ? '' : 's'}`
+        : 'SoftPro re-pulled — no changes',
+    });
   } catch {
     return NextResponse.json(
-      { error: 'Resync failed — please try again' },
+      { success: false, error: 'Resync failed — please try again' },
       { status: 500 },
     );
   }

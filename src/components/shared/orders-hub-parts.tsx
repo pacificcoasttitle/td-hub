@@ -136,9 +136,13 @@ export function ActionsDropdown({
         ? `/api/orders/${orderId}/resync`
         : `/api/orders/${orderId}/titlepoint/retry`;
       const res = await fetch(url, { method: 'POST' });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ error: 'Request failed' }));
-        alert(body.error ?? 'Request failed');
+      const body = await res.json().catch(() => null);
+      if (!res.ok || body?.success === false) {
+        alert(body?.error ?? 'Request failed');
+        return;
+      }
+      if (type === 'resync') {
+        alert(body?.message ?? (body?.updated ? 'Resynced from SoftPro.' : 'SoftPro re-pulled — no changes'));
       }
     } catch {
       alert('Network error — please try again');

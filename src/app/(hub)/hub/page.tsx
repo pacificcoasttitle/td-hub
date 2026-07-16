@@ -136,24 +136,78 @@ export default function HubPage() {
 
   async function runBatch(type: string, orders: HubOrder[]) {
     setBatchState({ type, orders, current: 0, results: [] });
+    if (type === 'cpl') {
+      await runCplBatch(orders);
+      return;
+    }
+    if (type === 'proposed') {
+      await runProposedInsuredBatch(orders);
+      return;
+    }
+
     const results: BatchResult[] = [];
     for (let i = 0; i < orders.length; i++) {
       setBatchState((s) => s ? { ...s, current: i + 1 } : null);
       try {
-        const url = type === 'cpl'
-          ? '/api/vendor-actions/cpl'
-          : type === 'proposed'
-            ? `/api/orders/${orders[i].id}/proposed-insured`
-            : `/api/orders/${orders[i].id}/fetch-prelim`;
-        const body = type === 'cpl' ? JSON.stringify({ orderId: orders[i].id, underwriter: 'westcor' }) : undefined;
-        const res = await fetch(url, { method: 'POST', headers: body ? { 'Content-Type': 'application/json' } : {}, body });
+        const res = await fetch(`/api/orders/${orders[i].id}/fetch-prelim`, { method: 'POST' });
         const data = await res.json();
-        if (!res.ok || (type !== 'prelim' && !data.success)) throw new Error(data.error ?? 'Failed');
+        if (!res.ok) throw new Error(data.error ?? 'Failed');
         results.push({ order: orders[i], ok: true });
       } catch (err) {
         results.push({ order: orders[i], ok: false, error: err instanceof Error ? err.message : 'Failed' });
       }
       setBatchState((s) => s ? { ...s, results: [...results] } : null);
+    }
+  }
+
+  async function runCplBatch(orders: HubOrder[]) {
+    await runDedicatedBatch('/api/orders/batch/cpl', orders, {
+      orderIds: orders.map((order) => order.id),
+      underwriter: 'westcor',
+    });
+  }
+
+  async function runProposedInsuredBatch(orders: HubOrder[]) {
+    await runDedicatedBatch('/api/orders/batch/proposed-insured', orders, {
+      orderIds: orders.map((order) => order.id),
+    });
+  }
+
+  async function runDedicatedBatch(
+    url: string,
+    orders: HubOrder[],
+    body: Record<string, unknown>,
+  ) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? 'Batch request failed');
+      const resultMap = new Map<number, { success: boolean; error?: string }>(
+        (data?.results ?? []).map((result: { orderId: number; success: boolean; error?: string }) => [
+          result.orderId,
+          { success: result.success, error: result.error },
+        ]),
+      );
+      const results = orders.map((order) => {
+        const result = resultMap.get(order.id);
+        return {
+          order,
+          ok: result?.success === true,
+          error: result?.success === true ? undefined : result?.error ?? 'No result returned',
+        };
+      });
+      setBatchState((s) => s ? { ...s, current: orders.length, results } : null);
+    } catch (err) {
+      const results = orders.map((order) => ({
+        order,
+        ok: false,
+        error: err instanceof Error ? err.message : 'Batch request failed',
+      }));
+      setBatchState((s) => s ? { ...s, current: orders.length, results } : null);
     }
   }
 

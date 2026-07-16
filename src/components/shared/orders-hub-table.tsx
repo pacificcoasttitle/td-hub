@@ -27,6 +27,7 @@ export interface HubOrder {
   transactionType: string | null;
   type?: string | null;
   openedAt: string | null;
+  branchId?: number | null;
   clientContactId?: number | null;
   clientName?: string | null;
   clientEmail?: string | null;

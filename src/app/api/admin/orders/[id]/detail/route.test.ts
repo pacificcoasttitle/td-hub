@@ -1,37 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
+  applyVisibilityMock,
   canAccessOrderMock,
   canAccessSalesScopedOrderMock,
-  dbMock,
+  getOrderReadModelMock,
   getSessionMock,
-  query,
-} = vi.hoisted(() => {
-  const query = {
-    limitRows: [] as unknown[][],
-    groupByRows: [] as unknown[][],
-    orderByRows: [] as unknown[][],
-  };
-
-  const builder = {
-    from: vi.fn(() => builder),
-    leftJoin: vi.fn(() => builder),
-    where: vi.fn(() => builder),
-    orderBy: vi.fn(async () => query.orderByRows.shift() ?? []),
-    groupBy: vi.fn(async () => query.groupByRows.shift() ?? []),
-    limit: vi.fn(async () => query.limitRows.shift() ?? []),
-  };
-
-  return {
-    canAccessOrderMock: vi.fn(),
-    canAccessSalesScopedOrderMock: vi.fn(),
-    getSessionMock: vi.fn(),
-    query,
-    dbMock: {
-      select: vi.fn(() => builder),
-    },
-  };
-});
+} = vi.hoisted(() => ({
+  applyVisibilityMock: vi.fn(),
+  canAccessOrderMock: vi.fn(),
+  canAccessSalesScopedOrderMock: vi.fn(),
+  getOrderReadModelMock: vi.fn(),
+  getSessionMock: vi.fn(),
+}));
 
 vi.mock('@/lib/security/auth', () => ({
   getSession: getSessionMock,
@@ -43,122 +24,88 @@ vi.mock('@/lib/security/permissions', () => ({
   isSalesScopedRole: (role: string) => role === 'sales_rep' || role === 'sales_manager',
 }));
 
-vi.mock('@/lib/db/client', () => ({
-  db: dbMock,
-}));
-
-vi.mock('@/lib/db/schema', () => {
-  const table = (name: string) => new Proxy({}, {
-    get: (_target, prop) => `${name}.${String(prop)}`,
-  });
-
-  return {
-    documents: table('documents'),
-    orderParties: table('order_parties'),
-    orderProperties: table('order_properties'),
-    orders: table('orders'),
-    orderStatusHistory: table('order_status_history'),
-  };
-});
-
-vi.mock('@/lib/domain/orders/detail-helpers', () => {
-  const table = (name: string) => new Proxy({}, {
-    get: (_target, prop) => `${name}.${String(prop)}`,
-  });
-  const formatParty = (party: {
-    externalName: string | null;
-    externalCompany: string | null;
-    externalEmail: string | null;
-    externalPhone: string | null;
-  } | null) => {
-    if (!party) return null;
-    const parts = party.externalName?.trim().split(/\s+/) ?? [];
-    return {
-      firstName: parts[0] ?? null,
-      lastName: parts.length > 1 ? parts.slice(1).join(' ') : null,
-      email: party.externalEmail,
-      phone: party.externalPhone,
-      company: party.externalCompany,
-    };
-  };
-
-  return {
-    contactDisplayName: vi.fn(() => 'Contact Name'),
-    createdByProfile: table('created_by_profile'),
-    escrowOfficerContact: table('escrow_officer'),
-    formatParty: vi.fn(formatParty),
-    lenderContact: table('lender_contact'),
-    listingAgentContact: table('listing_agent'),
-    salesRepContact: table('sales_rep'),
-    titleCompanyAlias: table('title_company'),
-    titleOfficerContact: table('title_officer'),
-    underwriterAlias: table('underwriter_company'),
-  };
-});
-
-vi.mock('drizzle-orm', () => ({
-  and: vi.fn((...conditions) => ({ type: 'and', conditions })),
-  asc: vi.fn((column) => ({ type: 'asc', column })),
-  eq: vi.fn((left, right) => ({ type: 'eq', left, right })),
-  sql: vi.fn((strings, ...values) => ({ type: 'sql', strings, values })),
+vi.mock('@/lib/domain/orders/read-model', () => ({
+  applyVisibility: applyVisibilityMock,
+  getOrderReadModel: getOrderReadModelMock,
 }));
 
 import { GET } from './route';
 
-function detailRow() {
-  const now = new Date('2026-07-15T12:00:00.000Z');
+function readModel() {
   return {
     id: 123,
     fileNumber: '20012345-OCT',
-    operationalStatus: 'open',
-    source: null,
-    productType: null,
-    transactionType: null,
-    salesPrice: null,
-    loanAmount: null,
-    openedAt: now,
-    closedAt: null,
-    marketingSource: null,
-    emailStatus: null,
-    dupOverride: false,
-    createdAt: now,
-    updatedAt: now,
-    propAddress: '123 Main St',
-    propCity: 'Orange',
-    propState: 'CA',
-    propZip: '92868',
-    propCounty: null,
-    propApn: null,
-    propLegalDesc: null,
-    propType: null,
-    eoId: null,
-    tcId: null,
-    tcName: null,
-    uwId: null,
-    uwName: null,
-    srId: null,
-    toId: null,
-    cbId: null,
+    source: 'softpro_sync',
+    marketingSource: 'Sales Rep Referral',
+    status: { value: 'open', label: 'Open', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+    transactionType: 'Purchase',
+    productType: 'Residential',
+    orderType: 'Title only',
+    property: {
+      addressFormatted: '123 Main St, Orange, CA 92868',
+      line1: '123 Main St',
+      line2: null,
+      city: 'Orange',
+      state: 'CA',
+      zip: '92868',
+      county: 'Orange',
+      apn: '123-456-789',
+      legalDescription: 'Lot 1',
+      propertyType: 'Single Family',
+    },
+    financials: {
+      salesPriceFormatted: '$500,000',
+      loanAmountFormatted: '$400,000',
+      premiumFormatted: '—',
+    },
+    dates: {
+      openedAt: 'Jul 15, 2026',
+      closedAt: '—',
+      completedAt: '—',
+      receivedAt: 'Jul 15, 2026',
+    },
+    parties: [
+      { role: 'buyer', name: 'Buyer One', company: null, email: 'buyer@example.com', phone: null, isPrimary: true },
+      { role: 'seller', name: 'Seller One', company: null, email: 'seller@example.com', phone: null, isPrimary: true },
+      { role: 'lender', name: 'Lender Contact', company: 'Order Party Lending', email: 'lender@example.com', phone: '555-0101', isPrimary: true },
+      { role: 'listing_agent', name: 'Listing Agent', company: 'Order Party Realty', email: 'listing@example.com', phone: '555-0102', isPrimary: true },
+      { role: 'other', name: 'Title Contact', company: 'Pacific Coast Title Company', email: 'title-company@example.com', phone: '555-0103', isPrimary: true },
+      { role: 'other', name: null, company: 'Westcor Land Title Insurance Company', email: 'claims@wltic.com', phone: '555-0104', isPrimary: false },
+    ],
+    relatedParties: {
+      titleCompany: { role: 'other', name: 'Title Contact', company: 'Pacific Coast Title Company', email: 'title-company@example.com', phone: '555-0103', isPrimary: true },
+      underwriter: { role: 'other', name: null, company: 'Westcor Land Title Insurance Company', email: 'claims@wltic.com', phone: '555-0104', isPrimary: false },
+    },
+    assignments: {
+      escrowOfficer: { name: 'Escrow Officer', email: 'escrow@example.com' },
+      titleOfficer: { name: 'Title Officer', email: 'title@example.com' },
+      salesRep: { name: 'Sales Rep', email: 'sales@example.com' },
+      createdBy: { id: 'profile-1', name: 'Opener User', email: 'opener@pct.com' },
+    },
+    documents: {
+      active: [],
+      activeByCategory: { prelim: { count: 1, latestId: 10, latestFilename: 'prelim.pdf', latestCreatedAt: 'Jul 16, 2026' } },
+      prelimAvailable: true,
+      activeCount: 1,
+    },
+    milestones: [
+      { key: 'opened', label: 'Order Opened', state: 'complete', date: 'Jul 15, 2026', documentId: null },
+      { key: 'prelim', label: 'Prelim Received', state: 'complete', date: 'Jul 16, 2026', documentId: 10 },
+    ],
   };
 }
 
 describe('GET /api/admin/orders/[id]/detail sales scope', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    query.limitRows = [];
-    query.groupByRows = [];
-    query.orderByRows = [];
     getSessionMock.mockResolvedValue({ id: 'manager-1', role: 'sales_manager', contactId: 10 });
     canAccessOrderMock.mockResolvedValue(false);
     canAccessSalesScopedOrderMock.mockResolvedValue(true);
+    getOrderReadModelMock.mockResolvedValue(readModel());
+    applyVisibilityMock.mockImplementation((model) => model);
   });
 
   it('uses the sales-scoped predicate for sales manager detail access', async () => {
-    query.limitRows.push([detailRow()]);
-    query.orderByRows.push([]);
-    query.groupByRows.push([]);
-    query.orderByRows.push([]);
-
     const response = await GET({} as never, { params: Promise.resolve({ id: '123' }) });
     const body = await response.json();
 
@@ -169,48 +116,61 @@ describe('GET /api/admin/orders/[id]/detail sales scope', () => {
       123,
     );
     expect(canAccessOrderMock).not.toHaveBeenCalled();
+    expect(getOrderReadModelMock).toHaveBeenCalledWith(123);
+    expect(applyVisibilityMock).toHaveBeenCalledWith(expect.objectContaining({ id: 123 }), 'staff');
   });
 
   it('sources lender and listing agent cards from order parties when header FKs are null', async () => {
-    query.limitRows.push([detailRow()]);
-    query.orderByRows.push([
-      {
-        role: 'lender',
-        isPrimary: true,
-        externalName: 'Lender Contact',
-        externalCompany: 'Order Party Lending',
-        externalEmail: 'lender@example.com',
-        externalPhone: '555-0101',
-      },
-      {
-        role: 'listing_agent',
-        isPrimary: true,
-        externalName: 'Listing Agent',
-        externalCompany: 'Order Party Realty',
-        externalEmail: 'listing@example.com',
-        externalPhone: '555-0102',
-      },
-    ]);
-    query.groupByRows.push([]);
-    query.orderByRows.push([]);
-
     const response = await GET({} as never, { params: Promise.resolve({ id: '123' }) });
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body.parties.lender).toMatchObject({
-      firstName: 'Lender',
-      lastName: 'Contact',
+      name: 'Lender Contact',
       company: 'Order Party Lending',
       email: 'lender@example.com',
       phone: '555-0101',
     });
     expect(body.parties.listingAgent).toMatchObject({
-      firstName: 'Listing',
-      lastName: 'Agent',
+      name: 'Listing Agent',
       company: 'Order Party Realty',
       email: 'listing@example.com',
       phone: '555-0102',
     });
+    expect(body.parties.titleCompany).toMatchObject({
+      name: 'Title Contact',
+      company: 'Pacific Coast Title Company',
+      email: 'title-company@example.com',
+      phone: '555-0103',
+    });
+    expect(body.parties.underwriter).toMatchObject({
+      name: null,
+      company: 'Westcor Land Title Insurance Company',
+      email: 'claims@wltic.com',
+      phone: '555-0104',
+    });
+  });
+
+  it('returns staff-visible financials, APN, legal description, and canonical milestones', async () => {
+    const response = await GET({} as never, { params: Promise.resolve({ id: '123' }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.order.salesPrice).toBe('$500,000');
+    expect(body.order.loanAmount).toBe('$400,000');
+    expect(body.order.source).toBe('softpro_sync');
+    expect(body.order.marketingSource).toBe('Sales Rep Referral');
+    expect(body.property.apn).toBe('123-456-789');
+    expect(body.property.legalDescription).toBe('Lot 1');
+    expect(body.property.propertyType).toBe('Single Family');
+    expect(body.assignments.createdBy).toMatchObject({
+      id: 'profile-1',
+      name: 'Opener User',
+      email: 'opener@pct.com',
+    });
+    expect(body.milestones).toEqual([
+      { id: 1, status: 'complete', label: 'Order Opened', notes: null, occurredAt: 'Jul 15, 2026' },
+      { id: 2, status: 'complete', label: 'Prelim Received', notes: null, occurredAt: 'Jul 16, 2026' },
+    ]);
   });
 });

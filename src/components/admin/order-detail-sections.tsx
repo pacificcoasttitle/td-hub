@@ -16,7 +16,7 @@ export interface OrderDetail {
   order: {
     id: number; fileNumber: string; status: string; source: string | null;
     productType: string | null; transactionType: string | null;
-    salesPrice: number | null; createdAt: string; updatedAt: string;
+    salesPrice: number | string | null; createdAt: string; updatedAt: string;
     emailStatus: string | null; dupOverride: boolean | null; marketingSource: string | null;
   };
   property: {
@@ -100,11 +100,16 @@ export function TransactionSection({ order }: { order: OrderDetail['order'] }) {
       <div className="grid grid-cols-2 gap-x-8 gap-y-2">
         <Row label="Type" value={order.transactionType || '—'} />
         <Row label="Product Type" value={order.productType || '—'} />
-        <Row label="Sales Price" value={formatOrderMoney(order.salesPrice)} />
+        <Row label="Sales Price" value={displayMoney(order.salesPrice)} />
         <Row label="Source" value={order.source?.replace(/_/g, ' ') || '—'} />
       </div>
     </Section>
   );
+}
+
+function displayMoney(value: number | string | null | undefined): string {
+  if (typeof value === 'string' && (value.startsWith('$') || value === '—')) return value;
+  return formatOrderMoney(value);
 }
 
 /* ── Parties ───────────────────────────────────────────────────────────────── */

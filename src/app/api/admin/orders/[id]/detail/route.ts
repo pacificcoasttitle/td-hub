@@ -2,18 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrder, canAccessSalesScopedOrder, isSalesScopedRole } from '@/lib/security/permissions';
-import { db } from '@/lib/db/client';
-import {
-  orders, orderProperties, orderParties, orderStatusHistory,
-  documents,
-} from '@/lib/db/schema';
-import { eq, and, sql, asc } from 'drizzle-orm';
-import {
-  escrowOfficerContact,
-  salesRepContact, titleOfficerContact, titleCompanyAlias,
-  underwriterAlias, createdByProfile,
-  contactDisplayName, formatParty,
-} from '@/lib/domain/orders/detail-helpers';
+import { applyVisibility, getOrderReadModel, type OrderReadModel, type OrderReadModelParty } from '@/lib/domain/orders/read-model';
 
 const ORDER_DETAIL_ROLES = [
   'super_admin',
@@ -54,225 +43,123 @@ export async function GET(
   }
 
   try {
-    const [row] = await db
-      .select({
-        // order
-        id: orders.id,
-        fileNumber: orders.fileNumber,
-        operationalStatus: orders.operationalStatus,
-        source: orders.source,
-        productType: orders.productType,
-        transactionType: orders.transactionType,
-        salesPrice: orders.salesPrice,
-        loanAmount: orders.loanAmount,
-        openedAt: orders.openedAt,
-        closedAt: orders.closedAt,
-        marketingSource: orders.marketingSource,
-        emailStatus: orders.emailStatus,
-        dupOverride: orders.dupOverride,
-        createdAt: orders.createdAt,
-        updatedAt: orders.updatedAt,
-        // property
-        propAddress: orderProperties.address,
-        propCity: orderProperties.city,
-        propState: orderProperties.state,
-        propZip: orderProperties.zip,
-        propCounty: orderProperties.county,
-        propApn: orderProperties.apn,
-        propLegalDesc: orderProperties.legalDescription,
-        propType: orderProperties.propertyType,
-        // escrow officer
-        eoId: escrowOfficerContact.id,
-        eoFirstName: escrowOfficerContact.firstName,
-        eoLastName: escrowOfficerContact.lastName,
-        eoFullName: escrowOfficerContact.fullName,
-        eoOfficerName: escrowOfficerContact.officerName,
-        eoCompanyName: escrowOfficerContact.companyName,
-        eoEmail: escrowOfficerContact.email,
-        eoPhone: escrowOfficerContact.phone,
-        // title company
-        tcId: titleCompanyAlias.id,
-        tcName: titleCompanyAlias.name,
-        // underwriter
-        uwId: underwriterAlias.id,
-        uwName: underwriterAlias.name,
-        // sales rep
-        srId: salesRepContact.id,
-        srFirstName: salesRepContact.firstName,
-        srLastName: salesRepContact.lastName,
-        srFullName: salesRepContact.fullName,
-        srOfficerName: salesRepContact.officerName,
-        srCompanyName: salesRepContact.companyName,
-        srEmail: salesRepContact.email,
-        // title officer
-        toId: titleOfficerContact.id,
-        toFirstName: titleOfficerContact.firstName,
-        toLastName: titleOfficerContact.lastName,
-        toFullName: titleOfficerContact.fullName,
-        toOfficerName: titleOfficerContact.officerName,
-        toCompanyName: titleOfficerContact.companyName,
-        toEmail: titleOfficerContact.email,
-        // created by
-        cbId: createdByProfile.id,
-        cbName: createdByProfile.displayName,
-        cbEmail: createdByProfile.email,
-      })
-      .from(orders)
-      .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
-      .leftJoin(escrowOfficerContact, eq(orders.escrowOfficerId, escrowOfficerContact.id))
-      .leftJoin(titleCompanyAlias, eq(orders.titleCompanyId, titleCompanyAlias.id))
-      .leftJoin(underwriterAlias, eq(orders.underwriterId, underwriterAlias.id))
-      .leftJoin(salesRepContact, eq(orders.salesRepId, salesRepContact.id))
-      .leftJoin(titleOfficerContact, eq(orders.titleOfficerId, titleOfficerContact.id))
-      .leftJoin(createdByProfile, eq(orders.createdBy, createdByProfile.id))
-      .where(eq(orders.id, orderId))
-      .limit(1);
-
-    if (!row) {
+    const model = await getOrderReadModel(orderId);
+    if (!model) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
-
-    // External parties come from order_parties; header FKs below remain for internal staff assignments.
-    const parties = await db
-      .select({
-        role: orderParties.role,
-        isPrimary: orderParties.isPrimary,
-        externalName: orderParties.externalName,
-        externalCompany: orderParties.externalCompany,
-        externalEmail: orderParties.externalEmail,
-        externalPhone: orderParties.externalPhone,
-      })
-      .from(orderParties)
-      .where(eq(orderParties.orderId, orderId))
-      .orderBy(
-        sql`case ${orderParties.role}
-          when 'buyer' then 1
-          when 'seller' then 2
-          when 'lender' then 3
-          when 'lender_contact' then 4
-          when 'listing_agent' then 5
-          when 'escrow_company' then 6
-          when 'other' then 7
-          else 99
-        end`,
-        sql`case when ${orderParties.isPrimary} then 0 else 1 end`,
-        asc(orderParties.createdAt),
-        asc(orderParties.id),
-      );
-
-    const buyerParty = parties.find((p) => p.role === 'buyer' && p.isPrimary)
-      ?? parties.find((p) => p.role === 'buyer')
-      ?? null;
-    const sellerParty = parties.find((p) => p.role === 'seller' && p.isPrimary)
-      ?? parties.find((p) => p.role === 'seller')
-      ?? null;
-    const lenderParty = parties.find((p) => p.role === 'lender' && p.isPrimary)
-      ?? parties.find((p) => p.role === 'lender')
-      ?? null;
-    const listingAgentParty = parties.find((p) => p.role === 'listing_agent' && p.isPrimary)
-      ?? parties.find((p) => p.role === 'listing_agent')
-      ?? null;
-
-    // Documents summary
-    const docRows = await db
-      .select({
-        category: documents.category,
-        count: sql<number>`count(*)`,
-      })
-      .from(documents)
-      .where(and(eq(documents.orderId, orderId), eq(documents.status, 'active')))
-      .groupBy(documents.category);
-
-    const docCount = docRows.reduce((sum, r) => sum + Number(r.count), 0);
-    const docCategories = docRows.map((r) => r.category);
-
-    // Status history
-    const history = await db
-      .select({
-        status: orderStatusHistory.status,
-        source: orderStatusHistory.source,
-        notes: orderStatusHistory.notes,
-        changedAt: orderStatusHistory.changedAt,
-      })
-      .from(orderStatusHistory)
-      .where(eq(orderStatusHistory.orderId, orderId))
-      .orderBy(asc(orderStatusHistory.changedAt));
-
-    return NextResponse.json({
-      order: {
-        id: row.id,
-        fileNumber: row.fileNumber,
-        status: row.operationalStatus,
-        source: row.source,
-        productType: row.productType,
-        transactionType: row.transactionType,
-        salesPrice: row.salesPrice,
-        loanAmount: row.loanAmount,
-        openedAt: row.openedAt.toISOString(),
-        closedAt: row.closedAt?.toISOString() ?? null,
-        createdAt: row.createdAt.toISOString(),
-        updatedAt: row.updatedAt.toISOString(),
-        emailStatus: row.emailStatus,
-        dupOverride: row.dupOverride,
-        marketingSource: row.marketingSource,
-      },
-      property: {
-        address: row.propAddress,
-        city: row.propCity,
-        state: row.propState,
-        zip: row.propZip,
-        county: row.propCounty,
-        apn: row.propApn,
-        legalDescription: row.propLegalDesc,
-        propertyType: row.propType,
-      },
-      parties: {
-        items: parties,
-        buyer: formatParty(buyerParty),
-        seller: formatParty(sellerParty),
-        escrowOfficer: row.eoId ? {
-          id: row.eoId,
-          name: contactDisplayName({ fullName: row.eoFullName, officerName: row.eoOfficerName, firstName: row.eoFirstName, lastName: row.eoLastName, companyName: row.eoCompanyName }),
-          email: row.eoEmail,
-          phone: row.eoPhone,
-        } : null,
-        lender: formatParty(lenderParty),
-        listingAgent: formatParty(listingAgentParty),
-        titleCompany: row.tcId ? { id: row.tcId, name: row.tcName } : null,
-        underwriter: row.uwId ? { id: row.uwId, name: row.uwName } : null,
-      },
-      assignments: {
-        salesRep: row.srId ? {
-          id: row.srId,
-          name: contactDisplayName({ fullName: row.srFullName, officerName: row.srOfficerName, firstName: row.srFirstName, lastName: row.srLastName, companyName: row.srCompanyName }),
-          email: row.srEmail,
-        } : null,
-        titleOfficer: row.toId ? {
-          id: row.toId,
-          name: contactDisplayName({ fullName: row.toFullName, officerName: row.toOfficerName, firstName: row.toFirstName, lastName: row.toLastName, companyName: row.toCompanyName }),
-          email: row.toEmail,
-        } : null,
-        createdBy: row.cbId ? {
-          id: row.cbId,
-          name: row.cbName,
-          email: row.cbEmail,
-        } : null,
-      },
-      documents: {
-        count: docCount,
-        categories: docCategories,
-      },
-      statusHistory: history.map((h) => ({
-        status: h.status,
-        source: h.source,
-        note: h.notes,
-        createdAt: h.changedAt.toISOString(),
-      })),
-    });
+    return NextResponse.json(mapStaffDetailResponse(applyVisibility(model, 'staff')));
   } catch (err) {
     return NextResponse.json(
       { error: 'Failed to load order detail', detail: err instanceof Error ? err.message : 'Unknown' },
       { status: 500 },
     );
   }
+}
+
+function mapStaffDetailResponse(model: OrderReadModel) {
+  const buyerParty = primaryParty(model.parties, 'buyer') ?? primaryParty(model.parties, 'borrower');
+  const sellerParty = primaryParty(model.parties, 'seller');
+  const lenderParty = primaryParty(model.parties, 'lender');
+  const listingAgentParty = primaryParty(model.parties, 'listing_agent');
+
+  return {
+    order: {
+      id: model.id,
+      fileNumber: model.fileNumber,
+      status: model.status.value,
+      source: model.source,
+      productType: model.productType,
+      transactionType: model.transactionType,
+      salesPrice: model.financials.salesPriceFormatted,
+      loanAmount: model.financials.loanAmountFormatted,
+      openedAt: model.dates.openedAt,
+      closedAt: model.dates.closedAt,
+      createdAt: model.dates.receivedAt,
+      updatedAt: model.dates.receivedAt,
+      emailStatus: null,
+      dupOverride: false,
+      marketingSource: model.marketingSource,
+    },
+    property: {
+      address: model.property.line1,
+      city: model.property.city,
+      state: model.property.state,
+      zip: model.property.zip,
+      county: model.property.county === '—' ? null : model.property.county,
+      apn: model.property.apn,
+      legalDescription: model.property.legalDescription,
+      propertyType: model.property.propertyType,
+    },
+    parties: {
+      items: model.parties.map(toLegacyParty),
+      buyer: splitPartyName(buyerParty),
+      seller: splitPartyName(sellerParty),
+      escrowOfficer: model.assignments.escrowOfficer,
+      lender: partyName(lenderParty),
+      listingAgent: partyName(listingAgentParty),
+      titleCompany: partyName(model.relatedParties.titleCompany),
+      underwriter: partyName(model.relatedParties.underwriter),
+    },
+    assignments: {
+      salesRep: model.assignments.salesRep,
+      titleOfficer: model.assignments.titleOfficer,
+      createdBy: model.assignments.createdBy,
+    },
+    documents: {
+      count: model.documents.activeCount,
+      categories: Object.keys(model.documents.activeByCategory),
+    },
+    statusHistory: model.milestones.map((milestone) => ({
+      status: milestone.key,
+      source: 'system',
+      note: milestone.label,
+      createdAt: milestone.date,
+    })),
+    milestones: model.milestones.map((milestone, index) => ({
+      id: index + 1,
+      status: milestone.state,
+      label: milestone.label,
+      notes: null,
+      occurredAt: milestone.date,
+    })),
+  };
+}
+
+function primaryParty(parties: OrderReadModelParty[], role: string): OrderReadModelParty | null {
+  return parties.find((party) => party.role === role && party.isPrimary)
+    ?? parties.find((party) => party.role === role)
+    ?? null;
+}
+
+function toLegacyParty(party: OrderReadModelParty) {
+  return {
+    role: party.role,
+    isPrimary: party.isPrimary,
+    externalName: party.name,
+    externalCompany: party.company,
+    externalEmail: party.email,
+    externalPhone: party.phone,
+  };
+}
+
+function splitPartyName(party: OrderReadModelParty | null) {
+  if (!party?.name) return null;
+  const parts = party.name.trim().split(/\s+/);
+  return {
+    firstName: parts[0] ?? null,
+    lastName: parts.length > 1 ? parts.slice(1).join(' ') : null,
+    email: party.email,
+    phone: party.phone,
+    company: party.company,
+  };
+}
+
+function partyName(party: OrderReadModelParty | null) {
+  if (!party) return null;
+  return {
+    name: party.name,
+    email: party.email,
+    phone: party.phone,
+    company: party.company,
+  };
 }

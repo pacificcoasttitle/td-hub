@@ -60,6 +60,7 @@ vi.mock('@/lib/db/schema', () => {
       county: column('orderProperties.county'),
       apn: column('orderProperties.apn'),
       legalDescription: column('orderProperties.legalDescription'),
+      propertyType: column('orderProperties.propertyType'),
       fullAddress: column('orderProperties.fullAddress'),
     },
     orderStatusHistory: {
@@ -72,6 +73,8 @@ vi.mock('@/lib/db/schema', () => {
     orders: {
       id: column('orders.id'),
       fileNumber: column('orders.fileNumber'),
+      source: column('orders.source'),
+      marketingSource: column('orders.marketingSource'),
       operationalStatus: column('orders.operationalStatus'),
       transactionType: column('orders.transactionType'),
       productType: column('orders.productType'),
@@ -82,6 +85,7 @@ vi.mock('@/lib/db/schema', () => {
       closedAt: column('orders.closedAt'),
       completedAt: column('orders.completedAt'),
       createdAt: column('orders.createdAt'),
+      createdBy: column('orders.createdBy'),
       escrowOfficerId: column('orders.escrowOfficerId'),
       titleOfficerId: column('orders.titleOfficerId'),
       salesRepId: column('orders.salesRepId'),
@@ -104,6 +108,8 @@ const baseData: OrderReadModelData = {
     id: 42,
     fileNumber: '20019922-GLT',
     escrowNumber: '20019922-GLT',
+    source: 'softpro_sync',
+    marketingSource: 'Sales Rep Referral',
     operationalStatus: 'in_process',
     transactionType: 'Purchase',
     productType: 'Residential',
@@ -125,6 +131,7 @@ const baseData: OrderReadModelData = {
     county: 'Los Angeles',
     apn: '5641-001-002',
     legalDescription: 'Lot 1 of Tract 2',
+    propertyType: 'Single Family',
     fullAddress: '123 Main St Unit 4, Glendale, CA 91203',
   },
   parties: [
@@ -132,11 +139,14 @@ const baseData: OrderReadModelData = {
     { id: 2, role: 'seller', name: 'Sam Seller', company: null, email: 'seller@example.com', phone: null, isPrimary: true, createdAt: '2026-07-15T18:02:00.000Z' },
     { id: 1, role: 'buyer', name: 'Bea Buyer', company: null, email: 'buyer@example.com', phone: null, isPrimary: true, createdAt: '2026-07-15T18:01:00.000Z' },
     { id: 4, role: 'lender', name: 'Lender Contact', company: 'Pacific Lending', email: 'loan@example.com', phone: '555-1212', isPrimary: true, createdAt: '2026-07-15T18:03:00.000Z' },
+    { id: 6, role: 'other', name: 'Veronica Sanchez', company: 'Pacific Coast Title Company', email: 'vsanchez@pct.com', phone: '818-568-8227', isPrimary: true, createdAt: '2026-07-15T18:05:00.000Z' },
+    { id: 7, role: 'other', name: null, company: 'Westcor Land Title Insurance Company', email: 'claims@wltic.com', phone: '(407)629-5842', isPrimary: false, createdAt: '2026-07-15T18:06:00.000Z' },
   ],
   assignments: {
     escrowOfficer: { name: 'Ella Escrow', email: 'ella@pct.com' },
     titleOfficer: { name: 'Tina Title', email: 'unit66@pct.com' },
     salesRep: { name: 'Ryan Rep', email: 'ryan@pct.com' },
+    createdBy: { id: 'profile-1', name: 'Opener User', email: 'opener@pct.com' },
   },
   documents: [
     { id: 10, category: 'prelim', filename: 'prelim-v1.pdf', sizeBytes: 1000, createdAt: '2026-07-16T17:00:00.000Z' },
@@ -157,6 +167,8 @@ describe('buildOrderReadModel', () => {
       id: 42,
       fileNumber: '20019922-GLT',
       escrowNumber: '20019922-GLT',
+      source: 'softpro_sync',
+      marketingSource: 'Sales Rep Referral',
       status: {
         value: 'in_process',
         label: 'In Process',
@@ -166,6 +178,7 @@ describe('buildOrderReadModel', () => {
         addressFormatted: '123 Main St Unit 4, Glendale, CA 91203',
         county: 'Los Angeles',
         apn: '5641-001-002',
+        propertyType: 'Single Family',
       },
       financials: {
         salesPriceFormatted: '$490,000',
@@ -191,7 +204,7 @@ describe('buildOrderReadModel', () => {
       },
     });
 
-    expect(model.parties.map((party) => party.role)).toEqual(['buyer', 'seller', 'lender', 'listing_agent']);
+    expect(model.parties.map((party) => party.role)).toEqual(['buyer', 'seller', 'lender', 'listing_agent', 'other', 'other']);
     expect(model.parties.find((party) => party.role === 'lender')).toMatchObject({
       name: 'Lender Contact',
       company: 'Pacific Lending',
@@ -199,6 +212,22 @@ describe('buildOrderReadModel', () => {
     expect(model.parties.find((party) => party.role === 'listing_agent')).toMatchObject({
       name: 'List Agent',
       company: 'Agent Co',
+    });
+  });
+
+  it('exposes title company and underwriter from role=other parties', () => {
+    const model = buildOrderReadModel(baseData);
+
+    expect(model.relatedParties.titleCompany).toMatchObject({
+      role: 'other',
+      name: 'Veronica Sanchez',
+      company: 'Pacific Coast Title Company',
+      isPrimary: true,
+    });
+    expect(model.relatedParties.underwriter).toMatchObject({
+      role: 'other',
+      company: 'Westcor Land Title Insurance Company',
+      isPrimary: false,
     });
   });
 
@@ -294,6 +323,15 @@ describe('milestone derivation', () => {
 });
 
 describe('applyVisibility', () => {
+  it('leaves staff-visible fields unredacted', () => {
+    const model = buildOrderReadModel(baseData);
+    const visible = applyVisibility(model, 'staff');
+
+    expect(visible.financials.salesPriceFormatted).toBe('$490,000');
+    expect(visible.property.apn).toBe('5641-001-002');
+    expect(visible.property.legalDescription).toBe('Lot 1 of Tract 2');
+  });
+
   it('redacts client-hidden financial and property fields', () => {
     const visible = applyVisibility(buildOrderReadModel(baseData), 'client');
 

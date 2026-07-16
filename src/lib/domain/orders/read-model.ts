@@ -6,6 +6,7 @@ import {
   orderProperties,
   orderStatusHistory,
   orders,
+  profiles,
   titlePointData,
 } from '@/lib/db/schema';
 import { and, asc, eq } from 'drizzle-orm';
@@ -18,6 +19,7 @@ import { contactDisplayName } from './detail-helpers';
 const salesRepContact = alias(contacts, 'read_model_sales_rep');
 const titleOfficerContact = alias(contacts, 'read_model_title_officer');
 const escrowOfficerContact = alias(contacts, 'read_model_escrow_officer');
+const createdByProfile = alias(profiles, 'read_model_created_by_profile');
 
 const PARTY_ROLE_ORDER = [
   'buyer',
@@ -33,7 +35,7 @@ const PARTY_ROLE_ORDER = [
 
 const MILESTONE_KEYS = ['opened', 'prelim', 'recording', 'disbursement', 'closed'] as const;
 
-export type OrderReadModelVisibilityPolicy = 'internal' | 'client';
+export type OrderReadModelVisibilityPolicy = 'internal' | 'staff' | 'client';
 export type OrderMilestoneKey = typeof MILESTONE_KEYS[number];
 export type OrderMilestoneState = 'complete' | 'in_progress' | 'pending';
 
@@ -49,6 +51,8 @@ export interface OrderReadModel {
   id: number;
   fileNumber: string;
   escrowNumber: string | null;
+  source: string | null;
+  marketingSource: string | null;
   status: { value: string; label: string; color: string };
   transactionType: string | null;
   productType: string | null;
@@ -63,6 +67,7 @@ export interface OrderReadModel {
     county: string;
     apn: string | null;
     legalDescription: string | null;
+    propertyType: string | null;
   };
   financials: {
     salesPriceFormatted: string;
@@ -76,10 +81,15 @@ export interface OrderReadModel {
     receivedAt: string;
   };
   parties: OrderReadModelParty[];
+  relatedParties: {
+    titleCompany: OrderReadModelParty | null;
+    underwriter: OrderReadModelParty | null;
+  };
   assignments: {
     escrowOfficer: OrderReadModelAssignment | null;
     titleOfficer: OrderReadModelAssignment | null;
     salesRep: OrderReadModelAssignment | null;
+    createdBy: OrderReadModelAssignment | null;
   };
   documents: OrderReadModelDocuments;
   milestones: OrderReadModelMilestone[];
@@ -95,6 +105,7 @@ export interface OrderReadModelParty {
 }
 
 export interface OrderReadModelAssignment {
+  id?: string | number | null;
   name: string | null;
   email: string | null;
 }
@@ -130,6 +141,8 @@ export interface OrderReadModelData {
     id: number;
     fileNumber: string;
     escrowNumber: string | null;
+    source: string | null;
+    marketingSource: string | null;
     operationalStatus: string;
     transactionType: string | null;
     productType: string | null;
@@ -151,6 +164,7 @@ export interface OrderReadModelData {
     county: string | null;
     apn: string | null;
     legalDescription: string | null;
+    propertyType: string | null;
     fullAddress: string | null;
   } | null;
   parties: OrderReadModelPartySource[];
@@ -158,6 +172,7 @@ export interface OrderReadModelData {
     escrowOfficer: OrderReadModelAssignment | null;
     titleOfficer: OrderReadModelAssignment | null;
     salesRep: OrderReadModelAssignment | null;
+    createdBy: OrderReadModelAssignment | null;
   };
   documents: OrderReadModelDocumentSource[];
   statusHistory: OrderReadModelStatusSource[];
@@ -201,6 +216,8 @@ export function buildOrderReadModel(data: OrderReadModelData): OrderReadModel {
     id: data.order.id,
     fileNumber: data.order.fileNumber,
     escrowNumber: data.order.escrowNumber,
+    source: data.order.source,
+    marketingSource: data.order.marketingSource,
     status: {
       value: data.order.operationalStatus,
       label: status.label,
@@ -219,6 +236,7 @@ export function buildOrderReadModel(data: OrderReadModelData): OrderReadModel {
       county: formatCounty(data.property?.county),
       apn: data.property?.apn ?? null,
       legalDescription: data.property?.legalDescription ?? null,
+      propertyType: data.property?.propertyType ?? null,
     },
     financials: {
       salesPriceFormatted: formatOrderMoney(data.order.salesPrice),
@@ -232,6 +250,10 @@ export function buildOrderReadModel(data: OrderReadModelData): OrderReadModel {
       receivedAt: formatOrderDate(data.order.receivedAt),
     },
     parties: orderPartiesCanonically(data.parties),
+    relatedParties: {
+      titleCompany: explicitOtherParty(data.parties, true),
+      underwriter: explicitOtherParty(data.parties, false),
+    },
     assignments: data.assignments,
     documents: summarizeActiveDocuments(data.documents),
     milestones: deriveOrderMilestones(data),
@@ -242,7 +264,7 @@ export function applyVisibility(
   model: OrderReadModel,
   policy: OrderReadModelVisibilityPolicy,
 ): OrderReadModel {
-  if (policy === 'internal') return model;
+  if (policy === 'internal' || policy === 'staff') return model;
 
   return {
     ...model,
@@ -363,6 +385,8 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
     .select({
       id: orders.id,
       fileNumber: orders.fileNumber,
+      source: orders.source,
+      marketingSource: orders.marketingSource,
       operationalStatus: orders.operationalStatus,
       transactionType: orders.transactionType,
       productType: orders.productType,
@@ -380,6 +404,7 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
       propCounty: orderProperties.county,
       propApn: orderProperties.apn,
       propLegalDescription: orderProperties.legalDescription,
+      propPropertyType: orderProperties.propertyType,
       propFullAddress: orderProperties.fullAddress,
       eoFullName: escrowOfficerContact.fullName,
       eoOfficerName: escrowOfficerContact.officerName,
@@ -399,12 +424,16 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
       srLastName: salesRepContact.lastName,
       srCompanyName: salesRepContact.companyName,
       srEmail: salesRepContact.email,
+      createdById: createdByProfile.id,
+      createdByName: createdByProfile.displayName,
+      createdByEmail: createdByProfile.email,
     })
     .from(orders)
     .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
     .leftJoin(escrowOfficerContact, eq(orders.escrowOfficerId, escrowOfficerContact.id))
     .leftJoin(titleOfficerContact, eq(orders.titleOfficerId, titleOfficerContact.id))
     .leftJoin(salesRepContact, eq(orders.salesRepId, salesRepContact.id))
+    .leftJoin(createdByProfile, eq(orders.createdBy, createdByProfile.id))
     .where(eq(orders.id, orderId))
     .limit(1);
 
@@ -458,6 +487,8 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
       id: row.id,
       fileNumber: row.fileNumber,
       escrowNumber: null,
+      source: row.source,
+      marketingSource: row.marketingSource,
       operationalStatus: row.operationalStatus,
       transactionType: row.transactionType,
       productType: row.productType,
@@ -479,6 +510,7 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
       county: row.propCounty,
       apn: row.propApn,
       legalDescription: row.propLegalDescription,
+      propertyType: row.propPropertyType,
       fullAddress: row.propFullAddress,
     },
     parties: partyRows,
@@ -507,6 +539,11 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
         companyName: row.srCompanyName,
         email: row.srEmail,
       }),
+      createdBy: row.createdById ? {
+        id: row.createdById,
+        name: row.createdByName,
+        email: row.createdByEmail,
+      } : null,
     },
     documents: documentRows,
     statusHistory: historyRows,
@@ -531,6 +568,13 @@ function orderPartiesCanonically(parties: OrderReadModelPartySource[]): OrderRea
       phone: party.phone,
       isPrimary: Boolean(party.isPrimary),
     }));
+}
+
+function explicitOtherParty(parties: OrderReadModelPartySource[], isPrimary: boolean): OrderReadModelParty | null {
+  const party = orderPartiesCanonically(parties).find((candidate) => (
+    candidate.role === 'other' && candidate.isPrimary === isPrimary
+  ));
+  return party ?? null;
 }
 
 function roleRank(role: string): number {

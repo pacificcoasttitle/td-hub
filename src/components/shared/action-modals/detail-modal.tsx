@@ -47,6 +47,7 @@ interface AdminDetailResponse {
     lender?: { name: string | null } | null;
     escrowOfficer?: { name: string | null } | null;
   };
+  milestones?: Milestone[];
 }
 
 interface LegacyDetailResponse {
@@ -126,11 +127,17 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
       Promise.all([
         fetch(detailUrl).then((r) => r.ok ? r.json() : null),
         fetch(`${base}/documents`).then((r) => r.ok ? r.json() : { documents: [] }),
-      ]).then(([o, d]) => { setOrder(normalizeOrderDetail(o)); setDocs(d?.documents ?? []); })
+      ]).then(([o, d]) => {
+        setOrder(normalizeOrderDetail(o));
+        setDocs(d?.documents ?? []);
+        setMilestones(isClient ? [] : normalizeMilestones(o));
+        setMilestonesError(null);
+        setMilestonesLoading(false);
+      })
         .catch(() => {}).finally(() => setLoading(false));
     }, 0);
     return () => clearTimeout(timeout);
-  }, [open, base, detailUrl]);
+  }, [open, base, detailUrl, isClient]);
 
   useEffect(() => {
     if (!open) return;
@@ -154,26 +161,6 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
     }, 0);
     return () => clearTimeout(timeout);
   }, [open, base]);
-
-  useEffect(() => {
-    if (!open || isClient) return;
-    const timeout = setTimeout(() => {
-      setMilestones([]);
-      setMilestonesError(null);
-      setMilestonesLoading(true);
-
-      fetch(`/api/orders/${orderId}/milestones`)
-        .then(async (r) => {
-          const body = await r.json().catch(() => null);
-          if (!r.ok) throw new Error(body?.error ?? `Failed to load milestones (${r.status})`);
-          return body?.milestones as Milestone[] | undefined;
-        })
-        .then((items) => setMilestones(items ?? []))
-        .catch((err: unknown) => setMilestonesError(err instanceof Error ? err.message : 'Failed to load milestones'))
-        .finally(() => setMilestonesLoading(false));
-    }, 0);
-    return () => clearTimeout(timeout);
-  }, [open, isClient, orderId]);
 
   const seller = order ? [order.sellerFirstName, order.sellerLastName].filter(Boolean).join(' ') : '';
   const buyer = order ? [order.buyerFirstName, order.buyerLastName].filter(Boolean).join(' ') : '';
@@ -202,8 +189,8 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
                 <F l="Product" v={order.productType ?? '—'} />
                 <F l="Opened" v={formatOrderDate(order.openedAt)} />
                 <F l="Closed" v={formatOrderDate(order.closedAt)} />
-                <F l="Sales Price" v={formatOrderMoney(order.salesPrice)} />
-                <F l="Loan Amount" v={formatOrderMoney(order.loanAmount)} />
+                <F l="Sales Price" v={displayMoney(order.salesPrice)} />
+                <F l="Loan Amount" v={displayMoney(order.loanAmount)} />
                 <F l="Seller" v={seller || '—'} />
                 <F l="Buyer" v={buyer || '—'} />
               </div>
@@ -322,6 +309,11 @@ function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse |
   };
 }
 
+function normalizeMilestones(data: AdminDetailResponse | LegacyDetailResponse | null): Milestone[] {
+  if (!data || isLegacyDetailResponse(data)) return [];
+  return data.milestones ?? [];
+}
+
 function F({ l, v }: { l: string; v: string }) {
   return <div className="px-3 py-2.5 bg-gray-50 rounded-lg"><p className="text-[10px] uppercase tracking-wider text-[#6B7280]">{l}</p><p className="text-sm font-medium text-[#1A1A2E] mt-0.5 truncate">{v}</p></div>;
 }
@@ -389,6 +381,11 @@ function partyLabel(party: OrderParty): string {
     default:
       return party.role.replace(/_/g, ' ');
   }
+}
+
+function displayMoney(value: number | string | null | undefined): string {
+  if (typeof value === 'string' && (value.startsWith('$') || value === '—')) return value;
+  return formatOrderMoney(value);
 }
 
 function money(value: number | string | null | undefined): string {
@@ -527,15 +524,15 @@ function MilestonesTab({
   if (milestones.length === 0) {
     return (
       <div className="p-8 text-center bg-gray-50 rounded-lg">
-        <p className="text-sm font-medium text-[#1A1A2E]">No webhook milestones yet</p>
-        <p className="text-xs text-[#6B7280] mt-1">Milestones reported by SoftPro. New events appear as they occur.</p>
+        <p className="text-sm font-medium text-[#1A1A2E]">No milestones yet</p>
+        <p className="text-xs text-[#6B7280] mt-1">Milestones appear as order progress is recorded.</p>
       </div>
     );
   }
 
   return (
     <div>
-      <p className="text-xs text-[#6B7280] mb-4">Milestones reported by SoftPro. New events appear as they occur.</p>
+      <p className="text-xs text-[#6B7280] mb-4">Canonical order milestones from the shared read model.</p>
       <div className="space-y-3">
         {milestones.map((m, i) => (
           <div key={m.id} className="flex gap-3">

@@ -178,12 +178,15 @@ export const orderNotes = pgTable('order_notes', {
   body: text('body').notNull(),
   authorName: varchar('author_name', { length: 255 }),
   authorId: varchar('author_id', { length: 64 }).references(() => profiles.id),
+  /** When true, note is staff/SoftPro-internal and must not be returned by client APIs. */
+  isInternal: boolean('is_internal').notNull().default(true),
   isSyncedToSoftpro: boolean('is_synced_to_softpro').notNull().default(false),
   softproNoteId: varchar('softpro_note_id', { length: 100 }),
   syncedAt: timestamp('synced_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (table) => ({
   orderIdx: index('order_notes_order_idx').on(table.orderId),
+  orderInternalIdx: index('order_notes_order_internal_idx').on(table.orderId, table.isInternal),
 }));
 
 // ─── Relations ───────────────────────────────────────────────────────────────

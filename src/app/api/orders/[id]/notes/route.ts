@@ -10,6 +10,8 @@ import { addNotes } from '@/lib/integrations/softpro';
 const noteSchema = z.object({
   subject: z.string().max(255).optional(),
   text: z.string().min(1).max(5000),
+  /** When true, note is visible to clients (`is_internal = false`). Default: staff-internal. */
+  shareWithClient: z.boolean().optional(),
 });
 
 export async function POST(
@@ -48,12 +50,15 @@ export async function POST(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
+    const isInternal = parsed.data.shareWithClient !== true;
+
     const [note] = await db.insert(orderNotes).values({
       orderId,
       subject: parsed.data.subject ?? null,
       body: parsed.data.text,
       authorName: session.displayName ?? session.email,
       authorId: session.id,
+      isInternal,
     }).returning();
 
     let synced = false;
@@ -67,7 +72,15 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
-      note: { id: note!.id, subject: note!.subject, body: note!.body, authorName: note!.authorName, createdAt: note!.createdAt, isSyncedToSoftpro: synced },
+      note: {
+        id: note!.id,
+        subject: note!.subject,
+        body: note!.body,
+        authorName: note!.authorName,
+        createdAt: note!.createdAt,
+        isSyncedToSoftpro: synced,
+        isInternal: note!.isInternal,
+      },
     }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -94,6 +107,7 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
+    // Staff sees all notes (internal + shared).
     const rows = await db
       .select({
         id: orderNotes.id,
@@ -102,6 +116,7 @@ export async function GET(
         authorName: orderNotes.authorName,
         createdAt: orderNotes.createdAt,
         isSyncedToSoftpro: orderNotes.isSyncedToSoftpro,
+        isInternal: orderNotes.isInternal,
       })
       .from(orderNotes)
       .where(eq(orderNotes.orderId, orderId))

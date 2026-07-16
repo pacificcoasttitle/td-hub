@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect } from 'react';
+
 interface ModalShellProps {
   open: boolean;
   onClose: () => void;
@@ -11,6 +13,15 @@ interface ModalShellProps {
 }
 
 export function ModalShell({ open, onClose, title, subtitle, wide, children }: ModalShellProps) {
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
@@ -22,7 +33,7 @@ export function ModalShell({ open, onClose, title, subtitle, wide, children }: M
             <h3 className="text-sm font-semibold text-white">{title}</h3>
             {subtitle && <p className="text-xs text-white/50 mt-0.5 font-mono">{subtitle}</p>}
           </div>
-          <button onClick={onClose} className="text-white/60 hover:text-white p-1 -mr-1">
+          <button onClick={onClose} className="text-white/60 hover:text-white p-1 -mr-1" aria-label="Close">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>

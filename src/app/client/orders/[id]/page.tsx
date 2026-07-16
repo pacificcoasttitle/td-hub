@@ -8,6 +8,7 @@ import { DocumentsTab } from '@/components/client/order-detail/documents-tab';
 import { formatDate as fmtDate, getStatusStyle } from '@/components/client/order-detail/helpers';
 import { ActivityFeed } from '@/components/shared/activity-feed';
 import { formatOrderAddress } from '@/lib/domain/orders/order-format';
+import { normalizeClientFeesResponse, type FeeInvoice } from '@/lib/domain/orders/client-fees';
 
 interface Document {
   id: number;
@@ -264,19 +265,20 @@ function PrelimTabContent({ orderId }: { orderId: number }) {
 
 /* ─── Inline Fees Tab ──────────────────────────────────────────────────────── */
 
-interface FeeItem { description: string; amount: number; }
-interface Invoice { id: string | number; label: string; items: FeeItem[]; total: number; }
-
 function FeesTabContent({ orderId }: { orderId: number }) {
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoices, setInvoices] = useState<FeeInvoice[]>([]);
   const [grandTotal, setGrandTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     fetch(`/api/client/orders/${orderId}/fees`)
-      .then((r) => r.ok ? r.json() : Promise.reject())
-      .then((d) => { setInvoices(d.invoices ?? []); setGrandTotal(d.grandTotal ?? 0); })
+      .then(async (r) => {
+        const body = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(body?.error ?? `Failed to load fee data (${r.status})`);
+        return normalizeClientFeesResponse(body);
+      })
+      .then((d) => { setInvoices(d.invoices); setGrandTotal(d.grandTotal); })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, [orderId]);

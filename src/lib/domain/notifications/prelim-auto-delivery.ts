@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { adminActivityLogs, orders } from '@/lib/db/schema';
+import { adminActivityLogs } from '@/lib/db/schema';
 import { getPrelimDeliveryMode } from './prelim-delivery-mode';
 import { resolvePrelimRecipients } from './prelim-recipient-resolution';
 import { sendPrelimDeliveryEmail } from './prelim-delivery-send';
@@ -39,16 +39,6 @@ function parseCutoff(): Date | null {
   if (!raw) return null;
   const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-async function getOrderOpenedAt(orderId: number): Promise<Date | null> {
-  const [order] = await db
-    .select({ openedAt: orders.openedAt })
-    .from(orders)
-    .where(eq(orders.id, orderId))
-    .limit(1);
-
-  return order?.openedAt ?? null;
 }
 
 async function hasExistingPrelimDelivery(input: PrelimAutoDeliveryInput): Promise<boolean> {
@@ -106,13 +96,12 @@ export async function maybeAutoDeliverPrelim(input: PrelimAutoDeliveryInput): Pr
     });
   }
 
-  const orderOpenedAt = await getOrderOpenedAt(input.orderId);
-  if (!orderOpenedAt || orderOpenedAt < cutoff) {
+  if (input.documentCreatedAt < cutoff) {
     return finish(input, {
       outcome: 'skipped_before_cutoff',
       sent: false,
       needsManualDelivery: false,
-      reason: orderOpenedAt ? 'order opened before auto-delivery cutoff' : 'order opened_at not found',
+      reason: 'prelim arrived before auto-delivery cutoff',
     });
   }
 

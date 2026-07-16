@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
+import { canAccessDocumentOrder } from '@/lib/security/document-access';
 import { uploadDocument } from '@/lib/domain/documents/service';
 import { docCategoryEnum } from '@/lib/db/schema/documents';
 
@@ -29,6 +30,10 @@ export async function POST(req: NextRequest) {
       category: formData.get('category') || undefined,
       description: formData.get('description') || undefined,
     });
+
+    if (!(await canAccessDocumentOrder(session, fields.orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
 
     const buffer = Buffer.from(await file.arrayBuffer());
 

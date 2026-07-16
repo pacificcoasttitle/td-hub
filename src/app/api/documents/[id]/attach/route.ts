@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
-import { attachToSoftPro } from '@/lib/domain/documents/service';
+import { canAccessDocumentOrder } from '@/lib/security/document-access';
+import { attachToSoftPro, getDocumentById } from '@/lib/domain/documents/service';
 
 export async function POST(
   _req: NextRequest,
@@ -16,6 +17,15 @@ export async function POST(
     const docId = parseInt(id, 10);
     if (isNaN(docId)) {
       return NextResponse.json({ error: 'Invalid document ID' }, { status: 400 });
+    }
+
+    const doc = await getDocumentById(docId);
+    if (!doc) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+    }
+
+    if (!(await canAccessDocumentOrder(session, doc.orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const result = await attachToSoftPro(docId);

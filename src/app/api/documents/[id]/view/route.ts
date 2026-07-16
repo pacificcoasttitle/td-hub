@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
+import { canAccessDocumentOrder } from '@/lib/security/document-access';
 import { getDocumentById } from '@/lib/domain/documents/service';
 import { getObjectStream } from '@/lib/integrations/s3/client';
 import { db } from '@/lib/db/client';
@@ -28,6 +29,10 @@ export async function GET(
     const doc = await getDocumentById(docId);
     if (!doc || doc.status !== 'active') {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+    }
+
+    if (!(await canAccessDocumentOrder(session, doc.orderId))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const result = await getObjectStream(doc.storageKey);

@@ -11,6 +11,7 @@ import { OrderActions } from './order-actions';
 import type { SalesAction } from './order-actions';
 import type { SalesDashboardStats, SalesOrder } from './types';
 import { useTessaPrelimEnabled } from '@/hooks/useTessaPrelimEnabled';
+import { formatOrderDate } from '@/lib/domain/orders/date-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 interface Props {
@@ -23,12 +24,6 @@ const MONTH_LABEL = `${NOW.toLocaleString('en-US', { month: 'long' })} ${NOW.get
 
 function fmtAddr(o: SalesOrder): string {
   return [o.address, o.city, o.state].filter(Boolean).join(', ') || '—';
-}
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—';
-  try { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
-  catch { return '—'; }
 }
 
 export function DashboardContent({ displayName, role }: Props) {
@@ -165,7 +160,7 @@ export function DashboardContent({ displayName, role }: Props) {
                             {status.label}
                           </span>
                         </td>
-                        <td className="px-5 py-3 text-gray-500 whitespace-nowrap border-r border-gray-100">{fmtDate(o.openedAt)}</td>
+                        <td className="px-5 py-3 text-gray-500 whitespace-nowrap border-r border-gray-100">{formatOrderDate(o.openedAt)}</td>
                         <td className="px-2 py-3 text-right">
                           <OrderActions order={o} onAction={handleOrderAction} tessaPrelimEnabled={tessaPrelimEnabled} />
                         </td>

@@ -7,6 +7,7 @@ import {
 import { TH, StatusBadge, DocBadges, ActionsDropdown } from './orders-hub-parts';
 import type { OrderDocuments } from './orders-hub-parts';
 import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
+import { formatOrderDate } from '@/lib/domain/orders/date-format';
 import { STATUS_FILTER_OPTIONS } from '@/lib/domain/orders/status-format';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
@@ -299,7 +300,7 @@ export function OrdersHubTable({
                         : <span className="text-red-600 font-medium">Unassigned</span>}
                     </td>
                   )}
-                  <td className={`px-4 ${cellPy} text-[#4B5563] tabular-nums whitespace-nowrap`}>{o.openedAt ? new Date(o.openedAt).toLocaleDateString() : '—'}</td>
+                  <td className={`px-4 ${cellPy} text-[#4B5563] tabular-nums whitespace-nowrap`}>{formatOrderDate(o.openedAt)}</td>
                   <td className={`px-4 ${cellPy} whitespace-nowrap ${createdByClass}`}>{createdByDisplay}</td>
                   {hasActions && (
                     <td className={`px-4 ${cellPy}`} onClick={(e) => e.stopPropagation()}>

@@ -9,6 +9,7 @@ import {
   formatAddress, buildPageRange,
 } from './order-table-parts';
 import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
+import { formatOrderDate } from '@/lib/domain/orders/date-format';
 
 export interface Order {
   id: number;
@@ -48,17 +49,6 @@ const SOURCE_STYLES: Record<string, string> = {
 
 function fmtSource(s: string) {
   return SOURCE_LABELS[s] ?? s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function fmtOpenedDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  try {
-    const d = new Date(iso);
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const yy = String(d.getFullYear()).slice(-2);
-    return `${mm}/${dd}/${yy}`;
-  } catch { return '—'; }
 }
 
 const EMAIL_COLORS: Record<string, string> = {
@@ -221,7 +211,7 @@ function OrderRow({ order, rowNum, onClick, onAction }: {
       <td className="px-4 py-3 text-center text-[#9CA3AF] tabular-nums">{rowNum}</td>
       <td className="px-4 py-3 font-mono font-medium text-[#1B2A4A] whitespace-nowrap">{order.fileNumber}</td>
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap" title={fullAddr}>{truncAddr}</td>
-      <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap tabular-nums">{fmtOpenedDate(order.openedAt)}</td>
+      <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap tabular-nums">{formatOrderDate(order.openedAt)}</td>
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.transactionType ?? '—'}</td>
       <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{order.productType ?? '—'}</td>
       <td className="px-4 py-3 text-[#1A1A2E] whitespace-nowrap">{order.salesRepName ?? '—'}</td>

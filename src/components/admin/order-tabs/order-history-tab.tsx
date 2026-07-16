@@ -1,6 +1,7 @@
 'use client';
 
 import { SectionHeading } from './order-overview-tab';
+import { formatOrderDateTime } from '@/lib/domain/orders/date-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 interface StatusHistoryEntry {
@@ -69,8 +70,5 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function formatDateTime(iso: string | null): string {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-  } catch { return '—'; }
+  return formatOrderDateTime(iso);
 }

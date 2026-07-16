@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { formatOrderDate } from '@/lib/domain/orders/date-format';
 import { statusLabel } from '@/lib/domain/orders/status-format';
 
 interface OpeningRow {
@@ -36,12 +37,6 @@ const MONTH_NAMES = [
 
 function fmtAddr(o: OpeningRow): string {
   return [o.address, o.city, o.state].filter(Boolean).join(', ') || '—';
-}
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—';
-  try { return new Date(iso).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }); }
-  catch { return '—'; }
 }
 
 function orderTypeLabel(o: OpeningRow): string {
@@ -120,7 +115,7 @@ export function OpeningsDrilldownModal({ isOpen, onClose, month, year, repId }: 
                   <td className="py-2.5 px-3 text-gray-700 max-w-[220px] truncate">{fmtAddr(o)}</td>
                   <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap">{statusLabel(o.operationalStatus)}</td>
                   <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap">{orderTypeLabel(o)}</td>
-                  <td className="py-2.5 pl-3 text-center text-gray-600 whitespace-nowrap tabular-nums">{fmtDate(o.openedAt)}</td>
+                  <td className="py-2.5 pl-3 text-center text-gray-600 whitespace-nowrap tabular-nums">{formatOrderDate(o.openedAt)}</td>
                 </tr>
               ))
             ) : null}

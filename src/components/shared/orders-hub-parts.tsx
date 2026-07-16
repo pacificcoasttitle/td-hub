@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { formatOrderDate } from '@/lib/domain/orders/date-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 /* ── Document Badge Types ──────────────────────────────────────────────────── */
@@ -22,9 +23,8 @@ const DOC_BADGE_CONFIG: { key: keyof OrderDocuments; label: string; bg: string; 
 ];
 
 function fmtDocDate(iso: string | null | undefined): string {
-  if (!iso) return '';
-  try { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
-  catch { return ''; }
+  const formatted = formatOrderDate(iso);
+  return formatted === '—' ? '' : formatted;
 }
 
 export function DocBadges({ docs }: { docs?: OrderDocuments }) {

@@ -1,5 +1,6 @@
 'use client';
 
+import { formatOrderDate } from '@/lib/domain/orders/date-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 interface OrderDetail {
@@ -44,9 +45,9 @@ export function OrderOverviewTab({ order }: { order: OrderDetail }) {
         </div>
         <div className="space-y-5">
           <SectionHeading>Key Dates</SectionHeading>
-          <FieldRow label="Opened" value={formatDate(order.openedAt)} />
-          <FieldRow label="Completed" value={order.completedAt ? formatDate(order.completedAt) : null} />
-          <FieldRow label="Closed" value={order.closedAt ? formatDate(order.closedAt) : null} />
+          <FieldRow label="Opened" value={formatOrderDate(order.openedAt)} />
+          <FieldRow label="Completed" value={formatOrderDate(order.completedAt)} />
+          <FieldRow label="Closed" value={formatOrderDate(order.closedAt)} />
           <div className="pt-2"><SectionHeading>Financials</SectionHeading></div>
           <FieldRow label="Sales Price" value={order.salesPrice ? formatCurrency(order.salesPrice) : null} />
           <FieldRow label="Loan Amount" value={order.loanAmount ? formatCurrency(order.loanAmount) : null} />
@@ -74,12 +75,6 @@ export function FieldRow({ label, value, children }: { label: string; value?: st
       </dd>
     </div>
   );
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '—';
-  try { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
-  catch { return '—'; }
 }
 
 function formatCurrency(value: string): string {

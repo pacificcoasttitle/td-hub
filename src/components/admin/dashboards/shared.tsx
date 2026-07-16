@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { formatOrderDate, formatOrderDateTime } from '@/lib/domain/orders/date-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -214,16 +215,11 @@ export function formatAddress(property: { address: string | null; city: string |
 }
 
 export function formatDate(iso: string | null): string {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  } catch { return '—'; }
+  return formatOrderDate(iso);
 }
 
 export function formatDateTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  } catch { return iso; }
+  return formatOrderDateTime(iso);
 }
 
 export function formatRelative(iso: string): string {

@@ -4,16 +4,11 @@ import { OrderActions } from './order-actions';
 import type { SalesAction } from './order-actions';
 import type { SalesOrder } from './types';
 import { useTessaPrelimEnabled } from '@/hooks/useTessaPrelimEnabled';
+import { formatOrderDate } from '@/lib/domain/orders/date-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 function fmtAddr(o: SalesOrder): string {
   return [o.address, o.city, o.state].filter(Boolean).join(', ') || '—';
-}
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—';
-  try { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
-  catch { return '—'; }
 }
 
 function orderTypeLabel(o: SalesOrder): string {
@@ -101,7 +96,7 @@ export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
                         {o.salesRepName ?? '—'}
                       </td>
                     )}
-                    <td className={`px-5 py-3 text-gray-500 whitespace-nowrap ${tdBr}`}>{fmtDate(o.openedAt)}</td>
+                    <td className={`px-5 py-3 text-gray-500 whitespace-nowrap ${tdBr}`}>{formatOrderDate(o.openedAt)}</td>
                     <td className="px-2 py-3 text-right">
                       <OrderActions order={o} onAction={onAction} tessaPrelimEnabled={tessaPrelimEnabled} />
                     </td>

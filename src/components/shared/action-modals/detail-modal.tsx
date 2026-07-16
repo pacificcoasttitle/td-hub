@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ModalShell } from './modal-shell';
 import { ActivityFeed } from '@/components/shared/activity-feed';
 import { NotesTab } from './notes-tab';
+import { formatOrderDate, formatOrderDateTime } from '@/lib/domain/orders/date-format';
 import { statusLabel } from '@/lib/domain/orders/status-format';
 
 interface OrderDetail {
@@ -198,8 +199,8 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
                 <F l="Status" v={statusLabel(order.operationalStatus)} />
                 <F l="Transaction" v={order.transactionType ?? '—'} />
                 <F l="Product" v={order.productType ?? '—'} />
-                <F l="Opened" v={order.openedAt ? new Date(order.openedAt).toLocaleDateString() : '—'} />
-                <F l="Closed" v={order.closedAt ? new Date(order.closedAt).toLocaleDateString() : '—'} />
+                <F l="Opened" v={formatOrderDate(order.openedAt)} />
+                <F l="Closed" v={formatOrderDate(order.closedAt)} />
                 <F l="Sales Price" v={order.salesPrice ? `$${Number(order.salesPrice).toLocaleString()}` : '—'} />
                 <F l="Loan Amount" v={order.loanAmount ? `$${Number(order.loanAmount).toLocaleString()}` : '—'} />
                 <F l="Seller" v={seller || '—'} />
@@ -397,11 +398,7 @@ function money(value: number | string | null | undefined): string {
 }
 
 function dateLabel(value: string | null | undefined): string {
-  if (!value) return '—';
-  const parsed = new Date(value);
-  return isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return formatOrderDate(value);
 }
 
 function FeesTab({
@@ -584,12 +581,12 @@ function fmtTime(iso: string): { display: string; full: string } {
   try {
     const d = new Date(iso);
     const diff = Date.now() - d.getTime();
-    const full = d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const full = formatOrderDateTime(d);
     if (diff < 60_000) return { display: 'just now', full };
     if (diff < 3_600_000) return { display: `${Math.floor(diff / 60_000)}m ago`, full };
     if (diff < 86_400_000) return { display: `${Math.floor(diff / 3_600_000)}h ago`, full };
-    return { display: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), full };
-  } catch { return { display: iso, full: iso }; }
+    return { display: formatOrderDate(d), full };
+  } catch { return { display: '—', full: '—' }; }
 }
 
 function DocGroups({ docs, isClient }: { docs: Doc[]; isClient?: boolean }) {

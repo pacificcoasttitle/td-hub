@@ -116,7 +116,12 @@ export async function handleEnrichOrderDetails(): Promise<EnrichOrderDetailsResu
       // Prefer the exact file-number match in case SoftPro returns siblings.
       const detail = result.data.find((d) => d.OrderNumber === order.fileNumber) ?? result.data[0];
 
-      await processOrderDetail(detail, { salesReps, titleOfficers, escrowOfficers });
+      await processOrderDetail(detail, {
+        salesReps,
+        titleOfficers,
+        escrowOfficers,
+        preserveExistingOnEmpty: true,
+      });
       stats.enriched++;
     } catch (err) {
       stats.errors.push({

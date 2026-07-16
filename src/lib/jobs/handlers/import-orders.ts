@@ -76,7 +76,14 @@ export async function importOrdersFromSoftPro(
         .where(eq(orders.fileNumber, item.OrderNumber))
         .limit(1);
 
-      await processOrderDetail(item, { salesReps, titleOfficers, escrowOfficers });
+      // Existing rows upsert by file number — preserve type fields SoftPro omits.
+      // First-insert path inside processOrderDetail ignores this flag.
+      await processOrderDetail(item, {
+        salesReps,
+        titleOfficers,
+        escrowOfficers,
+        preserveExistingOnEmpty: true,
+      });
 
       if (existedBefore.length > 0) {
         updated++;

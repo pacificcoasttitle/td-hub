@@ -38,21 +38,21 @@ export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
         {showRep ? (
           <colgroup>
             <col style={{ width: '100px' }} />
-            <col style={{ width: '160px' }} />
+            <col style={{ width: '150px' }} />
             <col style={{ width: '80px' }} />
             <col style={{ width: '90px' }} />
-            <col style={{ width: '110px' }} />
+            <col style={{ width: '100px' }} />
             <col style={{ width: '85px' }} />
-            <col style={{ width: '150px' }} />
+            <col style={{ width: '280px' }} />
           </colgroup>
         ) : (
           <colgroup>
             <col style={{ width: '110px' }} />
-            <col style={{ width: '180px' }} />
+            <col style={{ width: '160px' }} />
             <col style={{ width: '90px' }} />
             <col style={{ width: '100px' }} />
             <col style={{ width: '90px' }} />
-            <col style={{ width: '160px' }} />
+            <col style={{ width: '280px' }} />
           </colgroup>
         )}
         <thead>
@@ -98,7 +98,7 @@ export function SalesOrdersTable({ role, orders, loading, onAction }: Props) {
                       </td>
                     )}
                     <td className={`px-5 py-3 text-gray-500 whitespace-nowrap ${tdBr}`}>{formatOrderDate(o.openedAt)}</td>
-                    <td className="px-2 py-3 text-right">
+                    <td className="px-2 py-3 text-right align-middle">
                       <OrderActions order={o} onAction={onAction} tessaPrelimEnabled={tessaPrelimEnabled} />
                     </td>
                   </tr>

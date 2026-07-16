@@ -152,6 +152,7 @@ export async function writePrelimDeliveryProofs(
     body: noteText,
     authorName: input.actor.name,
     authorId: input.actor.id,
+    isInternal: true,
     softproNoteId,
     isSyncedToSoftpro: softproSynced,
     syncedAt: deliveredAt,

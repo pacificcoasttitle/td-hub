@@ -41,6 +41,7 @@ vi.mock('@/lib/db/schema', () => ({
     authorName: 'order_notes.author_name',
     createdAt: 'order_notes.created_at',
     isSyncedToSoftpro: 'order_notes.is_synced',
+    isInternal: 'order_notes.is_internal',
     orderId: 'order_notes.order_id',
   },
   orders: { id: 'orders.id', fileNumber: 'orders.file_number' },

@@ -4,7 +4,7 @@ import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/client-scope';
 import { db } from '@/lib/db/client';
 import { orders, orderNotes } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { and, eq, desc } from 'drizzle-orm';
 import { addNotes } from '@/lib/integrations/softpro';
 
 const noteSchema = z.object({
@@ -52,12 +52,14 @@ export async function POST(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
+    // Client-authored notes are shared with the client portal (not staff-internal).
     const [note] = await db.insert(orderNotes).values({
       orderId,
       subject: parsed.data.subject ?? null,
       body: noteText,
       authorName: session.displayName ?? session.email,
       authorId: session.id,
+      isInternal: false,
     }).returning();
 
     let synced = false;
@@ -99,6 +101,7 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
+    // Clients only see non-internal notes. Staff-internal / SoftPro-internal stay hidden.
     const rows = await db
       .select({
         id: orderNotes.id,
@@ -109,7 +112,7 @@ export async function GET(
         isSyncedToSoftpro: orderNotes.isSyncedToSoftpro,
       })
       .from(orderNotes)
-      .where(eq(orderNotes.orderId, orderId))
+      .where(and(eq(orderNotes.orderId, orderId), eq(orderNotes.isInternal, false)))
       .orderBy(desc(orderNotes.createdAt));
 
     return NextResponse.json({ notes: rows });

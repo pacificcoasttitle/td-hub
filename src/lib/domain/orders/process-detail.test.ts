@@ -155,7 +155,7 @@ describe('processOrderDetail preserveExistingOnEmpty', () => {
     expect(set.marketingSource).toBe('Referral');
   });
 
-  it('default (import/webhook) still nulls empty SoftPro fields and resets status to open', async () => {
+  it('default (import/webhook) nulls empty SoftPro fields but never guesses operational_status open', async () => {
     const payload = detail({
       ProductType: '',
       OrderType: '',
@@ -173,11 +173,35 @@ describe('processOrderDetail preserveExistingOnEmpty', () => {
 
     expect(orderUpdateSets).toHaveLength(1);
     const set = orderUpdateSets[0]!;
-    expect(set.softproStatus).toBe('open');
-    expect(set.operationalStatus).toBe('open');
+    expect(set.softproStatus).toBeNull();
+    expect(set).not.toHaveProperty('operationalStatus');
     expect(set.productType).toBeNull();
     expect(set.orderType).toBeNull();
     expect(set.transactionType).toBeNull();
     expect(set.marketingSource).toBeNull();
+  });
+
+  it('maps SoftPro Hold to hold and updates operational_status', async () => {
+    await processOrderDetail(
+      detail({ OrderStatus: 'Hold' }),
+      { salesReps: [], titleOfficers: [], escrowOfficers: [] },
+    );
+
+    expect(orderUpdateSets).toHaveLength(1);
+    const set = orderUpdateSets[0]!;
+    expect(set.softproStatus).toBe('hold');
+    expect(set.operationalStatus).toBe('hold');
+  });
+
+  it('preserves operational_status when SoftPro status is unknown (does not guess open)', async () => {
+    await processOrderDetail(
+      detail({ OrderStatus: 'Pending Supervisor Review' }),
+      { salesReps: [], titleOfficers: [], escrowOfficers: [] },
+    );
+
+    expect(orderUpdateSets).toHaveLength(1);
+    const set = orderUpdateSets[0]!;
+    expect(set.softproStatus).toBe('pending supervisor review');
+    expect(set).not.toHaveProperty('operationalStatus');
   });
 });

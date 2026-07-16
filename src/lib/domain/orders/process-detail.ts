@@ -3,11 +3,17 @@ import { orders, orderProperties, orderStatusHistory, contacts } from '@/lib/db/
 import { eq } from 'drizzle-orm';
 import { parseSoftProDate } from '@/lib/integrations/softpro/types';
 import type { SoftProOrderDetailItem, SoftProResolvedPerson } from '@/lib/integrations/softpro/types';
+import {
+  mapStatus,
+  mapTransactionType,
+  type OperationalStatus,
+  type TransactionType,
+} from './status-map';
+
+export type { OperationalStatus, TransactionType };
+export { mapStatus, mapTransactionType };
 
 // ─── Shared types ────────────────────────────────────────────────────────────
-
-export type OperationalStatus = 'open' | 'in_process' | 'completed' | 'closed' | 'canceled' | 'duplicate';
-export type TransactionType = 'Purchase' | 'Refinance' | 'Equity' | 'Other';
 
 export interface ContactRecord {
   id: number;
@@ -19,39 +25,6 @@ export interface ContactRecord {
   sourceId: string | null;
   email: string | null;
   phone: string | null;
-}
-
-// ─── Status / type mapping ───────────────────────────────────────────────────
-
-export function mapStatus(raw: string): OperationalStatus {
-  const s = raw.toLowerCase().trim();
-  switch (s) {
-    case 'open': return 'open';
-    case 'in process':
-    case 'inprocess':
-    case 'in_process': return 'in_process';
-    case 'completed':
-    case 'clear for policy': return 'completed';
-    case 'closed': return 'closed';
-    case 'canceled':
-    case 'cancelled': return 'canceled';
-    case 'duplicate': return 'duplicate';
-    default: return 'open';
-  }
-}
-
-export function mapTransactionType(raw: string | null | undefined): TransactionType | null {
-  if (!raw || !raw.trim()) return null;
-  const normalized = raw.trim().toLowerCase();
-  switch (normalized) {
-    case 'purchase': return 'Purchase';
-    case 'refinance':
-    case 'refi': return 'Refinance';
-    case 'equity':
-    case 'home equity': return 'Equity';
-    case 'other': return 'Other';
-    default: return 'Other';
-  }
 }
 
 // ─── Officer loaders ─────────────────────────────────────────────────────────
@@ -172,13 +145,15 @@ export async function processOrderDetail(
   const escrowOfficers = options.escrowOfficers ?? await loadEscrowOfficers();
 
   const orderStatusPresent = Boolean(item.OrderStatus?.trim());
-  const operationalStatus = mapStatus(item.OrderStatus ?? 'open');
-  const softproStatus = (item.OrderStatus ?? 'open').toLowerCase().trim();
+  const mappedStatus = mapStatus(item.OrderStatus);
+  const softproStatus = orderStatusPresent
+    ? item.OrderStatus!.toLowerCase().trim()
+    : null;
   const transactionType = mapTransactionType(item.TransactionType);
   const salesPrice = parseSalesPrice(item.SalesPrice);
   const openedAt = parseSoftProDate(item.ReceivedDate);
   const completedAt = parseSoftProDate(item.CompletedDate);
-  const closedAt = operationalStatus === 'closed' ? parseSoftProDate(item.ModifiedDate) : null;
+  const closedAt = mappedStatus === 'closed' ? parseSoftProDate(item.ModifiedDate) : null;
   const titleOfficerName = item.TitleOfficerContact?.Name?.trim() || item.TitleOfficer;
   const escrowOfficerName = item.EscrowOfficerContact?.Name?.trim() || item.EscrowOfficer;
 
@@ -203,14 +178,21 @@ export async function processOrderDetail(
     .limit(1);
 
   if (existing) {
-    // Resync: never reset status to 'open' when SoftPro omits OrderStatus.
-    const shouldUpdateStatus = !(preserveExistingOnEmpty && !orderStatusPresent);
-    const statusChanged = shouldUpdateStatus && existing.operationalStatus !== operationalStatus;
+    // Never guess operational_status: only write when SoftPro maps to a known value.
+    // Unknown/blank OrderStatus preserves the existing operational_status.
+    const shouldUpdateSoftproStatus = orderStatusPresent
+      || (!preserveExistingOnEmpty && !orderStatusPresent);
+    const shouldUpdateOperationalStatus = mappedStatus != null;
+    const statusChanged =
+      shouldUpdateOperationalStatus && existing.operationalStatus !== mappedStatus;
 
     await db.update(orders).set({
-      ...(shouldUpdateStatus ? { softproStatus, operationalStatus } : {}),
+      ...(shouldUpdateSoftproStatus
+        ? { softproStatus: softproStatus ?? (preserveExistingOnEmpty ? undefined : null) }
+        : {}),
+      ...(shouldUpdateOperationalStatus ? { operationalStatus: mappedStatus } : {}),
       // Drizzle mapUpdateSet filters undefined → column omitted (preserves existing).
-      transactionType: transactionType || emptyField,
+      transactionType: transactionType ?? emptyField,
       productType: item.ProductType || emptyField,
       orderType: item.OrderType || emptyField,
       salesPrice: salesPrice ?? undefined,
@@ -229,19 +211,20 @@ export async function processOrderDetail(
     await refreshOfficerContact(escrowOfficerId, item.EscrowOfficerContact);
     await upsertOrderProperty(existing.id, item);
 
-    if (statusChanged) {
+    if (statusChanged && mappedStatus) {
       await db.insert(orderStatusHistory).values({
         orderId: existing.id,
-        status: operationalStatus,
+        status: mappedStatus,
         source: 'softpro_sync',
-        notes: `Import: status changed from ${existing.operationalStatus} to ${operationalStatus}`,
+        notes: `Import: status changed from ${existing.operationalStatus} to ${mappedStatus}`,
       });
     }
   } else {
+    const operationalStatus = mappedStatus ?? 'open';
     const [newOrder] = await db.insert(orders).values({
       fileNumber,
       operationalStatus,
-      softproStatus,
+      softproStatus: softproStatus ?? 'open',
       transactionType,
       productType: item.ProductType || null,
       orderType: item.OrderType || null,

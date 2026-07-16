@@ -8,7 +8,7 @@ import { branches, contacts, companies, profiles } from './contacts';
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
 export const operationalStatusEnum = pgEnum('operational_status', [
-  'open', 'in_process', 'completed', 'closed', 'canceled', 'duplicate',
+  'open', 'in_process', 'completed', 'closed', 'canceled', 'duplicate', 'hold',
 ]);
 
 export const transactionTypeEnum = pgEnum('transaction_type', [

@@ -8,13 +8,21 @@ import {
   TITLE_OFFICER_FIELDS,
   parseSoftProDate,
 } from './types';
+import {
+  mapStatus,
+  type OperationalStatus as MappedOperationalStatus,
+} from '../../domain/orders/status-map';
+
+export { mapStatus };
+export type { MappedOperationalStatus };
 
 // ─── Mapped Order (from GetOrders — limited fields) ─────────────────────────
 
 export interface MappedOrderData {
   fileNumber: string;
   softproStatus: string;
-  operationalStatus: 'open' | 'in_process' | 'completed' | 'closed' | 'canceled' | 'duplicate';
+  /** null = unknown SoftPro status; upsert must preserve existing on update */
+  operationalStatus: MappedOperationalStatus | null;
   transactionType: string | null;
   productType: string | null;
   orderType: string | null;
@@ -90,25 +98,6 @@ export interface MappedLookupEntry {
   raw: Record<string, string>;
 }
 
-// ─── Status Mapping ─────────────────────────────────────────────────────────
-
-function mapStatus(softproStatus: string): MappedOrderData['operationalStatus'] {
-  const s = softproStatus.toLowerCase().trim();
-  switch (s) {
-    case 'open': return 'open';
-    case 'in process':
-    case 'inprocess':
-    case 'in_process': return 'in_process';
-    case 'completed':
-    case 'clear for policy': return 'completed';
-    case 'closed': return 'closed';
-    case 'canceled':
-    case 'cancelled': return 'canceled';
-    case 'duplicate': return 'duplicate';
-    default: return 'open';
-  }
-}
-
 // ─── Order Mapper ───────────────────────────────────────────────────────────
 
 /**
@@ -118,8 +107,8 @@ function mapStatus(softproStatus: string): MappedOrderData['operationalStatus'] 
  * from this endpoint — they come from GetOrderContacts or not at all.
  */
 export function mapSoftProOrder(item: SoftProOrderItem): MappedOrderData {
-  const softproStatus = (item.OrderStatus ?? 'open').toLowerCase().trim();
-  const operationalStatus = mapStatus(item.OrderStatus ?? 'open');
+  const softproStatus = (item.OrderStatus ?? '').toLowerCase().trim() || 'open';
+  const operationalStatus = mapStatus(item.OrderStatus);
 
   const closedAt = operationalStatus === 'closed' ? parseSoftProDate(item.LastModifiedOn) : null;
 

@@ -50,12 +50,14 @@ export async function upsertFromSoftPro(
     const branchList = await getBranches();
     const branchId = deriveBranchId(mapped.fileNumber, branchList);
 
+    const operationalStatus = mapped.operationalStatus ?? 'open';
+
     const [newOrder] = await db
       .insert(orders)
       .values({
         fileNumber: mapped.fileNumber,
         branchId,
-        operationalStatus: mapped.operationalStatus,
+        operationalStatus,
         softproStatus: mapped.softproStatus,
         transactionType: validTransactionType(mapped.transactionType),
         productType: mapped.productType,
@@ -83,7 +85,7 @@ export async function upsertFromSoftPro(
 
     await db.insert(orderStatusHistory).values({
       orderId: newOrder!.id,
-      status: mapped.operationalStatus,
+      status: operationalStatus,
       source: 'softpro_sync',
       notes: 'Initial sync from SoftPro',
     });
@@ -91,7 +93,10 @@ export async function upsertFromSoftPro(
     return { created: true, orderId: newOrder!.id };
   }
 
-  const statusChanged = existing.operationalStatus !== mapped.operationalStatus;
+  // Unknown SoftPro status → preserve existing operational_status (never guess 'open').
+  const shouldUpdateOperationalStatus = mapped.operationalStatus != null;
+  const statusChanged =
+    shouldUpdateOperationalStatus && existing.operationalStatus !== mapped.operationalStatus;
 
   let branchIdUpdate: number | null | undefined;
   if (!existing.branchId) {
@@ -103,7 +108,9 @@ export async function upsertFromSoftPro(
     .update(orders)
     .set({
       softproStatus: mapped.softproStatus,
-      operationalStatus: mapped.operationalStatus,
+      ...(shouldUpdateOperationalStatus
+        ? { operationalStatus: mapped.operationalStatus! }
+        : {}),
       completedAt: mapped.completedAt ?? existing.completedAt,
       closedAt: mapped.closedAt ?? existing.closedAt,
       salesPrice: mapped.salesPrice ?? existing.salesPrice,
@@ -113,7 +120,7 @@ export async function upsertFromSoftPro(
     })
     .where(eq(orders.id, existing.id));
 
-  if (statusChanged) {
+  if (statusChanged && mapped.operationalStatus) {
     await db.insert(orderStatusHistory).values({
       orderId: existing.id,
       status: mapped.operationalStatus,

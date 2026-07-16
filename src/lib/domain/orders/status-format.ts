@@ -5,6 +5,7 @@ export const ORDER_STATUSES = [
   'closed',
   'canceled',
   'duplicate',
+  'hold',
 ] as const;
 
 export type OrderStatus = typeof ORDER_STATUSES[number];
@@ -16,10 +17,12 @@ const STATUS_LABELS: Record<OrderStatus, string> = {
   closed: 'Closed',
   canceled: 'Canceled',
   duplicate: 'Duplicate',
+  hold: 'Hold',
 };
 
 // Canonical semantic palette for order statuses:
-// open=blue, in_process=amber, completed=teal, closed=green, canceled=red, duplicate=gray.
+// open=blue, in_process=amber, completed=teal, closed=green, canceled=red,
+// duplicate=gray, hold=orange.
 const STATUS_COLORS: Record<OrderStatus, string> = {
   open: 'bg-blue-50 text-blue-700 border-blue-200',
   in_process: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -27,6 +30,7 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
   closed: 'bg-green-50 text-green-700 border-green-200',
   canceled: 'bg-red-50 text-red-700 border-red-200',
   duplicate: 'bg-gray-100 text-gray-600 border-gray-200',
+  hold: 'bg-orange-50 text-orange-700 border-orange-200',
 };
 
 const UNKNOWN_COLOR = 'bg-gray-100 text-gray-600 border-gray-200';

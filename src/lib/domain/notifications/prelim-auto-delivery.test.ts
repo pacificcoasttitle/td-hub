@@ -1,14 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  orderRows,
   deliveryMarkerRows,
   insertRows,
   resolvePrelimRecipientsMock,
   getPrelimDeliveryModeMock,
   sendPrelimDeliveryEmailMock,
 } = vi.hoisted(() => ({
-  orderRows: [] as Array<{ openedAt: Date }>,
   deliveryMarkerRows: [] as Array<{ id: number }>,
   insertRows: [] as Array<{ table: string; values: Record<string, unknown> }>,
   resolvePrelimRecipientsMock: vi.fn(),
@@ -31,22 +29,14 @@ vi.mock('@/lib/db/schema', () => ({
     entityId: 'admin_activity_logs.entity_id',
     meta: 'admin_activity_logs.meta',
   },
-  orders: {
-    __table: 'orders',
-    id: 'orders.id',
-    openedAt: 'orders.opened_at',
-  },
 }));
 
 vi.mock('@/lib/db/client', () => ({
   db: {
     select: vi.fn(() => ({
-      from: vi.fn((table: { __table?: string }) => ({
+      from: vi.fn(() => ({
         where: vi.fn(() => ({
-          limit: vi.fn(async () => {
-            if (table.__table === 'orders') return orderRows;
-            return deliveryMarkerRows;
-          }),
+          limit: vi.fn(async () => deliveryMarkerRows),
         })),
       })),
     })),
@@ -73,10 +63,12 @@ vi.mock('./prelim-delivery-send', () => ({
 
 import { maybeAutoDeliverPrelim } from './prelim-auto-delivery';
 
+const CUTOFF = '2026-07-16T00:00:00.000Z';
+
 const baseInput = {
   orderId: 5029,
   documentId: 3982,
-  documentCreatedAt: new Date('2026-07-16T00:00:00.000Z'),
+  documentCreatedAt: new Date(CUTOFF),
   triggeredBy: 'fetch_prelims' as const,
 };
 
@@ -91,9 +83,14 @@ function latestOutcome() {
   return insertRows.at(-1)?.values.meta as { outcome?: string; needs_manual_delivery?: boolean; reason?: string; message_id?: string };
 }
 
+function armLiveDelivery() {
+  resolvePrelimRecipientsMock.mockResolvedValue(resolvedRecipients);
+  getPrelimDeliveryModeMock.mockReturnValue({ mode: 'live', armed: true, message: 'LIVE' });
+  sendPrelimDeliveryEmailMock.mockResolvedValue({ messageId: 'sg-message-id' });
+}
+
 describe('maybeAutoDeliverPrelim', () => {
   beforeEach(() => {
-    orderRows.splice(0, orderRows.length, { openedAt: new Date('2026-07-16T00:00:00.000Z') });
     deliveryMarkerRows.splice(0, deliveryMarkerRows.length);
     insertRows.splice(0, insertRows.length);
     resolvePrelimRecipientsMock.mockReset();
@@ -102,18 +99,58 @@ describe('maybeAutoDeliverPrelim', () => {
     delete process.env.PRELIM_AUTO_DELIVERY_CUTOFF;
   });
 
-  it('does not send legacy pre-cutoff orders even when the prelim document is fetched after go-live', async () => {
-    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = '2026-07-16T00:00:00.000Z';
-    orderRows.splice(0, orderRows.length, { openedAt: new Date('2026-07-15T23:59:59.000Z') });
+  it('skips when the prelim document arrived before the cutoff', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
 
     const result = await maybeAutoDeliverPrelim({
       ...baseInput,
-      documentCreatedAt: new Date('2026-07-20T00:00:00.000Z'),
+      documentCreatedAt: new Date('2026-07-15T23:59:59.000Z'),
     });
 
     expect(result.outcome).toBe('skipped_before_cutoff');
+    expect(result.reason).toBe('prelim arrived before auto-delivery cutoff');
     expect(sendPrelimDeliveryEmailMock).not.toHaveBeenCalled();
-    expect(latestOutcome()).toMatchObject({ outcome: 'skipped_before_cutoff' });
+    expect(latestOutcome()).toMatchObject({
+      outcome: 'skipped_before_cutoff',
+      reason: 'prelim arrived before auto-delivery cutoff',
+    });
+  });
+
+  it('delivers a post-cutoff prelim even when the order opened before the cutoff', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+
+    // Arrival-gate proof: order age is irrelevant; only the prelim document's created_at matters.
+    const result = await maybeAutoDeliverPrelim({
+      ...baseInput,
+      documentCreatedAt: new Date('2026-07-16T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({ outcome: 'delivered', sent: true, messageId: 'sg-message-id' });
+    expect(sendPrelimDeliveryEmailMock).toHaveBeenCalledTimes(1);
+    expect(sendPrelimDeliveryEmailMock).toHaveBeenCalledWith(
+      5029,
+      { to: resolvedRecipients.to, cc: resolvedRecipients.cc },
+      expect.objectContaining({ id: 'system:prelim_auto_delivery' }),
+    );
+    expect(latestOutcome()).toMatchObject({ outcome: 'delivered', message_id: 'sg-message-id' });
+  });
+
+  it('blocks a second send for the same prelim document via idempotency', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+
+    const first = await maybeAutoDeliverPrelim(baseInput);
+    expect(first.outcome).toBe('delivered');
+    expect(sendPrelimDeliveryEmailMock).toHaveBeenCalledTimes(1);
+
+    deliveryMarkerRows.push({ id: 1 });
+    sendPrelimDeliveryEmailMock.mockClear();
+
+    const second = await maybeAutoDeliverPrelim(baseInput);
+    expect(second.outcome).toBe('skipped_already_delivered');
+    expect(sendPrelimDeliveryEmailMock).not.toHaveBeenCalled();
+    expect(latestOutcome()).toMatchObject({ outcome: 'skipped_already_delivered' });
   });
 
   it('does not send anything when the forward-only cutoff is unset', async () => {
@@ -131,28 +168,9 @@ describe('maybeAutoDeliverPrelim', () => {
     });
   });
 
-  it('sends post-cutoff prelims exactly once through the existing delivery path', async () => {
-    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = '2026-07-16T00:00:00.000Z';
-    resolvePrelimRecipientsMock.mockResolvedValue(resolvedRecipients);
-    getPrelimDeliveryModeMock.mockReturnValue({ mode: 'live', armed: true, message: 'LIVE' });
-    sendPrelimDeliveryEmailMock.mockResolvedValue({ messageId: 'sg-message-id' });
-
-    const result = await maybeAutoDeliverPrelim(baseInput);
-
-    expect(result).toMatchObject({ outcome: 'delivered', sent: true, messageId: 'sg-message-id' });
-    expect(sendPrelimDeliveryEmailMock).toHaveBeenCalledTimes(1);
-    expect(sendPrelimDeliveryEmailMock).toHaveBeenCalledWith(
-      5029,
-      { to: resolvedRecipients.to, cc: resolvedRecipients.cc },
-      expect.objectContaining({ id: 'system:prelim_auto_delivery' }),
-    );
-    expect(latestOutcome()).toMatchObject({ outcome: 'delivered', message_id: 'sg-message-id' });
-  });
-
-  it('sends an updated prelim version on a post-cutoff order', async () => {
-    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = '2026-07-16T00:00:00.000Z';
-    resolvePrelimRecipientsMock.mockResolvedValue(resolvedRecipients);
-    getPrelimDeliveryModeMock.mockReturnValue({ mode: 'live', armed: true, message: 'LIVE' });
+  it('sends an updated prelim version on a post-cutoff arrival', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
     sendPrelimDeliveryEmailMock.mockResolvedValue({ messageId: 'sg-updated-version' });
 
     const result = await maybeAutoDeliverPrelim({
@@ -167,7 +185,7 @@ describe('maybeAutoDeliverPrelim', () => {
   });
 
   it('skips when the same prelim version already has a manual delivery marker', async () => {
-    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = '2026-07-16T00:00:00.000Z';
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
     deliveryMarkerRows.push({ id: 1 });
 
     const result = await maybeAutoDeliverPrelim(baseInput);
@@ -179,7 +197,7 @@ describe('maybeAutoDeliverPrelim', () => {
   });
 
   it('skips when the same prelim version has only an auto-delivery marker', async () => {
-    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = '2026-07-16T00:00:00.000Z';
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
     deliveryMarkerRows.push({ id: 2 });
 
     const result = await maybeAutoDeliverPrelim(baseInput);
@@ -190,7 +208,7 @@ describe('maybeAutoDeliverPrelim', () => {
   });
 
   it('blocks and flags manual delivery when recipient resolution blocks', async () => {
-    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = '2026-07-16T00:00:00.000Z';
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
     resolvePrelimRecipientsMock.mockResolvedValue({
       to: null,
       cc: [],
@@ -214,7 +232,7 @@ describe('maybeAutoDeliverPrelim', () => {
   });
 
   it('does not auto-send in test mode', async () => {
-    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = '2026-07-16T00:00:00.000Z';
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
     resolvePrelimRecipientsMock.mockResolvedValue(resolvedRecipients);
     getPrelimDeliveryModeMock.mockReturnValue({ mode: 'test', armed: true, testRecipient: 'test@example.com', message: 'TEST' });
 

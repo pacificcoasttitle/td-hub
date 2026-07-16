@@ -29,20 +29,31 @@ export function ManagerAssignModal({ open, managerId, managerName, onClose, onSu
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) return;
-    setFilter('');
-    setLoadingReps(true);
-    fetch('/api/contacts?type=sales_rep&pageSize=500&active=true&sort=fullName&order=asc')
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      setFilter('');
+      setError('');
+      setLoadingReps(true);
+    });
+    fetch('/api/contacts?type=sales_rep&pageSize=500&active=true&sort=fullName&order=asc', {
+      signal: controller.signal,
+    })
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         const reps: Rep[] = d?.contacts ?? [];
         setAllReps(reps);
         setSelected(new Set(reps.filter(r => r.managerId === managerId && r.id !== managerId).map(r => r.id)));
       })
-      .catch(() => setAllReps([]))
+      .catch((err) => {
+        if (!(err instanceof DOMException && err.name === 'AbortError')) setAllReps([]);
+      })
       .finally(() => setLoadingReps(false));
+    return () => controller.abort();
   }, [open, managerId]);
 
   const toggle = useCallback((id: number) => {
@@ -75,14 +86,24 @@ export function ManagerAssignModal({ open, managerId, managerName, onClose, onSu
 
   async function save() {
     setSaving(true);
+    setError('');
     try {
       const res = await fetch(`/api/contacts/${managerId}/manager`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repIds: [...selected] }),
       });
-      if (res.ok) { onSuccess(); onClose(); }
-    } finally { setSaving(false); }
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? 'Save failed');
+      }
+      onSuccess();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (!open) return null;
@@ -128,6 +149,11 @@ export function ManagerAssignModal({ open, managerId, managerName, onClose, onSu
         </div>
 
         <p className="px-8 pb-2 text-[10px] text-[#9CA3AF] italic">Reps assigned to other managers are hidden. Reassign them from their current manager first.</p>
+        {error && (
+          <div className="mx-8 mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+            {error}
+          </div>
+        )}
         <div className="px-8 py-5 border-t border-gray-200 flex items-center justify-between">
           <span className="text-sm text-[#6B7280]">{selected.size} rep{selected.size !== 1 ? 's' : ''} selected</span>
           <div className="flex items-center gap-2">

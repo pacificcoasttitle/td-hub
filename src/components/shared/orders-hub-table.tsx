@@ -62,6 +62,8 @@ export interface OrdersHubTableProps {
   externalStatus?: string;
   onAction?: (type: ActionType, order: HubOrder) => void;
   showEscrowOfficerColumn?: boolean;
+  /** Bump to force a table refetch (e.g. after external modal success on hub page). */
+  refreshSignal?: number;
 }
 
 /* ── Component ─────────────────────────────────────────────────────────────── */
@@ -71,7 +73,7 @@ export function OrdersHubTable({
   onOrderSelect, showSearch = true, showStatusFilter = true,
   pageSize = 25, pollMs = 0, className = '', feesHrefBuilder,
   showCheckboxes = false, onSelectedOrdersChange, externalSearch, externalStatus, onAction,
-  showEscrowOfficerColumn = false,
+  showEscrowOfficerColumn = false, refreshSignal = 0,
 }: OrdersHubTableProps) {
   const [orders, setOrders] = useState<HubOrder[]>([]);
   const [page, setPage] = useState(1);
@@ -123,6 +125,10 @@ export function OrdersHubTable({
     queueMicrotask(() => setLoading(true));
     fetchOrders();
   }, [fetchOrders]);
+  useEffect(() => {
+    if (!refreshSignal) return;
+    fetchOrders();
+  }, [refreshSignal, fetchOrders]);
   useEffect(() => {
     if (!pollMs || pollMs <= 0) return;
     const id = setInterval(() => { if (!document.hidden) fetchOrders(); }, pollMs);
@@ -370,10 +376,10 @@ export function OrdersHubTable({
       {/* Internal Modals — only when onAction is not provided */}
       {!onAction && (
         <>
-          {actions.includes('cpl') && <CplModal open={modal === 'cpl'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} isClient={isClient} accentColor={accentColor} />}
+          {actions.includes('cpl') && <CplModal open={modal === 'cpl'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} isClient={isClient} accentColor={accentColor} onSuccess={fetchOrders} />}
           {actions.includes('prelim') && <PrelimModal open={modal === 'prelim'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} isClient={isClient} accentColor={accentColor} />}
-          {actions.includes('deliver_prelim') && <DeliverPrelimModal open={modal === 'deliver_prelim'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} accentColor={accentColor} />}
-          {actions.includes('proposed') && <ProposedInsuredModal open={modal === 'proposed'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} isClient={isClient} accentColor={accentColor} />}
+          {actions.includes('deliver_prelim') && <DeliverPrelimModal open={modal === 'deliver_prelim'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} accentColor={accentColor} onSuccess={fetchOrders} />}
+          {actions.includes('proposed') && <ProposedInsuredModal open={modal === 'proposed'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} isClient={isClient} accentColor={accentColor} onSuccess={fetchOrders} />}
           {actions.includes('notes') && <NotesModal open={modal === 'notes'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} isClient={isClient} accentColor={accentColor} />}
           {actions.includes('detail') && <DetailModal open={modal === 'detail'} onClose={closeModal} orderId={selId} fileNumber={selFile} address={selAddr} isClient={isClient} accentColor={accentColor} />}
         </>

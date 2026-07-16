@@ -47,6 +47,8 @@ export default function HubPage() {
   const [modal, setModal] = useState<ModalType>(null);
   const [modalOrder, setModalOrder] = useState<HubOrder | null>(null);
   const [batchState, setBatchState] = useState<{ type: string; orders: HubOrder[]; current: number; results: BatchResult[] } | null>(null);
+  const [tableRefreshSignal, setTableRefreshSignal] = useState(0);
+  const refreshTable = useCallback(() => setTableRefreshSignal((n) => n + 1), []);
 
   // ─── Role-aware state (escrow_assistant gets task cards + officer chips) ───
   const [role, setRole] = useState<string | null>(null);
@@ -303,13 +305,14 @@ export default function HubPage() {
         pollMs={30_000}
         className="flex-1 min-h-0"
         showEscrowOfficerColumn={isEscrowAssistant}
+        refreshSignal={tableRefreshSignal}
       />
 
       {/* ─── Single-Order Modals (opened from row actions or single-select quick action) ─── */}
-      <CplModal open={modal === 'cpl'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />
+      <CplModal open={modal === 'cpl'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} onSuccess={refreshTable} />
       <PrelimModal open={modal === 'prelim'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />
-      <DeliverPrelimModal open={modal === 'deliver_prelim'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />
-      <ProposedInsuredModal open={modal === 'proposed'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />
+      <DeliverPrelimModal open={modal === 'deliver_prelim'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} onSuccess={refreshTable} />
+      <ProposedInsuredModal open={modal === 'proposed'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} onSuccess={refreshTable} />
       <NotesModal open={modal === 'notes'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />
       <DetailModal open={modal === 'detail'} onClose={() => setModal(null)} orderId={mId} fileNumber={mFile} address={mAddr} />
 

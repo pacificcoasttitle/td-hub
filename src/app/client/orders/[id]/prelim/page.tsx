@@ -11,13 +11,18 @@ interface PrelimDoc {
   filename: string;
   sizeBytes: number | null;
   createdAt: string;
+  category?: string | null;
 }
 
 interface Note {
   id: number;
-  content: string;
+  body: string;
   createdAt: string;
-  author: string;
+  authorName?: string | null;
+}
+
+function filterPrelimDocuments(documents: PrelimDoc[] | undefined): PrelimDoc[] {
+  return (documents ?? []).filter((doc) => doc.category === 'prelim');
 }
 
 export default function ClientPrelimPage() {
@@ -41,7 +46,7 @@ export default function ClientPrelimPage() {
     ])
       .then(([o, d, n]) => {
         if (o) setFileNumber(o.fileNumber);
-        setDocs((d?.documents ?? []).filter((doc: any) => doc.category === 'prelim'));
+        setDocs(filterPrelimDocuments(d?.documents));
         setNotes(n?.notes ?? []);
       })
       .catch(() => {})
@@ -56,15 +61,17 @@ export default function ClientPrelimPage() {
       const res = await fetch(`/api/client/orders/${orderId}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: noteText.trim() }),
+        body: JSON.stringify({ text: noteText.trim() }),
       });
-      if (!res.ok) throw new Error('Failed to save note');
       const body = await res.json().catch(() => null);
+      if (!res.ok || body?.success === false) {
+        throw new Error(body?.error ?? 'Failed to save note');
+      }
       if (body?.note) setNotes((prev) => [body.note, ...prev]);
       setNoteText('');
       setNoteResult({ type: 'success', message: 'Note added' });
-    } catch {
-      setNoteResult({ type: 'error', message: 'Failed to save note' });
+    } catch (err) {
+      setNoteResult({ type: 'error', message: err instanceof Error ? err.message : 'Failed to save note' });
     } finally {
       setSavingNote(false);
     }
@@ -85,7 +92,7 @@ export default function ClientPrelimPage() {
       if (count > 0) {
         setFetchResult({ type: 'success', message: `Found ${count} document${count > 1 ? 's' : ''}` });
         fetch(`/api/client/orders/${orderId}/documents`).then((r) => r.ok ? r.json() : null).then((d) => {
-          if (d?.documents) setDocs(d.documents.filter((doc: any) => doc.category === 'prelim'));
+          if (d?.documents) setDocs(filterPrelimDocuments(d.documents));
         }).catch(() => {});
       } else {
         setFetchResult({ type: 'info', message: 'No prelim available yet in SoftPro' });
@@ -210,10 +217,10 @@ export default function ClientPrelimPage() {
                 {notes.map((n) => (
                   <div key={n.id} className="px-5 py-4">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium text-[#1B2A4A]">{n.author}</span>
+                      <span className="text-sm font-medium text-[#1B2A4A]">{n.authorName ?? 'Unknown'}</span>
                       <span className="text-xs text-[#6B7280]">{formatDate(n.createdAt)}</span>
                     </div>
-                    <p className="text-sm text-[#4B5563] whitespace-pre-wrap">{n.content}</p>
+                    <p className="text-sm text-[#4B5563] whitespace-pre-wrap">{n.body}</p>
                   </div>
                 ))}
               </div>

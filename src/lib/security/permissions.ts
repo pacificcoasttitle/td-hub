@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { orders } from '@/lib/db/schema';
+import { getManagedRepIds } from '@/lib/domain/contacts/managed-reps';
 import type { SessionUser } from './auth';
 
 export interface NavItem {
@@ -72,6 +73,38 @@ export function isStaff(session: { role: string }): boolean {
   return (STAFF_ROLES as readonly string[]).includes(session.role);
 }
 
+// ─── Sales Scope ─────────────────────────────────────────────────────────────
+
+export function isSalesScopedRole(role: string): role is 'sales_rep' | 'sales_manager' {
+  return role === 'sales_rep' || role === 'sales_manager';
+}
+
+export async function getSalesScopedContactIds(session: SessionUser): Promise<number[]> {
+  if (!isSalesScopedRole(session.role) || session.contactId === null) return [];
+  if (session.role === 'sales_rep') return [session.contactId];
+
+  const managedRepIds = await getManagedRepIds(session.contactId);
+  return Array.from(new Set([session.contactId, ...managedRepIds]));
+}
+
+export async function canAccessSalesScopedOrder(
+  session: SessionUser,
+  orderId: number,
+): Promise<boolean> {
+  if (!Number.isInteger(orderId) || orderId <= 0) return false;
+
+  const contactIds = await getSalesScopedContactIds(session);
+  if (contactIds.length === 0) return false;
+
+  const [order] = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(and(eq(orders.id, orderId), inArray(orders.salesRepId, contactIds)))
+    .limit(1);
+
+  return Boolean(order);
+}
+
 // ─── Per-Order Access ───────────────────────────────────────────────────────
 
 const ALL_ORDERS_ROLES = new Set(['super_admin', 'admin', 'cs_admin', 'open_order_team']);
@@ -116,9 +149,6 @@ export async function canAccessOrder(
       return session.contactId !== null && order.titleOfficerId === session.contactId;
     case 'sales_rep':
     case 'sales_manager':
-      // TODO: switch to validateSalesAccess() once it covers sales_manager
-      // hierarchy + branch scopes. For now use direct ownership which matches
-      // existing list-scoping behaviour for sales_rep.
       return session.contactId !== null && order.salesRepId === session.contactId;
     default:
       return false;

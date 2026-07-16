@@ -1,8 +1,8 @@
 import { db } from '@/lib/db/client';
 import { contacts } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { getManagedRepIds } from '@/lib/domain/contacts/managed-reps';
 import { contactNameToReportName } from '@/lib/domain/contacts/name-mapping';
+import { getSalesScopedContactIds } from '@/lib/security/permissions';
 import type { SessionUser } from '@/lib/security/auth';
 
 export class SalesAccessError extends Error {
@@ -17,6 +17,7 @@ export interface SalesAccessResult {
   contactId: number;
   repName: string;
   role: 'sales_rep' | 'sales_manager';
+  contactIds?: number[];
   managedRepIds?: number[];
 }
 
@@ -61,14 +62,15 @@ export async function validateSalesAccess(
     };
   }
 
-  const managedIds = await getManagedRepIds(ownContact.id);
-  const allTeamIds = [ownContact.id, ...managedIds];
+  const allTeamIds = await getSalesScopedContactIds(session);
+  const managedIds = allTeamIds.filter((id) => id !== ownContact.id);
 
   if (!requestedRepId || requestedRepId === 'all') {
     return {
       contactId: ownContact.id,
       repName: toReportName(ownContact.fullName),
       role: 'sales_manager',
+      contactIds: allTeamIds,
       managedRepIds: allTeamIds,
     };
   }
@@ -81,6 +83,7 @@ export async function validateSalesAccess(
       contactId: ownContact.id,
       repName: toReportName(ownContact.fullName),
       role: 'sales_manager',
+      contactIds: [ownContact.id],
       managedRepIds: allTeamIds,
     };
   }
@@ -96,6 +99,7 @@ export async function validateSalesAccess(
     contactId: targetContact.id,
     repName: toReportName(targetContact.fullName),
     role: 'sales_manager',
+    contactIds: [targetContact.id],
     managedRepIds: allTeamIds,
   };
 }

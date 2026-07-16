@@ -114,6 +114,7 @@ export async function GET(req: NextRequest) {
     const ordersResult = await getScopedOrders({
       scopeColumn: orders.salesRepId,
       contactId: access.contactId,
+      contactIds: access.contactIds,
       page,
       pageSize,
       status,

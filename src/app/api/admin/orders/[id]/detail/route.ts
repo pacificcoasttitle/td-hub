@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
-import { canAccessOrder } from '@/lib/security/permissions';
+import { canAccessOrder, canAccessSalesScopedOrder, isSalesScopedRole } from '@/lib/security/permissions';
 import { db } from '@/lib/db/client';
 import {
   orders, orderProperties, orderParties, orderStatusHistory,
@@ -45,7 +45,11 @@ export async function GET(
   }
   const orderId = parsed.data.id;
 
-  if (!(await canAccessOrder(session, orderId))) {
+  const canAccess = isSalesScopedRole(session.role)
+    ? await canAccessSalesScopedOrder(session, orderId)
+    : await canAccessOrder(session, orderId);
+
+  if (!canAccess) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 

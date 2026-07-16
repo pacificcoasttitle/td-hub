@@ -3,7 +3,17 @@ import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/client-scope';
 import { db } from '@/lib/db/client';
 import { documents } from '@/lib/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
+
+/** Client-safe docs: portal products + open-order confirmation email attachments. */
+export const CLIENT_DOCUMENT_CATEGORIES = [
+  'prelim',
+  'cpl',
+  'proposed_insured',
+  'legal_vesting',
+  'tax',
+  'grant_deed',
+] as const;
 
 export async function GET(
   _req: NextRequest,
@@ -41,7 +51,8 @@ export async function GET(
       .where(
         and(
           eq(documents.orderId, orderId),
-          eq(documents.status, 'active')
+          eq(documents.status, 'active'),
+          inArray(documents.category, [...CLIENT_DOCUMENT_CATEGORIES]),
         )
       )
       .orderBy(desc(documents.createdAt));

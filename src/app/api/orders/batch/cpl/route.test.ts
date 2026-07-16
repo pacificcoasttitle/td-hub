@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-const { dbBuilder, generateCplMock, getSessionMock } = vi.hoisted(() => ({
+const {
+  canAccessOrderDetailResourceMock,
+  dbBuilder,
+  generateCplMock,
+  getSessionMock,
+} = vi.hoisted(() => ({
+  canAccessOrderDetailResourceMock: vi.fn(),
   dbBuilder: {
     from: vi.fn(),
     where: vi.fn(),
@@ -13,6 +19,10 @@ const { dbBuilder, generateCplMock, getSessionMock } = vi.hoisted(() => ({
 
 vi.mock('@/lib/security/auth', () => ({
   getSession: getSessionMock,
+}));
+
+vi.mock('@/lib/security/permissions', () => ({
+  canAccessOrderDetailResource: canAccessOrderDetailResourceMock,
 }));
 
 vi.mock('@/lib/domain/cpl/service', () => ({
@@ -48,19 +58,21 @@ function request(body: unknown) {
 
 describe('POST /api/orders/batch/cpl', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    getSessionMock.mockResolvedValue({ id: 'staff-1', role: 'admin' });
+    vi.resetAllMocks();
+    getSessionMock.mockResolvedValue({ id: 'staff-1', role: 'admin', contactId: null });
+    canAccessOrderDetailResourceMock.mockResolvedValue(true);
     dbBuilder.from.mockReturnValue(dbBuilder);
     dbBuilder.where.mockReturnValue(dbBuilder);
+  });
+
+  it('processes mixed-branch orders using each order branch with per-order status', async () => {
     dbBuilder.limit
       .mockResolvedValueOnce([{ branchId: 2 }])
       .mockResolvedValueOnce([{ branchId: 7 }]);
     generateCplMock
       .mockResolvedValueOnce({ success: true, documentId: 101, errors: [] })
       .mockResolvedValueOnce({ success: false, documentId: undefined, errors: ['Missing lender'] });
-  });
 
-  it('processes mixed-branch orders using each order branch with per-order status', async () => {
     const response = await POST(request({
       orderIds: [11, 22],
       underwriter: 'westcor',
@@ -86,5 +98,58 @@ describe('POST /api/orders/batch/cpl', () => {
       { orderId: 11, success: true, documentId: 101 },
       { orderId: 22, success: false, error: 'Missing lender' },
     ]);
+  });
+
+  it('skips orderIds the caller cannot access and never generates CPL for them', async () => {
+    getSessionMock.mockResolvedValue({ id: 'mgr-1', role: 'sales_manager', contactId: 10 });
+    canAccessOrderDetailResourceMock
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    dbBuilder.limit.mockResolvedValueOnce([{ branchId: 2 }]);
+    generateCplMock.mockResolvedValueOnce({ success: true, documentId: 101, errors: [] });
+
+    const response = await POST(request({
+      orderIds: [11, 99],
+      underwriter: 'westcor',
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(canAccessOrderDetailResourceMock).toHaveBeenNthCalledWith(
+      1,
+      { id: 'mgr-1', role: 'sales_manager', contactId: 10 },
+      11,
+    );
+    expect(canAccessOrderDetailResourceMock).toHaveBeenNthCalledWith(
+      2,
+      { id: 'mgr-1', role: 'sales_manager', contactId: 10 },
+      99,
+    );
+    expect(generateCplMock).toHaveBeenCalledTimes(1);
+    expect(generateCplMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 11 }),
+      'mgr-1',
+    );
+    expect(body.results).toEqual([
+      { orderId: 11, success: true, documentId: 101 },
+      { orderId: 99, success: false, error: 'Not found' },
+    ]);
+  });
+
+  it('does not rely on role allowlist alone — sales_rep with access can process own order', async () => {
+    getSessionMock.mockResolvedValue({ id: 'rep-1', role: 'sales_rep', contactId: 3 });
+    canAccessOrderDetailResourceMock.mockResolvedValue(true);
+    dbBuilder.limit.mockResolvedValueOnce([{ branchId: 2 }]);
+    generateCplMock.mockResolvedValueOnce({ success: true, documentId: 55, errors: [] });
+
+    const response = await POST(request({
+      orderIds: [11],
+      underwriter: 'westcor',
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.results).toEqual([{ orderId: 11, success: true, documentId: 55 }]);
+    expect(generateCplMock).toHaveBeenCalledTimes(1);
   });
 });

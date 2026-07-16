@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { EmptyState } from './empty-state';
+import { formatOrderDate } from '@/lib/domain/orders/date-format';
 
 interface Milestone {
   name: string;
@@ -96,7 +97,7 @@ export function OrderTimeline({ orderId }: { orderId: number }) {
                     )}
                   </div>
                   {m.date && (
-                    <span className="text-sm text-[#6B7280] flex-shrink-0 whitespace-nowrap">{formatDate(m.date)}</span>
+                    <span className="text-sm text-[#6B7280] flex-shrink-0 whitespace-nowrap">{formatOrderDate(m.date)}</span>
                   )}
                 </div>
               </div>
@@ -116,7 +117,7 @@ function TimelineSkeleton() {
           <div key={i} className="flex gap-6">
             <div className="h-10 w-10 rounded-full bg-gray-100 animate-pulse flex-shrink-0" />
             <div className="flex-1 space-y-2 pt-2">
-              <div className="h-4 bg-gray-100 rounded animate-pulse" style={{ width: `${30 + Math.random() * 40}%` }} />
+              <div className="h-4 bg-gray-100 rounded animate-pulse" style={{ width: SKELETON_WIDTHS[i % SKELETON_WIDTHS.length] }} />
               <div className="h-3 bg-gray-100 rounded animate-pulse w-24" />
             </div>
           </div>
@@ -126,10 +127,4 @@ function TimelineSkeleton() {
   );
 }
 
-function formatDate(d: string): string {
-  try {
-    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  } catch {
-    return d;
-  }
-}
+const SKELETON_WIDTHS = ['42%', '58%', '36%', '64%', '48%', '52%', '44%'];

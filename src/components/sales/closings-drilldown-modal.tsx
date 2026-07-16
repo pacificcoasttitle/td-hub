@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { formatOrderDate } from '@/lib/domain/orders/date-format';
 
 interface ClosingRow {
   fileNumber: string;
@@ -27,12 +28,6 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-function fmtDate(iso: string) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
-}
-
 function fmtCurrency(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 });
 }
@@ -43,15 +38,18 @@ export function ClosingsDrilldownModal({ isOpen, onClose, month, year, repId }: 
 
   useEffect(() => {
     if (!isOpen) return;
-    setLoading(true);
-    setData(null);
-    const params = new URLSearchParams({ month: String(month), year: String(year) });
-    if (repId) params.set('repId', String(repId));
-    fetch(`/api/sales/closings?${params}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) setData(d); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    const timeout = setTimeout(() => {
+      setLoading(true);
+      setData(null);
+      const params = new URLSearchParams({ month: String(month), year: String(year) });
+      if (repId) params.set('repId', String(repId));
+      fetch(`/api/sales/closings?${params}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d) setData(d); })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }, 0);
+    return () => clearTimeout(timeout);
   }, [isOpen, month, year, repId]);
 
   if (!isOpen) return null;
@@ -98,7 +96,7 @@ export function ClosingsDrilldownModal({ isOpen, onClose, month, year, repId }: 
                 <tr key={i} className="hover:bg-gray-50">
                   <td className="py-2.5 pr-3 text-blue-600 font-medium whitespace-nowrap">{c.fileNumber}</td>
                   <td className="py-2.5 px-3 text-gray-700 max-w-[200px] truncate">{c.address}</td>
-                  <td className="py-2.5 px-3 text-center text-gray-600 whitespace-nowrap tabular-nums">{fmtDate(c.closedDate)}</td>
+                  <td className="py-2.5 px-3 text-center text-gray-600 whitespace-nowrap tabular-nums">{formatOrderDate(c.closedDate)}</td>
                   <td className="py-2.5 pl-3 text-right text-gray-900 font-medium tabular-nums">{fmtCurrency(c.revenue)}</td>
                 </tr>
               ))

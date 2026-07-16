@@ -1,4 +1,5 @@
 import { statusBadge } from '@/lib/domain/orders/status-format';
+import { formatOrderDate } from '@/lib/domain/orders/date-format';
 
 export const CATEGORY_LABELS: Record<string, string> = {
   cpl: 'CPL',
@@ -46,8 +47,7 @@ export function getStatusBanner(status: string): { label: string; bg: string; te
 }
 
 export function formatDate(d: string | null | undefined) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return formatOrderDate(d);
 }
 
 export function formatFileSize(bytes: number | null | undefined) {

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
+import { formatOrderDateTime } from '@/lib/domain/orders/date-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
@@ -277,6 +278,6 @@ function fmtTime(iso: string): string {
     if (diff < 60_000) return 'just now';
     if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
     if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-  } catch { return iso; }
+    return formatOrderDateTime(d);
+  } catch { return '—'; }
 }

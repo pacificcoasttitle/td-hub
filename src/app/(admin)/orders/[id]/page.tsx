@@ -247,7 +247,7 @@ export default function OrderDetailPage() {
       </div>
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
         {activeTab === 'Overview' && <OrderOverviewTab order={order} />}
-        {activeTab === 'Property' && <OrderPropertyTab property={order.property} orderId={order.id} />}
+        {activeTab === 'Property' && <OrderPropertyTab property={order.property} orderId={order.id} onPropertyUpdated={() => fetchOrder()} />}
         {activeTab === 'History' && <OrderHistoryTab history={order.statusHistory} />}
         {activeTab === 'Documents' && <OrderDocuments orderId={order.id} />}
         {activeTab === 'Fees' && <OrderFees orderId={order.id} />}

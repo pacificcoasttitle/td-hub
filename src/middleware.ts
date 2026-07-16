@@ -8,6 +8,7 @@ const PUBLIC_PATHS = [
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.includes(pathname)) return true;
+  // SoftPro webhooks stay session-public; handlers verify SOFTPRO_WEBHOOK_SECRET.
   if (pathname.startsWith('/api/webhooks/softpro/')) return true;
   if (pathname.startsWith('/_next/')) return true;
   if (pathname.startsWith('/favicon')) return true;

@@ -9,7 +9,7 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, sql, asc } from 'drizzle-orm';
 import {
-  escrowOfficerContact, lenderContact, listingAgentContact,
+  escrowOfficerContact,
   salesRepContact, titleOfficerContact, titleCompanyAlias,
   underwriterAlias, createdByProfile,
   contactDisplayName, formatParty,
@@ -90,24 +90,6 @@ export async function GET(
         eoCompanyName: escrowOfficerContact.companyName,
         eoEmail: escrowOfficerContact.email,
         eoPhone: escrowOfficerContact.phone,
-        // lender
-        lnId: lenderContact.id,
-        lnFirstName: lenderContact.firstName,
-        lnLastName: lenderContact.lastName,
-        lnFullName: lenderContact.fullName,
-        lnOfficerName: lenderContact.officerName,
-        lnCompanyName: lenderContact.companyName,
-        lnEmail: lenderContact.email,
-        lnPhone: lenderContact.phone,
-        // listing agent
-        laId: listingAgentContact.id,
-        laFirstName: listingAgentContact.firstName,
-        laLastName: listingAgentContact.lastName,
-        laFullName: listingAgentContact.fullName,
-        laOfficerName: listingAgentContact.officerName,
-        laCompanyName: listingAgentContact.companyName,
-        laEmail: listingAgentContact.email,
-        laPhone: listingAgentContact.phone,
         // title company
         tcId: titleCompanyAlias.id,
         tcName: titleCompanyAlias.name,
@@ -138,8 +120,6 @@ export async function GET(
       .from(orders)
       .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
       .leftJoin(escrowOfficerContact, eq(orders.escrowOfficerId, escrowOfficerContact.id))
-      .leftJoin(lenderContact, eq(orders.lenderId, lenderContact.id))
-      .leftJoin(listingAgentContact, eq(orders.listingAgentId, listingAgentContact.id))
       .leftJoin(titleCompanyAlias, eq(orders.titleCompanyId, titleCompanyAlias.id))
       .leftJoin(underwriterAlias, eq(orders.underwriterId, underwriterAlias.id))
       .leftJoin(salesRepContact, eq(orders.salesRepId, salesRepContact.id))
@@ -185,6 +165,12 @@ export async function GET(
       ?? null;
     const sellerParty = parties.find((p) => p.role === 'seller' && p.isPrimary)
       ?? parties.find((p) => p.role === 'seller')
+      ?? null;
+    const lenderParty = parties.find((p) => p.role === 'lender' && p.isPrimary)
+      ?? parties.find((p) => p.role === 'lender')
+      ?? null;
+    const listingAgentParty = parties.find((p) => p.role === 'listing_agent' && p.isPrimary)
+      ?? parties.find((p) => p.role === 'listing_agent')
       ?? null;
 
     // Documents summary
@@ -250,19 +236,8 @@ export async function GET(
           email: row.eoEmail,
           phone: row.eoPhone,
         } : null,
-        lender: row.lnId ? {
-          id: row.lnId,
-          name: contactDisplayName({ fullName: row.lnFullName, officerName: row.lnOfficerName, firstName: row.lnFirstName, lastName: row.lnLastName, companyName: row.lnCompanyName }),
-          email: row.lnEmail,
-          phone: row.lnPhone,
-        } : null,
-        listingAgent: row.laId ? {
-          id: row.laId,
-          name: contactDisplayName({ fullName: row.laFullName, officerName: row.laOfficerName, firstName: row.laFirstName, lastName: row.laLastName, companyName: row.laCompanyName }),
-          email: row.laEmail,
-          phone: row.laPhone,
-          company: row.laCompanyName,
-        } : null,
+        lender: formatParty(lenderParty),
+        listingAgent: formatParty(listingAgentParty),
         titleCompany: row.tcId ? { id: row.tcId, name: row.tcName } : null,
         underwriter: row.uwId ? { id: row.uwId, name: row.uwName } : null,
       },

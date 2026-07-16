@@ -65,12 +65,28 @@ vi.mock('@/lib/domain/orders/detail-helpers', () => {
   const table = (name: string) => new Proxy({}, {
     get: (_target, prop) => `${name}.${String(prop)}`,
   });
+  const formatParty = (party: {
+    externalName: string | null;
+    externalCompany: string | null;
+    externalEmail: string | null;
+    externalPhone: string | null;
+  } | null) => {
+    if (!party) return null;
+    const parts = party.externalName?.trim().split(/\s+/) ?? [];
+    return {
+      firstName: parts[0] ?? null,
+      lastName: parts.length > 1 ? parts.slice(1).join(' ') : null,
+      email: party.externalEmail,
+      phone: party.externalPhone,
+      company: party.externalCompany,
+    };
+  };
 
   return {
     contactDisplayName: vi.fn(() => 'Contact Name'),
     createdByProfile: table('created_by_profile'),
     escrowOfficerContact: table('escrow_officer'),
-    formatParty: vi.fn(() => null),
+    formatParty: vi.fn(formatParty),
     lenderContact: table('lender_contact'),
     listingAgentContact: table('listing_agent'),
     salesRepContact: table('sales_rep'),
@@ -153,5 +169,48 @@ describe('GET /api/admin/orders/[id]/detail sales scope', () => {
       123,
     );
     expect(canAccessOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('sources lender and listing agent cards from order parties when header FKs are null', async () => {
+    query.limitRows.push([detailRow()]);
+    query.orderByRows.push([
+      {
+        role: 'lender',
+        isPrimary: true,
+        externalName: 'Lender Contact',
+        externalCompany: 'Order Party Lending',
+        externalEmail: 'lender@example.com',
+        externalPhone: '555-0101',
+      },
+      {
+        role: 'listing_agent',
+        isPrimary: true,
+        externalName: 'Listing Agent',
+        externalCompany: 'Order Party Realty',
+        externalEmail: 'listing@example.com',
+        externalPhone: '555-0102',
+      },
+    ]);
+    query.groupByRows.push([]);
+    query.orderByRows.push([]);
+
+    const response = await GET({} as never, { params: Promise.resolve({ id: '123' }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.parties.lender).toMatchObject({
+      firstName: 'Lender',
+      lastName: 'Contact',
+      company: 'Order Party Lending',
+      email: 'lender@example.com',
+      phone: '555-0101',
+    });
+    expect(body.parties.listingAgent).toMatchObject({
+      firstName: 'Listing',
+      lastName: 'Agent',
+      company: 'Order Party Realty',
+      email: 'listing@example.com',
+      phone: '555-0102',
+    });
   });
 });

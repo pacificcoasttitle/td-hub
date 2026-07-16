@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrderDetailResource } from '@/lib/security/permissions';
 import { generateProposedInsured, getProposedInsuredPrefill } from '@/lib/domain/documents/proposed-insured';
 import type { ProposedInsuredInput } from '@/lib/domain/documents/proposed-insured';
 
@@ -44,6 +45,11 @@ export async function POST(req: NextRequest) {
 
   for (const orderId of orderIds) {
     try {
+      if (!(await canAccessOrderDetailResource(session, orderId))) {
+        results.push({ orderId, success: false, error: 'Not found' });
+        continue;
+      }
+
       const prefill = await getProposedInsuredPrefill(orderId);
       if (!prefill) {
         results.push({ orderId, success: false, error: 'Order not found' });

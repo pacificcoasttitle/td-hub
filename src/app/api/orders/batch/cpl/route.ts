@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrderDetailResource } from '@/lib/security/permissions';
 import { generateCpl } from '@/lib/domain/cpl/service';
 import { db } from '@/lib/db/client';
 import { orders } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-
-const ALLOWED_ROLES = [
-  'super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant',
-];
 
 const bodySchema = z.object({
   orderIds: z.array(z.number().int().positive()).min(1).max(50),
@@ -28,9 +25,6 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  if (!ALLOWED_ROLES.includes(session.role)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
 
   const body = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(body);
@@ -49,6 +43,11 @@ export async function POST(req: NextRequest) {
 
   for (const orderId of orderIds) {
     try {
+      if (!(await canAccessOrderDetailResource(session, orderId))) {
+        results.push({ orderId, success: false, error: 'Not found' });
+        continue;
+      }
+
       const branchId = await resolveOrderBranchId(orderId);
       if (!branchId) {
         results.push({

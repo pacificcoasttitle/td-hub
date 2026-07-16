@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
+import { canAccessOrderDetailResource } from '@/lib/security/permissions';
 import { db } from '@/lib/db/client';
 import { orders } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -33,6 +34,11 @@ export async function POST(req: NextRequest) {
 
   for (const orderId of orderIds) {
     try {
+      if (!(await canAccessOrderDetailResource(session, orderId))) {
+        results.push({ orderId, success: false, documentsFound: 0, error: 'Not found' });
+        continue;
+      }
+
       const [order] = await db
         .select({ fileNumber: orders.fileNumber })
         .from(orders)

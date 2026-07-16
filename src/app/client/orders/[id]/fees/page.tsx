@@ -4,38 +4,24 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { EmptyState } from '@/components/client/empty-state';
+import { normalizeClientFeesResponse, type ClientFeesViewData } from '@/lib/domain/orders/client-fees';
 
-interface FeeItem {
-  description: string;
-  amount: number;
-}
-
-interface Invoice {
-  id: string | number;
-  label: string;
-  items: FeeItem[];
-  total: number;
-}
-
-interface FeesResponse {
-  invoices: Invoice[];
-  grandTotal: number;
-  fileNumber?: string;
-}
+const SKELETON_LINE_WIDTHS = ['46%', '68%', '54%', '72%', '39%', '61%'];
 
 export default function ClientFeesPage() {
   const params = useParams<{ id: string }>();
   const orderId = params.id;
-  const [data, setData] = useState<FeesResponse | null>(null);
+  const [data, setData] = useState<ClientFeesViewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const ac = new AbortController();
     fetch(`/api/client/orders/${orderId}/fees`, { signal: ac.signal })
-      .then((r) => {
-        if (!r.ok) throw new Error('Failed to load fee estimate');
-        return r.json() as Promise<FeesResponse>;
+      .then(async (r) => {
+        const body = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(body?.error ?? `Failed to load fee estimate (${r.status})`);
+        return normalizeClientFeesResponse(body);
       })
       .then(setData)
       .catch((err) => { if (err.name !== 'AbortError') setError(err.message); })
@@ -152,9 +138,9 @@ function FeesSkeleton() {
         <div className="h-4 w-24 bg-gray-100 rounded" />
         <div className="h-4 w-16 bg-gray-100 rounded" />
       </div>
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="px-6 py-4 flex justify-between border-b border-gray-100">
-          <div className="h-4 bg-gray-100 rounded" style={{ width: `${30 + Math.random() * 40}%` }} />
+      {SKELETON_LINE_WIDTHS.map((width) => (
+        <div key={width} className="px-6 py-4 flex justify-between border-b border-gray-100">
+          <div className="h-4 bg-gray-100 rounded" style={{ width }} />
           <div className="h-4 w-20 bg-gray-100 rounded" />
         </div>
       ))}

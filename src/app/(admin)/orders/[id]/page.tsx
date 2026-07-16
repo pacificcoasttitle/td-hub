@@ -72,7 +72,7 @@ export default function OrderDetailPage() {
   const [activeTab, setActiveTab] = useState<Tab>('Overview');
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [syncSuccess, setSyncSuccess] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ match: boolean; changes: { field: string; old: string; new: string }[] } | null>(null);
   const [deliverPrelimOpen, setDeliverPrelimOpen] = useState(false);
@@ -103,16 +103,16 @@ export default function OrderDetailPage() {
   }, [fetchOrder]);
 
   async function handleResync() {
-    setSyncing(true); setSyncError(null); setSyncSuccess(false);
+    setSyncing(true); setSyncError(null); setSyncMessage(null);
     try {
       const res = await fetch(`/api/orders/${params.id}/resync`, { method: 'POST' });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
+      const body = await res.json().catch(() => null);
+      if (!res.ok || body?.success === false) {
         throw new Error(body?.error ?? `Resync failed (${res.status})`);
       }
       await fetchOrder();
-      setSyncSuccess(true);
-      setTimeout(() => setSyncSuccess(false), 4000);
+      setSyncMessage(body?.message ?? (body?.updated ? 'Order resynced from SoftPro.' : 'SoftPro re-pulled — no changes'));
+      setTimeout(() => setSyncMessage(null), 5000);
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'Resync failed');
       setTimeout(() => setSyncError(null), 5000);
@@ -200,8 +200,8 @@ export default function OrderDetailPage() {
           <button onClick={() => setSyncError(null)} className="text-red-400 hover:text-red-600 ml-4">✕</button>
         </div>
       )}
-      {syncSuccess && (
-        <div className="mb-4 px-4 py-2.5 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">Order resynced successfully.</div>
+      {syncMessage && (
+        <div className="mb-4 px-4 py-2.5 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">{syncMessage}</div>
       )}
       {verifyResult && (
         <div className={`mb-4 rounded-lg border shadow-sm overflow-hidden ${verifyResult.match ? 'border-green-200' : 'border-amber-200'}`}>

@@ -2,21 +2,32 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { ModalShell } from './modal-shell';
+import type { ProposedInsuredInput } from '@/lib/domain/documents/proposed-insured';
 
 interface Branch { id: number; code: string; name: string; }
 interface TitleOfficer { value: string; label: string; }
-interface OrderData {
-  branchId?: number; titleOfficerId?: number;
-  lenderCompanyName?: string; lenderAddress?: string;
-  lenderCity?: string; lenderState?: string; lenderZip?: string;
-  loanNumber?: string; loanAmount?: string;
-  buyerFirstName?: string; buyerLastName?: string;
-  secondaryBuyerFirstName?: string; secondaryBuyerLastName?: string;
-  propertyStreet?: string; propertyCity?: string; propertyState?: string; propertyZip?: string;
-  prelimDate?: string;
+interface ProposedInsuredPrefill {
+  property?: { address?: string; city?: string; state?: string; zipcode?: string };
+  lender?: {
+    company?: string;
+    companyId?: number | null;
+    lookupCode?: string;
+    assignmentClause?: string;
+    address?: string;
+    city?: string;
+    state?: string;
+    zipcode?: string;
+  };
+  titleOfficer?: { id: number; name: string; email: string | null; phone: string | null } | null;
+  branch?: { id: number; name: string } | null;
+  borrowersVesting?: string;
+  loanAmount?: number;
+  loanNumber?: string;
+  preliminaryReportDate?: string;
+  supplementalReportDate?: string;
 }
-interface ExistingDoc { id: number; fileName: string; createdAt: string; }
-interface LenderResult { id: number; companyName: string; address?: string; city?: string; state?: string; zip?: string; }
+interface ExistingDoc { id: number; fileName?: string | null; filename?: string | null; createdAt: string; }
+interface LenderResult { id: number; companyName: string; lookupCode?: string; assignmentClause?: string; address?: string; city?: string; state?: string; zip?: string; }
 
 export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, address, isClient, accentColor }: {
   open: boolean; onClose: () => void;
@@ -31,6 +42,8 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
   const [existingDocs, setExistingDocs] = useState<ExistingDoc[]>([]);
 
   const [lenderType, setLenderType] = useState<'existing' | 'new'>('new');
+  const [lenderCompanyId, setLenderCompanyId] = useState<number | null>(null);
+  const [lenderLookupCode, setLenderLookupCode] = useState('');
   const [lenderCompany, setLenderCompany] = useState('');
   const [assignmentClause, setAssignmentClause] = useState('');
   const [lenderAddr, setLenderAddr] = useState('');
@@ -62,50 +75,54 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
 
   useEffect(() => {
     if (!open) return;
-    setLoading(true); setResult(null); setLenderType('new');
+    const timeout = setTimeout(() => {
+      setLoading(true); setResult(null); setLenderType('new');
 
-    const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
-    const piDocsUrl = isClient ? `${base}/proposed-insured` : `${base}/documents?category=proposed_insured`;
-    Promise.all([
-      fetch('/api/branches').then((r) => r.ok ? r.json() : null),
-      fetch('/api/form-options').then((r) => r.ok ? r.json() : null),
-      fetch(base).then((r) => r.ok ? r.json() : null),
-      fetch(piDocsUrl).then((r) => r.ok ? r.json() : { documents: [] }),
-    ]).then(([brData, formOpts, od, docData]) => {
-      if (brData?.branches) setBranches(brData.branches);
-      if (formOpts?.titleOfficers) {
-        const officers = (formOpts.titleOfficers as Array<{ id: number; name?: string; email?: string }>)
-          .map(t => ({ value: String(t.id), label: t.name ?? t.email ?? '' }));
-        setTitleOfficers(officers);
-      }
-      if (docData?.documents) setExistingDocs(docData.documents);
+      const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
+      const piDocsUrl = isClient ? `${base}/proposed-insured` : `${base}/documents?category=proposed_insured`;
+      Promise.all([
+        fetch('/api/branches').then((r) => r.ok ? r.json() : null),
+        fetch('/api/form-options').then((r) => r.ok ? r.json() : null),
+        fetch(`${base}/proposed-insured/prefill`).then((r) => r.ok ? r.json() : null),
+        fetch(piDocsUrl).then((r) => r.ok ? r.json() : { documents: [] }),
+      ]).then(([brData, formOpts, prefill, docData]) => {
+        if (brData?.branches) setBranches(brData.branches);
+        if (formOpts?.titleOfficers) {
+          const officers = (formOpts.titleOfficers as Array<{ id: number; name?: string; email?: string }>)
+            .map(t => ({ value: String(t.id), label: t.name ?? t.email ?? '' }));
+          setTitleOfficers(officers);
+        }
+        if (docData?.documents) setExistingDocs(docData.documents);
 
-      if (od) {
-        const o = od as OrderData;
-        if (o.branchId) setBranchId(o.branchId);
-        if (o.titleOfficerId) setTitleOfficerId(String(o.titleOfficerId));
-        setLenderCompany(o.lenderCompanyName ?? '');
-        setLenderAddr(o.lenderAddress ?? '');
-        setLenderCity(o.lenderCity ?? '');
-        setLenderState(o.lenderState ?? '');
-        setLenderZip(o.lenderZip ?? '');
-        setLoanNumber(o.loanNumber ?? '');
-        setLoanAmount(o.loanAmount ?? '');
-        setPropStreet(o.propertyStreet ?? '');
-        setPropCity(o.propertyCity ?? '');
-        setPropState(o.propertyState ?? '');
-        setPropZip(o.propertyZip ?? '');
-        const buyers = [
-          [o.buyerFirstName, o.buyerLastName].filter(Boolean).join(' '),
-          [o.secondaryBuyerFirstName, o.secondaryBuyerLastName].filter(Boolean).join(' '),
-        ].filter(Boolean).join(', ');
-        setBorrower(buyers);
-        if (o.prelimDate) setPrelimDate(o.prelimDate.slice(0, 10));
-        setLenderExpanded(!o.lenderCompanyName);
-        setPropertyExpanded(!o.propertyStreet);
-      }
-    }).catch(() => {}).finally(() => setLoading(false));
-  }, [open, orderId]);
+        if (prefill) {
+          const data = prefill as ProposedInsuredPrefill;
+          if (data.branch?.id) setBranchId(data.branch.id);
+          if (data.titleOfficer?.id) setTitleOfficerId(String(data.titleOfficer.id));
+          setLenderCompanyId(data.lender?.companyId ?? null);
+          setLenderLookupCode(data.lender?.lookupCode ?? '');
+          setLenderType(data.lender?.companyId ? 'existing' : 'new');
+          setLenderCompany(data.lender?.company ?? '');
+          setAssignmentClause(data.lender?.assignmentClause ?? '');
+          setLenderAddr(data.lender?.address ?? '');
+          setLenderCity(data.lender?.city ?? '');
+          setLenderState(data.lender?.state ?? '');
+          setLenderZip(data.lender?.zipcode ?? '');
+          setLoanNumber(data.loanNumber ?? '');
+          setLoanAmount(data.loanAmount != null ? String(data.loanAmount) : '');
+          setPropStreet(data.property?.address ?? '');
+          setPropCity(data.property?.city ?? '');
+          setPropState(data.property?.state ?? '');
+          setPropZip(data.property?.zipcode ?? '');
+          setBorrower(data.borrowersVesting ?? '');
+          setSupplementalDate(toDateInput(data.supplementalReportDate) || todayInput());
+          setPrelimDate(toDateInput(data.preliminaryReportDate));
+          setLenderExpanded(!data.lender?.company);
+          setPropertyExpanded(!data.property?.address);
+        }
+      }).catch(() => {}).finally(() => setLoading(false));
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [open, orderId, isClient]);
 
   function handleLenderSearch(v: string) {
     setLenderSearch(v);
@@ -120,7 +137,10 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
   }
 
   function selectLender(l: LenderResult) {
+    setLenderCompanyId(l.id);
+    setLenderLookupCode(l.lookupCode ?? '');
     setLenderCompany(l.companyName ?? '');
+    setAssignmentClause(l.assignmentClause ?? '');
     setLenderAddr(l.address ?? '');
     setLenderCity(l.city ?? '');
     setLenderState(l.state ?? '');
@@ -133,17 +153,31 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
     setGenerating(true); setResult(null);
     try {
       const piBase = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
+      const payload: ProposedInsuredInput = {
+        branchId,
+        titleOfficer: titleOfficerId,
+        lenderCompany,
+        ...(lenderType === 'existing' && lenderCompanyId ? { lenderCompanyId } : {}),
+        ...(lenderLookupCode ? { lenderCompanyLookupCode: lenderLookupCode } : {}),
+        assignmentClause: assignmentClause || undefined,
+        lenderAddress: lenderAddr,
+        lenderCity,
+        lenderState: lenderState || undefined,
+        lenderZipcode: lenderZip,
+        isNewLender: lenderType === 'new',
+        propertyAddress: propStreet,
+        propertyCity: propCity,
+        propertyState: propState,
+        propertyZipcode: propZip,
+        loanNumber,
+        loanAmount: parseMoney(loanAmount),
+        borrowersVesting: borrower,
+        supplementalReportDate: supplementalDate || todayInput(),
+        preliminaryReportDate: prelimDate || undefined,
+      };
       const res = await fetch(`${piBase}/proposed-insured`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          branchId, titleOfficerId: titleOfficerId || undefined,
-          lenderCompany, assignmentClause,
-          lenderAddress: lenderAddr, lenderCity, lenderState, lenderZip,
-          propertyAddress: propStreet, propertyCity: propCity, propertyState: propState, propertyZip: propZip,
-          loanNumber, loanAmount, borrowerNames: borrower,
-          supplementalDate: supplementalDate || undefined,
-          prelimDate: prelimDate || undefined,
-        }),
+        body: JSON.stringify(payload),
       });
       const body = await res.json();
       if (!res.ok || !body.success) throw new Error(body.error ?? 'Generation failed');
@@ -158,7 +192,7 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
   }
 
   return (
-    <ModalShell open={open} onClose={onClose} title="Proposed Insured" subtitle={`File #${fileNumber} — ${address}`} wide>
+    <ModalShell open={open} onClose={onClose} title="Proposed Insured" subtitle={`File #${fileNumber} — ${address}`} wide accentColor={accentColor}>
       {loading ? (
         <div className="p-10 text-center">
           <div className="w-6 h-6 border-2 border-gray-200 border-t-[#F26B2B] rounded-full animate-spin mx-auto" />
@@ -266,7 +300,7 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
                 {existingDocs.map((d) => (
                   <div key={d.id} className="flex items-center justify-between px-3 py-2.5 bg-gray-50 rounded-lg">
                     <div className="min-w-0">
-                      <p className="text-sm text-[#1A1A2E] truncate">{d.fileName}</p>
+                      <p className="text-sm text-[#1A1A2E] truncate">{d.fileName ?? d.filename ?? 'Proposed Insured.pdf'}</p>
                       <p className="text-xs text-[#6B7280]">{new Date(d.createdAt).toLocaleDateString()}</p>
                     </div>
                     <a href={`${isClient ? '/api/client' : '/api'}/documents/${d.id}/download`} className="text-xs font-semibold ml-3 shrink-0 text-[#F26B2B] hover:text-[#E05A1A]">Download</a>
@@ -320,4 +354,18 @@ function Inp({ label, value, onChange, prefix, className = '', placeholder, type
       </div>
     </div>
   );
+}
+
+function parseMoney(value: string): number {
+  const parsed = Number(value.replace(/[$,]/g, '').trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toDateInput(value: string | null | undefined): string {
+  if (!value) return '';
+  return value.slice(0, 10);
+}
+
+function todayInput(): string {
+  return new Date().toISOString().slice(0, 10);
 }

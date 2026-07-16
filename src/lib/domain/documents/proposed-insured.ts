@@ -1,36 +1,39 @@
 import { db } from '@/lib/db/client';
 import { orders, branches, contacts, companies } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { z } from 'zod';
 import { uploadDocument, attachToSoftPro } from './service';
 import { buildPdf } from './proposed-insured-pdf';
 
 // ─── Input Types ─────────────────────────────────────────────────────────────
 
-export interface ProposedInsuredInput {
-  lenderCompany: string;
-  lenderCompanyId?: number;
-  lenderCompanyLookupCode?: string;
-  assignmentClause?: string;
-  lenderAddress: string;
-  lenderCity: string;
-  lenderState?: string;
-  lenderZipcode: string;
-  isNewLender: boolean;
+export const proposedInsuredInputSchema = z.object({
+  lenderCompany: z.string().min(1),
+  lenderCompanyId: z.number().int().positive().optional(),
+  lenderCompanyLookupCode: z.string().optional(),
+  assignmentClause: z.string().optional(),
+  lenderAddress: z.string().min(1),
+  lenderCity: z.string().min(1),
+  lenderState: z.string().optional(),
+  lenderZipcode: z.string().min(1),
+  isNewLender: z.boolean(),
 
-  propertyAddress: string;
-  propertyCity: string;
-  propertyState: string;
-  propertyZipcode: string;
+  propertyAddress: z.string().min(1),
+  propertyCity: z.string().min(1),
+  propertyState: z.string().min(1),
+  propertyZipcode: z.string().min(1),
 
-  titleOfficer: string;
-  loanAmount: number;
-  loanNumber: string;
-  borrowersVesting: string;
-  supplementalReportDate: string;
-  preliminaryReportDate?: string;
+  titleOfficer: z.string().min(1),
+  loanAmount: z.number().min(0),
+  loanNumber: z.string(),
+  borrowersVesting: z.string().min(1),
+  supplementalReportDate: z.string().min(1),
+  preliminaryReportDate: z.string().optional(),
 
-  branchId: number;
-}
+  branchId: z.number().int().positive(),
+});
+
+export type ProposedInsuredInput = z.infer<typeof proposedInsuredInputSchema>;
 
 export interface ProposedInsuredResult {
   success: boolean;

@@ -1,34 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/client-scope';
-import { generateProposedInsured } from '@/lib/domain/documents/proposed-insured';
+import { generateProposedInsured, proposedInsuredInputSchema } from '@/lib/domain/documents/proposed-insured';
 import { db } from '@/lib/db/client';
 import { documents } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-
-const bodySchema = z.object({
-  lenderCompany: z.string().min(1),
-  lenderCompanyId: z.number().int().positive().optional(),
-  lenderCompanyLookupCode: z.string().optional(),
-  assignmentClause: z.string().optional(),
-  lenderAddress: z.string().min(1),
-  lenderCity: z.string().min(1),
-  lenderState: z.string().optional(),
-  lenderZipcode: z.string().min(1),
-  isNewLender: z.boolean(),
-  propertyAddress: z.string().min(1),
-  propertyCity: z.string().min(1),
-  propertyState: z.string().min(1),
-  propertyZipcode: z.string().min(1),
-  titleOfficer: z.string().min(1),
-  loanAmount: z.number().min(0),
-  loanNumber: z.string(),
-  borrowersVesting: z.string().min(1),
-  supplementalReportDate: z.string().min(1),
-  preliminaryReportDate: z.string().optional(),
-  branchId: z.number().int().positive(),
-});
 
 export async function POST(
   req: NextRequest,
@@ -52,7 +28,7 @@ export async function POST(
     }
 
     const body = await req.json().catch(() => null);
-    const parsed = bodySchema.safeParse(body);
+    const parsed = proposedInsuredInputSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid input', details: parsed.error.issues }, { status: 400 });
     }

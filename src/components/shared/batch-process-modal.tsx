@@ -2,6 +2,7 @@
 
 import { ModalShell } from '@/components/shared/action-modals/modal-shell';
 import type { HubOrder } from '@/components/shared/orders-hub-table';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 
 export interface BatchResult {
   order: HubOrder;
@@ -22,7 +23,12 @@ export interface BatchProcessModalProps {
 }
 
 function fmtAddr(o: HubOrder) {
-  return [o.propertyStreet, o.propertyCity, o.propertyState].filter(Boolean).join(', ') || '—';
+  return formatOrderAddress({
+    propertyStreet: o.propertyStreet,
+    propertyCity: o.propertyCity,
+    propertyState: o.propertyState,
+    propertyZip: o.propertyZip,
+  });
 }
 
 function batchTitle(type: string): string {

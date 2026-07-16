@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { formatOrderDate, formatOrderDateTime } from '@/lib/domain/orders/date-format';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -26,6 +27,8 @@ export interface RecentOrder {
     address: string | null;
     city: string | null;
     state: string | null;
+    zip?: string | null;
+    fullAddress?: string | null;
   } | null;
 }
 
@@ -209,9 +212,7 @@ export const BASE_ORDER_COLUMNS = [
 // ─── Formatters ─────────────────────────────────────────────────────────────
 
 export function formatAddress(property: { address: string | null; city: string | null; state: string | null } | null | undefined): string {
-  if (!property) return '—';
-  const parts = [property.address, property.city, property.state].filter(Boolean);
-  return parts.length > 0 ? parts.join(', ') : '—';
+  return formatOrderAddress(property);
 }
 
 export function formatDate(iso: string | null): string {

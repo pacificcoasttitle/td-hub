@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 export interface OrderResult {
@@ -60,7 +61,7 @@ export function StepSelectOrder({ onSelect }: { onSelect: (o: OrderResult) => vo
       {!loading && results.length > 0 && (
         <ul className="mt-3 space-y-1">
           {results.map((o) => {
-            const addr = [o.property?.address, o.property?.city, o.property?.state].filter(Boolean).join(', ');
+            const addr = formatOrderAddress(o.property);
             return (
               <li key={o.id}>
                 <button
@@ -71,7 +72,7 @@ export function StepSelectOrder({ onSelect }: { onSelect: (o: OrderResult) => vo
                     <span className="font-medium text-[#1A1A2E]">{o.fileNumber}</span>
                     <StatusBadge status={o.operationalStatus} />
                   </div>
-                  {addr && <p className="text-sm text-[#6B7280] mt-0.5">{addr}</p>}
+                  {addr !== '—' && <p className="text-sm text-[#6B7280] mt-0.5">{addr}</p>}
                 </button>
               </li>
             );
@@ -96,12 +97,12 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 export function OrderSummaryBanner({ order }: { order: OrderResult }) {
-  const addr = [order.property?.address, order.property?.city, order.property?.state].filter(Boolean).join(', ');
+  const addr = formatOrderAddress(order.property);
   return (
     <div className="flex items-center justify-between px-4 py-3 bg-gray-50 rounded-lg border border-gray-200">
       <div>
         <p className="font-medium text-[#1A1A2E] text-sm">{order.fileNumber}</p>
-        {addr && <p className="text-xs text-[#6B7280]">{addr}</p>}
+        {addr !== '—' && <p className="text-xs text-[#6B7280]">{addr}</p>}
       </div>
       <StatusBadge status={order.operationalStatus} />
     </div>

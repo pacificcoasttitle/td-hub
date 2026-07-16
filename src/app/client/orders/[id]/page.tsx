@@ -7,6 +7,7 @@ import { OrderTimeline } from '@/components/client/order-timeline';
 import { DocumentsTab } from '@/components/client/order-detail/documents-tab';
 import { formatDate as fmtDate, getStatusStyle } from '@/components/client/order-detail/helpers';
 import { ActivityFeed } from '@/components/shared/activity-feed';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 
 interface Document {
   id: number;
@@ -26,6 +27,7 @@ interface OrderDetail {
     address: string | null;
     city: string | null;
     state: string | null;
+    zip?: string | null;
     county: string | null;
     fullAddress: string | null;
   } | null;
@@ -95,9 +97,7 @@ export default function ClientOrderDetailPage() {
     );
   }
 
-  const addr = order.property?.fullAddress
-    ?? [order.property?.address, order.property?.city, order.property?.state].filter(Boolean).join(', ')
-    ?? null;
+  const addr = formatOrderAddress(order.property);
   const status = getStatusStyle(order.operationalStatus);
 
   return (
@@ -114,7 +114,7 @@ export default function ClientOrderDetailPage() {
           <div>
             <span className="font-mono text-sm text-[#4B5563] tracking-wide">{order.fileNumber}</span>
             <h1 className="text-xl sm:text-2xl font-semibold text-[#1B2A4A] mt-1">
-              {addr ?? 'Property details pending'}
+              {addr === '—' ? 'Property details pending' : addr}
             </h1>
           </div>
           <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium flex-shrink-0 border ${status.className}`}>

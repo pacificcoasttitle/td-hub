@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { EmptyState } from '@/components/client/empty-state';
 import { formatDate, getStatusStyle } from '@/components/client/order-detail/helpers';
 import { OrdersHubTable } from '@/components/shared/orders-hub-table';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 
 interface Order {
   id: number;
@@ -122,7 +123,7 @@ export default function ClientDashboardPage() {
 /* ─── File Card ────────────────────────────────────────────────────────────── */
 
 function FileCard({ order }: { order: Order }) {
-  const addr = [order.address, order.city, order.state].filter(Boolean).join(', ');
+  const addr = formatOrderAddress(order);
   const status = getStatusStyle(order.operationalStatus);
 
   return (
@@ -135,7 +136,7 @@ function FileCard({ order }: { order: Order }) {
       </div>
 
       <div className="mb-4">
-        {addr ? (
+        {addr !== '—' ? (
           <h3 className="text-lg font-semibold text-[#1B2A4A] leading-snug">{addr}</h3>
         ) : (
           <p className="text-base text-[#4B5563] italic">Property details pending</p>

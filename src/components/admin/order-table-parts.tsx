@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -8,6 +9,7 @@ export interface OrderProperty {
   address: string | null;
   city: string | null;
   state: string | null;
+  zip?: string | null;
   county: string | null;
   fullAddress: string | null;
 }
@@ -87,9 +89,7 @@ export function PagBtn({ children, disabled, active, onClick }: {
 /* ── Helpers ────────────────────────────────────────────────────────────────── */
 
 export function formatAddress(property: OrderProperty | null): string {
-  if (!property) return '—';
-  const parts = [property.address, property.city, property.state].filter(Boolean);
-  return parts.length > 0 ? parts.join(', ') : '—';
+  return formatOrderAddress(property);
 }
 
 export function buildPageRange(current: number, total: number): (number | null)[] {

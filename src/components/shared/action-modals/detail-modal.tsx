@@ -6,6 +6,7 @@ import { ModalShell } from './modal-shell';
 import { ActivityFeed } from '@/components/shared/activity-feed';
 import { NotesTab } from './notes-tab';
 import { formatOrderDate, formatOrderDateTime } from '@/lib/domain/orders/date-format';
+import { formatOrderMoney } from '@/lib/domain/orders/order-format';
 import { statusLabel } from '@/lib/domain/orders/status-format';
 
 interface OrderDetail {
@@ -201,8 +202,8 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
                 <F l="Product" v={order.productType ?? '—'} />
                 <F l="Opened" v={formatOrderDate(order.openedAt)} />
                 <F l="Closed" v={formatOrderDate(order.closedAt)} />
-                <F l="Sales Price" v={order.salesPrice ? `$${Number(order.salesPrice).toLocaleString()}` : '—'} />
-                <F l="Loan Amount" v={order.loanAmount ? `$${Number(order.loanAmount).toLocaleString()}` : '—'} />
+                <F l="Sales Price" v={formatOrderMoney(order.salesPrice)} />
+                <F l="Loan Amount" v={formatOrderMoney(order.loanAmount)} />
                 <F l="Seller" v={seller || '—'} />
                 <F l="Buyer" v={buyer || '—'} />
               </div>

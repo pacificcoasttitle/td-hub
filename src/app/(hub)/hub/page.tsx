@@ -18,13 +18,18 @@ import {
   type OfficerFilterValue,
 } from '@/components/escrow/officer-filter-chips';
 import type { TaskPriority } from '@/lib/domain/escrow/tasks';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 import { STATUS_FILTER_OPTIONS } from '@/lib/domain/orders/status-format';
 
 interface QuickResult { id: number; fileNumber: string; propertyStreet: string | null; propertyCity: string | null; propertyState: string | null; operationalStatus: string | null; }
 type ModalType = 'cpl' | 'prelim' | 'deliver_prelim' | 'proposed' | 'notes' | 'detail' | null;
 
 function oAddr(o: HubOrder | QuickResult) {
-  return [o.propertyStreet, o.propertyCity, o.propertyState].filter(Boolean).join(', ') || '—';
+  return formatOrderAddress({
+    propertyStreet: o.propertyStreet,
+    propertyCity: o.propertyCity,
+    propertyState: o.propertyState,
+  });
 }
 
 export default function HubPage() {

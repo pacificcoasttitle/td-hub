@@ -8,6 +8,7 @@ import { TH, StatusBadge, DocBadges, ActionsDropdown } from './orders-hub-parts'
 import type { OrderDocuments } from './orders-hub-parts';
 import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
 import { formatOrderDate } from '@/lib/domain/orders/date-format';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 import { STATUS_FILTER_OPTIONS } from '@/lib/domain/orders/status-format';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
@@ -20,6 +21,7 @@ export interface HubOrder {
   propertyStreet: string | null;
   propertyCity: string | null;
   propertyState: string | null;
+  propertyZip?: string | null;
   operationalStatus: string | null;
   softproStatus?: string | null;
   transactionType: string | null;
@@ -188,7 +190,12 @@ export function OrdersHubTable({
   function closeModal() { setModal(null); }
 
   function addr(o: HubOrder) {
-    return [o.propertyStreet, o.propertyCity, o.propertyState].filter(Boolean).join(', ') || '—';
+    return formatOrderAddress({
+      propertyStreet: o.propertyStreet,
+      propertyCity: o.propertyCity,
+      propertyState: o.propertyState,
+      propertyZip: o.propertyZip,
+    });
   }
 
   const selId = modalOrder?.id ?? 0;

@@ -11,6 +11,7 @@ import { OrderOverviewTab } from '@/components/admin/order-tabs/order-overview-t
 import { OrderPropertyTab } from '@/components/admin/order-tabs/order-property-tab';
 import { OrderHistoryTab } from '@/components/admin/order-tabs/order-history-tab';
 import { DeliverPrelimModal } from '@/components/shared/action-modals';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 interface OrderProperty {
@@ -156,9 +157,7 @@ export default function OrderDetailPage() {
 
   const deliverStatus = (order.softproStatus ?? order.operationalStatus ?? '').toLowerCase().trim();
   const canDeliverPrelim = !!order.documents?.prelim?.exists && !['canceled', 'cancelled', 'duplicate'].includes(deliverStatus);
-  const orderAddress = order.property?.fullAddress
-    ?? [order.property?.address, order.property?.city, order.property?.state].filter(Boolean).join(', ')
-    ?? '';
+  const orderAddress = formatOrderAddress(order.property);
 
   return (
     <div className="p-6">
@@ -169,7 +168,7 @@ export default function OrderDetailPage() {
             <h1 className="text-2xl font-semibold text-[#1A1A2E]">{order.fileNumber}</h1>
             <StatusBadge status={order.operationalStatus} />
           </div>
-          {order.property?.fullAddress && <p className="text-[#6B7280] mt-1">{order.property.fullAddress}</p>}
+          {orderAddress !== '—' && <p className="text-[#6B7280] mt-1">{orderAddress}</p>}
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {order.softproLastSyncedAt && <p className="text-xs text-[#6B7280]">Last synced {formatDateTime(order.softproLastSyncedAt)}</p>}
@@ -264,7 +263,7 @@ export default function OrderDetailPage() {
         onClose={() => setDeliverPrelimOpen(false)}
         orderId={order.id}
         fileNumber={order.fileNumber}
-        address={orderAddress}
+        address={orderAddress === '—' ? '' : orderAddress}
       />
     </div>
   );

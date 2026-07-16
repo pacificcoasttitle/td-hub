@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatOrderDate } from '@/lib/domain/orders/date-format';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 import { statusLabel } from '@/lib/domain/orders/status-format';
 
 interface OpeningRow {
@@ -36,7 +37,7 @@ const MONTH_NAMES = [
 ];
 
 function fmtAddr(o: OpeningRow): string {
-  return [o.address, o.city, o.state].filter(Boolean).join(', ') || '—';
+  return formatOrderAddress(o);
 }
 
 function orderTypeLabel(o: OpeningRow): string {

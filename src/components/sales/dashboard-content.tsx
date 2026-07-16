@@ -12,6 +12,7 @@ import type { SalesAction } from './order-actions';
 import type { SalesDashboardStats, SalesOrder } from './types';
 import { useTessaPrelimEnabled } from '@/hooks/useTessaPrelimEnabled';
 import { formatOrderDate } from '@/lib/domain/orders/date-format';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 interface Props {
@@ -23,7 +24,7 @@ const NOW = new Date();
 const MONTH_LABEL = `${NOW.toLocaleString('en-US', { month: 'long' })} ${NOW.getFullYear()}`;
 
 function fmtAddr(o: SalesOrder): string {
-  return [o.address, o.city, o.state].filter(Boolean).join(', ') || '—';
+  return formatOrderAddress(o);
 }
 
 export function DashboardContent({ displayName, role }: Props) {

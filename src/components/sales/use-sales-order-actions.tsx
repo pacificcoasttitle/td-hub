@@ -5,9 +5,10 @@ import { PrelimModal, DetailModal, openPrelimInNewTab } from '@/components/share
 import { TessaPrelimResultsModal } from '@/components/tessa/TessaPrelimResultsModal';
 import type { SalesAction } from './order-actions';
 import type { SalesOrder } from './types';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 
 function fmtAddr(o: SalesOrder): string {
-  return [o.address, o.city, o.state].filter(Boolean).join(', ') || '—';
+  return formatOrderAddress(o);
 }
 
 export function useSalesOrderActions() {

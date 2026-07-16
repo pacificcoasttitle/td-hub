@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
 import { formatOrderDateTime } from '@/lib/domain/orders/date-format';
+import { formatCounty, formatOrderAddress, formatOrderMoney } from '@/lib/domain/orders/order-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
@@ -60,7 +61,7 @@ export function PropertySection({ property }: { property: OrderDetail['property'
   const [expanded, setExpanded] = useState(false);
   if (!property) return <Section><SH>Property</SH><p className="text-sm text-gray-400">No property data</p></Section>;
 
-  const addr = [property.address, property.city, property.state, property.zip].filter(Boolean).join(', ') || '—';
+  const addr = formatOrderAddress(property);
   const legal = property.legalDescription;
   const isLong = legal && legal.length > 150;
 
@@ -70,7 +71,7 @@ export function PropertySection({ property }: { property: OrderDetail['property'
       <div className="space-y-2">
         <Row label="Address" value={addr} />
         <div className="grid grid-cols-2 gap-x-8">
-          <Row label="County" value={property.county || '—'} />
+          <Row label="County" value={formatCounty(property.county)} />
           <Row label="APN" value={property.apn || '—'} />
         </div>
         <Row label="Property Type" value={property.propertyType || '—'} />
@@ -93,16 +94,13 @@ export function PropertySection({ property }: { property: OrderDetail['property'
 /* ── Transaction ───────────────────────────────────────────────────────────── */
 
 export function TransactionSection({ order }: { order: OrderDetail['order'] }) {
-  const price = order.salesPrice != null
-    ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(order.salesPrice)
-    : '—';
   return (
     <Section>
       <SH>Transaction</SH>
       <div className="grid grid-cols-2 gap-x-8 gap-y-2">
         <Row label="Type" value={order.transactionType || '—'} />
         <Row label="Product Type" value={order.productType || '—'} />
-        <Row label="Sales Price" value={price} />
+        <Row label="Sales Price" value={formatOrderMoney(order.salesPrice)} />
         <Row label="Source" value={order.source?.replace(/_/g, ' ') || '—'} />
       </div>
     </Section>

@@ -18,32 +18,15 @@ const {
 }));
 
 vi.mock('@/lib/db/client', () => {
-  const updateWhere = vi.fn(async () => undefined);
   const updateSet = vi.fn((vals: Record<string, unknown>) => {
     if (vals.isActive === false) {
       deactivateCalls.push(vals);
     } else {
       updateSets.push(vals);
     }
-    return { where: updateWhere };
+    return { where: vi.fn(async () => undefined) };
   });
 
-  const limit = vi.fn(async () => contactSelectQueue.shift() ?? []);
-  const where = vi.fn(() => ({ limit }));
-  const from = vi.fn(() => ({
-    where: vi.fn((condition: unknown) => {
-      // count(*) path used by shouldDeactivateExistingSalesReps (no .limit)
-      if (condition && typeof condition === 'object') {
-        return {
-          limit,
-          then: undefined,
-        };
-      }
-      return { limit };
-    }),
-  }));
-
-  // Drizzle builders are thenable in some paths; support both chained limit and awaited select.
   const select = vi.fn((cols?: Record<string, unknown>) => {
     if (cols && 'count' in cols) {
       return {
@@ -67,7 +50,6 @@ vi.mock('@/lib/db/client', () => {
       update: vi.fn(() => ({ set: updateSet })),
       insert: vi.fn(() => ({ values: vi.fn(async () => undefined) })),
       execute: vi.fn(async () => undefined),
-      from,
     },
   };
 });

@@ -260,12 +260,21 @@ export function buildOrderReadModel(data: OrderReadModelData): OrderReadModel {
   };
 }
 
+function redactPartyContact(party: OrderReadModelParty): OrderReadModelParty {
+  return {
+    ...party,
+    email: null,
+    phone: null,
+  };
+}
+
 export function applyVisibility(
   model: OrderReadModel,
   policy: OrderReadModelVisibilityPolicy,
 ): OrderReadModel {
   if (policy === 'internal' || policy === 'staff') return model;
 
+  // Client policy: keep party names/roles/company; redact direct contact details.
   return {
     ...model,
     property: {
@@ -277,6 +286,15 @@ export function applyVisibility(
       salesPriceFormatted: '—',
       loanAmountFormatted: '—',
       premiumFormatted: '—',
+    },
+    parties: model.parties.map(redactPartyContact),
+    relatedParties: {
+      titleCompany: model.relatedParties.titleCompany
+        ? redactPartyContact(model.relatedParties.titleCompany)
+        : null,
+      underwriter: model.relatedParties.underwriter
+        ? redactPartyContact(model.relatedParties.underwriter)
+        : null,
     },
   };
 }

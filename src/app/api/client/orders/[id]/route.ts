@@ -1,7 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/client-scope';
-import { applyVisibility, getOrderReadModel } from '@/lib/domain/orders/read-model';
+import {
+  applyVisibility,
+  getOrderReadModel,
+  type OrderReadModelParty,
+} from '@/lib/domain/orders/read-model';
+
+function toClientParty(party: OrderReadModelParty) {
+  return {
+    role: party.role,
+    isPrimary: party.isPrimary,
+    externalName: party.name,
+    externalCompany: party.company,
+    externalEmail: party.email,
+    externalPhone: party.phone,
+  };
+}
 
 export async function GET(
   _req: NextRequest,
@@ -49,6 +64,8 @@ export async function GET(
           }
         : null,
       documents: visible.documents.active,
+      // order_parties via read model; client-redacted (name/role/company only).
+      parties: visible.parties.map(toClientParty),
     });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

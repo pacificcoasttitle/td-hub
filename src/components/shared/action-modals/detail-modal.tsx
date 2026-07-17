@@ -58,6 +58,8 @@ interface LegacyDetailResponse {
     address: string | null; city: string | null; state: string | null; zip?: string | null;
     county?: string | null; apn?: string | null; legalDescription?: string | null;
   } | null;
+  /** Client detail returns order_parties (client-redacted) on the legacy shape. */
+  parties?: OrderParty[];
 }
 
 function isLegacyDetailResponse(data: AdminDetailResponse | LegacyDetailResponse): data is LegacyDetailResponse {
@@ -254,6 +256,16 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
 function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse | null): OrderDetail | null {
   if (!data) return null;
   if (isLegacyDetailResponse(data)) {
+    const parties = data.parties ?? [];
+    const buyer = parties.find((p) => (p.role === 'buyer' || p.role === 'borrower') && p.isPrimary)
+      ?? parties.find((p) => p.role === 'buyer' || p.role === 'borrower');
+    const seller = parties.find((p) => p.role === 'seller' && p.isPrimary)
+      ?? parties.find((p) => p.role === 'seller');
+    const lender = parties.find((p) => p.role === 'lender' && p.isPrimary)
+      ?? parties.find((p) => p.role === 'lender');
+    const escrow = parties.find((p) => p.role === 'escrow_company' && p.isPrimary)
+      ?? parties.find((p) => p.role === 'escrow_company');
+
     return {
       id: data.id,
       fileNumber: data.fileNumber,
@@ -265,19 +277,19 @@ function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse |
       propertyCounty: data.property?.county ?? null,
       propertyApn: data.property?.apn ?? null,
       propertyLegalDescription: data.property?.legalDescription ?? null,
-      sellerFirstName: null,
-      sellerLastName: null,
-      buyerFirstName: null,
-      buyerLastName: null,
+      sellerFirstName: seller?.externalName?.split(/\s+/)[0] ?? null,
+      sellerLastName: seller?.externalName?.split(/\s+/).slice(1).join(' ') || null,
+      buyerFirstName: buyer?.externalName?.split(/\s+/)[0] ?? null,
+      buyerLastName: buyer?.externalName?.split(/\s+/).slice(1).join(' ') || null,
       transactionType: data.transactionType,
       productType: data.productType ?? null,
       salesPrice: data.salesPrice ?? null,
       loanAmount: data.loanAmount ?? null,
       openedAt: data.openedAt ?? null,
       closedAt: data.closedAt ?? null,
-      lenderName: null,
-      escrowCompanyName: null,
-      parties: [],
+      lenderName: lender?.externalCompany ?? lender?.externalName ?? null,
+      escrowCompanyName: escrow?.externalCompany ?? escrow?.externalName ?? null,
+      parties,
     };
   }
 

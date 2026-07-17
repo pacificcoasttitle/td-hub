@@ -33,6 +33,7 @@ const readModel = {
     state: 'CA',
     zip: null,
     county: 'Los Angeles',
+    propertyType: 'Single Family',
     apn: null,
     legalDescription: null,
   },
@@ -101,6 +102,7 @@ describe('GET /api/client/orders/[id]', () => {
         state: 'CA',
         zip: null,
         county: 'Los Angeles',
+        propertyType: 'Single Family',
         fullAddress: '37833 Tackstem St, Palmdale, CA',
       },
       documents: [

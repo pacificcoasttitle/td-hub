@@ -60,6 +60,7 @@ export async function GET(
             state: visible.property.state,
             zip: visible.property.zip,
             county: visible.property.county === '—' ? null : visible.property.county,
+            propertyType: visible.property.propertyType,
             fullAddress: visible.property.addressFormatted,
           }
         : null,

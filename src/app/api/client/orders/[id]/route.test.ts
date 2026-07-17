@@ -46,6 +46,24 @@ const readModel = {
     loanAmountFormatted: '—',
     premiumFormatted: '—',
   },
+  parties: [
+    {
+      role: 'buyer',
+      name: 'Bea Buyer',
+      company: null,
+      email: null,
+      phone: null,
+      isPrimary: true,
+    },
+    {
+      role: 'lender',
+      name: 'Lender Contact',
+      company: 'Pacific Lending',
+      email: null,
+      phone: null,
+      isPrimary: true,
+    },
+  ],
   documents: {
     active: [
       { id: 1, filename: 'prelim.pdf', category: 'prelim', sizeBytes: 1234, createdAt: 'Jul 16, 2026' },
@@ -62,7 +80,7 @@ describe('GET /api/client/orders/[id]', () => {
     applyVisibilityMock.mockImplementation((model) => model);
   });
 
-  it('returns the client-visible read model shape without redacted fields', async () => {
+  it('returns the client-visible read model shape including order_parties', async () => {
     const response = await GET({} as never, { params: Promise.resolve({ id: '100' }) });
     const body = await response.json();
 
@@ -88,7 +106,26 @@ describe('GET /api/client/orders/[id]', () => {
       documents: [
         { id: 1, filename: 'prelim.pdf', category: 'prelim', sizeBytes: 1234, createdAt: 'Jul 16, 2026' },
       ],
+      parties: [
+        {
+          role: 'buyer',
+          isPrimary: true,
+          externalName: 'Bea Buyer',
+          externalCompany: null,
+          externalEmail: null,
+          externalPhone: null,
+        },
+        {
+          role: 'lender',
+          isPrimary: true,
+          externalName: 'Lender Contact',
+          externalCompany: 'Pacific Lending',
+          externalEmail: null,
+          externalPhone: null,
+        },
+      ],
     });
+    expect(body.parties).not.toEqual([]);
     expect(JSON.stringify(body)).not.toContain('financials');
     expect(JSON.stringify(body)).not.toContain('apn');
     expect(JSON.stringify(body)).not.toContain('legalDescription');

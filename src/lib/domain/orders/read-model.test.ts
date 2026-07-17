@@ -344,4 +344,35 @@ describe('applyVisibility', () => {
     expect(visible.property.legalDescription).toBeNull();
     expect(visible.property.addressFormatted).toBe('123 Main St Unit 4, Glendale, CA 91203');
   });
+
+  it('keeps client party names/roles/company but redacts email and phone', () => {
+    const visible = applyVisibility(buildOrderReadModel(baseData), 'client');
+    const lender = visible.parties.find((party) => party.role === 'lender');
+
+    expect(lender).toMatchObject({
+      role: 'lender',
+      name: 'Lender Contact',
+      company: 'Pacific Lending',
+      email: null,
+      phone: null,
+      isPrimary: true,
+    });
+    expect(visible.parties.every((party) => party.email === null && party.phone === null)).toBe(true);
+    expect(visible.relatedParties.titleCompany).toMatchObject({
+      name: 'Veronica Sanchez',
+      company: 'Pacific Coast Title Company',
+      email: null,
+      phone: null,
+    });
+  });
+
+  it('leaves staff party contact details unredacted', () => {
+    const visible = applyVisibility(buildOrderReadModel(baseData), 'staff');
+    const lender = visible.parties.find((party) => party.role === 'lender');
+
+    expect(lender).toMatchObject({
+      email: 'loan@example.com',
+      phone: '555-1212',
+    });
+  });
 });

@@ -50,6 +50,55 @@ function str(item: SyncRow, key: string): string | null {
   return v && v.trim() ? v.trim() : null;
 }
 
+/**
+ * SoftPro empty/null → omit from UPDATE so Drizzle leaves existing column values
+ * (mapUpdateSet drops undefined keys). Inserts still use the full null-able vals.
+ */
+export function omitEmptyForUpdate<T extends Record<string, unknown>>(
+  vals: T,
+): { [K in keyof T]?: Exclude<T[K], null> } {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(vals)) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'string' && value.trim() === '') continue;
+    out[key] = value;
+  }
+  return out as { [K in keyof T]?: Exclude<T[K], null> };
+}
+
+/**
+ * Guard mass sales-rep deactivation. Empty or suspiciously sparse SoftPro
+ * responses must not wipe isActive for the current roster.
+ */
+export async function shouldDeactivateExistingSalesReps(
+  responseRowCount: number,
+): Promise<{ deactivate: boolean; reason?: string; activeCount: number }> {
+  if (responseRowCount <= 0) {
+    return { deactivate: false, reason: 'empty SoftPro response', activeCount: 0 };
+  }
+
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(contacts)
+    .where(and(eq(contacts.isSalesRep, true), eq(contacts.isActive, true)));
+
+  const activeCount = Number(row?.count ?? 0);
+  if (activeCount <= 0) {
+    return { deactivate: true, activeCount };
+  }
+
+  const minRows = Math.max(1, Math.ceil(activeCount * 0.5));
+  if (responseRowCount < minRows) {
+    return {
+      deactivate: false,
+      reason: `sparse SoftPro response (${responseRowCount} rows vs ${activeCount} active; need >= ${minRows})`,
+      activeCount,
+    };
+  }
+
+  return { deactivate: true, activeCount };
+}
+
 function emptyResult(entityType: string, error?: string): SyncContactsResult {
   return {
     entityType, totalFetched: 0, created: 0, updated: 0, skipped: 0,
@@ -105,7 +154,9 @@ async function syncOpenContacts(items: SyncRow[]): Promise<SyncContactsResult> {
       };
 
       if (existing) {
-        await db.update(contacts).set(vals).where(eq(contacts.id, existing.id));
+        await db.update(contacts)
+          .set(omitEmptyForUpdate(vals))
+          .where(eq(contacts.id, existing.id));
         updated++;
       } else {
         await db.insert(contacts).values({ ...vals, sourceSystem: 'softpro' });
@@ -147,7 +198,9 @@ async function syncTitleOfficers(items: SyncRow[]): Promise<SyncContactsResult> 
       };
 
       if (existing) {
-        await db.update(contacts).set(vals).where(eq(contacts.id, existing.id));
+        await db.update(contacts)
+          .set(omitEmptyForUpdate(vals))
+          .where(eq(contacts.id, existing.id));
         updated++;
       } else {
         await db.insert(contacts).values({
@@ -213,7 +266,9 @@ async function syncEscrowOfficers(items: SyncRow[]): Promise<SyncContactsResult>
       };
 
       if (existing) {
-        await db.update(contacts).set(vals).where(eq(contacts.id, existing.id));
+        await db.update(contacts)
+          .set(omitEmptyForUpdate(vals))
+          .where(eq(contacts.id, existing.id));
         updated++;
       } else {
         await db.insert(contacts).values({
@@ -242,9 +297,18 @@ async function syncSalesRepRows(
   const errors: SyncContactsResult['errors'] = [];
 
   if (options.deactivateExistingSalesReps) {
-    await db.update(contacts)
-      .set({ isActive: false, updatedAt: new Date() })
-      .where(eq(contacts.isSalesRep, true));
+    const gate = await shouldDeactivateExistingSalesReps(items.length);
+    if (!gate.deactivate) {
+      console.warn('[sync-contacts] Skipping sales-rep deactivate-all', {
+        reason: gate.reason,
+        responseRows: items.length,
+        activeSalesReps: gate.activeCount,
+      });
+    } else {
+      await db.update(contacts)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(contacts.isSalesRep, true));
+    }
   }
 
   for (const item of items) {
@@ -275,7 +339,9 @@ async function syncSalesRepRows(
       };
 
       if (existing) {
-        await db.update(contacts).set(vals).where(eq(contacts.id, existing.id));
+        await db.update(contacts)
+          .set(omitEmptyForUpdate(vals))
+          .where(eq(contacts.id, existing.id));
         updated++;
       } else {
         await db.insert(contacts).values({ ...vals, sourceSystem: 'softpro' });
@@ -370,7 +436,9 @@ async function syncCompanyType(config: CompanySyncConfig, items: SyncRow[]): Pro
       }
 
       if (existingContact) {
-        await db.update(contacts).set(contactVals).where(eq(contacts.id, existingContact.id));
+        await db.update(contacts)
+          .set(omitEmptyForUpdate(contactVals))
+          .where(eq(contacts.id, existingContact.id));
       } else {
         await db.insert(contacts).values({
           ...contactVals,
@@ -383,9 +451,10 @@ async function syncCompanyType(config: CompanySyncConfig, items: SyncRow[]): Pro
       const [existingCompany] = await db.select({ id: companies.id })
         .from(companies).where(eq(companies.lookupCode, code)).limit(1);
 
+      const companyName = str(item, f.name);
       const companyVals: Record<string, unknown> = {
         lookupCode: code,
-        name: str(item, f.name) ?? code,
+        name: companyName,
         payeeName: str(item, f.payeeName),
         companyType: config.companyType,
         address1: str(item, f.address1),
@@ -422,10 +491,16 @@ async function syncCompanyType(config: CompanySyncConfig, items: SyncRow[]): Pro
       }
 
       if (existingCompany) {
-        await db.update(companies).set(companyVals).where(eq(companies.id, existingCompany.id));
+        await db.update(companies)
+          .set(omitEmptyForUpdate(companyVals))
+          .where(eq(companies.id, existingCompany.id));
         updated++;
       } else {
-        await db.insert(companies).values({ ...companyVals, sourceSystem: 'softpro', name: (companyVals.name as string) ?? code });
+        await db.insert(companies).values({
+          ...companyVals,
+          sourceSystem: 'softpro',
+          name: companyName ?? code,
+        });
         created++;
       }
     } catch (err) {

@@ -1,23 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/client-scope';
-import { db } from '@/lib/db/client';
-import { documents } from '@/lib/db/schema';
-import { eq, and, desc, inArray } from 'drizzle-orm';
+import { getOrderDocuments } from '@/lib/domain/orders/documents';
 
-/** Client-safe docs: portal products + open-order confirmation email attachments. */
-export const CLIENT_DOCUMENT_CATEGORIES = [
-  'prelim',
-  'cpl',
-  'proposed_insured',
-  'legal_vesting',
-  'tax',
-  'grant_deed',
-] as const;
+/** @deprecated Import from `@/lib/domain/orders/documents` — re-exported for existing tests. */
+export { CLIENT_DOCUMENT_CATEGORIES } from '@/lib/domain/orders/documents';
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
   if (!session) {
@@ -36,32 +27,16 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    const docs = await db
-      .select({
-        id: documents.id,
-        category: documents.category,
-        filename: documents.filename,
-        originalFilename: documents.originalFilename,
-        contentType: documents.contentType,
-        sizeBytes: documents.sizeBytes,
-        description: documents.description,
-        createdAt: documents.createdAt,
-      })
-      .from(documents)
-      .where(
-        and(
-          eq(documents.orderId, orderId),
-          eq(documents.status, 'active'),
-          inArray(documents.category, [...CLIENT_DOCUMENT_CATEGORIES]),
-        )
-      )
-      .orderBy(desc(documents.createdAt));
+    const result = await getOrderDocuments(orderId, 'client');
+    if (!result.ok) {
+      return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    }
 
-    return NextResponse.json({ documents: docs });
+    return NextResponse.json({ documents: result.documents });
   } catch {
     return NextResponse.json(
       { error: 'Internal server error' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

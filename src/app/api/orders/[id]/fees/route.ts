@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrderDetailResource } from '@/lib/security/permissions';
-import { getOrderByIdSimple } from '@/lib/domain/orders/service';
-import { getFees } from '@/lib/integrations/softpro';
+import { getOrderFees } from '@/lib/domain/orders/fees';
 
 export async function GET(
   _req: NextRequest,
@@ -24,42 +23,16 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    const order = await getOrderByIdSimple(orderId);
-    if (!order) {
+    const result = await getOrderFees(orderId, 'staff');
+    if (!result.ok) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    const result = await getFees(order.fileNumber);
-    if (!result.success || !result.data) {
-      return NextResponse.json({
-        success: false,
-        error: result.error?.message ?? 'Failed to retrieve fees',
-      });
+    if (!result.success) {
+      return NextResponse.json({ success: false, error: result.error });
     }
 
-    const invoices = result.data.map((inv) => {
-      const datedInvoice = inv as typeof inv & {
-        InvoiceDate?: string | null;
-        Date?: string | null;
-        CreatedDate?: string | null;
-      };
-      return {
-        invoiceNumber: inv.InvoiceNumber,
-        invoiceDate: datedInvoice.InvoiceDate ?? datedInvoice.Date ?? datedInvoice.CreatedDate ?? null,
-        fees: inv.Fees.map((f) => ({
-          description: f.Description,
-          amount: f.Amount,
-        })),
-        total: inv.Total.Amount,
-      };
-    });
-
-    const grandTotal = invoices.reduce((sum, inv) => sum + inv.total, 0);
-
-    return NextResponse.json({
-      success: true,
-      data: { invoices, grandTotal },
-    });
+    return NextResponse.json({ success: true, data: result.data });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

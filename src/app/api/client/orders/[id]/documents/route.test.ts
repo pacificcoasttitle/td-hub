@@ -36,6 +36,12 @@ vi.mock('@/lib/security/client-scope', () => ({
 }));
 
 vi.mock('@/lib/db/schema', () => ({
+  docCategoryEnum: {
+    enumValues: [
+      'cpl', 'prelim', 'policy', 'legal_vesting', 'grant_deed', 'tax',
+      'general', 'user_upload', 'proposed_insured', 'curative',
+    ],
+  },
   documents: {
     id: 'documents.id',
     category: 'documents.category',
@@ -58,17 +64,20 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 vi.mock('@/lib/db/client', () => {
-  const chain = {
-    from: vi.fn(() => chain),
-    where: whereMock.mockImplementation(() => chain),
-    orderBy: orderByMock.mockImplementation(async () => {
-      const categoryFilter = inArrayMock.mock.calls.find(
-        (call) => call[0] === 'documents.category',
-      );
-      const allowed = new Set((categoryFilter?.[1] as string[] | undefined) ?? []);
-      return MIXED_DOCS.filter((doc) => allowed.has(doc.category));
-    }),
+  const resolveRows = async () => {
+    const categoryFilter = inArrayMock.mock.calls.find(
+      (call) => call[0] === 'documents.category',
+    );
+    const allowed = new Set((categoryFilter?.[1] as string[] | undefined) ?? []);
+    return MIXED_DOCS.filter((doc) => allowed.has(doc.category));
   };
+  const chain: Record<string, unknown> = {};
+  chain.from = vi.fn(() => chain);
+  chain.where = whereMock.mockImplementation(() => chain);
+  chain.orderBy = orderByMock.mockImplementation(() => chain);
+  chain.limit = vi.fn(() => resolveRows());
+  chain.then = (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
+    resolveRows().then(resolve, reject);
   return {
     db: {
       select: vi.fn(() => chain),

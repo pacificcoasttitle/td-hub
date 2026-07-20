@@ -4,9 +4,16 @@ import { useState, useEffect } from 'react';
 import { ModalShell } from './modal-shell';
 import { ActivityFeed } from '@/components/shared/activity-feed';
 import { NotesTab } from './notes-tab';
+import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
 import { formatOrderDate, formatOrderDateTime } from '@/lib/domain/orders/date-format';
-import { formatOrderMoney } from '@/lib/domain/orders/order-format';
+import { formatCounty, formatOrderMoney } from '@/lib/domain/orders/order-format';
 import { statusLabel } from '@/lib/domain/orders/status-format';
+
+interface Assignment {
+  id?: string | number | null;
+  name: string | null;
+  email?: string | null;
+}
 
 interface OrderDetail {
   id: number; fileNumber: string; operationalStatus: string;
@@ -18,7 +25,25 @@ interface OrderDetail {
   transactionType: string | null; productType: string | null; salesPrice: string | null; loanAmount: string | null;
   openedAt: string | null; closedAt: string | null;
   lenderName: string | null; escrowCompanyName: string | null;
+  /** Staff-only; always null on the client legacy path. */
+  source: string | null;
+  /** Staff-only; always null on the client legacy path. */
+  assignments: {
+    salesRep: Assignment | null;
+    titleOfficer: Assignment | null;
+    createdBy: Assignment | null;
+  } | null;
   parties: OrderParty[];
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  manual_entry: 'TD Hub',
+  softpro_sync: 'SoftPro',
+};
+
+function formatSource(source: string | null | undefined): string {
+  if (!source) return '—';
+  return SOURCE_LABELS[source] ?? source.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 interface OrderParty {
@@ -33,6 +58,7 @@ interface OrderParty {
 interface AdminDetailResponse {
   order?: {
     id: number; fileNumber: string; status: string;
+    source?: string | null;
     transactionType: string | null; productType: string | null; salesPrice: string | null; loanAmount?: string | null;
     openedAt?: string | null; closedAt?: string | null;
   };
@@ -47,6 +73,11 @@ interface AdminDetailResponse {
     seller?: { firstName: string | null; lastName: string | null } | null;
     lender?: { name: string | null } | null;
     escrowOfficer?: { name: string | null } | null;
+  };
+  assignments?: {
+    salesRep: Assignment | null;
+    titleOfficer: Assignment | null;
+    createdBy: Assignment | null;
   };
   milestones?: Milestone[];
 }
@@ -186,16 +217,24 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
           </div>
           <div className="p-5">
             {tab === 'Overview' && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <F l="Status" v={statusLabel(order.operationalStatus)} />
-                <F l="Transaction" v={order.transactionType ?? '—'} />
-                <F l="Product" v={order.productType ?? '—'} />
-                <F l="Opened" v={formatOrderDate(order.openedAt)} />
-                <F l="Closed" v={formatOrderDate(order.closedAt)} />
-                <F l="Sales Price" v={displayMoney(order.salesPrice)} />
-                <F l="Loan Amount" v={displayMoney(order.loanAmount)} />
-                <F l="Seller" v={seller || '—'} />
-                <F l="Buyer" v={buyer || '—'} />
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <F l="Status" v={statusLabel(order.operationalStatus)} />
+                  <F l="Transaction" v={order.transactionType ?? '—'} />
+                  <F l="Product" v={order.productType ?? '—'} />
+                  <F l="Opened" v={formatOrderDate(order.openedAt)} />
+                  <F l="Closed" v={formatOrderDate(order.closedAt)} />
+                  <F l="Sales Price" v={displayMoney(order.salesPrice)} />
+                  <F l="Loan Amount" v={displayMoney(order.loanAmount)} />
+                  <F l="Seller" v={seller || '—'} />
+                  <F l="Buyer" v={buyer || '—'} />
+                  {/* Staff-only: client detail omits source; UI gates on !isClient. */}
+                  {!isClient && <F l="Source" v={formatSource(order.source)} />}
+                </div>
+                {/* Staff-only: client path never receives assignments (API + applyVisibility). */}
+                {!isClient && order.assignments && (
+                  <AssignmentsBlock assignments={order.assignments} />
+                )}
               </div>
             )}
             {tab === 'Property' && (
@@ -204,10 +243,12 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
                 <F l="City" v={order.propertyCity ?? '—'} />
                 <F l="State" v={order.propertyState ?? '—'} />
                 <F l="ZIP" v={order.propertyZip ?? '—'} />
-                <F l="County" v={order.propertyCounty ?? '—'} />
+                <F l="County" v={formatCounty(order.propertyCounty)} />
                 <F l="Property Type" v={order.propertyType ?? '—'} />
                 <F l="APN" v={order.propertyApn ?? '—'} />
-                <div className="col-span-2"><F l="Legal Description" v={order.propertyLegalDescription ?? '—'} /></div>
+                <div className="col-span-2">
+                  <LegalDescriptionField value={order.propertyLegalDescription} />
+                </div>
               </div>
             )}
             {tab === 'Parties' && (
@@ -289,6 +330,8 @@ function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse |
       closedAt: data.closedAt ?? null,
       lenderName: lender?.externalCompany ?? lender?.externalName ?? null,
       escrowCompanyName: escrow?.externalCompany ?? escrow?.externalName ?? null,
+      source: null,
+      assignments: null,
       parties,
     };
   }
@@ -318,6 +361,8 @@ function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse |
     closedAt: data.order.closedAt ?? null,
     lenderName: data.parties?.lender?.name ?? null,
     escrowCompanyName: data.parties?.escrowOfficer?.name ?? null,
+    source: data.order.source ?? null,
+    assignments: data.assignments ?? null,
     parties: data.parties?.items ?? [],
   };
 }
@@ -329,6 +374,56 @@ function normalizeMilestones(data: AdminDetailResponse | LegacyDetailResponse | 
 
 function F({ l, v }: { l: string; v: string }) {
   return <div className="px-3 py-2.5 bg-gray-50 rounded-lg"><p className="text-[10px] uppercase tracking-wider text-[#6B7280]">{l}</p><p className="text-sm font-medium text-[#1A1A2E] mt-0.5 truncate">{v}</p></div>;
+}
+
+function LegalDescriptionField({ value }: { value: string | null }) {
+  const [expanded, setExpanded] = useState(false);
+  const legal = value?.trim() || '';
+  const isLong = legal.length > 150;
+
+  return (
+    <div className="px-3 py-2.5 bg-gray-50 rounded-lg">
+      <p className="text-[10px] uppercase tracking-wider text-[#6B7280]">Legal Description</p>
+      <p className={`text-sm font-medium text-[#1A1A2E] mt-0.5 whitespace-pre-wrap ${!expanded && isLong ? 'line-clamp-3' : ''}`}>
+        {legal || '—'}
+      </p>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="text-xs text-[#1B2A4A] font-medium mt-1 hover:underline"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AssignmentsBlock({ assignments }: {
+  assignments: NonNullable<OrderDetail['assignments']>;
+}) {
+  const createdByName = assignments.createdBy?.name;
+  const createdByDisplay = formatCreatedBy(createdByName);
+  const createdByClass = createdByVariant(createdByName) === 'system'
+    ? 'text-[#9CA3AF] italic'
+    : '';
+
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-2">Assignments</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <F l="Sales Rep" v={assignments.salesRep?.name?.trim() || '—'} />
+        <F l="Title Officer" v={assignments.titleOfficer?.name?.trim() || '—'} />
+        <div className="px-3 py-2.5 bg-gray-50 rounded-lg">
+          <p className="text-[10px] uppercase tracking-wider text-[#6B7280]">Created By</p>
+          <p className={`text-sm font-medium mt-0.5 truncate ${createdByClass || 'text-[#1A1A2E]'}`}>
+            {createdByDisplay}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PartiesTab({ parties }: { parties: OrderParty[] }) {

@@ -131,5 +131,8 @@ describe('GET /api/client/orders/[id]', () => {
     expect(JSON.stringify(body)).not.toContain('financials');
     expect(JSON.stringify(body)).not.toContain('apn');
     expect(JSON.stringify(body)).not.toContain('legalDescription');
+    expect(body).not.toHaveProperty('source');
+    expect(body).not.toHaveProperty('assignments');
+    expect(body).not.toHaveProperty('marketingSource');
   });
 });

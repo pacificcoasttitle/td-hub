@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { OrderDetailsModal } from './OrderDetailsModal';
+import { DetailModal } from '@/components/shared/action-modals';
 import { ConfirmationsModal } from './ConfirmationsModal';
 import {
   type OrderProperty,
@@ -153,9 +153,10 @@ export function OrderTable({
 
       {/* Modals */}
       {modal?.type === 'details' && (
-        <OrderDetailsModal
+        <DetailModal
           orderId={modal.order.id}
           fileNumber={modal.order.fileNumber}
+          address={formatAddress(modal.order.property)}
           open
           onClose={closeModal}
         />

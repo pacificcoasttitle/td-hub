@@ -274,9 +274,11 @@ export function applyVisibility(
 ): OrderReadModel {
   if (policy === 'internal' || policy === 'staff') return model;
 
-  // Client policy: keep party names/roles/company; redact direct contact details.
+  // Client policy: keep party names/roles/company; redact contact + staff fields.
   return {
     ...model,
+    source: null,
+    marketingSource: null,
     property: {
       ...model.property,
       apn: null,
@@ -295,6 +297,12 @@ export function applyVisibility(
       underwriter: model.relatedParties.underwriter
         ? redactPartyContact(model.relatedParties.underwriter)
         : null,
+    },
+    assignments: {
+      escrowOfficer: null,
+      titleOfficer: null,
+      salesRep: null,
+      createdBy: null,
     },
   };
 }

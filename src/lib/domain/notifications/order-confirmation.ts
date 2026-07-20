@@ -1,27 +1,20 @@
 import { db } from '@/lib/db/client';
 import {
-  orders, orderProperties, orderParties, contacts,
+  orders, orderParties, contacts,
   profiles, documents, titlePointData, vendorApiLogs,
   notificationLogs,
 } from '@/lib/db/schema';
 import { eq, and, inArray, desc } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/pg-core';
 import { sendEmail, type SendGridAttachment } from '@/lib/integrations/sendgrid/client';
 import { downloadFile } from '@/lib/integrations/s3/client';
 import { getSetting } from '@/lib/domain/settings/service';
+import { applyVisibility, getOrderReadModel } from '@/lib/domain/orders/read-model';
+import { formatCounty, formatOrderAddress } from '@/lib/domain/orders/order-format';
 import {
   orderConfirmationTemplate,
   type ConfirmationParty,
   type ConfirmationTaxData,
 } from './confirmation-template';
-
-const salesRepContact = alias(contacts, 'sales_rep');
-const titleOfficerContact = alias(contacts, 'title_officer');
-
-function cName(c: { fullName: string | null; officerName: string | null; firstName: string | null; lastName: string | null } | null): string | null {
-  if (!c) return null;
-  return c.fullName ?? c.officerName ?? ([c.firstName, c.lastName].filter(Boolean).join(' ') || null);
-}
 
 export async function handleOrderConfirmation(
   orderId: number,
@@ -30,45 +23,11 @@ export async function handleOrderConfirmation(
   const noDocuments = payload?.noDocuments === true;
   const testOverride = typeof payload?.testOverrideTo === 'string' ? payload.testOverrideTo.trim() : '';
 
-  const [row] = await db
-    .select({
-      fileNumber: orders.fileNumber,
-      transactionType: orders.transactionType,
-      productType: orders.productType,
-      salesPrice: orders.salesPrice,
-      loanAmount: orders.loanAmount,
-      createdBy: orders.createdBy,
-      escrowOfficerId: orders.escrowOfficerId,
-      lenderId: orders.lenderId,
-      listingAgentId: orders.listingAgentId,
-      propAddress: orderProperties.address,
-      propCity: orderProperties.city,
-      propState: orderProperties.state,
-      propZip: orderProperties.zip,
-      propCounty: orderProperties.county,
-      propApn: orderProperties.apn,
-      propLegal: orderProperties.legalDescription,
-      propPrimaryOwner: orderProperties.primaryOwner,
-      propSecondaryOwner: orderProperties.secondaryOwner,
-      srEmail: salesRepContact.email,
-      srFullName: salesRepContact.fullName,
-      srOfficerName: salesRepContact.officerName,
-      srFirst: salesRepContact.firstName,
-      srLast: salesRepContact.lastName,
-      toFullName: titleOfficerContact.fullName,
-      toOfficerName: titleOfficerContact.officerName,
-      toFirst: titleOfficerContact.firstName,
-      toLast: titleOfficerContact.lastName,
-    })
-    .from(orders)
-    .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
-    .leftJoin(salesRepContact, eq(orders.salesRepId, salesRepContact.id))
-    .leftJoin(titleOfficerContact, eq(orders.titleOfficerId, titleOfficerContact.id))
-    .where(eq(orders.id, orderId))
-    .limit(1);
+  const model = await getOrderReadModel(orderId);
+  if (!model) throw new Error(`Order ${orderId} not found`);
+  const order = applyVisibility(model, 'staff');
 
-  if (!row) throw new Error(`Order ${orderId} not found`);
-
+  // Contact-joined parties for recipient resolution + email party blocks (email-specific).
   const partyRows = await db.select({
     role: orderParties.role,
     externalName: orderParties.externalName,
@@ -89,29 +48,62 @@ export async function handleOrderConfirmation(
     return { name: p.cFullName ?? p.externalName, email: p.cEmail ?? p.externalEmail, phone: p.cPhone ?? p.externalPhone, company: p.cCompany ?? p.externalCompany };
   };
 
-  const opener = await loadOpener(row.createdBy);
-  const recipientEmails = await loadRecipientEmails(orderId, row, partyRows);
+  const createdById = order.assignments.createdBy?.id != null
+    ? String(order.assignments.createdBy.id)
+    : null;
+  const opener = await loadOpener(createdById);
+  const recipientEmails = await loadRecipientEmails(orderId, {
+    escrowOfficerId: order.escrowOfficerId,
+    lenderId: order.lenderId,
+    listingAgentId: order.listingAgentId,
+    srEmail: order.assignments.salesRep?.email ?? null,
+  }, partyRows);
   const taxData = await loadTaxData(orderId);
-  const legalDescription = await loadLegalDescription(orderId, row.propLegal);
+  const legalDescription = await loadLegalDescription(orderId, order.property.legalDescription);
   const tpShutOff = (await getSetting('titlepoint_shut_off')) === 'true';
 
   const attachments = await buildAttachments(orderId, noDocuments);
 
+  const address = order.property.addressFormatted !== '—'
+    ? order.property.addressFormatted
+    : (formatOrderAddress({
+        address: order.property.line1,
+        city: order.property.city,
+        state: order.property.state,
+        zip: order.property.zip,
+      }) || null);
+  const addressOrNull = address === '—' ? null : address;
+  const countyRaw = order.property.county === '—' ? null : order.property.county;
+  const county = formatCounty(countyRaw);
+  const salesPrice = order.financials.salesPriceFormatted !== '—'
+    ? order.financials.salesPriceFormatted
+    : null;
+  const loanAmount = order.financials.loanAmountFormatted !== '—'
+    ? order.financials.loanAmountFormatted
+    : null;
+
   const { subject, html } = orderConfirmationTemplate({
-    fileNumber: row.fileNumber,
-    address: [row.propAddress, row.propCity, row.propState, row.propZip].filter(Boolean).join(', ') || null,
-    transactionType: row.transactionType,
-    productType: row.productType,
-    salesPrice: row.salesPrice,
-    loanAmount: row.loanAmount,
+    fileNumber: order.fileNumber,
+    address: addressOrNull,
+    transactionType: order.transactionType,
+    productType: order.productType,
+    salesPrice,
+    loanAmount,
     opener,
-    property: { address: row.propAddress, city: row.propCity, zip: row.propZip, county: row.propCounty, apn: row.propApn, legalDescription },
+    property: {
+      address: order.property.line1,
+      city: order.property.city,
+      zip: order.property.zip,
+      county: county === '—' ? null : county,
+      apn: order.property.apn,
+      legalDescription,
+    },
     taxData,
-    seller: { primary: row.propPrimaryOwner, secondary: row.propSecondaryOwner },
+    seller: { primary: order.property.primaryOwner, secondary: order.property.secondaryOwner },
     parties: { buyerAgent: toParty('buyer_agent'), listingAgent: toParty('listing_agent'), lender: toParty('lender'), escrow: toParty('escrow_company') },
     assignments: {
-      salesRep: cName({ fullName: row.srFullName, officerName: row.srOfficerName, firstName: row.srFirst, lastName: row.srLast }),
-      titleOfficer: cName({ fullName: row.toFullName, officerName: row.toOfficerName, firstName: row.toFirst, lastName: row.toLast }),
+      salesRep: order.assignments.salesRep?.name ?? null,
+      titleOfficer: order.assignments.titleOfficer?.name ?? null,
     },
     hasDocuments: attachments.length > 0,
     isTitlePointActive: !tpShutOff,

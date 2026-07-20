@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/permissions';
-import { getOrderById } from '@/lib/domain/orders/service';
+import { applyVisibility, getOrderReadModel } from '@/lib/domain/orders/read-model';
+import { mapStaffOrderDetailResponse } from '@/lib/domain/orders/staff-order-detail';
 import { db } from '@/lib/db/client';
-import { contacts, companies, documents, orderExternalRefs } from '@/lib/db/schema';
+import { contacts, companies, orderExternalRefs } from '@/lib/db/schema';
 import { eq, and, like } from 'drizzle-orm';
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -24,18 +25,22 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    const order = await getOrderById(orderId);
-    if (!order) {
+    const model = await getOrderReadModel(orderId);
+    if (!model) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
+    const visible = applyVisibility(model, 'staff');
+    const detail = mapStaffOrderDetailResponse(visible);
+
+    // CPL modal extras — not part of the canonical order identity, but still served here.
     let lenderContact: {
       companyName: string | null; fullName: string | null;
       address1: string | null; city: string | null; state: string | null; zip: string | null;
       assignmentClause: string | null;
     } | null = null;
 
-    if (order.lenderId) {
+    if (visible.lenderId) {
       const [lc] = await db
         .select({
           companyName: contacts.companyName,
@@ -47,23 +52,21 @@ export async function GET(
           assignmentClause: contacts.assignmentClause,
         })
         .from(contacts)
-        .where(eq(contacts.id, order.lenderId))
+        .where(eq(contacts.id, visible.lenderId))
         .limit(1);
       lenderContact = lc ?? null;
     }
 
-    // Resolve underwriter company for CPL auto-detection
     let underwriterCompany: { name: string; lookupCode: string } | null = null;
-    if (order.underwriterId) {
+    if (visible.underwriterId) {
       const [uw] = await db
         .select({ name: companies.name, lookupCode: companies.lookupCode })
         .from(companies)
-        .where(eq(companies.id, order.underwriterId))
+        .where(eq(companies.id, visible.underwriterId))
         .limit(1);
       if (uw) underwriterCompany = { name: uw.name, lookupCode: uw.lookupCode ?? '' };
     }
 
-    // Load CPL-specific saved data from external refs
     const cplRefRows = await db
       .select({ refType: orderExternalRefs.refType, refValue: orderExternalRefs.refValue })
       .from(orderExternalRefs)
@@ -71,7 +74,7 @@ export async function GET(
         and(
           eq(orderExternalRefs.orderId, orderId),
           like(orderExternalRefs.refType, 'cpl_%'),
-        )
+        ),
       );
 
     const cplData: Record<string, string> = {};
@@ -79,24 +82,11 @@ export async function GET(
       cplData[row.refType] = row.refValue;
     }
 
-    const [prelimDoc] = await db
-      .select({ id: documents.id })
-      .from(documents)
-      .where(and(
-        eq(documents.orderId, orderId),
-        eq(documents.category, 'prelim'),
-        eq(documents.status, 'active'),
-      ))
-      .limit(1);
-
     return NextResponse.json({
-      ...order,
+      ...detail,
       lenderContact,
       cplData,
       underwriter: underwriterCompany,
-      documents: {
-        prelim: { exists: !!prelimDoc },
-      },
     });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

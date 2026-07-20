@@ -17,6 +17,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/jobs/run?name=softpro.retry_document_attach",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/jobs/run?name=notifications.process_outbox",
       "schedule": "*/5 * * * *"
     },

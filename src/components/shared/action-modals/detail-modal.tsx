@@ -102,6 +102,11 @@ function isLegacyDetailResponse(data: AdminDetailResponse | LegacyDetailResponse
 interface Doc {
   id: number; filename: string; originalFilename?: string | null;
   category: string | null; sizeBytes?: number | null; createdAt: string;
+  isSyncedToSoftpro?: boolean | null;
+  softproSyncedAt?: string | null;
+  softproSyncError?: string | null;
+  softproDocumentId?: string | null;
+  softproAttachAttemptCount?: number | null;
 }
 
 interface FeeLineItem {
@@ -255,7 +260,18 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
               <PartiesTab parties={order.parties} />
             )}
             {tab === 'Documents' && (
-              docs.length > 0 ? <DocGroups docs={docs} isClient={isClient} /> : (
+              docs.length > 0 ? (
+                <DocGroups
+                  docs={docs}
+                  isClient={isClient}
+                  onRefreshDocs={() => {
+                    fetch(`${base}/documents`)
+                      .then((r) => r.ok ? r.json() : { documents: [] })
+                      .then((d) => setDocs(d?.documents ?? []))
+                      .catch(() => {});
+                  }}
+                />
+              ) : (
                 <div className="text-center py-8">
                   <svg className="mx-auto h-10 w-10 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                   <p className="text-sm font-medium text-[#1A1A2E] mt-3">No documents generated yet</p>
@@ -699,8 +715,77 @@ function fmtTime(iso: string): { display: string; full: string } {
   } catch { return { display: '—', full: '—' }; }
 }
 
-function DocGroups({ docs, isClient }: { docs: Doc[]; isClient?: boolean }) {
+function SoftProSyncBadge({
+  doc,
+  isClient,
+  onRetry,
+  retrying,
+}: {
+  doc: Doc;
+  isClient?: boolean;
+  onRetry: (id: number) => void;
+  retrying: boolean;
+}) {
+  if (isClient) return null;
+  if (doc.isSyncedToSoftpro) {
+    return (
+      <span
+        className="shrink-0 text-[11px] font-medium text-green-700"
+        title={doc.softproDocumentId ? `SoftPro id ${doc.softproDocumentId}` : 'Synced to SoftPro'}
+      >
+        In SoftPro
+      </span>
+    );
+  }
+  return (
+    <div className="shrink-0 flex flex-col items-end gap-0.5">
+      <span
+        className="text-[11px] font-medium text-amber-700"
+        title={doc.softproSyncError ?? 'Not synced to SoftPro'}
+      >
+        Not in SoftPro
+      </span>
+      <button
+        type="button"
+        disabled={retrying}
+        onClick={() => onRetry(doc.id)}
+        className="text-[11px] font-semibold text-[#1B2A4A] hover:text-[#C5A55A] disabled:opacity-50"
+      >
+        {retrying ? 'Retrying…' : 'Retry'}
+      </button>
+    </div>
+  );
+}
+
+function DocGroups({
+  docs,
+  isClient,
+  onRefreshDocs,
+}: {
+  docs: Doc[];
+  isClient?: boolean;
+  onRefreshDocs?: () => void;
+}) {
   const dlBase = isClient ? '/api/client' : '/api';
+  const [retryingId, setRetryingId] = useState<number | null>(null);
+
+  async function handleRetry(documentId: number) {
+    setRetryingId(documentId);
+    try {
+      const res = await fetch(`/api/documents/${documentId}/attach`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? `Retry failed (${res.status})`);
+      }
+      onRefreshDocs?.();
+    } catch {
+      // Failure is recorded on the documents row; refresh to surface softpro_sync_error.
+      onRefreshDocs?.();
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
   const grouped = DOC_GROUPS.map(({ label, cats }) => ({
     label,
     items: docs.filter((d) => cats.includes(d.category ?? '')),
@@ -730,6 +815,12 @@ function DocGroups({ docs, isClient }: { docs: Doc[]; isClient?: boolean }) {
                       {size && <> · {size}</>}
                     </p>
                   </div>
+                  <SoftProSyncBadge
+                    doc={d}
+                    isClient={isClient}
+                    onRetry={handleRetry}
+                    retrying={retryingId === d.id}
+                  />
                   <button
                     onClick={() => window.open(`${dlBase}/documents/${d.id}/download`, '_blank')}
                     className="shrink-0 inline-flex items-center gap-1 text-xs font-semibold text-[#F26B2B] hover:text-[#E05A1A] opacity-70 group-hover:opacity-100 transition-opacity"

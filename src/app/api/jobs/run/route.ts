@@ -20,6 +20,7 @@ import { handleSyncNewUsers } from '@/lib/jobs/handlers/sync-new-users';
 import { handleSyncAllContacts, handleSyncContactType } from '@/lib/jobs/handlers/sync-all-contacts';
 import { handleJobsWatchdog } from '@/lib/jobs/handlers/jobs-watchdog';
 import { handleOpsDailyReport } from '@/lib/jobs/handlers/ops-daily-report';
+import { handleRetrySoftProDocumentAttach } from '@/lib/jobs/handlers/retry-softpro-document-attach';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 
 function formatTodayForImport(): string {
@@ -95,6 +96,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleJobsWatchdog(),
   'ops.daily_report': () =>
     handleOpsDailyReport(),
+  'softpro.retry_document_attach': () =>
+    handleRetrySoftProDocumentAttach(),
 };
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

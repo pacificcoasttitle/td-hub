@@ -11,6 +11,7 @@ interface CplDocument {
   sizeBytes: number | null;
   createdAt: string;
   isSyncedToSoftpro: boolean;
+  softproSyncError?: string | null;
 }
 
 export default function OrderCpl({ orderId, fileNumber }: { orderId: number; fileNumber: string }) {
@@ -98,10 +99,12 @@ export default function OrderCpl({ orderId, fileNumber }: { orderId: number; fil
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                         </svg>
-                        Synced
+                        In SoftPro
                       </span>
                     ) : (
-                      <span className="text-xs text-[#6B7280]">Pending</span>
+                      <span className="text-xs font-medium text-amber-700" title={doc.softproSyncError ?? undefined}>
+                        Not in SoftPro
+                      </span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">

@@ -35,6 +35,9 @@ export const documents = pgTable('documents', {
   isSyncedToSoftpro: boolean('is_synced_to_softpro').notNull().default(false),
   softproSyncedAt: timestamp('softpro_synced_at'),
   softproSyncError: text('softpro_sync_error'),
+  softproDocumentId: varchar('softpro_document_id', { length: 128 }),
+  softproAttachAttemptCount: integer('softpro_attach_attempt_count').notNull().default(0),
+  softproAttachNextRetryAt: timestamp('softpro_attach_next_retry_at'),
 
   createdBy: varchar('created_by', { length: 64 }),
   createdAt: timestamp('created_at').notNull().defaultNow(),

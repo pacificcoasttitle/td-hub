@@ -45,6 +45,9 @@ export interface OrderDocument {
   isSyncedToSoftpro?: boolean | null;
   softproSyncedAt?: Date | string | null;
   softproSyncError?: string | null;
+  softproDocumentId?: string | null;
+  softproAttachAttemptCount?: number | null;
+  softproAttachNextRetryAt?: Date | string | null;
   createdBy?: string | null;
   updatedAt?: Date | string | null;
 }

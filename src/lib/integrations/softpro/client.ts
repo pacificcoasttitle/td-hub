@@ -604,11 +604,12 @@ export async function getAttachedDocuments(
 
 export async function uploadDocument(params: {
   documentId: number;
+  orderId?: number;
   orderNumber: string;
   documentName: string;
   folderName: string;
   fileUrl: string;
-}): Promise<VendorResult<{ documentId: string }>> {
+}): Promise<VendorResult<Array<{ Status?: number; Message?: string; Id?: string; FileUploadedStatus?: boolean }>>> {
   // Legacy payload shape: array with Id, OrderNumber, DocumentName, FileList
   const body = [{
     Id: String(params.documentId),
@@ -617,10 +618,10 @@ export async function uploadDocument(params: {
     FileList: [{ FolderName: params.folderName, FileURL: params.fileUrl }],
   }];
 
-  return makeRequest<{ documentId: string }>('POST', SOFTPRO_ENDPOINTS.uploadDocument, {
+  return makeRequest('POST', SOFTPRO_ENDPOINTS.uploadDocument, {
     body,
     operation: 'upload_document',
-    orderId: undefined,
+    orderId: params.orderId,
     bodyShape: 'array',
     responseShape: 'array',
   });

@@ -10,6 +10,8 @@ function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.includes(pathname)) return true;
   // SoftPro webhooks stay session-public; handlers verify SOFTPRO_WEBHOOK_SECRET.
   if (pathname.startsWith('/api/webhooks/softpro/')) return true;
+  // SoftPro AddDocuments downloads FileURL; HMAC verified in the route handler.
+  if (pathname.startsWith('/api/softpro/fetch-doc/')) return true;
   if (pathname.startsWith('/_next/')) return true;
   if (pathname.startsWith('/favicon')) return true;
   return false;

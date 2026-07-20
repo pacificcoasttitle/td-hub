@@ -169,7 +169,9 @@ export async function fetchGrantDeed(
       updatedAt: new Date(),
     }).where(eq(titlePointData.id, gdId));
 
-    try { await attachToSoftPro(uploadResult.documentId, 'Title Docs'); } catch { /* best effort */ }
+    // SoftPro write-back is best-effort for grant-deed completion, but failures
+    // are recorded on the documents row (never silently discarded).
+    await attachToSoftPro(uploadResult.documentId, 'Title Docs');
 
     return { success: true, titlePointDataId: gdId, documentId: uploadResult.documentId };
   } catch (err) {

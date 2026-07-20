@@ -435,7 +435,9 @@ export async function fetchImage(
       })
       .where(eq(titlePointData.id, titlePointDataId));
 
-    try { await attachToSoftPro(uploadResult.documentId, 'Title Docs'); } catch { /* best effort */ }
+    // SoftPro write-back is best-effort for TitlePoint completion, but failures
+    // are recorded on the documents row (never silently discarded).
+    await attachToSoftPro(uploadResult.documentId, 'Title Docs');
 
     return { success: true, documentId: uploadResult.documentId };
   } catch (err) {

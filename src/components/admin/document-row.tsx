@@ -15,6 +15,9 @@ interface Document {
   createdAt: string;
   isSyncedToSoftpro: boolean;
   softproSyncedAt: string | null;
+  softproSyncError?: string | null;
+  softproDocumentId?: string | null;
+  softproAttachAttemptCount?: number | null;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -74,17 +77,34 @@ export function DocumentRow({ doc, onRefresh }: { doc: Document; onRefresh: () =
         <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{formatDate(doc.createdAt)}</td>
         <td className="px-4 py-3 whitespace-nowrap">
           {doc.isSyncedToSoftpro ? (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700" title={doc.softproSyncedAt ? `Synced ${formatDate(doc.softproSyncedAt)}` : undefined}>
+            <span
+              className="inline-flex items-center gap-1 text-xs font-medium text-green-700"
+              title={
+                [
+                  doc.softproSyncedAt ? `Synced ${formatDate(doc.softproSyncedAt)}` : 'Synced',
+                  doc.softproDocumentId ? `SoftPro id ${doc.softproDocumentId}` : null,
+                ].filter(Boolean).join(' · ')
+              }
+            >
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
-              {formatCreatedBy(null)}
+              In SoftPro
             </span>
           ) : (
-            <button onClick={handleAttach} disabled={attaching}
-              className="px-2 py-1 text-xs font-medium border border-[#1B2A4A] text-[#1B2A4A] rounded-md hover:bg-[#1B2A4A]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-              {attaching ? 'Attaching…' : 'Attach to SoftPro'}
-            </button>
+            <div className="flex flex-col gap-1 items-start">
+              <span
+                className="text-xs font-medium text-amber-700"
+                title={doc.softproSyncError ?? undefined}
+              >
+                Not in SoftPro
+                {(doc.softproAttachAttemptCount ?? 0) > 0 ? ` (${doc.softproAttachAttemptCount} tries)` : ''}
+              </span>
+              <button onClick={handleAttach} disabled={attaching}
+                className="px-2 py-1 text-xs font-medium border border-[#1B2A4A] text-[#1B2A4A] rounded-md hover:bg-[#1B2A4A]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                {attaching ? 'Retrying…' : 'Retry SoftPro'}
+              </button>
+            </div>
           )}
         </td>
         <td className="px-4 py-3 text-right">

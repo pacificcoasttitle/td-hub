@@ -87,7 +87,9 @@ export async function generateProposedInsured(
       category: 'proposed_insured', description: `Proposed Insured — ${resolved.fileNumber}`, userId,
     });
 
-    attachToSoftPro(documentId, 'desk-file-upload').catch(() => {});
+    // SoftPro write-back is best-effort for the user op, but failures are recorded
+    // on the documents row (never silently discarded).
+    await attachToSoftPro(documentId, 'desk-file-upload');
 
     const awsPath = process.env.AWS_PATH;
     const downloadUrl = awsPath ? `${awsPath}${key}` : undefined;

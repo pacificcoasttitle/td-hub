@@ -38,7 +38,10 @@ export async function POST(
       return NextResponse.json({ error: result.error }, { status });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      softproDocumentId: result.softproDocumentId ?? null,
+    });
   } catch {
     return NextResponse.json(
       { error: 'Failed to attach document to SoftPro' },

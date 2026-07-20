@@ -1,8 +1,9 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { contacts, documents, orderProperties, orders } from '@/lib/db/schema';
+import { documents } from '@/lib/db/schema';
 import { downloadFile } from '@/lib/integrations/s3/client';
 import { sendEmail, type SendGridAttachment } from '@/lib/integrations/sendgrid/client';
+import { applyVisibility, getOrderReadModel } from '@/lib/domain/orders/read-model';
 import {
   BORDER_SOFT,
   ORANGE_TINT,
@@ -207,42 +208,21 @@ export function prelimDeliverySampleTemplate(data: PrelimDeliverySampleData): { 
 }
 
 async function loadOrderEmailContext(orderId: number): Promise<OrderEmailContext> {
-  const [row] = await db
-    .select({
-      fileNumber: orders.fileNumber,
-      propertyAddress: orderProperties.fullAddress,
-      fallbackAddress: orderProperties.address,
-      city: orderProperties.city,
-      state: orderProperties.state,
-      zip: orderProperties.zip,
-      apn: orderProperties.apn,
-      titleOfficerEmail: contacts.email,
-      titleOfficerName: contacts.fullName,
-      titleOfficerPhone: contacts.phone,
-      titleOfficerCell: contacts.cell,
-    })
-    .from(orders)
-    .leftJoin(orderProperties, eq(orderProperties.orderId, orders.id))
-    .leftJoin(contacts, eq(orders.titleOfficerId, contacts.id))
-    .where(eq(orders.id, orderId))
-    .limit(1);
+  const model = await getOrderReadModel(orderId);
+  if (!model) throw new Error(`Order ${orderId} not found`);
+  const order = applyVisibility(model, 'staff');
 
-  if (!row) throw new Error(`Order ${orderId} not found`);
-
-  const fallbackAddress = [
-    row.fallbackAddress,
-    row.city,
-    row.state,
-    row.zip,
-  ].filter((value): value is string => Boolean(value?.trim())).join(', ');
+  const propertyAddress = order.property.addressFormatted !== '—'
+    ? order.property.addressFormatted
+    : null;
 
   return {
-    fileNumber: row.fileNumber,
-    propertyAddress: row.propertyAddress ?? (fallbackAddress || null),
-    apn: row.apn,
-    titleOfficerEmail: row.titleOfficerEmail,
-    titleOfficerName: row.titleOfficerName,
-    titleOfficerPhone: row.titleOfficerPhone ?? row.titleOfficerCell,
+    fileNumber: order.fileNumber,
+    propertyAddress,
+    apn: order.property.apn,
+    titleOfficerEmail: order.assignments.titleOfficer?.email ?? null,
+    titleOfficerName: order.assignments.titleOfficer?.name ?? null,
+    titleOfficerPhone: order.assignments.titleOfficer?.phone ?? null,
   };
 }
 

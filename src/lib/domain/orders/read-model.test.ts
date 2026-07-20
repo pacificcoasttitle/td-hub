@@ -111,6 +111,14 @@ const baseData: OrderReadModelData = {
     source: 'softpro_sync',
     marketingSource: 'Sales Rep Referral',
     operationalStatus: 'in_process',
+    softproStatus: 'In Process',
+    softproLastSyncedAt: '2026-07-16T12:00:00.000Z',
+    isImported: false,
+    branchId: 1,
+    lenderId: 9,
+    underwriterId: 3,
+    escrowOfficerId: 4,
+    listingAgentId: 5,
     transactionType: 'Purchase',
     productType: 'Residential',
     orderType: 'Sale',
@@ -121,6 +129,7 @@ const baseData: OrderReadModelData = {
     completedAt: null,
     closedAt: null,
     receivedAt: '2026-07-15T17:00:00.000Z',
+    updatedAt: '2026-07-16T12:00:00.000Z',
   },
   property: {
     address: '123 Main St',
@@ -133,6 +142,8 @@ const baseData: OrderReadModelData = {
     legalDescription: 'Lot 1 of Tract 2',
     propertyType: 'Single Family',
     fullAddress: '123 Main St Unit 4, Glendale, CA 91203',
+    primaryOwner: 'Sam Seller',
+    secondaryOwner: null,
   },
   parties: [
     { id: 5, role: 'listing_agent', name: 'List Agent', company: 'Agent Co', email: 'list@example.com', phone: '555-5555', isPrimary: true, createdAt: '2026-07-15T18:04:00.000Z' },
@@ -143,9 +154,9 @@ const baseData: OrderReadModelData = {
     { id: 7, role: 'other', name: null, company: 'Westcor Land Title Insurance Company', email: 'claims@wltic.com', phone: '(407)629-5842', isPrimary: false, createdAt: '2026-07-15T18:06:00.000Z' },
   ],
   assignments: {
-    escrowOfficer: { name: 'Ella Escrow', email: 'ella@pct.com' },
-    titleOfficer: { name: 'Tina Title', email: 'unit66@pct.com' },
-    salesRep: { name: 'Ryan Rep', email: 'ryan@pct.com' },
+    escrowOfficer: { name: 'Ella Escrow', email: 'ella@pct.com', phone: '555-0001' },
+    titleOfficer: { name: 'Tina Title', email: 'unit66@pct.com', phone: '555-0002' },
+    salesRep: { name: 'Ryan Rep', email: 'ryan@pct.com', phone: null },
     createdBy: { id: 'profile-1', name: 'Opener User', email: 'opener@pct.com' },
   },
   documents: [
@@ -154,7 +165,7 @@ const baseData: OrderReadModelData = {
     { id: 12, category: 'cpl', filename: 'cpl.pdf', sizeBytes: null, createdAt: '2026-07-16T19:00:00.000Z' },
   ],
   statusHistory: [
-    { status: 'recording_confirmation', notes: 'Recording confirmed', changedAt: '2026-07-18T18:00:00.000Z' },
+    { id: 7, status: 'recording_confirmation', source: 'softpro_sync', notes: 'Recording confirmed', changedAt: '2026-07-18T18:00:00.000Z' },
   ],
   titleSearchCompletedAt: null,
 };
@@ -180,17 +191,29 @@ describe('buildOrderReadModel', () => {
         apn: '5641-001-002',
         propertyType: 'Single Family',
       },
+      softproStatus: 'In Process',
+      softproLastSyncedAt: '2026-07-16T12:00:00.000Z',
       financials: {
         salesPriceFormatted: '$490,000',
         loanAmountFormatted: '$425,000',
         premiumFormatted: '—',
+        salesPrice: '490000.00',
+        loanAmount: '425000.00',
       },
       dates: {
         openedAt: 'Jul 15, 2026',
         closedAt: '—',
         completedAt: '—',
         receivedAt: 'Jul 15, 2026',
+        openedAtIso: '2026-07-15T18:00:00.000Z',
       },
+      statusHistory: [{
+        id: 7,
+        status: 'recording_confirmation',
+        source: 'softpro_sync',
+        notes: 'Recording confirmed',
+        changedAt: '2026-07-18T18:00:00.000Z',
+      }],
       assignments: baseData.assignments,
     });
   });
@@ -339,9 +362,14 @@ describe('applyVisibility', () => {
       salesPriceFormatted: '—',
       loanAmountFormatted: '—',
       premiumFormatted: '—',
+      salesPrice: null,
+      loanAmount: null,
     });
     expect(visible.property.apn).toBeNull();
     expect(visible.property.legalDescription).toBeNull();
+    expect(visible.property.primaryOwner).toBeNull();
+    expect(visible.softproStatus).toBeNull();
+    expect(visible.statusHistory).toEqual([]);
     expect(visible.property.addressFormatted).toBe('123 Main St Unit 4, Glendale, CA 91203');
   });
 

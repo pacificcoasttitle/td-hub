@@ -3,26 +3,14 @@ import { sendPrelimDeliveryEmail } from './prelim-delivery-send';
 
 const {
   downloadFile,
-  orderContextRows,
+  getOrderReadModelMock,
   prelimDocRows,
   resolvePrelimRecipients,
   sendEmail,
   writePrelimDeliveryProofs,
 } = vi.hoisted(() => ({
   downloadFile: vi.fn(),
-  orderContextRows: [] as Array<{
-    fileNumber: string;
-    propertyAddress: string | null;
-    fallbackAddress: string | null;
-    city: string | null;
-    state: string | null;
-    zip: string | null;
-    apn: string | null;
-    titleOfficerEmail: string | null;
-    titleOfficerName: string | null;
-    titleOfficerPhone: string | null;
-    titleOfficerCell: string | null;
-  }>,
+  getOrderReadModelMock: vi.fn(),
   prelimDocRows: [] as Array<{
     id: number;
     filename: string;
@@ -79,16 +67,20 @@ vi.mock('@/lib/db/schema', () => ({
   },
 }));
 
+vi.mock('@/lib/domain/orders/read-model', () => ({
+  getOrderReadModel: getOrderReadModelMock,
+  applyVisibility: (model: unknown) => model,
+}));
+
 vi.mock('@/lib/db/client', () => ({
   db: {
     select: vi.fn(() => ({
-      from: vi.fn((table: { __table?: string }) => {
-        const rows = table.__table === 'documents' ? prelimDocRows : orderContextRows;
+      from: vi.fn(() => {
         const query = {
           leftJoin: vi.fn(() => query),
           where: vi.fn(() => ({
-            limit: vi.fn(async (count: number) => rows.slice(0, count)),
-            orderBy: vi.fn(async () => rows),
+            limit: vi.fn(async (count: number) => prelimDocRows.slice(0, count)),
+            orderBy: vi.fn(async () => prelimDocRows),
           })),
         };
         return query;
@@ -120,18 +112,19 @@ describe('sendPrelimDeliveryEmail', () => {
   beforeEach(() => {
     process.env.PRELIM_DELIVERY_TEST_RECIPIENT = 'safe-test@example.com';
     delete process.env.PRELIM_DELIVERY_LIVE;
-    orderContextRows.splice(0, orderContextRows.length, {
+    getOrderReadModelMock.mockResolvedValue({
       fileNumber: '12345-PCT',
-      propertyAddress: '123 Main St, Downey, CA 90241',
-      fallbackAddress: null,
-      city: null,
-      state: null,
-      zip: null,
-      apn: '999-111-222',
-      titleOfficerEmail: 'unit42@pct.com',
-      titleOfficerName: 'Title Unit 42',
-      titleOfficerPhone: '562-555-0100',
-      titleOfficerCell: null,
+      property: {
+        addressFormatted: '123 Main St, Downey, CA 90241',
+        apn: '999-111-222',
+      },
+      assignments: {
+        titleOfficer: {
+          name: 'Title Unit 42',
+          email: 'unit42@pct.com',
+          phone: '562-555-0100',
+        },
+      },
     });
     prelimDocRows.splice(0, prelimDocRows.length,
       {
@@ -326,18 +319,19 @@ describe('sendPrelimDeliveryEmail', () => {
   });
 
   it('falls back to open orders as Reply-To when no title officer email resolves', async () => {
-    orderContextRows.splice(0, orderContextRows.length, {
+    getOrderReadModelMock.mockResolvedValue({
       fileNumber: '12345-PCT',
-      propertyAddress: '123 Main St, Downey, CA 90241',
-      fallbackAddress: null,
-      city: null,
-      state: null,
-      zip: null,
-      apn: '999-111-222',
-      titleOfficerEmail: null,
-      titleOfficerName: null,
-      titleOfficerPhone: null,
-      titleOfficerCell: null,
+      property: {
+        addressFormatted: '123 Main St, Downey, CA 90241',
+        apn: '999-111-222',
+      },
+      assignments: {
+        titleOfficer: {
+          name: null,
+          email: null,
+          phone: null,
+        },
+      },
     });
 
     const result = await sendPrelimDeliveryEmail(123, {

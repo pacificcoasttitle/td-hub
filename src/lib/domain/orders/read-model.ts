@@ -47,6 +47,15 @@ export type OrderMilestoneState = 'complete' | 'in_progress' | 'pending';
  * should call applyVisibility() for layer-specific redaction instead of
  * re-querying or re-formatting fields locally.
  */
+export interface OrderReadModelStatusHistoryEntry {
+  id: number;
+  status: string;
+  source: string;
+  notes: string | null;
+  /** ISO timestamp for wire consumers that re-format (full page History tab). */
+  changedAt: string;
+}
+
 export interface OrderReadModel {
   id: number;
   fileNumber: string;
@@ -54,6 +63,15 @@ export interface OrderReadModel {
   source: string | null;
   marketingSource: string | null;
   status: { value: string; label: string; color: string };
+  /** SoftPro operational mirror — staff surfaces (full page). */
+  softproStatus: string | null;
+  softproLastSyncedAt: string | null;
+  isImported: boolean;
+  branchId: number | null;
+  lenderId: number | null;
+  underwriterId: number | null;
+  escrowOfficerId: number | null;
+  listingAgentId: number | null;
   transactionType: string | null;
   productType: string | null;
   orderType: string | null;
@@ -68,17 +86,28 @@ export interface OrderReadModel {
     apn: string | null;
     legalDescription: string | null;
     propertyType: string | null;
+    primaryOwner: string | null;
+    secondaryOwner: string | null;
   };
   financials: {
     salesPriceFormatted: string;
     loanAmountFormatted: string;
     premiumFormatted: string;
+    /** Raw DB values for forms / CPL (not display-formatted). */
+    salesPrice: string | null;
+    loanAmount: string | null;
   };
   dates: {
     openedAt: string;
     closedAt: string;
     completedAt: string;
     receivedAt: string;
+    /** ISO timestamps for consumers that call formatOrderDate themselves. */
+    openedAtIso: string | null;
+    closedAtIso: string | null;
+    completedAtIso: string | null;
+    createdAtIso: string | null;
+    updatedAtIso: string | null;
   };
   parties: OrderReadModelParty[];
   relatedParties: {
@@ -93,6 +122,8 @@ export interface OrderReadModel {
   };
   documents: OrderReadModelDocuments;
   milestones: OrderReadModelMilestone[];
+  /** Real order_status_history (not milestones). Newest-first for timeline UIs. */
+  statusHistory: OrderReadModelStatusHistoryEntry[];
 }
 
 export interface OrderReadModelParty {
@@ -108,6 +139,7 @@ export interface OrderReadModelAssignment {
   id?: string | number | null;
   name: string | null;
   email: string | null;
+  phone?: string | null;
 }
 
 export interface OrderReadModelDocuments {
@@ -144,6 +176,14 @@ export interface OrderReadModelData {
     source: string | null;
     marketingSource: string | null;
     operationalStatus: string;
+    softproStatus?: string | null;
+    softproLastSyncedAt?: Date | string | null;
+    isImported?: boolean | null;
+    branchId?: number | null;
+    lenderId?: number | null;
+    underwriterId?: number | null;
+    escrowOfficerId?: number | null;
+    listingAgentId?: number | null;
     transactionType: string | null;
     productType: string | null;
     orderType: string | null;
@@ -154,6 +194,7 @@ export interface OrderReadModelData {
     closedAt: Date | string | null;
     completedAt: Date | string | null;
     receivedAt: Date | string | null;
+    updatedAt?: Date | string | null;
   };
   property: {
     address: string | null;
@@ -166,6 +207,8 @@ export interface OrderReadModelData {
     legalDescription: string | null;
     propertyType: string | null;
     fullAddress: string | null;
+    primaryOwner?: string | null;
+    secondaryOwner?: string | null;
   } | null;
   parties: OrderReadModelPartySource[];
   assignments: {
@@ -199,7 +242,9 @@ export interface OrderReadModelDocumentSource {
 }
 
 export interface OrderReadModelStatusSource {
+  id?: number | null;
   status: string;
+  source?: string | null;
   notes: string | null;
   changedAt: Date | string | null;
 }
@@ -223,6 +268,14 @@ export function buildOrderReadModel(data: OrderReadModelData): OrderReadModel {
       label: status.label,
       color: status.color,
     },
+    softproStatus: data.order.softproStatus ?? null,
+    softproLastSyncedAt: toIso(data.order.softproLastSyncedAt),
+    isImported: Boolean(data.order.isImported),
+    branchId: data.order.branchId ?? null,
+    lenderId: data.order.lenderId ?? null,
+    underwriterId: data.order.underwriterId ?? null,
+    escrowOfficerId: data.order.escrowOfficerId ?? null,
+    listingAgentId: data.order.listingAgentId ?? null,
     transactionType: data.order.transactionType,
     productType: data.order.productType,
     orderType: data.order.orderType,
@@ -237,17 +290,26 @@ export function buildOrderReadModel(data: OrderReadModelData): OrderReadModel {
       apn: data.property?.apn ?? null,
       legalDescription: data.property?.legalDescription ?? null,
       propertyType: data.property?.propertyType ?? null,
+      primaryOwner: data.property?.primaryOwner ?? null,
+      secondaryOwner: data.property?.secondaryOwner ?? null,
     },
     financials: {
       salesPriceFormatted: formatOrderMoney(data.order.salesPrice),
       loanAmountFormatted: formatOrderMoney(data.order.loanAmount),
       premiumFormatted: formatOrderMoney(data.order.premium),
+      salesPrice: rawMoney(data.order.salesPrice),
+      loanAmount: rawMoney(data.order.loanAmount),
     },
     dates: {
       openedAt: formatOrderDate(data.order.openedAt),
       closedAt: formatOrderDate(data.order.closedAt),
       completedAt: formatOrderDate(data.order.completedAt),
       receivedAt: formatOrderDate(data.order.receivedAt),
+      openedAtIso: toIso(data.order.openedAt),
+      closedAtIso: toIso(data.order.closedAt),
+      completedAtIso: toIso(data.order.completedAt),
+      createdAtIso: toIso(data.order.receivedAt),
+      updatedAtIso: toIso(data.order.updatedAt ?? data.order.receivedAt),
     },
     parties: orderPartiesCanonically(data.parties),
     relatedParties: {
@@ -257,6 +319,16 @@ export function buildOrderReadModel(data: OrderReadModelData): OrderReadModel {
     assignments: data.assignments,
     documents: summarizeActiveDocuments(data.documents),
     milestones: deriveOrderMilestones(data),
+    statusHistory: [...data.statusHistory]
+      .map((entry, index) => ({
+        id: entry.id ?? index + 1,
+        status: entry.status,
+        source: entry.source ?? 'system',
+        notes: entry.notes,
+        changedAt: toIso(entry.changedAt) ?? '',
+      }))
+      .filter((entry) => entry.changedAt)
+      .sort((a, b) => toTime(b.changedAt) - toTime(a.changedAt)),
   };
 }
 
@@ -279,15 +351,26 @@ export function applyVisibility(
     ...model,
     source: null,
     marketingSource: null,
+    softproStatus: null,
+    softproLastSyncedAt: null,
+    branchId: null,
+    lenderId: null,
+    underwriterId: null,
+    escrowOfficerId: null,
+    listingAgentId: null,
     property: {
       ...model.property,
       apn: null,
       legalDescription: null,
+      primaryOwner: null,
+      secondaryOwner: null,
     },
     financials: {
       salesPriceFormatted: '—',
       loanAmountFormatted: '—',
       premiumFormatted: '—',
+      salesPrice: null,
+      loanAmount: null,
     },
     parties: model.parties.map(redactPartyContact),
     relatedParties: {
@@ -304,6 +387,7 @@ export function applyVisibility(
       salesRep: null,
       createdBy: null,
     },
+    statusHistory: [],
   };
 }
 
@@ -414,6 +498,14 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
       source: orders.source,
       marketingSource: orders.marketingSource,
       operationalStatus: orders.operationalStatus,
+      softproStatus: orders.softproStatus,
+      softproLastSyncedAt: orders.softproLastSyncedAt,
+      isImported: orders.isImported,
+      branchId: orders.branchId,
+      lenderId: orders.lenderId,
+      underwriterId: orders.underwriterId,
+      escrowOfficerId: orders.escrowOfficerId,
+      listingAgentId: orders.listingAgentId,
       transactionType: orders.transactionType,
       productType: orders.productType,
       orderType: orders.orderType,
@@ -423,6 +515,7 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
       closedAt: orders.closedAt,
       completedAt: orders.completedAt,
       receivedAt: orders.createdAt,
+      updatedAt: orders.updatedAt,
       propAddress: orderProperties.address,
       propCity: orderProperties.city,
       propState: orderProperties.state,
@@ -432,24 +525,30 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
       propLegalDescription: orderProperties.legalDescription,
       propPropertyType: orderProperties.propertyType,
       propFullAddress: orderProperties.fullAddress,
+      propPrimaryOwner: orderProperties.primaryOwner,
+      propSecondaryOwner: orderProperties.secondaryOwner,
       eoFullName: escrowOfficerContact.fullName,
       eoOfficerName: escrowOfficerContact.officerName,
       eoFirstName: escrowOfficerContact.firstName,
       eoLastName: escrowOfficerContact.lastName,
       eoCompanyName: escrowOfficerContact.companyName,
       eoEmail: escrowOfficerContact.email,
+      eoPhone: escrowOfficerContact.phone,
       toFullName: titleOfficerContact.fullName,
       toOfficerName: titleOfficerContact.officerName,
       toFirstName: titleOfficerContact.firstName,
       toLastName: titleOfficerContact.lastName,
       toCompanyName: titleOfficerContact.companyName,
       toEmail: titleOfficerContact.email,
+      toPhone: titleOfficerContact.phone,
+      toCell: titleOfficerContact.cell,
       srFullName: salesRepContact.fullName,
       srOfficerName: salesRepContact.officerName,
       srFirstName: salesRepContact.firstName,
       srLastName: salesRepContact.lastName,
       srCompanyName: salesRepContact.companyName,
       srEmail: salesRepContact.email,
+      srPhone: salesRepContact.phone,
       createdById: createdByProfile.id,
       createdByName: createdByProfile.displayName,
       createdByEmail: createdByProfile.email,
@@ -493,7 +592,9 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
       .orderBy(asc(documents.createdAt), asc(documents.id)),
     db
       .select({
+        id: orderStatusHistory.id,
         status: orderStatusHistory.status,
+        source: orderStatusHistory.source,
         notes: orderStatusHistory.notes,
         changedAt: orderStatusHistory.changedAt,
       })
@@ -516,6 +617,14 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
       source: row.source,
       marketingSource: row.marketingSource,
       operationalStatus: row.operationalStatus,
+      softproStatus: row.softproStatus,
+      softproLastSyncedAt: row.softproLastSyncedAt,
+      isImported: row.isImported,
+      branchId: row.branchId,
+      lenderId: row.lenderId,
+      underwriterId: row.underwriterId,
+      escrowOfficerId: row.escrowOfficerId,
+      listingAgentId: row.listingAgentId,
       transactionType: row.transactionType,
       productType: row.productType,
       orderType: row.orderType,
@@ -526,6 +635,7 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
       closedAt: row.closedAt,
       completedAt: row.completedAt,
       receivedAt: row.receivedAt,
+      updatedAt: row.updatedAt,
     },
     property: {
       address: row.propAddress,
@@ -538,6 +648,8 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
       legalDescription: row.propLegalDescription,
       propertyType: row.propPropertyType,
       fullAddress: row.propFullAddress,
+      primaryOwner: row.propPrimaryOwner,
+      secondaryOwner: row.propSecondaryOwner,
     },
     parties: partyRows,
     assignments: {
@@ -548,6 +660,7 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
         lastName: row.eoLastName,
         companyName: row.eoCompanyName,
         email: row.eoEmail,
+        phone: row.eoPhone,
       }),
       titleOfficer: assignment({
         fullName: row.toFullName,
@@ -556,6 +669,7 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
         lastName: row.toLastName,
         companyName: row.toCompanyName,
         email: row.toEmail,
+        phone: row.toPhone ?? row.toCell,
       }),
       salesRep: assignment({
         fullName: row.srFullName,
@@ -564,6 +678,7 @@ async function loadOrderReadModelData(orderId: number): Promise<OrderReadModelDa
         lastName: row.srLastName,
         companyName: row.srCompanyName,
         email: row.srEmail,
+        phone: row.srPhone,
       }),
       createdBy: row.createdById ? {
         id: row.createdById,
@@ -615,10 +730,22 @@ function assignment(contact: {
   lastName: string | null;
   companyName: string | null;
   email: string | null;
+  phone?: string | null;
 }): OrderReadModelAssignment | null {
   const name = contactDisplayName(contact);
   if (!name && !contact.email) return null;
-  return { name, email: contact.email };
+  return { name, email: contact.email, phone: contact.phone ?? null };
+}
+
+function toIso(value: Date | string | null | undefined): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function rawMoney(value: number | string | null | undefined): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  return String(value);
 }
 
 function milestoneState(

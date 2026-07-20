@@ -45,14 +45,12 @@ vi.mock('@/lib/db/schema', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...args) => ({ eq: args })),
+  and: vi.fn((...args) => ({ and: args })),
   desc: vi.fn((v) => v),
 }));
 
 vi.mock('@/lib/db/client', () => {
-  const selectChain: Record<string, unknown> = {};
-  selectChain.from = vi.fn(() => selectChain);
-  selectChain.where = whereMock.mockImplementation(() => selectChain);
-  selectChain.orderBy = vi.fn(async () => [
+  const notes = [
     {
       id: 1,
       subject: 'Staff',
@@ -71,8 +69,14 @@ vi.mock('@/lib/db/client', () => {
       isSyncedToSoftpro: false,
       isInternal: false,
     },
-  ]);
+  ];
+  const selectChain: Record<string, unknown> = {};
+  selectChain.from = vi.fn(() => selectChain);
+  selectChain.where = whereMock.mockImplementation(() => selectChain);
+  selectChain.orderBy = vi.fn(() => selectChain);
   selectChain.limit = vi.fn(async () => [{ fileNumber: '20012345-OCT' }]);
+  selectChain.then = (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
+    Promise.resolve(notes).then(resolve, reject);
 
   returningMock.mockResolvedValue([
     {

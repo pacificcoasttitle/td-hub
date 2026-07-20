@@ -46,10 +46,7 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 vi.mock('@/lib/db/client', () => {
-  const chain: Record<string, unknown> = {};
-  chain.from = vi.fn(() => chain);
-  chain.where = whereMock.mockImplementation(() => chain);
-  chain.orderBy = vi.fn(async () => [
+  const notes = [
     {
       id: 2,
       subject: 'Client visible',
@@ -58,8 +55,14 @@ vi.mock('@/lib/db/client', () => {
       createdAt: new Date('2026-01-02'),
       isSyncedToSoftpro: false,
     },
-  ]);
+  ];
+  const chain: Record<string, unknown> = {};
+  chain.from = vi.fn(() => chain);
+  chain.where = whereMock.mockImplementation(() => chain);
+  chain.orderBy = vi.fn(() => chain);
   chain.limit = vi.fn(async () => [{ fileNumber: '20012345-OCT' }]);
+  chain.then = (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
+    Promise.resolve(notes).then(resolve, reject);
   return {
     db: {
       select: selectMock.mockImplementation(() => chain),

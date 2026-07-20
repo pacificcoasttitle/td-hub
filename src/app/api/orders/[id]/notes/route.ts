@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrderDetailResource } from '@/lib/security/permissions';
-import { db } from '@/lib/db/client';
-import { orders, orderNotes } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
-import { addNotes } from '@/lib/integrations/softpro';
+import { createOrderNote, getOrderNotes } from '@/lib/domain/orders/notes';
 
 const noteSchema = z.object({
   subject: z.string().max(255).optional(),
@@ -40,47 +37,23 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid input', details: parsed.error.issues }, { status: 400 });
     }
 
-    const [order] = await db
-      .select({ fileNumber: orders.fileNumber })
-      .from(orders)
-      .where(eq(orders.id, orderId))
-      .limit(1);
+    const result = await createOrderNote({
+      orderId,
+      visibility: 'staff',
+      text: parsed.data.text,
+      subject: parsed.data.subject,
+      shareWithClient: parsed.data.shareWithClient,
+      authorName: session.displayName ?? session.email,
+      authorId: session.id,
+    });
 
-    if (!order) {
+    if (!result.ok) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    const isInternal = parsed.data.shareWithClient !== true;
-
-    const [note] = await db.insert(orderNotes).values({
-      orderId,
-      subject: parsed.data.subject ?? null,
-      body: parsed.data.text,
-      authorName: session.displayName ?? session.email,
-      authorId: session.id,
-      isInternal,
-    }).returning();
-
-    let synced = false;
-    try {
-      const spResult = await addNotes(order.fileNumber, parsed.data.text);
-      if (spResult.success) {
-        synced = true;
-        await db.update(orderNotes).set({ isSyncedToSoftpro: true }).where(eq(orderNotes.id, note!.id));
-      }
-    } catch { /* best effort */ }
-
     return NextResponse.json({
       success: true,
-      note: {
-        id: note!.id,
-        subject: note!.subject,
-        body: note!.body,
-        authorName: note!.authorName,
-        createdAt: note!.createdAt,
-        isSyncedToSoftpro: synced,
-        isInternal: note!.isInternal,
-      },
+      note: result.note,
     }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -107,22 +80,8 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    // Staff sees all notes (internal + shared).
-    const rows = await db
-      .select({
-        id: orderNotes.id,
-        subject: orderNotes.subject,
-        body: orderNotes.body,
-        authorName: orderNotes.authorName,
-        createdAt: orderNotes.createdAt,
-        isSyncedToSoftpro: orderNotes.isSyncedToSoftpro,
-        isInternal: orderNotes.isInternal,
-      })
-      .from(orderNotes)
-      .where(eq(orderNotes.orderId, orderId))
-      .orderBy(desc(orderNotes.createdAt));
-
-    return NextResponse.json({ notes: rows });
+    const { notes } = await getOrderNotes(orderId, 'staff');
+    return NextResponse.json({ notes });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

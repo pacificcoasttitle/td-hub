@@ -21,6 +21,7 @@ vi.mock('@/lib/db/client', () => {
   const chain: Record<string, unknown> = {};
   chain.from = vi.fn(() => chain);
   chain.where = vi.fn(() => chain);
+  chain.innerJoin = vi.fn(() => chain);
   chain.orderBy = vi.fn(() => chain);
   chain.limit = vi.fn(empty);
   chain.then = (resolve: (value: unknown[]) => unknown) => Promise.resolve([]).then(resolve);
@@ -75,6 +76,7 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...args) => ({ eq: args })),
   and: vi.fn((...args) => ({ and: args })),
   desc: vi.fn((v) => v),
+  inArray: vi.fn((...args) => ({ inArray: args })),
 }));
 
 vi.mock('@/lib/domain/orders/service', () => ({

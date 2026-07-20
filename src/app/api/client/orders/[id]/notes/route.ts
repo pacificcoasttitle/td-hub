@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/client-scope';
-import { db } from '@/lib/db/client';
-import { orders, orderNotes } from '@/lib/db/schema';
-import { and, eq, desc } from 'drizzle-orm';
-import { addNotes } from '@/lib/integrations/softpro';
+import { createOrderNote, getOrderNotes } from '@/lib/domain/orders/notes';
 
 const noteSchema = z.object({
   subject: z.string().max(255).optional(),
@@ -42,38 +39,22 @@ export async function POST(
 
     const noteText = parsed.data.text ?? parsed.data.note!;
 
-    const [order] = await db
-      .select({ fileNumber: orders.fileNumber })
-      .from(orders)
-      .where(eq(orders.id, orderId))
-      .limit(1);
+    const result = await createOrderNote({
+      orderId,
+      visibility: 'client',
+      text: noteText,
+      subject: parsed.data.subject,
+      authorName: session.displayName ?? session.email,
+      authorId: session.id,
+    });
 
-    if (!order) {
+    if (!result.ok) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    // Client-authored notes are shared with the client portal (not staff-internal).
-    const [note] = await db.insert(orderNotes).values({
-      orderId,
-      subject: parsed.data.subject ?? null,
-      body: noteText,
-      authorName: session.displayName ?? session.email,
-      authorId: session.id,
-      isInternal: false,
-    }).returning();
-
-    let synced = false;
-    try {
-      const spResult = await addNotes(order.fileNumber, noteText);
-      if (spResult.success) {
-        synced = true;
-        await db.update(orderNotes).set({ isSyncedToSoftpro: true }).where(eq(orderNotes.id, note!.id));
-      }
-    } catch { /* best effort */ }
-
     return NextResponse.json({
       success: true,
-      note: { id: note!.id, subject: note!.subject, body: note!.body, authorName: note!.authorName, createdAt: note!.createdAt, isSyncedToSoftpro: synced },
+      note: result.note,
     }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -101,21 +82,8 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    // Clients only see non-internal notes. Staff-internal / SoftPro-internal stay hidden.
-    const rows = await db
-      .select({
-        id: orderNotes.id,
-        subject: orderNotes.subject,
-        body: orderNotes.body,
-        authorName: orderNotes.authorName,
-        createdAt: orderNotes.createdAt,
-        isSyncedToSoftpro: orderNotes.isSyncedToSoftpro,
-      })
-      .from(orderNotes)
-      .where(and(eq(orderNotes.orderId, orderId), eq(orderNotes.isInternal, false)))
-      .orderBy(desc(orderNotes.createdAt));
-
-    return NextResponse.json({ notes: rows });
+    const { notes } = await getOrderNotes(orderId, 'client');
+    return NextResponse.json({ notes });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

@@ -375,4 +375,20 @@ describe('applyVisibility', () => {
       phone: '555-1212',
     });
   });
+
+  it('redacts client-hidden source, marketingSource, and staff assignments', () => {
+    const model = buildOrderReadModel(baseData);
+    const visible = applyVisibility(model, 'client');
+
+    expect(visible.source).toBeNull();
+    expect(visible.marketingSource).toBeNull();
+    expect(visible.assignments).toEqual({
+      escrowOfficer: null,
+      titleOfficer: null,
+      salesRep: null,
+      createdBy: null,
+    });
+    expect(applyVisibility(model, 'staff').source).toBe('softpro_sync');
+    expect(applyVisibility(model, 'staff').assignments.salesRep?.name).toBe('Ryan Rep');
+  });
 });

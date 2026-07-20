@@ -4,15 +4,24 @@ import { timingSafeEqualString } from '@/lib/security/softpro-webhook-auth';
 /** SoftPro downloads FileURL; keep the absolute URL well under Windows MAX_PATH (260). */
 export const SOFTPRO_FETCH_TTL_SECONDS = 60 * 60; // 1 hour
 
+/**
+ * Dedicated door secret only — never reuse SOFTPRO_WEBHOOK_SECRET (different trust boundary).
+ * Fallback: JOB_RUNNER_SECRET. If neither is set, fail closed (no signing).
+ */
+export function getSoftProDocFetchSecret(): string {
+  const dedicated = process.env.SOFTPRO_DOC_FETCH_SECRET?.trim();
+  if (dedicated) return dedicated;
+
+  const jobRunner = process.env.JOB_RUNNER_SECRET?.trim();
+  if (jobRunner) return jobRunner;
+
+  throw new Error(
+    'Missing SOFTPRO_DOC_FETCH_SECRET (or JOB_RUNNER_SECRET fallback). SoftPro fetch-doc is fail-closed.',
+  );
+}
+
 function getFetchSecret(): string {
-  const secret =
-    process.env.SOFTPRO_DOC_FETCH_SECRET
-    ?? process.env.SOFTPRO_WEBHOOK_SECRET
-    ?? process.env.JOB_RUNNER_SECRET;
-  if (!secret) {
-    throw new Error('Missing SOFTPRO_DOC_FETCH_SECRET (or SOFTPRO_WEBHOOK_SECRET / JOB_RUNNER_SECRET)');
-  }
-  return secret;
+  return getSoftProDocFetchSecret();
 }
 
 function getAppBaseUrl(): string {

@@ -23,8 +23,6 @@ const primaryBtn =
   'text-[11px] px-2 py-1 rounded transition-colors whitespace-nowrap';
 const secondaryBtn =
   'text-[11px] px-2 py-1 rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors whitespace-nowrap';
-const disabledBtn =
-  'text-[11px] px-2 py-1 rounded border border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed whitespace-nowrap';
 
 export function OrderActions({ order, onAction, tessaPrelimEnabled = false }: Props) {
   const hasPrelim = !!order.hasPrelim;
@@ -67,9 +65,6 @@ export function OrderActions({ order, onAction, tessaPrelimEnabled = false }: Pr
           >
             View Contacts
           </button>
-          <button type="button" disabled title="Coming soon" className={disabledBtn}>
-            View Invoice
-          </button>
           {tessaPrelimEnabled && (
             <button
               type="button"
@@ -101,9 +96,6 @@ export function OrderActions({ order, onAction, tessaPrelimEnabled = false }: Pr
             className={secondaryBtn}
           >
             View Contacts
-          </button>
-          <button type="button" disabled title="Coming soon" className={disabledBtn}>
-            View Invoice
           </button>
         </>
       )}

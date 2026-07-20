@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 import { ModalShell } from './modal-shell';
 import { ActivityFeed } from '@/components/shared/activity-feed';
 import { NotesTab } from './notes-tab';
@@ -13,6 +12,7 @@ interface OrderDetail {
   id: number; fileNumber: string; operationalStatus: string;
   propertyStreet: string | null; propertyCity: string | null; propertyState: string | null; propertyZip: string | null;
   propertyCounty: string | null; propertyApn: string | null; propertyLegalDescription: string | null;
+  propertyType: string | null;
   sellerFirstName: string | null; sellerLastName: string | null;
   buyerFirstName: string | null; buyerLastName: string | null;
   transactionType: string | null; productType: string | null; salesPrice: string | null; loanAmount: string | null;
@@ -39,6 +39,7 @@ interface AdminDetailResponse {
   property?: {
     address: string | null; city: string | null; state: string | null; zip: string | null;
     county: string | null; apn: string | null; legalDescription: string | null;
+    propertyType?: string | null;
   };
   parties?: {
     items?: OrderParty[];
@@ -57,6 +58,7 @@ interface LegacyDetailResponse {
   property?: {
     address: string | null; city: string | null; state: string | null; zip?: string | null;
     county?: string | null; apn?: string | null; legalDescription?: string | null;
+    propertyType?: string | null;
   } | null;
   /** Client detail returns order_parties (client-redacted) on the legacy shape. */
   parties?: OrderParty[];
@@ -119,7 +121,6 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
 
   const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
   const detailUrl = isClient ? base : `/api/admin/orders/${orderId}/detail`;
-  const detailHref = isClient ? `/client/orders/${orderId}` : `/orders/${orderId}`;
   const visibleTabs = isClient ? TABS.filter((t) => t !== 'Milestones') : TABS;
 
   useEffect(() => {
@@ -168,7 +169,7 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
   const buyer = order ? [order.buyerFirstName, order.buyerLastName].filter(Boolean).join(' ') : '';
 
   return (
-    <ModalShell open={open} onClose={onClose} title={`Order ${fileNumber}`} subtitle={address} wide accentColor={accentColor}>
+    <ModalShell open={open} onClose={onClose} title={`Order ${fileNumber}`} subtitle={address} size="xl" accentColor={accentColor}>
       {loading ? (
         <div className="p-10 text-center"><div className="w-6 h-6 border-2 border-gray-200 border-t-[#F26B2B] rounded-full animate-spin mx-auto" /></div>
       ) : !order ? (
@@ -204,6 +205,7 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
                 <F l="State" v={order.propertyState ?? '—'} />
                 <F l="ZIP" v={order.propertyZip ?? '—'} />
                 <F l="County" v={order.propertyCounty ?? '—'} />
+                <F l="Property Type" v={order.propertyType ?? '—'} />
                 <F l="APN" v={order.propertyApn ?? '—'} />
                 <div className="col-span-2"><F l="Legal Description" v={order.propertyLegalDescription ?? '—'} /></div>
               </div>
@@ -243,9 +245,6 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
             {tab === 'Milestones' && !isClient && (
               <MilestonesTab milestones={milestones} loading={milestonesLoading} error={milestonesError} />
             )}
-            <div className="mt-6 pt-4 border-t border-gray-100">
-              <Link href={detailHref} className="text-xs font-semibold text-[#F26B2B] hover:text-[#E05A1A]" onClick={onClose}>Open Full Page →</Link>
-            </div>
           </div>
         </>
       )}
@@ -277,6 +276,7 @@ function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse |
       propertyCounty: data.property?.county ?? null,
       propertyApn: data.property?.apn ?? null,
       propertyLegalDescription: data.property?.legalDescription ?? null,
+      propertyType: data.property?.propertyType ?? null,
       sellerFirstName: seller?.externalName?.split(/\s+/)[0] ?? null,
       sellerLastName: seller?.externalName?.split(/\s+/).slice(1).join(' ') || null,
       buyerFirstName: buyer?.externalName?.split(/\s+/)[0] ?? null,
@@ -305,6 +305,7 @@ function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse |
     propertyCounty: data.property?.county ?? null,
     propertyApn: data.property?.apn ?? null,
     propertyLegalDescription: data.property?.legalDescription ?? null,
+    propertyType: data.property?.propertyType ?? null,
     sellerFirstName: data.parties?.seller?.firstName ?? null,
     sellerLastName: data.parties?.seller?.lastName ?? null,
     buyerFirstName: data.parties?.buyer?.firstName ?? null,
@@ -567,16 +568,20 @@ function MilestonesTab({
 /* ── Document Grouping ─────────────────────────────────────────────────────── */
 
 const CAT_BADGE: Record<string, [string, string]> = {
+  prelim:           ['Prelim',           'bg-sky-100 text-sky-700'],
   cpl:              ['CPL',              'bg-purple-100 text-purple-700'],
   proposed_insured: ['Proposed Insured', 'bg-teal-100 text-teal-700'],
-  legal_vesting:    ['Legal Vesting',    'bg-blue-100 text-blue-700'],
+  legal_vesting:    ['Vesting',          'bg-blue-100 text-blue-700'],
   tax:              ['Tax',              'bg-green-100 text-green-700'],
   grant_deed:       ['Grant Deed',       'bg-amber-100 text-amber-700'],
 };
 
 const DOC_GROUPS: { label: string; cats: string[] }[] = [
-  { label: 'Open Order Documents', cats: ['legal_vesting', 'tax', 'grant_deed'] },
-  { label: 'CPLs', cats: ['cpl'] },
+  { label: 'Prelim', cats: ['prelim'] },
+  { label: 'Vesting', cats: ['legal_vesting'] },
+  { label: 'Tax', cats: ['tax'] },
+  { label: 'Grant Deed', cats: ['grant_deed'] },
+  { label: 'CPL', cats: ['cpl'] },
   { label: 'Proposed Insured', cats: ['proposed_insured'] },
 ];
 
@@ -607,7 +612,7 @@ function DocGroups({ docs, isClient }: { docs: Doc[]; isClient?: boolean }) {
   }));
   const otherCats = new Set(DOC_GROUPS.flatMap((g) => g.cats));
   const other = docs.filter((d) => !otherCats.has(d.category ?? ''));
-  if (other.length) grouped.push({ label: 'Other Documents', items: other });
+  if (other.length) grouped.push({ label: 'Other', items: other });
 
   return (
     <div className="space-y-5">

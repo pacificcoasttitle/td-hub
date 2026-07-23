@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClientContact } from '@/components/admin/client-selector';
 import type { ParsedAddress } from '@/components/ui/address-autocomplete';
 import type { SiteXPropertyResult } from '@/components/shared/property-confirm-modal';
+import { usePreInitOnSiteX } from '@/lib/orders/use-pre-init-on-sitex';
+import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
 import { EP, EC, type Person, type FormOptions } from './types';
 
 function deriveUW(product: string): string {
@@ -70,6 +72,8 @@ export function useQuickEntry() {
   const [toAutoFilled, setToAutoFilled] = useState(false);
   const [uwManual, setUwManual] = useState(false);
   const [clientCompanyName, setClientCompanyName] = useState('');
+
+  const preInit = usePreInitOnSiteX();
 
   useEffect(() => {
     fetch('/api/form-options')
@@ -166,6 +170,13 @@ export function useQuickEntry() {
 
   function handleConfirm(p: SiteXPropertyResult) {
     setShowConfirmModal(false);
+    const nextStreet = p.fullAddress || street;
+    const nextCity = p.city || city;
+    const nextState = p.state || state;
+    const nextZip = p.zip || zip;
+    const nextApn = p.apn || apn;
+    const nextCounty = p.county || county;
+    const nextLegal = p.legalDescription || legalDesc;
     if (p.apn) setApn(p.apn);
     if (p.county) setCounty(p.county);
     if (p.legalDescription) setLegalDesc(p.legalDescription);
@@ -176,6 +187,25 @@ export function useQuickEntry() {
     if (p.zip) setZip(p.zip);
     setSiteXFilled(true);
     fillOwners(p);
+
+    // OC-1: fire Tax+LV pre-init on confident SiteX match (not on address select / submit).
+    if (isConfidentSiteXMatch({ apn: nextApn, county: nextCounty, legalDescription: nextLegal })) {
+      preInit.onConfidentSiteX({
+        address: nextStreet,
+        city: nextCity || 'Unknown',
+        state: nextState || 'CA',
+        county: nextCounty!,
+        apn: nextApn,
+        legalDescription: nextLegal,
+        propertyType: p.propertyType,
+        primaryOwner: p.primaryOwner,
+        secondaryOwner: p.secondaryOwner,
+        fullAddress: p.fullAddress,
+        zip: nextZip,
+      });
+    } else {
+      preInit.onNoSiteXMatch();
+    }
   }
 
   async function handleApnSearch() {
@@ -189,7 +219,7 @@ export function useQuickEntry() {
       });
       const data = await res.json();
       if (data.match === 'single' && data.property) {
-        const p = data.property;
+        const p = data.property as SiteXPropertyResult;
         if (p.fullAddress) setStreet(p.fullAddress);
         if (p.city) setCity(p.city);
         if (p.state) setState(p.state);
@@ -199,11 +229,30 @@ export function useQuickEntry() {
         if (p.propertyType) setPropType(p.propertyType);
         setSiteXFilled(true);
         fillOwners(p);
+        if (isConfidentSiteXMatch(p)) {
+          preInit.onConfidentSiteX({
+            address: p.fullAddress || street,
+            city: p.city || city || 'Unknown',
+            state: p.state || state || 'CA',
+            county: p.county!,
+            apn: p.apn,
+            legalDescription: p.legalDescription,
+            propertyType: p.propertyType,
+            primaryOwner: p.primaryOwner,
+            secondaryOwner: p.secondaryOwner,
+            fullAddress: p.fullAddress,
+            zip: p.zip || zip,
+          });
+        } else {
+          preInit.onNoSiteXMatch();
+        }
       } else {
         setNoMatchMsg('No property found for this APN.');
+        preInit.onNoSiteXMatch();
       }
     } catch {
       setNoMatchMsg('Search failed.');
+      preInit.onNoSiteXMatch();
     } finally {
       setApnSearching(false);
     }
@@ -262,6 +311,8 @@ export function useQuickEntry() {
         deliverableEmails: deliverableEmails.filter(Boolean),
         clientType: client?.contactType ?? undefined,
         onBehalfOfContactId: client?.id || undefined,
+        titlePointSessionId: preInit.sessionId || undefined,
+        siteXSnapshot: preInit.siteXSnapshot || undefined,
       };
 
       const res = await fetch('/api/orders/create', {
@@ -304,6 +355,11 @@ export function useQuickEntry() {
     deliverableEmails, setDeliverableEmails,
     formOpts, submitting, result, setResult,
     repAutoFilled, toAutoFilled, clientCompanyName,
+    preInitPhase: preInit.phase,
+    preInitSubmitBlocked: preInit.submitBlocked,
+    preInitPreparingLabel: preInit.preparingLabel,
+    titlePointSessionId: preInit.sessionId,
+    handleNoSiteXMatch: preInit.onNoSiteXMatch,
     handleAddressSelect, handleSearchClick, handleConfirm, handleApnSearch, handleSubmit,
   };
 }

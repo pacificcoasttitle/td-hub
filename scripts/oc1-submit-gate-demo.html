@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>OC-1 Submit Gate Demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f3f4f6; margin: 0; padding: 40px; }
+    .bar { background: #fff; border-top: 1px solid #e5e7eb; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; max-width: 900px; margin: 0 auto 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .label { font-size: 14px; color: #6b7280; }
+    .ready { font-size: 12px; color: #15803d; }
+    button { padding: 12px 32px; font-size: 14px; font-weight: 600; background: #F26B2B; color: #fff; border: none; border-radius: 8px; height: 44px; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    h1 { max-width: 900px; margin: 0 auto 8px; font-size: 20px; color: #1A1A2E; }
+    p.sub { max-width: 900px; margin: 0 auto 24px; font-size: 13px; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>OC-1 — Submit gate states</h1>
+  <p class="sub">Visual proof: gated while Tax+LV pre-init runs, then enabled.</p>
+
+  <div class="bar" id="gated" data-state="gated">
+    <div>
+      <p class="label" data-testid="pre-init-preparing">Preparing title data…</p>
+    </div>
+    <button disabled data-testid="create-order-submit">Preparing…</button>
+  </div>
+
+  <div class="bar" id="enabled" data-state="enabled">
+    <div>
+      <p class="ready" data-testid="pre-init-ready">Title data ready</p>
+    </div>
+    <button data-testid="create-order-submit">Create Order</button>
+  </div>
+</body>
+</html>

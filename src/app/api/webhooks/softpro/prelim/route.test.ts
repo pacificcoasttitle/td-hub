@@ -113,4 +113,22 @@ describe('POST /api/webhooks/softpro/prelim signature gate', () => {
     expect(verifyMock).toHaveBeenCalled();
     expect(handlePrelimWebhookMock).toHaveBeenCalledTimes(1);
   });
+
+  it('logs vendor=softpro_webhook so entries appear in SP Webhooks view', async () => {
+    verifyMock.mockReturnValue({ ok: true });
+
+    await POST(request({ authorization: 'Bearer test-secret' }));
+
+    expect(insertValuesMock).toHaveBeenCalled();
+    for (const call of insertValuesMock.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({ vendor: 'softpro_webhook' }));
+    }
+  });
+
+  it('returns 401 for missing/bad auth (fail-closed)', async () => {
+    verifyMock.mockReturnValue({ ok: false, reason: 'secret_not_configured' });
+    const response = await POST(request());
+    expect(response.status).toBe(401);
+    expect(handlePrelimWebhookMock).not.toHaveBeenCalled();
+  });
 });

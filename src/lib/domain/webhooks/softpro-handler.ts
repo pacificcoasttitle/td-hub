@@ -4,16 +4,33 @@ import { documents, documentAudit, orders, orderStatusHistory, eventOutbox, vend
 import { eq } from 'drizzle-orm';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
 import { analyzePrelim } from '@/lib/tessa';
-import { maybeAutoDeliverPrelim } from '@/lib/domain/notifications/prelim-auto-delivery';
 import { getSetting } from '@/lib/domain/settings/service';
+import { ingestPrelimFromSoftPro } from '@/lib/domain/documents/ingest-prelim-from-softpro';
+
+const WEBHOOK_VENDOR = 'softpro_webhook';
 
 // ─── Zod Schemas ────────────────────────────────────────────────────────────
 
+/**
+ * Accepts:
+ * - Legacy PHP post-prelim-report push:
+ *   { Event, OrderNumber, DocumentUrl, StoredDocumentName, OrderId, OccurredAt, Source }
+ * - Legacy array shape still used by tests/fixtures: { OrderNumber, data: string[] }
+ */
 export const prelimPayloadSchema = z.object({
+  Event: z.string().optional(),
   OrderNumber: z.string().min(1),
+  DocumentUrl: z.string().url().optional(),
+  StoredDocumentName: z.string().optional(),
+  OrderId: z.union([z.string(), z.number()]).optional(),
+  OccurredAt: z.string().optional(),
+  Source: z.string().optional(),
   Status: z.string().optional(),
-  data: z.array(z.string().url()),
-});
+  data: z.array(z.string().url()).optional(),
+}).refine(
+  (p) => !!p.DocumentUrl || (Array.isArray(p.data) && p.data.length > 0),
+  { message: 'DocumentUrl or data[] with at least one URL is required' },
+);
 
 export const policyPayloadSchema = z.object({
   OrderNumber: z.string().min(1),
@@ -39,6 +56,59 @@ export interface WebhookResult {
   success: boolean;
   processed: number;
   errors: string[];
+  /** Observability summary for the prelim fast-path. */
+  outcomes?: Array<{
+    url: string;
+    outcome: 'deduped' | 'stale' | 'ingested' | 'error';
+    documentId?: number | null;
+    delivered?: boolean;
+    reason?: string;
+  }>;
+}
+
+async function logPrelimWebhookOp(
+  operation: string,
+  orderId: number | null,
+  meta: Record<string, unknown>,
+  success: boolean,
+) {
+  try {
+    await db.insert(vendorApiLogs).values({
+      vendor: WEBHOOK_VENDOR,
+      operation,
+      orderId: orderId ?? undefined,
+      requestId: crypto.randomUUID(),
+      startedAt: new Date(),
+      endedAt: new Date(),
+      success,
+      requestMeta: meta,
+    });
+  } catch { /* logging must not break the webhook */ }
+}
+
+function parseOccurredAt(raw: string | undefined): Date | null {
+  if (!raw?.trim()) return null;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function normalizePrelimItems(payload: PrelimPayload): Array<{
+  url: string;
+  storedDocumentName: string | null;
+  occurredAt: Date | null;
+}> {
+  if (payload.DocumentUrl) {
+    return [{
+      url: payload.DocumentUrl,
+      storedDocumentName: payload.StoredDocumentName?.trim() || null,
+      occurredAt: parseOccurredAt(payload.OccurredAt),
+    }];
+  }
+  return (payload.data ?? []).map((url) => ({
+    url,
+    storedDocumentName: null,
+    occurredAt: parseOccurredAt(payload.OccurredAt),
+  }));
 }
 
 // ─── Task Code → Milestone Mapping ──────────────────────────────────────────
@@ -109,6 +179,9 @@ async function storeDocument(params: {
       sizeBytes: params.buffer.length,
       status: 'active',
       description: `Received via SoftPro ${params.category} webhook`,
+      // SoftPro-origin — never write-back-push eligible
+      isSyncedToSoftpro: true,
+      softproSyncedAt: new Date(),
       createdBy: 'webhook:softpro',
     })
     .returning({ id: documents.id, createdAt: documents.createdAt });
@@ -132,58 +205,122 @@ async function storeDocument(params: {
 // ─── Prelim Handler ─────────────────────────────────────────────────────────
 
 export async function handlePrelimWebhook(payload: PrelimPayload): Promise<WebhookResult> {
+  await logPrelimWebhookOp('webhook_prelim_received', null, {
+    orderNumber: payload.OrderNumber,
+    event: payload.Event ?? null,
+    source: payload.Source ?? null,
+    hasDocumentUrl: !!payload.DocumentUrl,
+    dataCount: payload.data?.length ?? 0,
+  }, true);
+
   const order = await resolveOrder(payload.OrderNumber);
   if (!order) {
+    await logPrelimWebhookOp('webhook_prelim_error', null, {
+      orderNumber: payload.OrderNumber,
+      error: 'order_not_found',
+    }, false);
     return { success: false, processed: 0, errors: [`Order not found: ${payload.OrderNumber}`] };
   }
 
   if ((await getSetting('prelim_summary_shut_off')) === 'true') {
-    try {
-      await db.insert(vendorApiLogs).values({
-        vendor: 'softpro', operation: 'prelim_webhook_skipped', orderId: order.id,
-        requestId: crypto.randomUUID(), startedAt: new Date(), endedAt: new Date(),
-        success: true,
-        requestMeta: { reason: 'prelim_summary_shut_off', orderNumber: payload.OrderNumber } as Record<string, unknown>,
-      });
-    } catch { /* logging must not break the flow */ }
+    await logPrelimWebhookOp('webhook_prelim_skipped', order.id, {
+      reason: 'prelim_summary_shut_off',
+      orderNumber: payload.OrderNumber,
+    }, true);
     return { success: true, processed: 0, errors: [] };
   }
 
   let processed = 0;
   const errors: string[] = [];
+  const outcomes: NonNullable<WebhookResult['outcomes']> = [];
+  const items = normalizePrelimItems(payload);
 
-  for (const url of payload.data) {
+  for (const item of items) {
     try {
-      const { buffer, filename } = await downloadFromUrl(url);
-      const { documentId, storageKey, createdAt } = await storeDocument({
+      const result = await ingestPrelimFromSoftPro({
         orderId: order.id,
         fileNumber: order.fileNumber,
-        buffer,
-        filename,
-        category: 'prelim',
-        sourceUrl: url,
-      });
-
-      await maybeAutoDeliverPrelim({
-        orderId: order.id,
-        documentId,
-        documentCreatedAt: createdAt,
+        documentUrl: item.url,
+        storedDocumentName: item.storedDocumentName,
+        occurredAt: item.occurredAt,
+        source: 'softpro_webhook',
+        createdBy: 'webhook:softpro',
+        deliver: true,
         triggeredBy: 'softpro_webhook',
       });
+
+      if (result.outcome === 'deduped') {
+        await logPrelimWebhookOp('webhook_prelim_deduped', order.id, {
+          orderNumber: payload.OrderNumber,
+          documentUrl: item.url,
+          documentId: result.documentId,
+          reason: result.reason,
+        }, true);
+        outcomes.push({
+          url: item.url,
+          outcome: 'deduped',
+          documentId: result.documentId,
+          reason: result.reason,
+        });
+        continue;
+      }
+
+      if (result.outcome === 'stale') {
+        await logPrelimWebhookOp('webhook_prelim_deduped', order.id, {
+          orderNumber: payload.OrderNumber,
+          documentUrl: item.url,
+          documentId: result.documentId,
+          reason: result.reason,
+          stale: true,
+        }, true);
+        outcomes.push({
+          url: item.url,
+          outcome: 'stale',
+          documentId: result.documentId,
+          reason: result.reason,
+        });
+        continue;
+      }
+
+      // ingested
+      await logPrelimWebhookOp('webhook_prelim_ingested', order.id, {
+        orderNumber: payload.OrderNumber,
+        documentUrl: item.url,
+        documentId: result.documentId,
+        checksum: result.checksum,
+        isUpdate: result.isUpdate,
+      }, true);
+
+      const delivered = result.delivery?.outcome === 'delivered';
+      await logPrelimWebhookOp('webhook_prelim_delivered', order.id, {
+        orderNumber: payload.OrderNumber,
+        documentId: result.documentId,
+        deliveryOutcome: result.delivery?.outcome ?? null,
+        delivered,
+        reason: result.delivery?.reason ?? null,
+      }, delivered || result.delivery?.outcome === 'skipped_already_delivered'
+        || result.delivery?.outcome === 'skipped_before_cutoff'
+        || result.delivery?.outcome === 'not_armed'
+        || result.delivery?.outcome === 'blocked_no_recipient');
 
       await db.insert(eventOutbox).values({
         eventType: 'order.document.received',
         orderId: order.id,
-        payload: { documentId, category: 'prelim', fileNumber: order.fileNumber } as Record<string, unknown>,
+        payload: {
+          documentId: result.documentId,
+          category: 'prelim',
+          fileNumber: order.fileNumber,
+          isUpdate: result.isUpdate,
+        } as Record<string, unknown>,
       });
 
       const analysisPromise = analyzePrelim({
         orderId: order.id,
-        documentId,
+        documentId: result.documentId,
         fileNumber: order.fileNumber,
-        storageKey,
+        storageKey: result.storageKey,
         triggeredBy: 'webhook',
-      }).catch(err => {
+      }).catch((err) => {
         console.error('[TESSA] Webhook-triggered analysis failed:', err);
       });
 
@@ -198,12 +335,26 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
       }
 
       processed++;
+      outcomes.push({
+        url: item.url,
+        outcome: 'ingested',
+        documentId: result.documentId,
+        delivered,
+        reason: result.delivery?.outcome,
+      });
     } catch (err) {
-      errors.push(`Failed to process ${url}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      errors.push(`Failed to process ${item.url}: ${message}`);
+      outcomes.push({ url: item.url, outcome: 'error', reason: message });
+      await logPrelimWebhookOp('webhook_prelim_error', order.id, {
+        orderNumber: payload.OrderNumber,
+        documentUrl: item.url,
+        error: message,
+      }, false);
     }
   }
 
-  return { success: errors.length === 0, processed, errors };
+  return { success: errors.length === 0, processed, errors, outcomes };
 }
 
 // ─── Policy Classification ──────────────────────────────────────────────────

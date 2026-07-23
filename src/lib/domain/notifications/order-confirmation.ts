@@ -15,6 +15,13 @@ import {
   type ConfirmationParty,
   type ConfirmationTaxData,
 } from './confirmation-template';
+import {
+  OPEN_ORDERS_CONFIRMATION_CC,
+  buildConfirmationRecipients,
+} from './confirmation-recipients';
+
+/** Loud status when confirmation sends without the form's client recipient. Fits email_status varchar(20). */
+export const EMAIL_STATUS_SENT_NO_CLIENT = 'sent_no_client';
 
 export async function handleOrderConfirmation(
   orderId: number,
@@ -54,7 +61,6 @@ export async function handleOrderConfirmation(
   const opener = await loadOpener(createdById);
   const recipientEmails = await loadRecipientEmails(orderId, {
     escrowOfficerId: order.escrowOfficerId,
-    lenderId: order.lenderId,
     listingAgentId: order.listingAgentId,
     srEmail: order.assignments.salesRep?.email ?? null,
   }, partyRows);
@@ -109,14 +115,31 @@ export async function handleOrderConfirmation(
     isTitlePointActive: !tpShutOff,
   });
 
-  const fromEmail = process.env.OPEN_ORDERS_FROM_EMAIL ?? process.env.FROM_EMAIL ?? 'openorders@pct.com';
-  const { dedupedTo, dedupedCc } = recipientEmails;
+  const fromEmail = process.env.OPEN_ORDERS_FROM_EMAIL ?? process.env.FROM_EMAIL ?? OPEN_ORDERS_CONFIRMATION_CC;
+  const { to: dedupedTo, cc: dedupedCc, clientRecipientPresent } = recipientEmails;
   const finalTo = testOverride ? [testOverride] : dedupedTo;
   const finalCc = testOverride ? [] : dedupedCc;
+  const missingClient = !testOverride && !clientRecipientPresent;
 
+  // openorders@pct.com is always in TO or CC — empty TO is a programming error, not a silent skip.
   if (finalTo.length === 0) {
     await db.update(orders).set({ emailStatus: 'no_recipients', updatedAt: new Date() }).where(eq(orders.id, orderId));
-    return;
+    try {
+      await db.insert(notificationLogs).values({
+        eventType: 'order.confirmation',
+        orderId,
+        channel: 'email',
+        recipientEmail: null,
+        recipientRole: 'to',
+        subject,
+        status: 'no_recipients',
+        provider: 'sendgrid',
+        errorMessage: 'Confirmation had zero TO recipients after resolver (unexpected)',
+        sentAt: null,
+      });
+    } catch { /* logging must never mask the failure */ }
+    // Do NOT return quietly — outbox must not mark published/success for a non-send.
+    throw new Error(`Order ${orderId} confirmation has no recipients`);
   }
 
   const result = await sendEmail({
@@ -126,7 +149,11 @@ export async function handleOrderConfirmation(
     attachments: attachments.length > 0 ? attachments : undefined,
   });
 
-  const status = result.success ? 'sent' : 'failed';
+  const status = !result.success
+    ? 'failed'
+    : missingClient
+      ? EMAIL_STATUS_SENT_NO_CLIENT
+      : 'sent';
   await db.update(orders).set({ emailStatus: status, updatedAt: new Date() }).where(eq(orders.id, orderId));
 
   try {
@@ -145,13 +172,21 @@ export async function handleOrderConfirmation(
         status,
         provider: 'sendgrid',
         providerId: result.data?.messageId ?? null,
-        errorMessage: result.error?.message ?? null,
+        errorMessage: result.error?.message
+          ?? (missingClient ? 'Sent without client recipient — openorders CC only guaranteed delivery' : null),
         sentAt: result.success ? new Date() : null,
       });
     }
   } catch { /* notification logging must never break the send flow */ }
 
   if (!result.success) throw new Error(result.error?.message ?? 'Email send failed');
+
+  // Missing client is loud (email_status + logs + ops) but the email DID send — allow outbox publish.
+  if (missingClient) {
+    console.error(
+      `[order.confirmation] order ${orderId} sent without client recipient; status=${EMAIL_STATUS_SENT_NO_CLIENT}`,
+    );
+  }
 }
 
 async function loadOpener(createdBy: string | null): Promise<ConfirmationParty | null> {
@@ -168,28 +203,43 @@ async function loadOpener(createdBy: string | null): Promise<ConfirmationParty |
 
 async function loadRecipientEmails(
   orderId: number,
-  row: { escrowOfficerId: number | null; lenderId: number | null; listingAgentId: number | null; srEmail: string | null },
+  row: {
+    escrowOfficerId: number | null;
+    listingAgentId: number | null;
+    srEmail: string | null;
+  },
   partyRows: Array<{ role: string; externalEmail: string | null; cEmail: string | null }>,
 ) {
-  const contactEmails = await Promise.all(
-    [row.escrowOfficerId, row.listingAgentId].filter(Boolean).map(async (id) => {
-      const [c] = await db.select({ email: contacts.email }).from(contacts).where(eq(contacts.id, id!)).limit(1);
-      return c?.email ?? null;
-    }),
-  );
+  const loadContactEmail = async (id: number | null): Promise<string | null> => {
+    if (!id) return null;
+    const [c] = await db.select({ email: contacts.email }).from(contacts).where(eq(contacts.id, id)).limit(1);
+    return c?.email ?? null;
+  };
 
-  const toEmails: string[] = [...contactEmails.filter(Boolean) as string[]];
+  // Form client email lives on orders.client_contact_id (onBehalfOfContactId at create).
+  const [orderClient] = await db
+    .select({ clientContactId: orders.clientContactId })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  const [clientEmail, escrowOfficerEmail, listingAgentEmail] = await Promise.all([
+    loadContactEmail(orderClient?.clientContactId ?? null),
+    loadContactEmail(row.escrowOfficerId),
+    loadContactEmail(row.listingAgentId),
+  ]);
+
   const buyerAgent = partyRows.find((r) => r.role === 'buyer_agent');
-  if (buyerAgent?.cEmail ?? buyerAgent?.externalEmail) toEmails.push((buyerAgent!.cEmail ?? buyerAgent!.externalEmail)!);
+  const buyerAgentEmail = buyerAgent?.cEmail ?? buyerAgent?.externalEmail ?? null;
 
-  const ccEmails: string[] = [];
-  if (row.srEmail) ccEmails.push(row.srEmail);
-  const internalCc = process.env.PCT_INTERNAL_CC_EMAILS;
-  if (internalCc) internalCc.split(',').map((e) => e.trim()).filter(Boolean).forEach((e) => ccEmails.push(e));
-
-  const dedupedTo = [...new Set(toEmails.filter(Boolean))];
-  const dedupedCc = [...new Set(ccEmails.filter(Boolean))].filter((e) => !dedupedTo.includes(e));
-  return { dedupedTo, dedupedCc };
+  return buildConfirmationRecipients({
+    clientEmail,
+    escrowOfficerEmail,
+    listingAgentEmail,
+    buyerAgentEmail,
+    salesRepEmail: row.srEmail,
+    internalCcEmails: process.env.PCT_INTERNAL_CC_EMAILS ?? null,
+  });
 }
 
 async function loadTaxData(orderId: number): Promise<ConfirmationTaxData | null> {

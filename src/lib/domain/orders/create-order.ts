@@ -198,6 +198,8 @@ async function createLocalRecords(
     softproLastSyncedAt: new Date(),
     createdBy: userId ?? null,
     underwriterId: underwriterId ?? null,
+    // Form "client" (on behalf of) — confirmation resolver reads this as the primary TO.
+    clientContactId: input.onBehalfOfContactId ?? null,
   }).returning({ id: orders.id });
 
   const orderId = newOrder!.id;

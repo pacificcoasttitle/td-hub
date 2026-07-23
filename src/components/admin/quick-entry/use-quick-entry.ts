@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClientContact } from '@/components/admin/client-selector';
 import type { ParsedAddress } from '@/components/ui/address-autocomplete';
 import type { SiteXPropertyResult } from '@/components/shared/property-confirm-modal';
-import { usePreInitOnSiteX } from '@/lib/orders/use-pre-init-on-sitex';
+import { buildPreInitAddressKey, usePreInitOnSiteX } from '@/lib/orders/use-pre-init-on-sitex';
 import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
 import { EP, EC, type Person, type FormOptions } from './types';
 
@@ -74,6 +74,20 @@ export function useQuickEntry() {
   const [clientCompanyName, setClientCompanyName] = useState('');
 
   const preInit = usePreInitOnSiteX();
+
+  // Invalidate stale pre-init when the user edits address after a match.
+  const invalidatePreInit = preInit.invalidateIfAddressChanged;
+  useEffect(() => {
+    invalidatePreInit(
+      buildPreInitAddressKey({
+        address: street,
+        city: city || 'Unknown',
+        state: state || 'CA',
+        zip,
+        apn,
+      }),
+    );
+  }, [street, city, state, zip, apn, invalidatePreInit]);
 
   useEffect(() => {
     fetch('/api/form-options')

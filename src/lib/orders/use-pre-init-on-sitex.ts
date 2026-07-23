@@ -61,8 +61,17 @@ export interface UsePreInitOnSiteXResult {
   invalidateIfAddressChanged: (addressKey: string) => void;
 }
 
-function addressKey(p: { address: string; city: string; state: string; zip?: string | null; apn?: string | null }) {
-  return [p.address, p.city, p.state, p.zip ?? '', p.apn ?? ''].map((s) => s.trim().toLowerCase()).join('|');
+/** Shared address identity for invalidate-on-edit (Hub + client). */
+export function buildPreInitAddressKey(p: {
+  address: string;
+  city: string;
+  state: string;
+  zip?: string | null;
+  apn?: string | null;
+}): string {
+  return [p.address, p.city, p.state, p.zip ?? '', p.apn ?? '']
+    .map((s) => s.trim().toLowerCase())
+    .join('|');
 }
 
 export function usePreInitOnSiteX(): UsePreInitOnSiteXResult {
@@ -127,7 +136,7 @@ export function usePreInitOnSiteX(): UsePreInitOnSiteXResult {
       return;
     }
 
-    const key = addressKey(property);
+    const key = buildPreInitAddressKey(property);
     if (firedKeyRef.current === key && sessionId) {
       // Same confident match already in flight / done — do not re-fire.
       return;
@@ -205,6 +214,7 @@ export function usePreInitOnSiteX(): UsePreInitOnSiteXResult {
     clearTimers();
     firedKeyRef.current = null;
     setSessionId(null);
+    setSiteXSnapshot(null);
     setPhase('idle');
   }, [clearTimers]);
 

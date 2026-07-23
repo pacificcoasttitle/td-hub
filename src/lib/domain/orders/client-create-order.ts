@@ -2,12 +2,16 @@ import { db } from '@/lib/db/client';
 import { contacts } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { createAndSendToSoftPro, type CreateOrderResult } from './create-order';
+import { normalizeClientCreateBody } from './client-wizard-to-create';
 import type { SessionUser } from '@/lib/security/auth';
 
 /**
  * Client version of order creation. Loads the user's contact record
  * and auto-populates personalDetails/contacts from their profile.
  * User-provided fields always win over auto-filled values.
+ *
+ * Normalizes the wizard payload (street → address, etc.) and forwards
+ * OC-1 fields titlePointSessionId + siteXSnapshot into createAndSendToSoftPro.
  */
 export async function clientCreateOrder(
   raw: Record<string, unknown>,
@@ -25,7 +29,8 @@ export async function clientCreateOrder(
     contactData = row ?? null;
   }
 
-  const merged = mergeWithContactDefaults(raw, contactData, session);
+  const normalized = normalizeClientCreateBody(raw);
+  const merged = mergeWithContactDefaults(normalized, contactData, session);
   return createAndSendToSoftPro(merged, creatorUserId);
 }
 

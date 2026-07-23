@@ -5,13 +5,21 @@ import type { Step, Person, PartyContact, ClientDetails, PropertyData, SellerDat
 import { TRANSACTION_TYPES, CLIENT_TYPES } from './types';
 import { SH, RS, RF } from './shared';
 
-export function StepReview({ clientDetails, property, seller, transaction, parties, submitting, error, duplicateWarning, onSubmit, onPrev, onGoTo, onFilesChange }: {
+export function StepReview({
+  clientDetails, property, seller, transaction, parties,
+  submitting, submitBlocked = false, preparingLabel = null, preInitPhase,
+  error, duplicateWarning, onSubmit, onPrev, onGoTo, onFilesChange,
+}: {
   clientDetails: ClientDetails;
   property: PropertyData;
   seller: SellerData;
   transaction: TransactionData;
   parties: PartiesData;
   submitting: boolean;
+  /** OC-1: true while Tax+LV pre-init is in flight (same gate as Hub). */
+  submitBlocked?: boolean;
+  preparingLabel?: string | null;
+  preInitPhase?: string;
   error: string | null;
   duplicateWarning: string | null;
   onSubmit: () => void;
@@ -143,9 +151,27 @@ export function StepReview({ clientDetails, property, seller, transaction, parti
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           Back
         </button>
-        <button onClick={onSubmit} disabled={submitting} className="px-8 py-3 text-sm font-medium bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors h-12 inline-flex items-center gap-2">
-          {submitting ? 'Creating…' : 'Submit Your Order'}
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          {preparingLabel && (
+            <p className="text-sm text-[#6B7280]" data-testid="pre-init-preparing">{preparingLabel}</p>
+          )}
+          {preInitPhase === 'ready' && (
+            <p className="text-xs text-green-700" data-testid="pre-init-ready">Title data ready</p>
+          )}
+          {preInitPhase === 'timed_out' && (
+            <p className="text-xs text-[#6B7280]" data-testid="pre-init-timed-out">
+              Title data still preparing in background — you can submit
+            </p>
+          )}
+          <button
+            onClick={onSubmit}
+            disabled={submitting || submitBlocked}
+            data-testid="client-create-order-submit"
+            className="px-8 py-3 text-sm font-medium bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors h-12 inline-flex items-center gap-2"
+          >
+            {submitting ? 'Creating…' : submitBlocked ? 'Preparing…' : 'Submit Your Order'}
+          </button>
+        </div>
       </div>
     </div>
   );

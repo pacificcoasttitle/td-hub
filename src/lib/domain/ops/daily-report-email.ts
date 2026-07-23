@@ -80,6 +80,8 @@ export function renderDailyReportHtml(report: DailyReport): string {
           ['Attempted', d.attempted],
           ['Delivered', d.delivered],
           ['Failed', d.failed],
+          ['Confirmations missing client', d.confirmationMissingClient],
+          ['Confirmations no recipients', d.confirmationNoRecipients],
         ])}
         ${renderCountRows('Failure categories', d.categories)}
       `)}
@@ -175,6 +177,8 @@ export function renderDailyReportText(report: DailyReport): string {
       `Attempted: ${d.attempted}`,
       `Delivered: ${d.delivered}`,
       `Failed: ${d.failed}`,
+      `Confirmations missing client: ${d.confirmationMissingClient}`,
+      `Confirmations no recipients: ${d.confirmationNoRecipients}`,
       `Failure categories: ${countsText(d.categories)}`,
     ]),
     sectionText('7. Users (24h)', report.users, (d) => [

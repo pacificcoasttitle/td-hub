@@ -33,7 +33,8 @@ const PIPELINE_TIMEOUT_MS = 60_000;
 // ─── Initiate Search ────────────────────────────────────────────────────────
 // After successful createService, executes the full pipeline INLINE:
 //   poll → result → image → upload → softpro
-// Falls back to leaving a job row for a future cron if pipeline times out.
+// On timeout/failure the search is marked failed (retry via retryFailedSearches).
+// Do NOT leave status='queued' titlepoint.poll jobs — nothing drains that queue.
 
 export async function initiateSearch(
   orderId: number,
@@ -107,26 +108,33 @@ export async function initiateSearch(
   // Execute full pipeline inline
   const pipelineResult = await executePipeline(tpDataId);
 
-  // Mark job based on outcome
+  // Mark job + search based on outcome. Never leave phantom status='queued'
+  // titlepoint.poll rows — nothing drains that queue (Tier 3 decision).
   if (pipelineResult.success) {
     await db.update(jobs).set({
       status: 'completed',
       endedAt: new Date(),
       attempts: 1,
     }).where(eq(jobs.id, jobRow!.id));
-  } else if (pipelineResult.timedOut) {
-    // Timed out — leave job as queued for future cron pickup
-    await db.update(jobs).set({
-      status: 'queued',
-      nextRetryAt: new Date(Date.now() + 30_000),
-    }).where(eq(jobs.id, jobRow!.id));
   } else {
+    const message = pipelineResult.timedOut
+      ? `Pipeline timeout (retryable via manual retry): ${pipelineResult.error ?? 'timed out'}`
+      : (pipelineResult.error ?? 'Pipeline failed');
+
+    await db.update(titlePointData).set({
+      status: 'failed',
+      message,
+      updatedAt: new Date(),
+    }).where(eq(titlePointData.id, tpDataId));
+
     await db.update(jobs).set({
       status: 'failed',
-      error: pipelineResult.error,
+      error: message,
       endedAt: new Date(),
       attempts: 1,
     }).where(eq(jobs.id, jobRow!.id));
+
+    try { await maybeEnqueueConfirmation(orderId); } catch { /* confirmation fallback */ }
   }
 
   return {
@@ -146,7 +154,8 @@ export async function initiateSearch(
 //   6. Update title_point_data to 'completed'
 // If the whole thing takes >60s, returns { timedOut: true } for cron fallback.
 
-async function executePipeline(
+/** Exported for pre-init inline execution (no phantom poll queue). */
+export async function executePipeline(
   titlePointDataId: number,
 ): Promise<{ success: boolean; timedOut?: boolean; error?: string }> {
   console.error('[TP-PIPELINE] Starting executePipeline for titlePointDataId:', titlePointDataId);

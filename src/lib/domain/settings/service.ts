@@ -52,6 +52,14 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     defaultValue: 'true',
   },
   {
+    key: 'open_order_confirmation_timeout_minutes',
+    label: 'Open Order Confirmation Timeout (minutes)',
+    description: 'If TitlePoint legal_vesting/tax/grant_deed are not all completed within this many minutes, enqueue the confirmation email without the missing documents instead of waiting forever.',
+    category: 'Email',
+    type: 'number',
+    defaultValue: '10',
+  },
+  {
     key: 'closed_order_email_purchase_enabled',
     label: 'Closed Order Email (Purchase)',
     description: 'When enabled, sends notification email when a Purchase order is closed.',

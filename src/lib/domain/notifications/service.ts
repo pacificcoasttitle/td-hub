@@ -11,6 +11,7 @@ import {
   type OrderEmailData,
 } from './templates';
 import { dispatchNotification } from './dispatch';
+import { sweepPendingConfirmations } from '@/lib/domain/titlepoint/completion-checker';
 
 const MAX_FAIL_COUNT = 5;
 
@@ -20,6 +21,7 @@ export interface ProcessOutboxResult {
   processed: number;
   succeeded: number;
   failed: number;
+  confirmationSweeps?: { checked: number; enqueued: number };
 }
 
 interface NotificationTarget {
@@ -40,6 +42,12 @@ interface OrderContext {
 // ─── Outbox Processor ───────────────────────────────────────────────────────
 
 export async function processOutboxEvents(): Promise<ProcessOutboxResult> {
+  // Timeout/hard-fail fallback: enqueue confirmations that TitlePoint never completed.
+  let confirmationSweeps = { checked: 0, enqueued: 0 };
+  try {
+    confirmationSweeps = await sweepPendingConfirmations();
+  } catch { /* sweep must not block outbox drain */ }
+
   const pending = await db
     .select()
     .from(eventOutbox)
@@ -69,7 +77,7 @@ export async function processOutboxEvents(): Promise<ProcessOutboxResult> {
     }
   }
 
-  return { processed: filtered.length, succeeded, failed };
+  return { processed: filtered.length, succeeded, failed, confirmationSweeps };
 }
 
 async function dispatchEvent(

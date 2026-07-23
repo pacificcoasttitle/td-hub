@@ -97,6 +97,10 @@ export interface NotificationsData {
   delivered: number;
   failed: number;
   categories: CplVendorCount[];
+  /** Confirmations that sent but lacked the form's client recipient (loud ops signal). */
+  confirmationMissingClient: number;
+  /** Confirmations that resolved zero recipients (should be rare after openorders CC). */
+  confirmationNoRecipients: number;
 }
 
 export interface UsersData {
@@ -432,7 +436,7 @@ export async function getNotificationsSection(windowStart: Date, windowEnd: Date
     const [row] = await queryRows<{ attempted: unknown; delivered: unknown; failed: unknown }>(sql`
       select
         count(*)::int as attempted,
-        count(*) filter (where status in ('sent', 'delivered', 'success', 'completed'))::int as delivered,
+        count(*) filter (where status in ('sent', 'delivered', 'success', 'completed', 'sent_no_client'))::int as delivered,
         count(*) filter (where status in ('failed', 'bounced', 'rejected', 'error'))::int as failed
       from notification_logs
       where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}
@@ -445,12 +449,22 @@ export async function getNotificationsSection(windowStart: Date, windowEnd: Date
       group by status
       order by status
     `);
+    const [confirmationFlags] = await queryRows<{ missing_client: unknown; no_recipients: unknown }>(sql`
+      select
+        count(*) filter (where email_status = 'sent_no_client')::int as missing_client,
+        count(*) filter (where email_status = 'no_recipients')::int as no_recipients
+      from orders
+      where updated_at >= ${windowStart.toISOString()} and updated_at < ${windowEnd.toISOString()}
+        and email_status in ('sent_no_client', 'no_recipients')
+    `);
 
     return {
       attempted: toNumber(row?.attempted),
       delivered: toNumber(row?.delivered),
       failed: toNumber(row?.failed),
       categories: categories.map((category) => ({ vendor: category.vendor, count: toNumber(category.count) })),
+      confirmationMissingClient: toNumber(confirmationFlags?.missing_client),
+      confirmationNoRecipients: toNumber(confirmationFlags?.no_recipients),
     };
   });
 }
@@ -875,6 +889,18 @@ function computeSummary(input: {
     if (input.notifications.data.attempted >= 10 && input.notifications.data.delivered === 0) {
       critical = true;
       attentionItems.push(`Notification delivery stopped: ${input.notifications.data.attempted} attempted, 0 delivered.`);
+    }
+    if (input.notifications.data.confirmationMissingClient > 0) {
+      attention = true;
+      attentionItems.push(
+        `${input.notifications.data.confirmationMissingClient} open-order confirmation(s) sent without a client recipient (openorders@pct.com only).`,
+      );
+    }
+    if (input.notifications.data.confirmationNoRecipients > 0) {
+      attention = true;
+      attentionItems.push(
+        `${input.notifications.data.confirmationNoRecipients} open-order confirmation(s) ended with no_recipients — check recipient resolver.`,
+      );
     }
   }
 

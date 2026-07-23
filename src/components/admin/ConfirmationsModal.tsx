@@ -21,10 +21,11 @@ interface Props { orderId: number; fileNumber: string; open: boolean; onClose: (
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 
 const BANNER: Record<string, { cls: string; text: string }> = {
-  sent:          { cls: 'bg-green-50 border-green-200 text-green-800', text: 'Confirmation Sent Successfully' },
-  pending:       { cls: 'bg-amber-50 border-amber-200 text-amber-800', text: 'Confirmation Pending' },
-  failed:        { cls: 'bg-red-50 border-red-200 text-red-800',       text: 'Confirmation Failed' },
-  no_recipients: { cls: 'bg-gray-50 border-gray-200 text-gray-600',    text: 'No Recipients Available' },
+  sent:            { cls: 'bg-green-50 border-green-200 text-green-800', text: 'Confirmation Sent Successfully' },
+  pending:         { cls: 'bg-amber-50 border-amber-200 text-amber-800', text: 'Confirmation Pending' },
+  failed:          { cls: 'bg-red-50 border-red-200 text-red-800',       text: 'Confirmation Failed' },
+  no_recipients:   { cls: 'bg-gray-50 border-gray-200 text-gray-600',    text: 'No Recipients Available' },
+  sent_no_client:  { cls: 'bg-amber-50 border-amber-200 text-amber-900', text: 'Sent — Missing Client Recipient' },
 };
 
 const CAT_BADGE: Record<string, [string, string]> = {

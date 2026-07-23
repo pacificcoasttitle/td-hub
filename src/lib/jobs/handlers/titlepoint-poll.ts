@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { jobs } from '@/lib/db/schema';
+import { titlePointData } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 import {
   pollSearch,
   fetchResult,
@@ -27,10 +28,13 @@ interface TitlePointPollResult {
   error?: string;
 }
 
-const POLL_DELAY_MS = 30_000;
-
 // ─── Handler ────────────────────────────────────────────────────────────────
 
+/**
+ * One-shot TitlePoint poll handler.
+ * Does NOT enqueue status='queued' follow-up jobs (nothing drains that queue).
+ * Still-pending searches are marked failed + retryable via retryFailedSearches.
+ */
 export async function handleTitlePointPoll(
   payload: Record<string, unknown>
 ): Promise<TitlePointPollResult> {
@@ -40,23 +44,39 @@ export async function handleTitlePointPoll(
   const pollResult = await pollSearch(titlePointDataId);
 
   if (pollResult.status === 'pending') {
-    await db.insert(jobs).values({
-      jobType: 'titlepoint.poll',
-      payload: { titlePointDataId } as Record<string, unknown>,
-      status: 'queued',
-      nextRetryAt: new Date(Date.now() + POLL_DELAY_MS),
-    });
+    await db.update(titlePointData).set({
+      status: 'failed',
+      message: 'Still pending after poll — retry via manual TitlePoint retry (no queue consumer)',
+      updatedAt: new Date(),
+    }).where(eq(titlePointData.id, titlePointDataId));
 
-    return { status: 'pending', requeued: true };
+    const record = await getTitlePointRecord(titlePointDataId);
+    if (record?.orderId) {
+      try { await maybeEnqueueConfirmation(record.orderId); } catch { /* best effort */ }
+    }
+
+    return {
+      status: 'failed',
+      requeued: false,
+      error: 'Still pending — marked failed for manual retry (queue disabled)',
+    };
   }
 
   if (pollResult.status === 'failed') {
+    const record = await getTitlePointRecord(titlePointDataId);
+    if (record?.orderId) {
+      try { await maybeEnqueueConfirmation(record.orderId); } catch { /* best effort */ }
+    }
     return { status: 'failed', error: pollResult.error };
   }
 
   // success — fetch result data
   const resultOutcome = await fetchResult(titlePointDataId);
   if (!resultOutcome.success) {
+    const record = await getTitlePointRecord(titlePointDataId);
+    if (record?.orderId) {
+      try { await maybeEnqueueConfirmation(record.orderId); } catch { /* best effort */ }
+    }
     return { status: 'failed', error: resultOutcome.error };
   }
 
@@ -69,6 +89,7 @@ export async function handleTitlePointPoll(
 
   const imageOutcome = await fetchImage(titlePointDataId);
   if (!imageOutcome.success) {
+    try { await maybeEnqueueConfirmation(record.orderId); } catch { /* best effort */ }
     return { status: 'failed', error: imageOutcome.error };
   }
 
@@ -81,7 +102,7 @@ export async function handleTitlePointPoll(
     }
   }
 
-  // After any search completes, check if all three docs are ready
+  // After any search completes, check if confirmation can enqueue (complete / fail / timeout)
   try {
     await maybeEnqueueConfirmation(record.orderId);
   } catch {

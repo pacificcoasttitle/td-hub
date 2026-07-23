@@ -1,9 +1,9 @@
 import { db } from '@/lib/db/client';
-import { titlePointData, jobs, vendorApiLogs } from '@/lib/db/schema';
+import { titlePointData, vendorApiLogs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { createServicePreOrderLv, createServicePreOrderTax } from '@/lib/integrations/titlepoint/client';
 import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
-import { fetchImage } from './service';
+import { executePipeline, fetchImage } from './service';
 import { fetchGrantDeed } from './grant-deed';
 import { maybeEnqueueConfirmation } from './completion-checker';
 import { getSetting } from '@/lib/domain/settings/service';
@@ -85,12 +85,19 @@ export async function preInitiateSearches(property: {
         })
         .returning({ id: titlePointData.id });
 
-      await db.insert(jobs).values({
-        jobType: 'titlepoint.poll',
-        payload: { titlePointDataId: record!.id } as Record<string, unknown>,
-        status: 'queued',
-        nextRetryAt: new Date(Date.now() + 30_000),
-      });
+      // Drive inline — do NOT insert titlepoint.poll status='queued' (orphans; nothing drains them).
+      const pipelineResult = await executePipeline(record!.id);
+      if (!pipelineResult.success) {
+        const message = pipelineResult.timedOut
+          ? `Pipeline timeout (retryable via manual retry): ${pipelineResult.error ?? 'timed out'}`
+          : (pipelineResult.error ?? 'Pipeline failed');
+        await db.update(titlePointData).set({
+          status: 'failed',
+          message,
+          updatedAt: new Date(),
+        }).where(eq(titlePointData.id, record!.id));
+        return { searchType, status: 'failed' };
+      }
 
       return { searchType, status: 'initiated' };
     }),
@@ -124,11 +131,15 @@ export async function linkSessionToOrder(
 
   let finished = 0;
   for (const row of rows) {
-    if (row.status !== 'result_ready') continue;
+    if (row.status !== 'result_ready' && row.status !== 'completed') continue;
 
     try {
-      const imgResult = await fetchImage(row.id);
-      if (imgResult.success) finished++;
+      if (row.status === 'result_ready') {
+        const imgResult = await fetchImage(row.id);
+        if (imgResult.success) finished++;
+      } else {
+        finished++;
+      }
 
       if (row.searchType === 'legal_vesting') {
         try { await fetchGrantDeed(row.id); } catch { /* non-blocking */ }
@@ -136,9 +147,7 @@ export async function linkSessionToOrder(
     } catch { /* non-blocking */ }
   }
 
-  if (finished > 0) {
-    try { await maybeEnqueueConfirmation(orderId); } catch { /* non-blocking */ }
-  }
+  try { await maybeEnqueueConfirmation(orderId); } catch { /* non-blocking */ }
 
   return { linked: rows.length, finished };
 }

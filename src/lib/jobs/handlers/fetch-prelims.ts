@@ -1,14 +1,13 @@
 import { db } from '@/lib/db/client';
-import { orders, documents, documentAudit, prelimAnalyses } from '@/lib/db/schema';
+import { orders, documents, prelimAnalyses } from '@/lib/db/schema';
 import { sql, and, eq, or, isNull, asc } from 'drizzle-orm';
 import { getAttachedDocuments } from '@/lib/integrations/softpro';
-import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
 import { analyzePrelim } from '@/lib/tessa';
 import {
   isTessaAutoAnalysisEnabled,
   logCronCycleAutoAnalysisPaused,
 } from '@/lib/tessa/analysis-config';
-import { maybeAutoDeliverPrelim } from '@/lib/domain/notifications/prelim-auto-delivery';
+import { ingestPrelimFromSoftPro } from '@/lib/domain/documents/ingest-prelim-from-softpro';
 
 export interface FetchPrelimsResult {
   total: number;
@@ -224,54 +223,33 @@ export async function fetchPrelimsForOrder(
   let stored = 0;
   for (const url of urls) {
     try {
-      const { buffer, filename } = await downloadFromUrl(url);
-      const storageKey = `prelim-upload-doc/${fileNumber}/${Date.now()}_${filename}`;
-
-      const upload = await s3Upload({ key: storageKey, buffer, contentType: 'application/pdf' });
-      if (!upload.success) continue;
-
-      const [doc] = await db.insert(documents).values({
+      // Same ingest path as the prelim webhook (identity dedupe + SoftPro-origin stamp).
+      const result = await ingestPrelimFromSoftPro({
         orderId,
-        category: 'prelim',
-        filename,
-        originalFilename: filename,
-        storageProvider: 's3',
-        storageKey,
-        contentType: 'application/pdf',
-        sizeBytes: buffer.length,
-        status: 'active',
-        description: `Prelim fetched from SoftPro for ${fileNumber}`,
+        fileNumber,
+        documentUrl: url,
+        source: 'softpro_fetch',
         createdBy: 'job:fetch_prelims',
-      }).returning({ id: documents.id, createdAt: documents.createdAt });
-
-      await db.insert(documentAudit).values({
-        documentId: doc!.id,
-        action: 'uploaded',
-        byUserId: 'job:fetch_prelims',
-        meta: { source: 'softpro_fetch', sourceUrl: url, storageKey, sizeBytes: buffer.length } as Record<string, unknown>,
-      });
-
-      await maybeAutoDeliverPrelim({
-        orderId,
-        documentId: doc!.id,
-        documentCreatedAt: doc!.createdAt,
+        deliver: true,
         triggeredBy: 'fetch_prelims',
       });
+
+      if (result.outcome !== 'ingested') continue;
 
       try {
         if (isTessaAutoAnalysisEnabled()) {
           await analyzePrelim({
             orderId,
-            documentId: doc!.id,
+            documentId: result.documentId,
             fileNumber,
-            storageKey,
+            storageKey: result.storageKey,
             triggeredBy: 'cron',
           });
         }
       } catch (err) {
         console.error('[TESSA] Cron-triggered analysis failed:', {
           orderId,
-          documentId: doc!.id,
+          documentId: result.documentId,
           fileNumber,
           message: err instanceof Error ? err.message : err,
           stack: err instanceof Error ? err.stack : undefined,
@@ -292,13 +270,4 @@ function extractUrls(data: unknown): string[] {
     return data.filter((item): item is string => typeof item === 'string' && item.startsWith('http'));
   }
   return [];
-}
-
-async function downloadFromUrl(url: string): Promise<{ buffer: Buffer; filename: string }> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) throw new Error(`Download failed: HTTP ${response.status}`);
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  const filename = new URL(url).pathname.split('/').pop() ?? `prelim_${Date.now()}.pdf`;
-  return { buffer, filename };
 }

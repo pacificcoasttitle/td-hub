@@ -49,6 +49,9 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/** Must match admin SP Webhooks view filter (`/api/webhooks/log` → softpro_webhook). */
+const WEBHOOK_VENDOR = 'softpro_webhook';
+
 async function logWebhook(
   requestId: string,
   startedAt: Date,
@@ -60,7 +63,7 @@ async function logWebhook(
 ) {
   try {
     await db.insert(vendorApiLogs).values({
-      vendor: 'softpro',
+      vendor: WEBHOOK_VENDOR,
       operation,
       requestId,
       startedAt,

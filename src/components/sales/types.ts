@@ -1,3 +1,7 @@
+import type { BranchCode, ProductionByBranch } from '@/lib/integrations/managers-report/branch-codes';
+
+export type { BranchCode, ProductionByBranch };
+
 export interface SalesDashboardStats {
   openOrders: number;
   closedThisMonth: number;
@@ -32,6 +36,10 @@ export interface SalesDashboardStats {
     purchase: number; refinance: number; escrow: number; tsg: number;
     purchaseRevenue: number; refinanceRevenue: number; escrowRevenue: number; tsgRevenue: number;
   } | null;
+  /** MTD closings revenue by branch suffix — mapped via branch-codes adapter. */
+  productionByBranch: ProductionByBranch | null;
+  /** Viewer's home branch (managers only), from profiles.branch_id → branches.code. */
+  homeBranchCode: BranchCode | null;
   yesterday: { closed: number; revenue: number; opens: number } | null;
   prior: { closed: number; revenue: number } | null;
   ranking: { position: number; totalReps: number } | null;

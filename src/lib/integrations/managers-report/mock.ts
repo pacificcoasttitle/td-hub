@@ -5,6 +5,22 @@ import type { RepFigures, LeaderboardResponse, ClosingsResponse, ProductionHisto
 const MOCK_MONTH = new Date().toISOString().slice(0, 7);
 const PRIOR = (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); })();
 
+/** Shape A — available map (MR display names). Sums to mock mtd.revenue 42500. */
+export const MOCK_PRODUCTION_BY_BRANCH_AVAILABLE = {
+  Glendale: { closed: 8, revenue: 20000 },
+  Orange: { closed: 6, revenue: 15000 },
+  'Inland Empire': { closed: 3, revenue: 6000 },
+  Porterville: { closed: 0, revenue: 0 },
+  TSG: { closed: 1, revenue: 1500 },
+  Unassigned: { closed: 0, revenue: 0 },
+} as const;
+
+/** Shape B — MR degrade envelope. */
+export const MOCK_PRODUCTION_BY_BRANCH_UNAVAILABLE = {
+  available: false as const,
+  reason: 'Mock: productionByBranch reconciliation failed upstream',
+};
+
 function mockRepFigures(repName: string, month?: string): RepFigures {
   const m = month ?? MOCK_MONTH;
   return {
@@ -40,6 +56,8 @@ function mockRepFigures(repName: string, month?: string): RepFigures {
         escrow: { count: 2, revenue: 4000 },
         tsg: { count: 1, revenue: 1500 },
       },
+      // Ties to mtd.revenue (42500). Shape A: available branch map (MR display names).
+      productionByBranch: MOCK_PRODUCTION_BY_BRANCH_AVAILABLE,
     },
     prior: { month: PRIOR, closed: 22, revenue: 51200 },
     projected: 56000,

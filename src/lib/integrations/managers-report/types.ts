@@ -1,5 +1,14 @@
 // ─── Rep Figures (GET /api/td/rep/{repName}) ────────────────────────────────
 
+import type { ProductionByBranch } from './branch-codes';
+
+export type { BranchCode, BranchBucket, ProductionByBranch } from './branch-codes';
+
+/** Raw MR block: either seeded branch-name map or degrade envelope. */
+export type MrProductionByBranchRaw =
+  | Record<string, { closed: number; revenue: number }>
+  | { available: false; reason?: string };
+
 export interface RepDaySnapshot {
   date: string;
   closed: number;
@@ -57,6 +66,11 @@ export interface RepMtdFigures {
   /** Projected month-end opens/closes counts. Optional — present once MR exposes them. */
   projectedOpens?: number;
   projectedClosings?: number;
+  /**
+   * Closings revenue by file-number branch suffix (MTD).
+   * Polymorphic: branch map OR `{ available: false, reason }`.
+   */
+  productionByBranch?: MrProductionByBranchRaw | ProductionByBranch;
 }
 
 export interface RepPriorFigures {

@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
-import { orders, documents } from '@/lib/db/schema';
+import { orders, documents, branches } from '@/lib/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { getScopedOrders } from '@/lib/domain/orders/scoped-queries';
 import { getRepFigures } from '@/lib/integrations/managers-report';
+import {
+  branchCodeFromDbCode,
+  mapProductionByBranch,
+  type BranchCode,
+  type ProductionByBranch,
+} from '@/lib/integrations/managers-report/branch-codes';
 import { validateSalesAccess, SalesAccessError } from '../_helpers/validate-access';
 import type { RepFigures, MtdBreakdown, MtdCountBreakdown, MtdRevenueBreakdown } from '@/lib/integrations/managers-report/types';
 
@@ -31,7 +37,12 @@ function extractOptionalNumber(v: number | undefined): number {
   return v ?? 0;
 }
 
-function mapRepFigures(f: RepFigures) {
+export function mapRepFigures(f: RepFigures) {
+  const productionByBranch: ProductionByBranch = mapProductionByBranch(
+    f.mtd.productionByBranch,
+    f.mtd.revenue,
+  );
+
   return {
     production: {
       total: extractOptionalNumber(f.mtd.repTotalProduction),
@@ -90,12 +101,27 @@ function mapRepFigures(f: RepFigures) {
       escrowRevenue: extractRevenue(f.mtd.escrow),
       tsgRevenue: extractRevenue(f.mtd.tsg),
     },
+    productionByBranch,
     yesterday: { closed: f.yesterday.closed, revenue: f.yesterday.revenue, opens: f.yesterday.opens },
     prior: { closed: f.prior.closed, revenue: f.prior.revenue },
     ranking: { position: f.ranking.position, totalReps: f.ranking.totalReps },
     closingRatio: { closed: f.closingRatio.closed, total: f.closingRatio.created },
     projected: { revenue: f.projected, workingDaysLeft: f.workingDays.remaining },
   };
+}
+
+async function resolveHomeBranchCode(branchId: number | null): Promise<BranchCode | null> {
+  if (branchId == null) return null;
+  const [row] = await db
+    .select({ code: branches.code })
+    .from(branches)
+    .where(eq(branches.id, branchId))
+    .limit(1);
+  const code = branchCodeFromDbCode(row?.code);
+  if (row?.code && !code) {
+    console.error(`[homeBranch] unexpected branches.code=${JSON.stringify(row.code)} for branch_id=${branchId}`);
+  }
+  return code;
 }
 
 export async function GET(req: NextRequest) {
@@ -130,6 +156,12 @@ export async function GET(req: NextRequest) {
       }
     } catch { /* MR API failure is non-blocking */ }
 
+    // Viewer home branch (manager framing). Keyed on branches.CODE via FK — never branches.name.
+    const homeBranchCode =
+      access.role === 'sales_manager'
+        ? await resolveHomeBranchCode(session.branchId)
+        : null;
+
     // Enrich orders with prelim availability
     const orderIds = ordersResult.orders.map((o: ScopedOrderRow) => o.id);
     let prelimSet = new Set<number>();
@@ -159,6 +191,8 @@ export async function GET(req: NextRequest) {
       closings: repFigures?.closings ?? null,
       production: repFigures?.production ?? null,
       mtd: repFigures?.mtd ?? null,
+      productionByBranch: repFigures?.productionByBranch ?? null,
+      homeBranchCode,
       yesterday: repFigures?.yesterday ?? null,
       prior: repFigures?.prior ?? null,
       ranking: repFigures?.ranking ?? null,

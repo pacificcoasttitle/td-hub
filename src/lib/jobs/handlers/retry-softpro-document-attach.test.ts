@@ -19,10 +19,14 @@ vi.mock('@/lib/db/schema', () => ({
   },
 }));
 
+const andMock = vi.fn((...args: unknown[]) => args);
+const inArrayMock = vi.fn((...args: unknown[]) => ({ op: 'inArray', args }));
+
 vi.mock('drizzle-orm', () => ({
-  and: vi.fn((...args: unknown[]) => args),
+  and: (...args: unknown[]) => andMock(...args),
   asc: vi.fn((x: unknown) => x),
   eq: vi.fn((...args: unknown[]) => args),
+  inArray: (...args: unknown[]) => inArrayMock(...args),
   isNull: vi.fn((x: unknown) => x),
   lt: vi.fn((...args: unknown[]) => args),
   lte: vi.fn((...args: unknown[]) => args),
@@ -46,6 +50,7 @@ vi.mock('@/lib/db/client', () => ({
 describe('handleRetrySoftProDocumentAttach', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetModules();
   });
 
   it('retries unsynced docs and counts synced vs failed', async () => {
@@ -69,5 +74,47 @@ describe('handleRetrySoftProDocumentAttach', () => {
       failed: 1,
     });
     expect(result.errors).toEqual([{ documentId: 2, error: 'still failing' }]);
+  });
+
+  it('restricts selection to TD-Hub-generated categories (never prelim/policy)', async () => {
+    selectLimitMock.mockResolvedValue([
+      { id: 10, category: 'proposed_insured', softproAttachAttemptCount: 0 },
+      { id: 11, category: 'legal_vesting', softproAttachAttemptCount: 0 },
+      { id: 12, category: 'tax', softproAttachAttemptCount: 0 },
+    ]);
+    attachToSoftProMock.mockResolvedValue({ success: true, softproDocumentId: 'ok' });
+
+    const {
+      handleRetrySoftProDocumentAttach,
+      SOFTPRO_RETRY_ATTACH_CATEGORIES,
+    } = await import('./retry-softpro-document-attach');
+
+    expect([...SOFTPRO_RETRY_ATTACH_CATEGORIES]).toEqual([
+      'cpl',
+      'proposed_insured',
+      'legal_vesting',
+      'tax',
+      'grant_deed',
+    ]);
+    expect(SOFTPRO_RETRY_ATTACH_CATEGORIES).not.toContain('prelim');
+    expect(SOFTPRO_RETRY_ATTACH_CATEGORIES).not.toContain('policy');
+    expect(SOFTPRO_RETRY_ATTACH_CATEGORIES).not.toContain('general');
+
+    await handleRetrySoftProDocumentAttach();
+
+    expect(inArrayMock).toHaveBeenCalledWith(
+      'documents.category',
+      [...SOFTPRO_RETRY_ATTACH_CATEGORIES],
+    );
+    const whereArgs = andMock.mock.calls.at(-1) ?? [];
+    expect(whereArgs.some((arg) => (
+      typeof arg === 'object'
+      && arg !== null
+      && (arg as { op?: string }).op === 'inArray'
+    ))).toBe(true);
+
+    // Selection mock never returns prelim — attach must not be invoked for fetched categories.
+    expect(attachToSoftProMock).not.toHaveBeenCalledWith(expect.any(Number), 'prelim');
+    expect(attachToSoftProMock.mock.calls.map((c) => c[0])).toEqual([10, 11, 12]);
   });
 });

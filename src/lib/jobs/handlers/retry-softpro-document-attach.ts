@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lt, lte, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, lte, or } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { documents } from '@/lib/db/schema';
 import { attachToSoftPro } from '@/lib/domain/documents/service';
@@ -17,7 +17,19 @@ const BATCH_LIMIT = 25;
 const TIME_BUDGET_MS = 240_000;
 
 /**
- * Re-attempt SoftPro AddDocuments for unsynced active documents with backoff.
+ * Categories TD Hub generates and may push to SoftPro.
+ * Never include SoftPro-fetched categories (prelim, policy) — those already live in SoftPro.
+ */
+export const SOFTPRO_RETRY_ATTACH_CATEGORIES = [
+  'cpl',
+  'proposed_insured',
+  'legal_vesting',
+  'tax',
+  'grant_deed',
+] as const;
+
+/**
+ * Re-attempt SoftPro AddDocuments for unsynced active TD-Hub-generated documents with backoff.
  * Regenerates a fresh short fetch URL on each attempt (tokens expire).
  */
 export async function handleRetrySoftProDocumentAttach(): Promise<RetrySoftProDocumentAttachResult> {
@@ -33,6 +45,7 @@ export async function handleRetrySoftProDocumentAttach(): Promise<RetrySoftProDo
     .where(and(
       eq(documents.status, 'active'),
       eq(documents.isSyncedToSoftpro, false),
+      inArray(documents.category, [...SOFTPRO_RETRY_ATTACH_CATEGORIES]),
       lt(documents.softproAttachAttemptCount, SOFTPRO_ATTACH_MAX_ATTEMPTS),
       or(
         isNull(documents.softproAttachNextRetryAt),

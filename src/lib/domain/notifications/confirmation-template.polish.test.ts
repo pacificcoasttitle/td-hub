@@ -5,13 +5,14 @@ import {
   orderConfirmationTemplate,
 } from './confirmation-template';
 import { parseTaxResultData } from './tax-result-data';
-import { PCT_LIGHT_LOGO_URL } from './email-layout';
 
 const TAX = parseTaxResultData({
   TaxReport: {
     TaxRateArea: '04-001',
     LandValue: '250000',
     ImprovementsValue: '180000',
+    TaxRate: '1.1250',
+    IssueDate: '2025-07-01',
     Installments: {
       Item: [
         { Number: '1st', Amount: '2412.50', Balance: '0.00', DueDate: '2025-12-10', Status: 'Paid' },
@@ -65,8 +66,8 @@ describe('isMeaningfulMoney / moneyRowForTransaction', () => {
   });
 });
 
-describe('orderConfirmationTemplate polish', () => {
-  it('Purchase: inline action pills near top, title officer, Sales Price (not Loan Amount)', () => {
+describe('orderConfirmationTemplate polish + redesign', () => {
+  it('Purchase: redesign actions, title officer in snapshot, Sales price (not Loan amount)', () => {
     const { html } = orderConfirmationTemplate({
       ...base,
       transactionType: 'Purchase',
@@ -74,8 +75,8 @@ describe('orderConfirmationTemplate polish', () => {
       loanAmount: '$0',
     });
 
-    expect(html).toContain(PCT_LIGHT_LOGO_URL);
-    expect(html).toContain('Your Title Officer');
+    expect(html).toContain('ORDER CONFIRMATION');
+    expect(html).toContain('Title officer');
     expect(html).toContain('Terry Title');
     expect(html).toContain('terry.to@pct.com');
     expect(html).toContain('(626) 555-0100');
@@ -83,20 +84,19 @@ describe('orderConfirmationTemplate polish', () => {
     expect(html).toContain('Generate Fees');
     expect(html).toContain('Generate CPL');
     expect(html).toContain('View Order in Portal');
-    // Pills use the same ▣ chrome as attached docs
-    expect(html).toMatch(/▣<\/span>Generate Fees/);
-    expect(html).toContain('Sales Price');
+    expect(html).toContain('background:#10213A');
+    expect(html).toContain('background:#0E5A63');
+    expect(html).toContain('background:#F26B2B');
+    expect(html).toContain('Sales price');
     expect(html).toContain('$500,000');
-    expect(html).not.toMatch(/Sales Price[\s\S]{0,80}\$0/);
-    expect(html).not.toContain('>Loan Amount<');
-    // Actions appear before tax section (prominent)
-    const actionsIdx = html.indexOf('Quick actions');
-    const taxIdx = html.indexOf('Property Tax Details');
-    expect(actionsIdx).toBeGreaterThan(-1);
-    expect(taxIdx).toBeGreaterThan(actionsIdx);
+    expect(html).not.toMatch(/Sales price[\s\S]{0,80}\$0/);
+    expect(html).not.toContain('Loan amount');
+    // Doc pills are labels, not links
+    expect(html).toContain('background:#DCEFF0');
+    expect(html).not.toMatch(/href="[^"]*"[^>]*>Legal/);
   });
 
-  it('Refinance: shows Loan Amount, hides Sales Price even if provided', () => {
+  it('Refinance: shows Loan amount, hides Sales price even if provided', () => {
     const { html } = orderConfirmationTemplate({
       ...base,
       transactionType: 'Refinance',
@@ -104,15 +104,14 @@ describe('orderConfirmationTemplate polish', () => {
       loanAmount: '$425,000',
     });
 
-    expect(html).toContain('Your Title Officer');
-    expect(html).toContain('Loan Amount');
+    expect(html).toContain('Title officer');
+    expect(html).toContain('Loan amount');
     expect(html).toContain('$425,000');
-    expect(html).not.toContain('>Sales Price<');
+    expect(html).not.toContain('Sales price');
     expect(html).toContain('Quick actions');
-    expect(html).toMatch(/border-radius:999px/);
   });
 
-  it('never renders Sales Price: 0 on purchase with zero amount', () => {
+  it('never renders Sales price: 0 on purchase with zero amount', () => {
     const { html } = orderConfirmationTemplate({
       ...base,
       transactionType: 'Purchase',
@@ -120,7 +119,7 @@ describe('orderConfirmationTemplate polish', () => {
       loanAmount: null,
     });
 
-    expect(html).not.toMatch(/Sales Price[^]*\$0/);
-    expect(html).not.toContain('>Sales Price<');
+    expect(html).not.toMatch(/Sales price[^]*\$0/);
+    expect(html).not.toContain('Sales price');
   });
 });

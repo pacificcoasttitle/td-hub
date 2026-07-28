@@ -7,6 +7,8 @@ const LEGACY_TAX = parseTaxResultData({
     TaxRateArea: '04-001',
     LandValue: '250000',
     ImprovementsValue: '180000',
+    TaxRate: '1.1250',
+    IssueDate: '2025-07-01',
     Installments: {
       Item: [
         { Number: '1st', Amount: '2412.50', Balance: '0.00', DueDate: '2025-12-10', Status: 'Paid' },
@@ -17,7 +19,7 @@ const LEGACY_TAX = parseTaxResultData({
 });
 
 describe('orderConfirmationTemplate OC-3', () => {
-  it('renders Property Tax Details from captured data (legacy parity labels)', () => {
+  it('renders property tax from parseTaxResultData (legacy parity values)', () => {
     const { html } = orderConfirmationTemplate({
       fileNumber: '20019999-TEST',
       hasDocuments: true,
@@ -27,20 +29,14 @@ describe('orderConfirmationTemplate OC-3', () => {
       property: { address: '123 Main', city: 'Glendale', zip: '91203', apn: '1', county: 'Los Angeles' },
     });
 
-    expect(html).toContain('Property Tax Details');
-    expect(html).toContain('Tax Rate Area');
-    expect(html).toContain('04-001');
-    expect(html).toContain('Land Value');
+    expect(html).toContain('Property tax summary');
     expect(html).toContain('250000');
-    expect(html).toContain('Improvements Value');
     expect(html).toContain('180000');
-    expect(html).toContain('1st Installment Amount');
     expect(html).toContain('2412.50');
-    expect(html).toContain('1st Installment Balance');
-    expect(html).toContain('1st Installment Due Date');
-    expect(html).toContain('1st Installment Status');
-    expect(html).toContain('2nd Installment Amount');
-    expect(html).toContain('Attached:</strong> Legal and Vesting, Tax Roll');
+    expect(html).toContain('2025-12-10');
+    expect(html).toContain('Paid');
+    expect(html).toContain('Legal &amp; Vesting');
+    expect(html).toContain('Tax Roll');
   });
 
   it('kills the "documents coming shortly" placeholder', () => {
@@ -54,11 +50,10 @@ describe('orderConfirmationTemplate OC-3', () => {
 
     expect(html).not.toContain('Documents are being generated and will be available shortly');
     expect(html).not.toContain('coming shortly');
-    // Tax section still present without PDFs
-    expect(html).toContain('Property Tax Details');
+    expect(html).toContain('Property tax summary');
   });
 
-  it('omits attach note when no docs exist (silent skip)', () => {
+  it('omits doc pills when no docs exist (silent skip)', () => {
     const { html } = orderConfirmationTemplate({
       fileNumber: '20019999-TEST',
       hasDocuments: false,
@@ -66,7 +61,8 @@ describe('orderConfirmationTemplate OC-3', () => {
       isTitlePointActive: true,
     });
 
-    expect(html).not.toContain('<strong>Attached:</strong>');
+    expect(html).not.toContain('Initial documents');
+    expect(html).not.toContain('Legal &amp; Vesting');
     expect(html).not.toContain('coming shortly');
   });
 });

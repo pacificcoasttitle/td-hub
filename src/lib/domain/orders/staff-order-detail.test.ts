@@ -159,17 +159,16 @@ describe('order-confirmation email parity with canonical formatters', () => {
     });
 
     expect(subject).toBe('Open Order Confirmation - 20019922-GLT');
-    // Property block uses line1/city/zip (same source as formatOrderAddress components)
-    expect(html).toContain('123 Main St, Glendale, 91203');
-    // Purchase → Sales Price only (never Loan Amount / never Sales Price: 0)
-    expect(html).toContain('Sales Price');
+    // Snapshot Property uses addressFormatted from the read model
+    expect(html).toContain(model.property.addressFormatted);
+    // Purchase → Sales price only (never Loan amount / never Sales price: 0)
+    expect(html).toContain('Sales price');
     expect(html).toContain('$490,000');
-    expect(html).not.toContain('Loan Amount');
+    expect(html).not.toContain('Loan amount');
     expect(html).not.toContain('$425,000');
-    expect(html).toContain('Ryan Rep');
     expect(html).toContain('Tina Title');
     expect(html).toContain('unit66@pct.com');
-    expect(html).toContain('Your Title Officer');
+    expect(html).toContain('Title officer');
     expect(html).toContain('Los Angeles');
     expect(html).toContain('5641-001-002');
   });

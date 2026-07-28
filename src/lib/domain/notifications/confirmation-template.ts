@@ -1,18 +1,8 @@
-import {
-  BORDER_SOFT,
-  CARD_BG,
-  ORANGE_TINT,
-  PCT_NAVY,
-  PCT_ORANGE,
-  TEXT_MUTED,
-  TEXT_PRIMARY,
-  detailsRow as row,
-  emailLayout as layout,
-  esc,
-} from './email-layout';
+import { detailsRow as row, esc } from './email-layout';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hub.pctitle.com';
-const FINCEN_URL = process.env.FINCEN_CHECK_URL ?? 'https://hub.pctitle.com/fincen-check';
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? 'https://hub.pctitle.com').replace(/\/+$/, '');
+const LOGO_URL = 'https://www.pct.com/logo2.png';
+const DASH = '—';
 
 export interface ConfirmationParty {
   name: string | null;
@@ -55,13 +45,25 @@ export interface FullConfirmationData {
   opener?: ConfirmationParty | null;
   /** Title officer contact for the client (name + email/phone). */
   titleOfficer?: ConfirmationParty | null;
-  property?: { address?: string | null; city?: string | null; zip?: string | null; county?: string | null; apn?: string | null; legalDescription?: string | null } | null;
+  property?: {
+    address?: string | null;
+    city?: string | null;
+    zip?: string | null;
+    county?: string | null;
+    apn?: string | null;
+    legalDescription?: string | null;
+  } | null;
   taxData?: ConfirmationTaxData | null;
   seller?: { primary?: string | null; secondary?: string | null } | null;
-  parties?: { buyerAgent?: ConfirmationParty | null; listingAgent?: ConfirmationParty | null; lender?: ConfirmationParty | null; escrow?: ConfirmationParty | null } | null;
+  parties?: {
+    buyerAgent?: ConfirmationParty | null;
+    listingAgent?: ConfirmationParty | null;
+    lender?: ConfirmationParty | null;
+    escrow?: ConfirmationParty | null;
+  } | null;
   assignments?: { salesRep?: string | null; titleOfficer?: string | null } | null;
   hasDocuments: boolean;
-  /** Labels for PDFs actually attached (attach-what-exists). Empty = no doc note. */
+  /** Labels for PDFs actually attached (attach-what-exists). Empty = no doc pills. */
   attachedDocLabels?: string[];
   isTitlePointActive: boolean;
 }
@@ -78,242 +80,171 @@ export function isMeaningfulMoney(value: string | null | undefined): boolean {
   return true;
 }
 
+export function moneyForTransaction(
+  transactionType: string | null | undefined,
+  salesPrice: string | null | undefined,
+  loanAmount: string | null | undefined,
+): { label: string; value: string } | null {
+  const t = transactionType?.toLowerCase().trim() ?? '';
+  if (t === 'purchase') {
+    return isMeaningfulMoney(salesPrice) ? { label: 'Sales price', value: salesPrice! } : null;
+  }
+  if (t === 'refinance') {
+    return isMeaningfulMoney(loanAmount) ? { label: 'Loan amount', value: loanAmount! } : null;
+  }
+  return null;
+}
+
+/** Test helper — keeps polish unit tests on money conditional. */
 export function moneyRowForTransaction(
   transactionType: string | null | undefined,
   salesPrice: string | null | undefined,
   loanAmount: string | null | undefined,
 ): string {
-  const t = transactionType?.toLowerCase().trim() ?? '';
-  if (t === 'purchase') {
-    return isMeaningfulMoney(salesPrice) ? row('Sales Price', salesPrice!) : '';
+  const m = moneyForTransaction(transactionType, salesPrice, loanAmount);
+  if (!m) return '';
+  // Normalize labels to historical polish expectations (Sales Price / Loan Amount).
+  const label = m.label === 'Sales price' ? 'Sales Price' : m.label === 'Loan amount' ? 'Loan Amount' : m.label;
+  return row(label, m.value);
+}
+
+function display(value: string | null | undefined): string {
+  const v = value?.trim();
+  return v ? v : DASH;
+}
+
+function propertyAddress(data: FullConfirmationData): string {
+  if (data.address?.trim()) return data.address.trim();
+  if (!data.property) return DASH;
+  const composed = [data.property.address, data.property.city, data.property.zip].filter(Boolean).join(', ');
+  return composed || DASH;
+}
+
+/** Map attach-what-exists labels → template pill labels (display only, not links). */
+const DOC_PILL_ORDER: Array<{ match: RegExp; label: string }> = [
+  { match: /legal/i, label: 'Legal &amp; Vesting' },
+  { match: /tax/i, label: 'Tax Roll' },
+  { match: /grant/i, label: 'Recent Grant Deed' },
+];
+
+function docPillsHtml(labels: string[]): string {
+  const present = DOC_PILL_ORDER.filter((d) => labels.some((l) => d.match.test(l)));
+  if (present.length === 0) return '';
+
+  const cells = present.map((d, i) => {
+    const isLast = i === present.length - 1;
+    const pad = isLast ? 'padding:0 0 8px 0;' : 'padding:0 8px 8px 0;';
+    // Pills are visual labels only — PDFs are email attachments (not hrefs).
+    return `<td style="${pad}"><span style="display:block;background:#DCEFF0;color:#10213A;font-size:13px;font-weight:bold;padding:12px 14px;border-radius:10px;">${d.label}</span></td>`;
+  }).join('');
+
+  return `<tr><td style="padding:0 32px 28px 32px;"><h2 style="margin:0 0 14px 0;color:#10213A;font-size:18px;">Initial documents</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>${cells}</tr></table></td></tr>`;
+}
+
+function snapshotRow(
+  label: string,
+  valueHtml: string,
+  opts?: { last?: boolean },
+): string {
+  const border = opts?.last ? '' : 'border-bottom:1px solid #E5E7EB;';
+  return `<tr><td width="36%" style="background:#F8FAFC;color:#6B7280;font-size:13px;padding:13px 16px;${border}">${label}</td><td style="color:#10213A;font-size:14px;font-weight:bold;padding:13px 16px;${border}">${valueHtml}</td></tr>`;
+}
+
+function openedByHtml(opener: ConfirmationParty | null | undefined): string {
+  if (!opener?.name && !opener?.email) return esc(DASH);
+  const name = opener.name?.trim() || DASH;
+  if (opener.email?.trim()) {
+    const email = opener.email.trim();
+    return `${esc(name)} · <a href="mailto:${esc(email)}" style="color:#F26B2B;text-decoration:none;">${esc(email)}</a>`;
   }
-  if (t === 'refinance') {
-    return isMeaningfulMoney(loanAmount) ? row('Loan Amount', loanAmount!) : '';
+  return esc(name);
+}
+
+function titleOfficerHtml(to: ConfirmationParty | null | undefined, fallbackName?: string | null): string {
+  const name = to?.name?.trim() || fallbackName?.trim() || '';
+  const contact = [to?.email?.trim(), to?.phone?.trim()].filter(Boolean);
+  if (!name && contact.length === 0) return esc(DASH);
+  if (!name) return esc(contact.join(' · '));
+  if (contact.length === 0) return esc(name);
+  const email = to?.email?.trim();
+  if (email) {
+    const rest = to?.phone?.trim() ? ` · ${esc(to.phone!.trim())}` : '';
+    return `${esc(name)} · <a href="mailto:${esc(email)}" style="color:#F26B2B;text-decoration:none;">${esc(email)}</a>${rest}`;
   }
-  // Other / unknown types: hide the money row (never render Sales Price: 0).
-  return '';
+  return esc([name, ...contact].join(' · '));
 }
 
-function detailsTable(rows: string): string {
-  if (!rows) return '';
-  return `<table width="100%" cellpadding="0" cellspacing="0" style="background:${CARD_BG};border-radius:10px;margin:0 0 20px;border:1px solid ${BORDER_SOFT};">${rows}</table>`;
-}
-
-function sectionHeading(title: string): string {
-  return `<p style="margin:0 0 10px;font-size:14px;font-weight:700;color:${PCT_NAVY};letter-spacing:0.02em;">${esc(title)}</p>`;
-}
-
-function partyBlock(label: string, p: ConfirmationParty | null | undefined): string {
-  if (!p || (!p.name && !p.email)) return '';
-  let rows = '';
-  if (p.name) rows += row('Name', p.name);
-  if (p.email) rows += row('Email', p.email);
-  if (p.phone) rows += row('Telephone', p.phone);
-  if (p.company) rows += row('Company', p.company);
-  return `${sectionHeading(label)}${detailsTable(rows)}`;
-}
-
-/** Same pill chrome as attached Legal Vesting / Tax / Grant Deed chips. */
-function pill(label: string, href?: string): string {
-  const inner = `<span style="color:${PCT_ORANGE};font-size:15px;margin-right:8px;">▣</span>${esc(label)}`;
-  const content = href
-    ? `<a href="${href}" style="color:${TEXT_PRIMARY};text-decoration:none;font-size:13px;font-weight:700;display:inline-block;">${inner}</a>`
-    : `<span style="color:${TEXT_PRIMARY};font-size:13px;font-weight:700;">${inner}</span>`;
-  return `<div style="display:inline-block;border:1px solid ${BORDER_SOFT};border-radius:999px;padding:9px 14px;background:#FFFFFF;">${content}</div>`;
-}
-
-function inlinePills(items: Array<{ label: string; href?: string }>): string {
-  if (items.length === 0) return '';
-  const cells = items.map((item) =>
-    `<td style="padding:0 8px 8px 0;white-space:nowrap;">${pill(item.label, item.href)}</td>`,
-  ).join('');
-  return `<table cellpadding="0" cellspacing="0" style="margin:0 0 20px;"><tr>${cells}</tr></table>`;
-}
-
-function installmentRows(label: string, inst: TaxInstallment | null | undefined): string {
-  if (!inst) return '';
-  let r = '';
-  if (inst.amount) r += row(`${label} Amount`, inst.amount);
-  if (inst.balance) r += row(`${label} Balance`, inst.balance);
-  if (inst.dueDate) r += row(`${label} Due Date`, inst.dueDate);
-  if (inst.status) r += row(`${label} Status`, inst.status);
-  return r;
-}
-
-function installmentCard(title: string, inst: TaxInstallment | null | undefined): string {
-  if (!inst) return '';
-  const rows = installmentRows(title, inst);
-  if (!rows) return '';
-  return `<td width="50%" valign="top" style="padding:0 6px 0 0;">
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:${CARD_BG};border:1px solid ${BORDER_SOFT};border-radius:10px;">
-      <tr><td style="padding:12px 14px 4px;font-size:12px;font-weight:700;color:${PCT_ORANGE};text-transform:uppercase;letter-spacing:0.04em;">${esc(title)}</td></tr>
-      ${rows}
-    </table>
-  </td>`;
-}
-
-function attachedDocsHtml(labels: string[], hasDocuments: boolean, isTitlePointActive: boolean): string {
-  if (labels.length > 0 || hasDocuments) {
-    const items = labels.length > 0 ? labels : ['Title documents'];
-    return `
-      ${sectionHeading('Attached documents')}
-      <p style="margin:0 0 10px;font-size:13px;color:${TEXT_MUTED};"><strong style="color:${TEXT_PRIMARY};">Attached:</strong> ${esc(items.join(', '))}</p>
-      ${inlinePills(items.map((label) => ({ label })))}`;
-  }
-
-  if (!isTitlePointActive) {
-    return `<div style="background:${ORANGE_TINT};border-left:3px solid ${PCT_ORANGE};padding:14px 16px;margin:0 0 20px;">
-      <p style="margin:0;font-size:13px;color:${TEXT_MUTED};">TitlePoint is currently offline. Documents will be available when service resumes.</p>
-    </div>`;
-  }
-
-  return '';
-}
-
-function titleOfficerHtml(to: ConfirmationParty | null | undefined): string {
-  if (!to || (!to.name && !to.email && !to.phone)) return '';
-  const contactLine = [to.email, to.phone].filter(Boolean).join(' · ');
-  return `
-    <div style="background:${ORANGE_TINT};border:1px solid ${PCT_ORANGE};border-radius:12px;padding:16px 18px;margin:0 0 20px;">
-      <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:${PCT_ORANGE};text-transform:uppercase;letter-spacing:0.06em;">Your Title Officer</p>
-      ${to.name ? `<p style="margin:0 0 4px;font-size:16px;font-weight:700;color:${PCT_NAVY};">${esc(to.name)}</p>` : ''}
-      ${contactLine ? `<p style="margin:0;font-size:13px;color:${TEXT_PRIMARY};">${esc(contactLine)}</p>` : ''}
-      <p style="margin:8px 0 0;font-size:12px;color:${TEXT_MUTED};">Questions about this order? Contact your title officer above.</p>
-    </div>`;
+function installmentCard(
+  title: string,
+  inst: TaxInstallment | null | undefined,
+  sidePad: 'right' | 'left',
+): string {
+  const pad = sidePad === 'right' ? 'padding-right:8px;' : 'padding-left:8px;';
+  const amount = display(inst?.amount);
+  const due = display(inst?.dueDate);
+  const status = display(inst?.status);
+  return `<td width="50%" valign="top" style="${pad}"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #E5E7EB;border-radius:12px;"><tr><td style="padding:16px;"><div style="font-size:12px;font-weight:bold;color:#F26B2B;letter-spacing:.6px;margin-bottom:10px;">${title}</div><div style="font-size:13px;color:#6B7280;">Amount</div><div style="font-size:17px;font-weight:bold;color:#10213A;margin:2px 0 10px 0;">${esc(amount)}</div><div style="font-size:13px;color:#6B7280;">Due ${esc(due)}</div><div style="margin-top:10px;display:inline-block;background:#E8F5EF;color:#176B4D;font-size:11px;font-weight:bold;padding:6px 9px;border-radius:999px;">${esc(status)}</div></td></tr></table></td>`;
 }
 
 export function orderConfirmationTemplate(data: FullConfirmationData): { subject: string; html: string } {
-  const isPurchase = data.transactionType?.toLowerCase() === 'purchase';
-  const pt = data.productType?.toLowerCase().trim() ?? '';
-  const hideGenerateFees = pt === 'full alta' || pt === 'hard money';
   const fn = data.fileNumber;
   const orderUrl = `${APP_URL}/orders/confirm/${encodeURIComponent(fn)}`;
+  const pt = data.productType?.toLowerCase().trim() ?? '';
+  const hideGenerateFees = pt === 'full alta' || pt === 'hard money';
 
-  // FinCEN — purchase only; never show Sales Price: 0
-  let fincenHtml = '';
-  if (isPurchase) {
-    const fincenPrice = isMeaningfulMoney(data.salesPrice) ? data.salesPrice! : 'N/A';
-    fincenHtml = `
-    <div style="background:${ORANGE_TINT};border:1px solid ${PCT_ORANGE};border-radius:12px;padding:18px;margin:0 0 20px;">
-      <p style="color:${PCT_NAVY};margin:0 0 8px;font-size:15px;font-weight:700;">FinCEN Reporting Quick Check</p>
-      <p style="margin:0 0 8px;font-size:13px;color:${TEXT_PRIMARY};">Sales Price: <strong>${esc(fincenPrice)}</strong></p>
-      <ul style="margin:0 0 14px;padding-left:20px;font-size:13px;color:${TEXT_PRIMARY};">
-        <li>Is this an all-cash or wire-financed transaction?</li>
-        <li>Is the buyer a legal entity or trust?</li>
-      </ul>
-      ${inlinePills([{ label: 'Check This Transaction', href: FINCEN_URL }])}
-    </div>`;
-  }
+  const feesUrl = `${APP_URL}/orders/${encodeURIComponent(fn)}/fees`;
+  const proposedUrl = `${APP_URL}/orders/${encodeURIComponent(fn)}/proposed`;
+  const cplUrl = `${APP_URL}/orders/${encodeURIComponent(fn)}/cpl`;
 
+  const money = moneyForTransaction(data.transactionType, data.salesPrice, data.loanAmount);
+  const tax = data.taxData;
   const attachedLabels = (data.attachedDocLabels ?? []).filter(Boolean);
-  const docHtml = attachedDocsHtml(attachedLabels, data.hasDocuments, data.isTitlePointActive);
 
-  // Action pills — same chrome as doc chips, inline, prominent (near top).
-  const actionItems: Array<{ label: string; href: string }> = [];
+  const titleOfficer = data.titleOfficer
+    ?? (data.assignments?.titleOfficer
+      ? { name: data.assignments.titleOfficer, email: null, phone: null, company: null }
+      : null);
+
+  // Quick actions — template colors: Fees #10213A / Proposed #0E5A63 / CPL #F26B2B
+  const actionCells: string[] = [];
   if (!hideGenerateFees) {
-    actionItems.push({ label: 'Generate Fees', href: `${APP_URL}/orders/${encodeURIComponent(fn)}/fees` });
+    actionCells.push(`<td style="padding-right:8px;"><a href="${feesUrl}" style="display:block;text-align:center;background:#10213A;color:#ffffff;text-decoration:none;font-size:13px;font-weight:bold;padding:12px 10px;border-radius:8px;">Generate Fees</a></td>`);
   }
-  actionItems.push({ label: 'Generate Proposed', href: `${APP_URL}/orders/${encodeURIComponent(fn)}/proposed` });
-  actionItems.push({ label: 'Generate CPL', href: `${APP_URL}/orders/${encodeURIComponent(fn)}/cpl` });
-  actionItems.push({ label: 'View Order in Portal', href: orderUrl });
-  const actionPills = `
-    ${sectionHeading('Quick actions')}
-    ${inlinePills(actionItems)}`;
+  actionCells.push(`<td style="padding:0 4px;"><a href="${proposedUrl}" style="display:block;text-align:center;background:#0E5A63;color:#ffffff;text-decoration:none;font-size:13px;font-weight:bold;padding:12px 10px;border-radius:8px;">Generate Proposed</a></td>`);
+  actionCells.push(`<td style="padding-left:8px;"><a href="${cplUrl}" style="display:block;text-align:center;background:#F26B2B;color:#ffffff;text-decoration:none;font-size:13px;font-weight:bold;padding:12px 10px;border-radius:8px;">Generate CPL</a></td>`);
 
-  // Order / property summary
-  let summaryRows = '';
-  summaryRows += row('Order #', fn);
-  if (data.address) summaryRows += row('Property', data.address);
-  if (data.property) {
-    const addr = [data.property.address, data.property.city, data.property.zip].filter(Boolean).join(', ');
-    if (addr && !data.address) summaryRows += row('Property Address', addr);
-    else if (addr && data.address && addr !== data.address) summaryRows += row('Property Address', addr);
-    if (data.property.apn) summaryRows += row('APN', data.property.apn);
-    if (data.property.county) summaryRows += row('County', data.property.county);
-    if (data.property.legalDescription) summaryRows += row('Legal Description', data.property.legalDescription);
-  }
-  if (data.opener?.name) summaryRows += row('Opened By', data.opener.name);
-  if (data.opener?.email) summaryRows += row('Opener Email', data.opener.email);
-  if (data.transactionType) summaryRows += row('Transaction Type', data.transactionType);
-  summaryRows += moneyRowForTransaction(data.transactionType, data.salesPrice, data.loanAmount);
-  const summaryHtml = summaryRows
-    ? `${sectionHeading('Order & property summary')}${detailsTable(summaryRows)}`
+  const moneyRow = money
+    ? `<tr><td style="padding:14px 16px;"><div style="font-size:12px;color:#6B7280;">${esc(money.label)}</div><div style="font-size:14px;font-weight:bold;color:#10213A;margin-top:3px;">${esc(money.value)}</div></td></tr>`
     : '';
 
-  // Tax section
-  let taxHtml = '';
-  if (data.taxData) {
-    const td = data.taxData;
-    let overview = '';
-    if (td.taxRateArea) overview += row('Tax Rate Area', td.taxRateArea);
-    if (td.useCode) overview += row('Use Code', td.useCode);
-    if (td.regionCode) overview += row('Region Code', td.regionCode);
-    if (td.floodZone) overview += row('Flood Zone', td.floodZone);
-    if (td.zoningCode) overview += row('Zoning Code', td.zoningCode);
-    if (td.taxRate) overview += row('Tax Rate', td.taxRate);
-    if (td.issueDate) overview += row('Issue Date', td.issueDate);
-    if (td.landValue) overview += row('Land Value', td.landValue);
-    if (td.improvementsValue) overview += row('Improvements Value', td.improvementsValue);
-
-    const firstCard = installmentCard('1st Installment', td.firstInstallment);
-    const secondCard = installmentCard('2nd Installment', td.secondInstallment);
-    const installmentTable = (firstCard || secondCard)
-      ? `<table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;"><tr>${firstCard}${secondCard || '<td></td>'}</tr></table>`
-      : '';
-
-    if (overview || installmentTable) {
-      taxHtml = `${sectionHeading('Property Tax Details')}${detailsTable(overview)}${installmentTable}`;
-    }
-  }
-
-  let sellerHtml = '';
-  if (data.seller?.primary) {
-    let rows = row('Primary Owner', data.seller.primary);
-    if (data.seller.secondary) rows += row('Secondary Owner', data.seller.secondary);
-    sellerHtml = `${sectionHeading('Seller / Owner')}${detailsTable(rows)}`;
-  }
-
-  // Transaction details — sales/loan already in summary via conditional; avoid duplicate / zero rows here.
-  let txHtml = '';
-  {
-    let rows = '';
-    if (data.assignments?.salesRep) rows += row('Sales Rep', data.assignments.salesRep);
-    if (data.productType) rows += row('Product', data.productType);
-    if (data.loanNumber) rows += row('Loan Number', data.loanNumber);
-    if (data.escrowNumber) rows += row('Escrow Number', data.escrowNumber);
-    if (rows) txHtml = `${sectionHeading('Transaction details')}${detailsTable(rows)}`;
-  }
-
-  const partyHtml = [
-    partyBlock('Buyer Agent', data.parties?.buyerAgent),
-    partyBlock('Listing Agent', data.parties?.listingAgent),
-    partyBlock('Lender', data.parties?.lender),
-    partyBlock('Escrow', data.parties?.escrow),
-  ].join('');
-
-  const toBlock = titleOfficerHtml(
-    data.titleOfficer
-      ?? (data.assignments?.titleOfficer
-        ? { name: data.assignments.titleOfficer, email: null, phone: null, company: null }
-        : null),
-  );
-
-  const body = `
-    <p style="margin:0 0 10px;font-size:16px;font-weight:700;color:${PCT_NAVY};">Title order opened</p>
-    <p style="margin:0 0 6px;font-size:15px;color:${TEXT_PRIMARY};line-height:1.6;">Pacific Coast Title has opened a new order.</p>
-    <p style="margin:0 0 16px;font-size:18px;font-weight:700;color:${PCT_NAVY};">Order # ${esc(fn)}</p>
-    ${toBlock}
-    ${actionPills}
-    ${summaryHtml}
-    ${docHtml}
-    ${taxHtml}
-    ${fincenHtml}
-    ${sellerHtml}
-    ${txHtml}
-    ${partyHtml}`;
+  const html = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Open Order Confirmation</title></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;padding:28px 12px;"><tr><td align="center">
+<table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:100%;max-width:640px;background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 8px 28px rgba(16,33,58,.08);">
+<tr><td style="background:#10213A;padding:26px 32px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td valign="middle"><img src="${LOGO_URL}" width="155" alt="Pacific Coast Title" style="display:block;border:0;max-width:155px;height:auto;"></td><td align="right" valign="middle" style="font-size:12px;font-weight:bold;letter-spacing:1.2px;color:#FF8A4C;">ORDER CONFIRMATION</td></tr></table></td></tr>
+<tr><td style="padding:34px 32px 26px 32px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#FAF7F1;border:1px solid #E5E7EB;border-radius:14px;"><tr><td style="padding:24px 24px 22px 24px;"><div style="display:inline-block;background:#E8F5EF;color:#176B4D;font-size:12px;font-weight:bold;letter-spacing:.6px;padding:7px 11px;border-radius:999px;margin-bottom:14px;">ORDER OPENED SUCCESSFULLY</div><h1 style="margin:0 0 8px 0;color:#10213A;font-size:28px;line-height:1.2;">Your title order is open</h1><p style="margin:0 0 18px 0;color:#4B5563;font-size:15px;line-height:1.6;">Pacific Coast Title has opened your order and prepared the initial property documents.</p><table role="presentation" cellspacing="0" cellpadding="0"><tr><td style="background:#F26B2B;border-radius:8px;"><a href="${orderUrl}" target="_blank" style="display:inline-block;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:12px 18px;">View Order in Portal</a></td></tr></table></td></tr></table></td></tr>
+<tr><td style="padding:0 32px 28px 32px;"><h2 style="margin:0 0 14px 0;color:#10213A;font-size:18px;">Order snapshot</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #E5E7EB;border-radius:12px;overflow:hidden;">
+${snapshotRow('Order number', esc(fn))}
+${snapshotRow('Property', esc(propertyAddress(data)))}
+${snapshotRow('APN', esc(display(data.property?.apn)))}
+${snapshotRow('County', esc(display(data.property?.county)))}
+${snapshotRow('Transaction type', esc(display(data.transactionType)))}
+${snapshotRow('Opened by', openedByHtml(data.opener))}
+${snapshotRow('Title officer', titleOfficerHtml(titleOfficer, data.assignments?.titleOfficer), { last: true })}
+</table></td></tr>
+${docPillsHtml(attachedLabels)}
+<tr><td style="padding:0 32px 28px 32px;"><h2 style="margin:0 0 14px 0;color:#10213A;font-size:18px;">Property tax summary</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #E5E7EB;border-radius:12px;overflow:hidden;"><tr><td width="50%" style="padding:15px 16px;border-bottom:1px solid #E5E7EB;border-right:1px solid #E5E7EB;"><div style="font-size:12px;color:#6B7280;margin-bottom:4px;">Tax rate</div><div style="font-size:15px;color:#10213A;font-weight:bold;">${esc(display(tax?.taxRate))}</div></td><td width="50%" style="padding:15px 16px;border-bottom:1px solid #E5E7EB;"><div style="font-size:12px;color:#6B7280;margin-bottom:4px;">Issue date</div><div style="font-size:15px;color:#10213A;font-weight:bold;">${esc(display(tax?.issueDate))}</div></td></tr><tr><td style="padding:15px 16px;border-right:1px solid #E5E7EB;"><div style="font-size:12px;color:#6B7280;margin-bottom:4px;">Land value</div><div style="font-size:15px;color:#10213A;font-weight:bold;">${esc(display(tax?.landValue))}</div></td><td style="padding:15px 16px;"><div style="font-size:12px;color:#6B7280;margin-bottom:4px;">Improvement value</div><div style="font-size:15px;color:#10213A;font-weight:bold;">${esc(display(tax?.improvementsValue))}</div></td></tr></table></td></tr>
+<tr><td style="padding:0 32px 28px 32px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>${installmentCard('1ST INSTALLMENT', tax?.firstInstallment, 'right')}${installmentCard('2ND INSTALLMENT', tax?.secondInstallment, 'left')}</tr></table></td></tr>
+<tr><td style="padding:0 32px 28px 32px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td width="50%" valign="top" style="padding-right:8px;"><h2 style="margin:0 0 12px 0;color:#10213A;font-size:18px;">Seller / owner</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#FAF7F1;border-radius:12px;"><tr><td style="padding:14px 16px;border-bottom:1px solid #E5E7EB;"><div style="font-size:12px;color:#6B7280;">Primary owner</div><div style="font-size:14px;font-weight:bold;color:#10213A;margin-top:3px;">${esc(display(data.seller?.primary))}</div></td></tr><tr><td style="padding:14px 16px;"><div style="font-size:12px;color:#6B7280;">Secondary owner</div><div style="font-size:14px;font-weight:bold;color:#10213A;margin-top:3px;">${esc(display(data.seller?.secondary))}</div></td></tr></table></td><td width="50%" valign="top" style="padding-left:8px;"><h2 style="margin:0 0 12px 0;color:#10213A;font-size:18px;">Transaction</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#FAF7F1;border-radius:12px;"><tr><td style="padding:14px 16px;${moneyRow ? 'border-bottom:1px solid #E5E7EB;' : ''}"><div style="font-size:12px;color:#6B7280;">Product</div><div style="font-size:14px;font-weight:bold;color:#10213A;margin-top:3px;">${esc(display(data.productType))}</div></td></tr>${moneyRow}</table></td></tr></table></td></tr>
+<tr><td style="padding:0 32px 32px 32px;"><h2 style="margin:0 0 14px 0;color:#10213A;font-size:18px;">Quick actions</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>${actionCells.join('')}</tr></table></td></tr>
+<tr><td style="background:#10213A;padding:22px 32px;text-align:center;"><p style="margin:0 0 6px 0;color:#ffffff;font-size:13px;font-weight:bold;">Pacific Coast Title Company</p><p style="margin:0;color:#D8DEE8;font-size:11px;line-height:1.5;">Automated order confirmation · <a href="https://www.pct.com" style="color:#FF8A4C;text-decoration:none;">pct.com</a></p></td></tr>
+</table></td></tr></table>
+</body></html>`;
 
   return {
     subject: `Open Order Confirmation - ${fn}`,
-    html: layout('Order Confirmation', body),
+    html,
   };
 }

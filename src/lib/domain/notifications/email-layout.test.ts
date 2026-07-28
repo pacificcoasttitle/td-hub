@@ -123,11 +123,14 @@ describe('emailLayout', () => {
     expect(PCT_DARK_LOGO_PATH).toBe('/logo2-dark.png');
   });
 
-  it('keeps rendered order-confirmation HTML wrapped by the shared shell', () => {
+  it('order-confirmation uses the PCT redesign shell (not the legacy emailLayout wrapper)', () => {
     const rendered = orderConfirmationTemplate(confirmationFixture);
-    const body = extractLayoutBody(rendered.html);
 
-    expect(rendered.html).toBe(legacyLayout('Order Confirmation', body));
+    expect(rendered.html).toContain('background:#10213A');
+    expect(rendered.html).toContain('ORDER CONFIRMATION');
+    expect(rendered.html).toContain('Your title order is open');
+    expect(rendered.html).toContain('https://www.pct.com/logo2.png');
+    expect(rendered.html).not.toContain('logo2-light.png');
   });
 
   it('normalizes trailing slashes before appending the logo path', async () => {

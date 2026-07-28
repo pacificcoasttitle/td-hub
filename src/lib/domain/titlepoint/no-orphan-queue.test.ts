@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 describe('TitlePoint Tier-1: no new orphan titlepoint.poll queued jobs', () => {
   it('pre-initiate does not insert status=queued titlepoint.poll jobs', () => {
+    // Still true after OC-1: background executePipeline, never jobs insert with queued.
     const src = readFileSync(
       join(process.cwd(), 'src/lib/domain/titlepoint/pre-initiate.ts'),
       'utf8',

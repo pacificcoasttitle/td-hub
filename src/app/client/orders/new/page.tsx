@@ -10,6 +10,8 @@ import { StepTransaction } from '@/components/client/new-order/step-transaction'
 import { StepAddParties } from '@/components/client/new-order/step-add-parties';
 import { StepReview } from '@/components/client/new-order/step-review';
 import type { SiteXPropertyResult } from '@/components/shared/property-confirm-modal';
+import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
+import { buildPreInitAddressKey, usePreInitOnSiteX } from '@/lib/orders/use-pre-init-on-sitex';
 
 export default function ClientNewOrderPage() {
   const [step, setStep] = useState<Step>(1);
@@ -46,6 +48,10 @@ export default function ClientNewOrderPage() {
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const prevTxType = useRef<string>('');
 
+  // Same shared OC-1 hook as Hub quick-entry — do not fork.
+  const preInit = usePreInitOnSiteX();
+  const invalidatePreInit = preInit.invalidateIfAddressChanged;
+
   useEffect(() => {
     fetch('/api/client/profile').then((r) => r.ok ? r.json() : null).then((d) => {
       if (!d) return;
@@ -56,6 +62,19 @@ export default function ClientNewOrderPage() {
       if (toId) setTransaction(prev => prev.titleOfficer ? prev : { ...prev, titleOfficer: String(toId) });
     }).catch(() => {});
   }, []);
+
+  // Invalidate stale pre-init when address fields are edited after a match.
+  useEffect(() => {
+    invalidatePreInit(
+      buildPreInitAddressKey({
+        address: property.street,
+        city: property.city || 'Unknown',
+        state: property.state || 'CA',
+        zip: property.zip,
+        apn: property.apn,
+      }),
+    );
+  }, [property.street, property.city, property.state, property.zip, property.apn, invalidatePreInit]);
 
   function next() { if (step < 5) setStep((step + 1) as Step); }
   function prev() { if (step > 1) setStep((step - 1) as Step); }
@@ -77,7 +96,7 @@ export default function ClientNewOrderPage() {
     }));
   }, [transaction.transactionType, seller.siteXFilled, seller.primary, seller.secondary, seller.hasSecondary, seller.isOrg, seller.orgType]);
 
-  function handleSiteXResult(siteX: SiteXPropertyResult) {
+  function fillOwnersFromSiteX(siteX: SiteXPropertyResult) {
     if (siteX.primaryOwner) {
       const parts = siteX.primaryOwner.split(' ');
       const first = parts[0] ?? '';
@@ -103,14 +122,54 @@ export default function ClientNewOrderPage() {
     }
   }
 
+  function handleSiteXResult(siteX: SiteXPropertyResult, propertyAfter: PropertyData) {
+    fillOwnersFromSiteX(siteX);
+
+    if (isConfidentSiteXMatch({
+      apn: propertyAfter.apn || siteX.apn,
+      county: propertyAfter.county || siteX.county,
+      legalDescription: propertyAfter.legalDescription || siteX.legalDescription,
+    })) {
+      preInit.onConfidentSiteX({
+        address: propertyAfter.street || siteX.fullAddress || '',
+        city: propertyAfter.city || siteX.city || 'Unknown',
+        state: propertyAfter.state || siteX.state || 'CA',
+        county: (propertyAfter.county || siteX.county)!,
+        apn: propertyAfter.apn || siteX.apn,
+        legalDescription: propertyAfter.legalDescription || siteX.legalDescription,
+        propertyType: propertyAfter.propertyType || siteX.propertyType,
+        primaryOwner: siteX.primaryOwner,
+        secondaryOwner: siteX.secondaryOwner,
+        fullAddress: siteX.fullAddress,
+        zip: propertyAfter.zip || siteX.zip,
+      });
+    } else {
+      preInit.onNoSiteXMatch();
+    }
+  }
+
+  function handleNoSiteXMatch() {
+    preInit.onNoSiteXMatch();
+  }
+
   async function handleSubmit() {
+    if (preInit.submitBlocked) return;
     setSubmitting(true);
     setResult(null);
     try {
       const res = await fetch('/api/client/orders/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientDetails, property, seller, transaction, parties, deliverableEmails: parties.deliverableEmails }),
+        body: JSON.stringify({
+          clientDetails,
+          property,
+          seller,
+          transaction,
+          parties,
+          deliverableEmails: parties.deliverableEmails,
+          titlePointSessionId: preInit.sessionId || undefined,
+          siteXSnapshot: preInit.siteXSnapshot || undefined,
+        }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? `Order creation failed (${res.status})`);
@@ -229,7 +288,16 @@ export default function ClientNewOrderPage() {
       <div className="max-w-2xl">
         <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm">
           {step === 1 && <StepDetails profile={profile} data={clientDetails} onChange={setClientDetails} onNext={next} />}
-          {step === 2 && <StepProperty data={property} onChange={setProperty} onSiteXResult={handleSiteXResult} onNext={next} onPrev={prev} />}
+          {step === 2 && (
+            <StepProperty
+              data={property}
+              onChange={setProperty}
+              onSiteXResult={handleSiteXResult}
+              onNoSiteXMatch={handleNoSiteXMatch}
+              onNext={next}
+              onPrev={prev}
+            />
+          )}
           {step === 3 && (
             <StepTransaction
               data={transaction}
@@ -245,7 +313,11 @@ export default function ClientNewOrderPage() {
             <StepReview
               clientDetails={clientDetails} property={property} seller={seller}
               transaction={transaction} parties={parties}
-              submitting={submitting} error={result?.type === 'error' ? result.message : null}
+              submitting={submitting}
+              submitBlocked={preInit.submitBlocked}
+              preparingLabel={preInit.preparingLabel}
+              preInitPhase={preInit.phase}
+              error={result?.type === 'error' ? result.message : null}
               duplicateWarning={duplicateWarning}
               onSubmit={handleSubmit} onPrev={prev} onGoTo={setStep}
               onFilesChange={setFiles}

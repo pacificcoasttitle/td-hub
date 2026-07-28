@@ -11,12 +11,15 @@ import { SH, FL, Nav } from './shared';
 interface StepPropertyProps {
   data: PropertyData;
   onChange: (d: PropertyData) => void;
-  onSiteXResult?: (result: SiteXPropertyResult) => void;
+  /** Fired after a SiteX single match is applied — parent runs shared pre-init. */
+  onSiteXResult?: (result: SiteXPropertyResult, propertyAfter: PropertyData) => void;
+  /** No usable SiteX match — parent clears pre-init gate (no-match grace). */
+  onNoSiteXMatch?: () => void;
   onNext: () => void;
   onPrev: () => void;
 }
 
-export function StepProperty({ data, onChange, onSiteXResult, onNext, onPrev }: StepPropertyProps) {
+export function StepProperty({ data, onChange, onSiteXResult, onNoSiteXMatch, onNext, onPrev }: StepPropertyProps) {
   const [showModal, setShowModal] = useState(false);
   const [pendingAddress, setPendingAddress] = useState<ParsedAddress | null>(null);
   const [noMatchMessage, setNoMatchMessage] = useState('');
@@ -45,12 +48,13 @@ export function StepProperty({ data, onChange, onSiteXResult, onNext, onPrev }: 
     if (property.state) updated.state = property.state;
     if (property.zip) updated.zip = property.zip;
     onChange(updated);
-    onSiteXResult?.(property);
+    onSiteXResult?.(property, updated);
   }
 
   function handleNoMatch() {
     setShowModal(false);
     setNoMatchMessage('Property not found in county records — you can enter details manually.');
+    onNoSiteXMatch?.();
   }
 
   function handleReject() {
@@ -70,8 +74,8 @@ export function StepProperty({ data, onChange, onSiteXResult, onNext, onPrev }: 
       });
       const result = await res.json();
       if (result.match === 'single' && result.property) {
-        const p = result.property;
-        onChange({
+        const p = result.property as SiteXPropertyResult;
+        const updated: PropertyData = {
           ...data,
           street: p.fullAddress ?? data.street,
           city: p.city ?? data.city,
@@ -82,13 +86,16 @@ export function StepProperty({ data, onChange, onSiteXResult, onNext, onPrev }: 
           propertyType: p.propertyType ?? data.propertyType,
           unitNumber: p.unitNumber ?? data.unitNumber,
           siteXFilled: true,
-        });
-        onSiteXResult?.(p);
+        };
+        onChange(updated);
+        onSiteXResult?.(p, updated);
       } else {
         setNoMatchMessage('No property found for this APN.');
+        onNoSiteXMatch?.();
       }
     } catch {
       setNoMatchMessage('Search failed. Please try again.');
+      onNoSiteXMatch?.();
     } finally {
       setApnSearching(false);
     }

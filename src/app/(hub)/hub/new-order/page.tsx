@@ -69,15 +69,29 @@ export default function HubNewOrderPage() {
 
       {/* Fixed Submit Bar — full width for hub (no sidebar) */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-8 py-4 flex items-center justify-between z-30">
-        <div>
+        <div className="flex flex-col gap-1">
           {s.result?.type === 'error' && <p className="text-sm text-red-600">{s.result.message}</p>}
+          {s.preInitPreparingLabel && (
+            <p className="text-sm text-[#6B7280]" data-testid="pre-init-preparing">
+              {s.preInitPreparingLabel}
+            </p>
+          )}
+          {s.preInitPhase === 'ready' && (
+            <p className="text-xs text-green-700" data-testid="pre-init-ready">Title data ready</p>
+          )}
+          {s.preInitPhase === 'timed_out' && (
+            <p className="text-xs text-[#6B7280]" data-testid="pre-init-timed-out">
+              Title data still preparing in background — you can submit
+            </p>
+          )}
         </div>
         <button
           onClick={s.handleSubmit}
-          disabled={s.submitting}
+          disabled={s.submitting || s.preInitSubmitBlocked}
+          data-testid="create-order-submit"
           className="px-8 py-3 text-sm font-semibold bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors h-11 inline-flex items-center gap-2"
         >
-          {s.submitting ? 'Creating Order…' : 'Create Order'}
+          {s.submitting ? 'Creating Order…' : s.preInitSubmitBlocked ? 'Preparing…' : 'Create Order'}
         </button>
       </div>
 
@@ -87,7 +101,12 @@ export default function HubNewOrderPage() {
         open={s.showConfirmModal}
         address={s.pendingAddress ?? { street: '', city: '', state: '', zip: '' }}
         onConfirm={s.handleConfirm}
-        onNoMatch={() => { s.setShowConfirmModal(false); s.setNoMatchMsg('Property not found — enter details manually.'); }}
+        onNoMatch={() => {
+          s.setShowConfirmModal(false);
+          s.setNoMatchMsg('Property not found — enter details manually.');
+          // No-match grace: do not fire pre-init and do not gate submit.
+          s.handleNoSiteXMatch?.();
+        }}
         onReject={() => { s.setShowConfirmModal(false); s.setStreet(''); s.setCity(''); s.setState(''); s.setZip(''); }}
         accentColor="#F26B2B"
       />

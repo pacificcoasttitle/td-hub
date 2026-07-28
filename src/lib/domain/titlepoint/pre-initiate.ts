@@ -85,9 +85,11 @@ export async function preInitiateSearches(property: {
         })
         .returning({ id: titlePointData.id });
 
-      // Drive inline — do NOT insert titlepoint.poll status='queued' (orphans; nothing drains them).
-      const pipelineResult = await executePipeline(record!.id);
-      if (!pipelineResult.success) {
+      // Drive poll→result in background (parks at result_ready when no orderId).
+      // Do NOT insert titlepoint.poll status='queued' (orphans; nothing drains them).
+      // UI polls /api/titlepoint/pre-initiate/status; submit gate times out without hanging.
+      void executePipeline(record!.id).then(async (pipelineResult) => {
+        if (pipelineResult.success) return;
         const message = pipelineResult.timedOut
           ? `Pipeline timeout (retryable via manual retry): ${pipelineResult.error ?? 'timed out'}`
           : (pipelineResult.error ?? 'Pipeline failed');
@@ -96,10 +98,15 @@ export async function preInitiateSearches(property: {
           message,
           updatedAt: new Date(),
         }).where(eq(titlePointData.id, record!.id));
-        return { searchType, status: 'failed' };
-      }
+      }).catch(async (err) => {
+        await db.update(titlePointData).set({
+          status: 'failed',
+          message: err instanceof Error ? err.message : 'Pipeline failed',
+          updatedAt: new Date(),
+        }).where(eq(titlePointData.id, record!.id));
+      });
 
-      return { searchType, status: 'initiated' };
+      return { searchType, status: 'pending' };
     }),
   );
 

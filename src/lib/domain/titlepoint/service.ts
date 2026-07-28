@@ -213,6 +213,19 @@ export async function executePipeline(
       return { success: false, error: resultOutcome.error };
     }
 
+    // Pre-order sessions (null orderId): park at result_ready — fetchImage/grant-deed
+    // require an order. linkSessionToOrder finishes docs after SoftPro create.
+    const [afterResult] = await db
+      .select({ orderId: titlePointData.orderId, searchType: titlePointData.searchType })
+      .from(titlePointData)
+      .where(eq(titlePointData.id, titlePointDataId))
+      .limit(1);
+
+    if (!afterResult?.orderId) {
+      console.error('[TP-PIPELINE] Pre-order park at result_ready (no orderId yet)');
+      return { success: true };
+    }
+
     // ── Step 3: Generate image + upload + SoftPro ──
     if (Date.now() > deadline) {
       return { success: false, timedOut: true, error: 'Pipeline timeout before image generation' };
@@ -225,21 +238,11 @@ export async function executePipeline(
     }
 
     // ── Step 4: Post-completion triggers (best-effort, don't fail pipeline) ──
-    const [record] = await db
-      .select()
-      .from(titlePointData)
-      .where(eq(titlePointData.id, titlePointDataId))
-      .limit(1);
-
-    if (record) {
-      if (record.searchType === 'legal_vesting') {
-        try { await fetchGrantDeed(titlePointDataId); } catch { /* best effort */ }
-      }
-
-      if (record.orderId) {
-        try { await maybeEnqueueConfirmation(record.orderId); } catch { /* best effort */ }
-      }
+    if (afterResult.searchType === 'legal_vesting') {
+      try { await fetchGrantDeed(titlePointDataId); } catch { /* best effort */ }
     }
+
+    try { await maybeEnqueueConfirmation(afterResult.orderId); } catch { /* best effort */ }
 
     return { success: true };
   } catch (error) {

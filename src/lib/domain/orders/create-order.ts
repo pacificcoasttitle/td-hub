@@ -7,6 +7,7 @@ import { propertyLookup } from '@/lib/integrations/sitex/client';
 import type { SiteXPropertyData } from '@/lib/integrations/sitex/types';
 import { autoTriggerTitlePoint } from '@/lib/domain/titlepoint/auto-trigger';
 import { linkSessionToOrder } from '@/lib/domain/titlepoint/pre-initiate';
+import { initiateSearch } from '@/lib/domain/titlepoint/service';
 import { getSetting } from '@/lib/domain/settings/service';
 import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
 import { buildSoftProPayload, type ResolvedContacts } from './softpro-payload';
@@ -72,6 +73,20 @@ export const createOrderInputSchema = z.object({
   clientType: z.string().optional(),
   onBehalfOfContactId: z.number().int().positive().optional(),
   titlePointSessionId: z.string().optional(),
+  /**
+   * Input-phase SiteX result (confident match). When present, skip the
+   * duplicate SiteX lookup on submit.
+   */
+  siteXSnapshot: z.object({
+    matchCode: z.literal('S').optional(),
+    apn: z.string().nullable().optional(),
+    legalDescription: z.string().nullable().optional(),
+    county: z.string().nullable().optional(),
+    fips: z.string().nullable().optional(),
+    propertyType: z.string().nullable().optional(),
+    primaryOwner: z.string().nullable().optional(),
+    secondaryOwner: z.string().nullable().optional(),
+  }).optional(),
 });
 
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>;
@@ -96,17 +111,44 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
   const input = parsed.data;
   let sitexData: SiteXPropertyData | null = null;
 
-  try {
-    const sxResult = await propertyLookup({
-      street: input.property.address,
-      city: input.property.city,
-      state: input.property.state,
-      zip: input.property.zip,
-    });
-    if (sxResult.success && sxResult.data?.matchCode === 'S') {
-      sitexData = sxResult.data;
-    }
-  } catch { /* SiteX failure never blocks order creation */ }
+  // Prefer the input-phase SiteX snapshot — do not call SiteX again on submit.
+  if (input.siteXSnapshot && (input.siteXSnapshot.matchCode === 'S' || input.siteXSnapshot.apn || input.siteXSnapshot.legalDescription)) {
+    sitexData = {
+      matchCode: 'S',
+      apn: input.siteXSnapshot.apn ?? null,
+      legalDescription: input.siteXSnapshot.legalDescription ?? null,
+      county: input.siteXSnapshot.county ?? null,
+      fips: input.siteXSnapshot.fips ?? null,
+      propertyType: input.siteXSnapshot.propertyType ?? null,
+      primaryOwner: input.siteXSnapshot.primaryOwner ?? null,
+      secondaryOwner: input.siteXSnapshot.secondaryOwner ?? null,
+      fullAddress: null,
+      city: null,
+      state: null,
+      zip: null,
+      unitNumber: null,
+      beds: null,
+      baths: null,
+      sqft: null,
+      lotSize: null,
+      yearBuilt: null,
+      assessedValue: null,
+      lastSaleDate: null,
+      lastSalePrice: null,
+    };
+  } else {
+    try {
+      const sxResult = await propertyLookup({
+        street: input.property.address,
+        city: input.property.city,
+        state: input.property.state,
+        zip: input.property.zip,
+      });
+      if (sxResult.success && sxResult.data?.matchCode === 'S') {
+        sitexData = sxResult.data;
+      }
+    } catch { /* SiteX failure never blocks order creation */ }
+  }
 
   const apn = input.property.apn ?? sitexData?.apn ?? '';
   const legal = input.property.legalDescription ?? sitexData?.legalDescription ?? '';
@@ -145,6 +187,11 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
     try {
       await linkSessionToOrder(input.titlePointSessionId, orderId, fileNumber);
     } catch { /* link failure never blocks order creation */ }
+
+    // Geo is post-order only (not in pre-init Tax+LV). Fire geo after link.
+    try {
+      await initiateSearch(orderId, 'geo_address', 'system:auto');
+    } catch { /* geo failure never blocks order creation */ }
   } else if (input.property.address && input.property.state && county) {
     try {
       const tpResult = await autoTriggerTitlePoint(orderId, {

@@ -19,16 +19,28 @@ import {
   OPEN_ORDERS_CONFIRMATION_CC,
   buildConfirmationRecipients,
 } from './confirmation-recipients';
+import { parseTaxResultData } from './tax-result-data';
+import { EMAIL_STATUS_SENT_NO_CLIENT, hasConfirmationEmailStatus } from './confirmation-send-guard';
 
-/** Loud status when confirmation sends without the form's client recipient. Fits email_status varchar(20). */
-export const EMAIL_STATUS_SENT_NO_CLIENT = 'sent_no_client';
+export { EMAIL_STATUS_SENT_NO_CLIENT } from './confirmation-send-guard';
+
+const DOC_LABELS: Record<string, string> = {
+  legal_vesting: 'Legal and Vesting',
+  tax: 'Tax Roll',
+  grant_deed: 'Recent Grant Deed',
+};
 
 export async function handleOrderConfirmation(
   orderId: number,
   payload: Record<string, unknown> | null,
 ): Promise<void> {
-  const noDocuments = payload?.noDocuments === true;
   const testOverride = typeof payload?.testOverrideTo === 'string' ? payload.testOverrideTo.trim() : '';
+
+  // Double-send guard (email_status) — outbox dedup is the primary; this is the belt.
+  if (await hasConfirmationEmailStatus(orderId)) {
+    console.error(`[order.confirmation] order ${orderId} already sent (email_status) — skipping`);
+    return;
+  }
 
   const model = await getOrderReadModel(orderId);
   if (!model) throw new Error(`Order ${orderId} not found`);
@@ -68,7 +80,8 @@ export async function handleOrderConfirmation(
   const legalDescription = await loadLegalDescription(orderId, order.property.legalDescription);
   const tpShutOff = (await getSetting('titlepoint_shut_off')) === 'true';
 
-  const attachments = await buildAttachments(orderId, noDocuments);
+  // Attach whatever LV/tax/grant-deed PDFs exist — never block on missing ones.
+  const { attachments, labels: attachedDocLabels } = await buildAttachments(orderId);
 
   const address = order.property.addressFormatted !== '—'
     ? order.property.addressFormatted
@@ -112,6 +125,7 @@ export async function handleOrderConfirmation(
       titleOfficer: order.assignments.titleOfficer?.name ?? null,
     },
     hasDocuments: attachments.length > 0,
+    attachedDocLabels,
     isTitlePointActive: !tpShutOff,
   });
 
@@ -242,93 +256,88 @@ async function loadRecipientEmails(
   });
 }
 
+/**
+ * Tax section from captured pre-init / fetchResult payload — independent of tax PDF.
+ * Accepts result_ready / completed / failed rows that still carry resultData.
+ */
 async function loadTaxData(orderId: number): Promise<ConfirmationTaxData | null> {
-  const [taxRow] = await db.select({ metadata: titlePointData.metadata })
+  const taxRows = await db.select({
+    metadata: titlePointData.metadata,
+    status: titlePointData.status,
+  })
     .from(titlePointData)
     .where(and(
       eq(titlePointData.orderId, orderId),
       eq(titlePointData.searchType, 'tax'),
-      eq(titlePointData.status, 'completed'),
     ))
     .orderBy(desc(titlePointData.createdAt), desc(titlePointData.id))
-    .limit(1);
-  if (!taxRow) return null;
+    .limit(10);
 
-  const meta = (taxRow.metadata as Record<string, unknown>) ?? {};
-  const rd = (meta.resultData as Record<string, unknown>) ?? {};
-  const str = (obj: Record<string, unknown>, ...keys: string[]) => {
-    for (const k of keys) { const v = obj[k]; if (typeof v === 'string' && v.trim()) return v.trim(); }
-    return null;
-  };
-  const obj = (o: Record<string, unknown>, ...keys: string[]) => {
-    for (const k of keys) { const v = o[k]; if (v && typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>; }
-    return null;
-  };
-  const report = obj(rd, 'TaxReport', 'taxReport') ?? rd;
-  const pickInstallment = (source: Record<string, unknown>, ordinal: '1st' | '2nd') => {
-    const installments = obj(source, 'Installments', 'installments');
-    if (!installments) return null;
-    const rawItems = installments.Item ?? installments.items;
-    const items = Array.isArray(rawItems) ? rawItems : rawItems ? [rawItems] : [];
-    const match = items.find((item) => {
-      if (!item || typeof item !== 'object') return false;
-      const number = str(item as Record<string, unknown>, 'Number', 'number');
-      return number === ordinal;
-    });
-    return match && typeof match === 'object' && !Array.isArray(match)
-      ? (match as Record<string, unknown>)
-      : null;
-  };
-
-  return {
-    taxRateArea: str(report, 'TaxRateArea', 'taxRateArea'),
-    useCode: str(report, 'UseCode', 'useCode'),
-    regionCode: str(report, 'RegionCode', 'regionCode'),
-    floodZone: str(report, 'FloodZone', 'floodZone'),
-    zoningCode: str(report, 'ZoningCode', 'zoningCode'),
-    taxRate: str(report, 'TaxRate', 'taxRate'),
-    issueDate: str(report, 'IssueDate', 'issueDate'),
-    landValue: str(report, 'LandValue', 'landValue', 'LandValuation', 'landValuation'),
-    improvementsValue: str(report, 'ImprovementsValue', 'improvementsValue', 'ImprovementsValuation', 'improvementsValuation'),
-    firstInstallment: (pickInstallment(report, '1st') ?? obj(report, 'FirstInstallment', 'firstInstallment')) as ConfirmationTaxData['firstInstallment'],
-    secondInstallment: (pickInstallment(report, '2nd') ?? obj(report, 'SecondInstallment', 'secondInstallment')) as ConfirmationTaxData['secondInstallment'],
-  };
+  for (const taxRow of taxRows) {
+    if (taxRow.status === 'superseded') continue;
+    const meta = (taxRow.metadata as Record<string, unknown>) ?? {};
+    const parsed = parseTaxResultData(meta.resultData);
+    if (parsed) return parsed;
+  }
+  return null;
 }
 
 async function loadLegalDescription(orderId: number, fallback: string | null): Promise<string | null> {
-  const [lvRow] = await db.select({ metadata: titlePointData.metadata })
+  const lvRows = await db.select({
+    metadata: titlePointData.metadata,
+    status: titlePointData.status,
+  })
     .from(titlePointData)
     .where(and(
       eq(titlePointData.orderId, orderId),
       eq(titlePointData.searchType, 'legal_vesting'),
-      eq(titlePointData.status, 'completed'),
     ))
     .orderBy(desc(titlePointData.createdAt), desc(titlePointData.id))
-    .limit(1);
+    .limit(10);
 
-  if (!lvRow) return fallback;
-
-  const meta = (lvRow.metadata as Record<string, unknown>) ?? {};
-  const result = (meta.resultData as Record<string, unknown>) ?? {};
-  for (const key of ['BriefLegal', 'briefLegal', 'LegalDescription', 'legalDescription']) {
-    const value = result[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
+  for (const lvRow of lvRows) {
+    if (lvRow.status === 'superseded') continue;
+    const meta = (lvRow.metadata as Record<string, unknown>) ?? {};
+    const result = (meta.resultData as Record<string, unknown>) ?? {};
+    for (const key of ['BriefLegal', 'briefLegal', 'LegalDescription', 'legalDescription']) {
+      const value = result[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
   }
   return fallback;
 }
 
-async function buildAttachments(orderId: number, noDocuments: boolean): Promise<SendGridAttachment[]> {
-  if (noDocuments) return [];
-  const docRows = await db.select({ storageKey: documents.storageKey, filename: documents.filename, category: documents.category })
+async function buildAttachments(
+  orderId: number,
+): Promise<{ attachments: SendGridAttachment[]; labels: string[] }> {
+  const docRows = await db.select({
+    storageKey: documents.storageKey,
+    filename: documents.filename,
+    category: documents.category,
+  })
     .from(documents)
-    .where(and(eq(documents.orderId, orderId), inArray(documents.category, ['legal_vesting', 'tax', 'grant_deed']), eq(documents.status, 'active')));
+    .where(and(
+      eq(documents.orderId, orderId),
+      inArray(documents.category, ['legal_vesting', 'tax', 'grant_deed']),
+      eq(documents.status, 'active'),
+    ));
 
   const attachments: SendGridAttachment[] = [];
-  for (const doc of docRows) {
+  const labels: string[] = [];
+  const order = ['legal_vesting', 'tax', 'grant_deed'] as const;
+
+  for (const cat of order) {
+    const doc = docRows.find((d) => d.category === cat);
+    if (!doc) continue;
     try {
       const result = await downloadFile(doc.storageKey);
       if (result.success && result.data) {
-        attachments.push({ content: result.data.toString('base64'), type: 'application/pdf', filename: doc.filename });
+        attachments.push({
+          content: result.data.toString('base64'),
+          type: 'application/pdf',
+          filename: doc.filename,
+        });
+        labels.push(DOC_LABELS[cat] ?? cat);
       }
     } catch {
       try {
@@ -341,5 +350,5 @@ async function buildAttachments(orderId: number, noDocuments: boolean): Promise<
       } catch { /* never fail the email send */ }
     }
   }
-  return attachments;
+  return { attachments, labels };
 }

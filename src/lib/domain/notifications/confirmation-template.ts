@@ -61,6 +61,8 @@ export interface FullConfirmationData {
   parties?: { buyerAgent?: ConfirmationParty | null; listingAgent?: ConfirmationParty | null; lender?: ConfirmationParty | null; escrow?: ConfirmationParty | null } | null;
   assignments?: { salesRep?: string | null; titleOfficer?: string | null } | null;
   hasDocuments: boolean;
+  /** Labels for PDFs actually attached (attach-what-exists). Empty = no doc note. */
+  attachedDocLabels?: string[];
   isTitlePointActive: boolean;
 }
 
@@ -119,18 +121,21 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
     </div>`;
   }
 
-  // Document note
-  const docHtml = data.hasDocuments
-    ? `<div style="background:${CARD_BG};border:1px solid ${BORDER_SOFT};border-left:4px solid ${PCT_ORANGE};border-radius:12px;padding:14px 16px;margin:0 0 18px;">
-        <p style="margin:0;font-size:13px;color:${TEXT_PRIMARY};"><strong>Attached:</strong> Legal and Vesting, Recent Grant Deed, Tax Roll</p>
-      </div>`
-    : data.isTitlePointActive
-      ? `<div style="background:${CARD_BG};border:1px solid ${BORDER_SOFT};border-left:4px solid ${PCT_ORANGE};border-radius:12px;padding:14px 16px;margin:0 0 18px;">
-          <p style="margin:0;font-size:13px;color:${TEXT_MUTED};">Documents are being generated and will be available shortly.</p>
-        </div>`
-      : `<div style="background:${CARD_BG};border:1px solid ${BORDER_SOFT};border-left:4px solid ${PCT_ORANGE};border-radius:12px;padding:14px 16px;margin:0 0 18px;">
+  // Document note — attach-what-exists only. Never show "coming shortly" placeholder (OC-3).
+  const attachedLabels = (data.attachedDocLabels ?? []).filter(Boolean);
+  let docHtml = '';
+  if (attachedLabels.length > 0 || data.hasDocuments) {
+    const labelText = attachedLabels.length > 0
+      ? attachedLabels.join(', ')
+      : 'Title documents';
+    docHtml = `<div style="background:${CARD_BG};border:1px solid ${BORDER_SOFT};border-left:4px solid ${PCT_ORANGE};border-radius:12px;padding:14px 16px;margin:0 0 18px;">
+        <p style="margin:0;font-size:13px;color:${TEXT_PRIMARY};"><strong>Attached:</strong> ${esc(labelText)}</p>
+      </div>`;
+  } else if (!data.isTitlePointActive) {
+    docHtml = `<div style="background:${CARD_BG};border:1px solid ${BORDER_SOFT};border-left:4px solid ${PCT_ORANGE};border-radius:12px;padding:14px 16px;margin:0 0 18px;">
           <p style="margin:0;font-size:13px;color:${TEXT_MUTED};">TitlePoint is currently offline. Documents will be available when service resumes.</p>
         </div>`;
+  }
 
   // Action buttons
   let actionBtns = '';

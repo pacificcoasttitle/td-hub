@@ -6,7 +6,6 @@ import {
   PCT_ORANGE,
   TEXT_MUTED,
   TEXT_PRIMARY,
-  button as btn,
   detailsRow as row,
   emailLayout as layout,
   esc,
@@ -54,6 +53,8 @@ export interface FullConfirmationData {
   loanNumber?: string | null;
   escrowNumber?: string | null;
   opener?: ConfirmationParty | null;
+  /** Title officer contact for the client (name + email/phone). */
+  titleOfficer?: ConfirmationParty | null;
   property?: { address?: string | null; city?: string | null; zip?: string | null; county?: string | null; apn?: string | null; legalDescription?: string | null } | null;
   taxData?: ConfirmationTaxData | null;
   seller?: { primary?: string | null; secondary?: string | null } | null;
@@ -63,6 +64,34 @@ export interface FullConfirmationData {
   /** Labels for PDFs actually attached (attach-what-exists). Empty = no doc note. */
   attachedDocLabels?: string[];
   isTitlePointActive: boolean;
+}
+
+/** True for a displayable money string that is not empty/dash/zero. */
+export function isMeaningfulMoney(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === '—' || trimmed === '-' || trimmed.toLowerCase() === 'n/a') return false;
+  const normalized = trimmed.replace(/[$,\s]/g, '');
+  if (!normalized) return false;
+  const n = Number(normalized);
+  if (Number.isFinite(n) && n === 0) return false;
+  return true;
+}
+
+export function moneyRowForTransaction(
+  transactionType: string | null | undefined,
+  salesPrice: string | null | undefined,
+  loanAmount: string | null | undefined,
+): string {
+  const t = transactionType?.toLowerCase().trim() ?? '';
+  if (t === 'purchase') {
+    return isMeaningfulMoney(salesPrice) ? row('Sales Price', salesPrice!) : '';
+  }
+  if (t === 'refinance') {
+    return isMeaningfulMoney(loanAmount) ? row('Loan Amount', loanAmount!) : '';
+  }
+  // Other / unknown types: hide the money row (never render Sales Price: 0).
+  return '';
 }
 
 function detailsTable(rows: string): string {
@@ -84,7 +113,23 @@ function partyBlock(label: string, p: ConfirmationParty | null | undefined): str
   return `${sectionHeading(label)}${detailsTable(rows)}`;
 }
 
-/** OC-3 content labels preserved — presentational layout only. */
+/** Same pill chrome as attached Legal Vesting / Tax / Grant Deed chips. */
+function pill(label: string, href?: string): string {
+  const inner = `<span style="color:${PCT_ORANGE};font-size:15px;margin-right:8px;">▣</span>${esc(label)}`;
+  const content = href
+    ? `<a href="${href}" style="color:${TEXT_PRIMARY};text-decoration:none;font-size:13px;font-weight:700;display:inline-block;">${inner}</a>`
+    : `<span style="color:${TEXT_PRIMARY};font-size:13px;font-weight:700;">${inner}</span>`;
+  return `<div style="display:inline-block;border:1px solid ${BORDER_SOFT};border-radius:999px;padding:9px 14px;background:#FFFFFF;">${content}</div>`;
+}
+
+function inlinePills(items: Array<{ label: string; href?: string }>): string {
+  if (items.length === 0) return '';
+  const cells = items.map((item) =>
+    `<td style="padding:0 8px 8px 0;white-space:nowrap;">${pill(item.label, item.href)}</td>`,
+  ).join('');
+  return `<table cellpadding="0" cellspacing="0" style="margin:0 0 20px;"><tr>${cells}</tr></table>`;
+}
+
 function installmentRows(label: string, inst: TaxInstallment | null | undefined): string {
   if (!inst) return '';
   let r = '';
@@ -110,17 +155,10 @@ function installmentCard(title: string, inst: TaxInstallment | null | undefined)
 function attachedDocsHtml(labels: string[], hasDocuments: boolean, isTitlePointActive: boolean): string {
   if (labels.length > 0 || hasDocuments) {
     const items = labels.length > 0 ? labels : ['Title documents'];
-    const chips = items.map((label) => `
-      <tr><td style="padding:0 0 8px;">
-        <div style="display:inline-block;border:1px solid ${BORDER_SOFT};border-radius:999px;padding:9px 14px;background:#FFFFFF;color:${TEXT_PRIMARY};font-size:13px;font-weight:700;">
-          <span style="color:${PCT_ORANGE};font-size:15px;margin-right:8px;">▣</span>${esc(label)}
-        </div>
-      </td></tr>`).join('');
-
     return `
       ${sectionHeading('Attached documents')}
       <p style="margin:0 0 10px;font-size:13px;color:${TEXT_MUTED};"><strong style="color:${TEXT_PRIMARY};">Attached:</strong> ${esc(items.join(', '))}</p>
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">${chips}</table>`;
+      ${inlinePills(items.map((label) => ({ label })))}`;
   }
 
   if (!isTitlePointActive) {
@@ -129,8 +167,19 @@ function attachedDocsHtml(labels: string[], hasDocuments: boolean, isTitlePointA
     </div>`;
   }
 
-  // OC-3: no "coming shortly" placeholder when TP is active and nothing attached.
   return '';
+}
+
+function titleOfficerHtml(to: ConfirmationParty | null | undefined): string {
+  if (!to || (!to.name && !to.email && !to.phone)) return '';
+  const contactLine = [to.email, to.phone].filter(Boolean).join(' · ');
+  return `
+    <div style="background:${ORANGE_TINT};border:1px solid ${PCT_ORANGE};border-radius:12px;padding:16px 18px;margin:0 0 20px;">
+      <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:${PCT_ORANGE};text-transform:uppercase;letter-spacing:0.06em;">Your Title Officer</p>
+      ${to.name ? `<p style="margin:0 0 4px;font-size:16px;font-weight:700;color:${PCT_NAVY};">${esc(to.name)}</p>` : ''}
+      ${contactLine ? `<p style="margin:0;font-size:13px;color:${TEXT_PRIMARY};">${esc(contactLine)}</p>` : ''}
+      <p style="margin:8px 0 0;font-size:12px;color:${TEXT_MUTED};">Questions about this order? Contact your title officer above.</p>
+    </div>`;
 }
 
 export function orderConfirmationTemplate(data: FullConfirmationData): { subject: string; html: string } {
@@ -140,34 +189,38 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
   const fn = data.fileNumber;
   const orderUrl = `${APP_URL}/orders/confirm/${encodeURIComponent(fn)}`;
 
-  // FinCEN block
+  // FinCEN — purchase only; never show Sales Price: 0
   let fincenHtml = '';
   if (isPurchase) {
+    const fincenPrice = isMeaningfulMoney(data.salesPrice) ? data.salesPrice! : 'N/A';
     fincenHtml = `
     <div style="background:${ORANGE_TINT};border:1px solid ${PCT_ORANGE};border-radius:12px;padding:18px;margin:0 0 20px;">
       <p style="color:${PCT_NAVY};margin:0 0 8px;font-size:15px;font-weight:700;">FinCEN Reporting Quick Check</p>
-      <p style="margin:0 0 8px;font-size:13px;color:${TEXT_PRIMARY};">Sales Price: <strong>${esc(data.salesPrice ?? 'N/A')}</strong></p>
+      <p style="margin:0 0 8px;font-size:13px;color:${TEXT_PRIMARY};">Sales Price: <strong>${esc(fincenPrice)}</strong></p>
       <ul style="margin:0 0 14px;padding-left:20px;font-size:13px;color:${TEXT_PRIMARY};">
         <li>Is this an all-cash or wire-financed transaction?</li>
         <li>Is the buyer a legal entity or trust?</li>
       </ul>
-      <table cellpadding="0" cellspacing="0"><tr>
-        ${btn('Check This Transaction', FINCEN_URL)}
-      </tr></table>
+      ${inlinePills([{ label: 'Check This Transaction', href: FINCEN_URL }])}
     </div>`;
   }
 
   const attachedLabels = (data.attachedDocLabels ?? []).filter(Boolean);
   const docHtml = attachedDocsHtml(attachedLabels, data.hasDocuments, data.isTitlePointActive);
 
-  // Action buttons
-  const btnCells: string[] = [];
-  if (!hideGenerateFees) btnCells.push(btn('Generate Fees', `${APP_URL}/orders/${encodeURIComponent(fn)}/fees`));
-  btnCells.push(btn('Generate Proposed', `${APP_URL}/orders/${encodeURIComponent(fn)}/proposed`));
-  btnCells.push(btn('Generate CPL', `${APP_URL}/orders/${encodeURIComponent(fn)}/cpl`));
-  const actionBtns = `<table cellpadding="0" cellspacing="0" style="margin:0 0 22px;"><tr>${btnCells.map((b) => b + '<td width="8"></td>').join('')}</tr></table>`;
+  // Action pills — same chrome as doc chips, inline, prominent (near top).
+  const actionItems: Array<{ label: string; href: string }> = [];
+  if (!hideGenerateFees) {
+    actionItems.push({ label: 'Generate Fees', href: `${APP_URL}/orders/${encodeURIComponent(fn)}/fees` });
+  }
+  actionItems.push({ label: 'Generate Proposed', href: `${APP_URL}/orders/${encodeURIComponent(fn)}/proposed` });
+  actionItems.push({ label: 'Generate CPL', href: `${APP_URL}/orders/${encodeURIComponent(fn)}/cpl` });
+  actionItems.push({ label: 'View Order in Portal', href: orderUrl });
+  const actionPills = `
+    ${sectionHeading('Quick actions')}
+    ${inlinePills(actionItems)}`;
 
-  // Order / property summary (single clean card — prelim-style details table)
+  // Order / property summary
   let summaryRows = '';
   summaryRows += row('Order #', fn);
   if (data.address) summaryRows += row('Property', data.address);
@@ -181,14 +234,13 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
   }
   if (data.opener?.name) summaryRows += row('Opened By', data.opener.name);
   if (data.opener?.email) summaryRows += row('Opener Email', data.opener.email);
-  if (data.opener?.phone) summaryRows += row('Opener Telephone', data.opener.phone);
-  if (data.opener?.company) summaryRows += row('Opener Company', data.opener.company);
   if (data.transactionType) summaryRows += row('Transaction Type', data.transactionType);
+  summaryRows += moneyRowForTransaction(data.transactionType, data.salesPrice, data.loanAmount);
   const summaryHtml = summaryRows
     ? `${sectionHeading('Order & property summary')}${detailsTable(summaryRows)}`
     : '';
 
-  // Tax section — same OC-3 fields, cleaner installment layout
+  // Tax section
   let taxHtml = '';
   if (data.taxData) {
     const td = data.taxData;
@@ -214,7 +266,6 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
     }
   }
 
-  // Seller section
   let sellerHtml = '';
   if (data.seller?.primary) {
     let rows = row('Primary Owner', data.seller.primary);
@@ -222,15 +273,12 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
     sellerHtml = `${sectionHeading('Seller / Owner')}${detailsTable(rows)}`;
   }
 
-  // Transaction section
+  // Transaction details — sales/loan already in summary via conditional; avoid duplicate / zero rows here.
   let txHtml = '';
   {
     let rows = '';
     if (data.assignments?.salesRep) rows += row('Sales Rep', data.assignments.salesRep);
-    if (data.assignments?.titleOfficer) rows += row('Title Officer', data.assignments.titleOfficer);
     if (data.productType) rows += row('Product', data.productType);
-    if (data.salesPrice) rows += row('Sales Price', data.salesPrice);
-    if (data.loanAmount) rows += row('Loan Amount', data.loanAmount);
     if (data.loanNumber) rows += row('Loan Number', data.loanNumber);
     if (data.escrowNumber) rows += row('Escrow Number', data.escrowNumber);
     if (rows) txHtml = `${sectionHeading('Transaction details')}${detailsTable(rows)}`;
@@ -243,22 +291,26 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
     partyBlock('Escrow', data.parties?.escrow),
   ].join('');
 
-  // Body sits inside shared emailLayout (PCT logo header + www.pct.com footer) — same shell as prelim-delivery.
+  const toBlock = titleOfficerHtml(
+    data.titleOfficer
+      ?? (data.assignments?.titleOfficer
+        ? { name: data.assignments.titleOfficer, email: null, phone: null, company: null }
+        : null),
+  );
+
   const body = `
     <p style="margin:0 0 10px;font-size:16px;font-weight:700;color:${PCT_NAVY};">Title order opened</p>
     <p style="margin:0 0 6px;font-size:15px;color:${TEXT_PRIMARY};line-height:1.6;">Pacific Coast Title has opened a new order.</p>
-    <p style="margin:0 0 20px;font-size:18px;font-weight:700;color:${PCT_NAVY};">Order # ${esc(fn)}</p>
+    <p style="margin:0 0 16px;font-size:18px;font-weight:700;color:${PCT_NAVY};">Order # ${esc(fn)}</p>
+    ${toBlock}
+    ${actionPills}
     ${summaryHtml}
     ${docHtml}
     ${taxHtml}
     ${fincenHtml}
-    ${actionBtns}
     ${sellerHtml}
     ${txHtml}
-    ${partyHtml}
-    <table cellpadding="0" cellspacing="0" style="margin:8px 0 0;"><tr>
-      ${btn('View Order in Portal', orderUrl)}
-    </tr></table>`;
+    ${partyHtml}`;
 
   return {
     subject: `Open Order Confirmation - ${fn}`,

@@ -101,6 +101,16 @@ export async function handleOrderConfirmation(
     ? order.financials.loanAmountFormatted
     : null;
 
+  const titleOfficerAssignment = order.assignments.titleOfficer;
+  const titleOfficer = titleOfficerAssignment && (titleOfficerAssignment.name || titleOfficerAssignment.email)
+    ? {
+        name: titleOfficerAssignment.name,
+        email: titleOfficerAssignment.email,
+        phone: titleOfficerAssignment.phone ?? null,
+        company: null,
+      }
+    : null;
+
   const { subject, html } = orderConfirmationTemplate({
     fileNumber: order.fileNumber,
     address: addressOrNull,
@@ -109,6 +119,7 @@ export async function handleOrderConfirmation(
     salesPrice,
     loanAmount,
     opener,
+    titleOfficer,
     property: {
       address: order.property.line1,
       city: order.property.city,

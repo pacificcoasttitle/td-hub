@@ -127,6 +127,7 @@ describe('mapStaffOrderDetailResponse (full-page parity)', () => {
 describe('order-confirmation email parity with canonical formatters', () => {
   it('renders the same address/money/assignments the UI would show', () => {
     const model = buildOrderReadModel(sampleData);
+    const to = model.assignments.titleOfficer;
     const { subject, html } = orderConfirmationTemplate({
       fileNumber: model.fileNumber,
       address: model.property.addressFormatted,
@@ -135,6 +136,9 @@ describe('order-confirmation email parity with canonical formatters', () => {
       salesPrice: model.financials.salesPriceFormatted,
       loanAmount: model.financials.loanAmountFormatted,
       opener: null,
+      titleOfficer: to
+        ? { name: to.name, email: to.email, phone: to.phone ?? null, company: null }
+        : null,
       property: {
         address: model.property.line1,
         city: model.property.city,
@@ -148,7 +152,7 @@ describe('order-confirmation email parity with canonical formatters', () => {
       parties: {},
       assignments: {
         salesRep: model.assignments.salesRep?.name ?? null,
-        titleOfficer: model.assignments.titleOfficer?.name ?? null,
+        titleOfficer: to?.name ?? null,
       },
       hasDocuments: true,
       isTitlePointActive: true,
@@ -157,10 +161,15 @@ describe('order-confirmation email parity with canonical formatters', () => {
     expect(subject).toBe('Open Order Confirmation - 20019922-GLT');
     // Property block uses line1/city/zip (same source as formatOrderAddress components)
     expect(html).toContain('123 Main St, Glendale, 91203');
+    // Purchase → Sales Price only (never Loan Amount / never Sales Price: 0)
+    expect(html).toContain('Sales Price');
     expect(html).toContain('$490,000');
-    expect(html).toContain('$425,000');
+    expect(html).not.toContain('Loan Amount');
+    expect(html).not.toContain('$425,000');
     expect(html).toContain('Ryan Rep');
     expect(html).toContain('Tina Title');
+    expect(html).toContain('unit66@pct.com');
+    expect(html).toContain('Your Title Officer');
     expect(html).toContain('Los Angeles');
     expect(html).toContain('5641-001-002');
   });

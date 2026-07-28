@@ -56,6 +56,8 @@ export const eventOutbox = pgTable('event_outbox', {
   payload: jsonb('payload'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   publishedAt: timestamp('published_at'),
+  /** Set while a worker owns the row (FOR UPDATE SKIP LOCKED claim). Cleared on publish/fail. */
+  claimedAt: timestamp('claimed_at'),
   failCount: integer('fail_count').notNull().default(0),
 }, (table) => ({
   unpublishedIdx: index('outbox_unpublished_idx').on(table.publishedAt),

@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
-import { eventOutbox, orders, orderProperties, orderParties, contacts } from '@/lib/db/schema';
-import { eq, isNull } from 'drizzle-orm';
+import { orders, orderProperties, orderParties, contacts } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 import { sendEmail } from '@/lib/integrations/sendgrid/client';
 import { sendSms } from '@/lib/integrations/twilio/client';
 import {
@@ -12,8 +12,13 @@ import {
 } from './templates';
 import { dispatchNotification } from './dispatch';
 import { sweepPendingConfirmations } from '@/lib/domain/titlepoint/completion-checker';
-
-const MAX_FAIL_COUNT = 5;
+import {
+  OUTBOX_BATCH_LIMIT,
+  claimOutboxEvents,
+  markOutboxFailed,
+  markOutboxPublished,
+  type ClaimedOutboxEvent,
+} from './outbox-claim';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -22,6 +27,20 @@ export interface ProcessOutboxResult {
   succeeded: number;
   failed: number;
   confirmationSweeps?: { checked: number; enqueued: number };
+}
+
+/** Injectable seams for concurrency / unit tests. */
+export interface ProcessOutboxDeps {
+  claim?: (limit: number) => Promise<ClaimedOutboxEvent[]>;
+  dispatch?: (
+    eventType: string,
+    orderId: number | null,
+    payload: Record<string, unknown> | null,
+  ) => Promise<void>;
+  markPublished?: (id: number) => Promise<void>;
+  markFailed?: (id: number, previousFailCount: number) => Promise<void>;
+  sweep?: () => Promise<{ checked: number; enqueued: number }>;
+  batchLimit?: number;
 }
 
 interface NotificationTarget {
@@ -41,43 +60,48 @@ interface OrderContext {
 
 // ─── Outbox Processor ───────────────────────────────────────────────────────
 
-export async function processOutboxEvents(): Promise<ProcessOutboxResult> {
+/**
+ * Drain unpublished outbox events.
+ * Claims rows atomically (FOR UPDATE SKIP LOCKED) before dispatch so overlapping
+ * every-minute cron ticks never double-send the same event.
+ */
+export async function processOutboxEvents(
+  deps: ProcessOutboxDeps = {},
+): Promise<ProcessOutboxResult> {
+  const claim = deps.claim ?? ((limit: number) => claimOutboxEvents(limit));
+  const dispatch = deps.dispatch ?? dispatchEvent;
+  const markPublished = deps.markPublished ?? markOutboxPublished;
+  const markFailed = deps.markFailed ?? markOutboxFailed;
+  const sweep = deps.sweep ?? sweepPendingConfirmations;
+  const batchLimit = deps.batchLimit ?? OUTBOX_BATCH_LIMIT;
+
   // Timeout/hard-fail fallback: enqueue confirmations that TitlePoint never completed.
   let confirmationSweeps = { checked: 0, enqueued: 0 };
   try {
-    confirmationSweeps = await sweepPendingConfirmations();
+    confirmationSweeps = await sweep();
   } catch { /* sweep must not block outbox drain */ }
 
-  const pending = await db
-    .select()
-    .from(eventOutbox)
-    .where(isNull(eventOutbox.publishedAt))
-    .orderBy(eventOutbox.createdAt)
-    .limit(50);
-
-  const filtered = pending.filter((e) => e.failCount < MAX_FAIL_COUNT);
+  const claimed = await claim(batchLimit);
 
   let succeeded = 0;
   let failed = 0;
 
-  for (const event of filtered) {
+  for (const event of claimed) {
     try {
-      await dispatchEvent(event.eventType, event.orderId, event.payload as Record<string, unknown> | null);
-      await db
-        .update(eventOutbox)
-        .set({ publishedAt: new Date() })
-        .where(eq(eventOutbox.id, event.id));
+      await dispatch(
+        event.event_type,
+        event.order_id,
+        event.payload,
+      );
+      await markPublished(event.id);
       succeeded++;
     } catch {
-      await db
-        .update(eventOutbox)
-        .set({ failCount: event.failCount + 1 })
-        .where(eq(eventOutbox.id, event.id));
+      await markFailed(event.id, event.fail_count);
       failed++;
     }
   }
 
-  return { processed: filtered.length, succeeded, failed, confirmationSweeps };
+  return { processed: claimed.length, succeeded, failed, confirmationSweeps };
 }
 
 async function dispatchEvent(

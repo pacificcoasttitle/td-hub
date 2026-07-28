@@ -1,0 +1,28 @@
+{
+  "note": "Sample SoftPro create transactionDetails after TitleOffice examiner fix. Mirrors working March create 20015761-GLT: TitleOffice = PCT\\elasmarias (examiner), LookUpCodeTitleOffice = GLT (branch).",
+  "transactionDetails": {
+    "LookUpCodeTitleOffice": "GLT",
+    "TitleOffice": "PCT\\elasmarias",
+    "Product": "Residential",
+    "EscrowNumber": "ESC-SAMPLE",
+    "SalesAmount": 500000,
+    "TransactionType": "Purchase",
+    "LoanNumber": "",
+    "LoanAmount": 400000,
+    "UnderwriterLookUpCode": "WC",
+    "CoverageAmount": 500000
+  },
+  "titleOfficerContactAsResolved": {
+    "id": 42,
+    "officerName": "Eddie LasMarias",
+    "lookupCode": "GLT",
+    "officeLookupCode": "GLT",
+    "softproLookupCode": "PCT\\elasmarias",
+    "closerExaminer": "PCT\\elasmarias"
+  },
+  "mapping": {
+    "LookUpCodeTitleOffice": "branch (lookupCode / officeLookupCode / OFFICER_BRANCH_MAP)",
+    "TitleOffice": "examiner (softproLookupCode ?? closerExaminer); NEVER lookupCode",
+    "missingExaminer": "omit TitleOffice entirely — do not send GLT"
+  }
+}

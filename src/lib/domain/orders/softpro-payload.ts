@@ -62,6 +62,10 @@ export interface ResolvedContact {
   lookupCode: string | null;
   flookupCode: string | null;
   officeLookupCode: string | null;
+  /** SoftPro examiner person lookup (e.g. PCT\elasmarias). NOT the branch. */
+  softproLookupCode?: string | null;
+  /** Legacy alias for the examiner person lookup (same intent as softproLookupCode). */
+  closerExaminer?: string | null;
   officerName: string | null;
   softproUserType: string | null;
   userType: string | null;
@@ -69,6 +73,26 @@ export interface ResolvedContact {
   city: string | null;
   state: string | null;
   zip: string | null;
+}
+
+/**
+ * SoftPro TitleOffice must be the examiner person lookup (PCT\user), never the
+ * branch office code (GLT/OCT/…). Branch stays on LookUpCodeTitleOffice.
+ *
+ * Prefer softproLookupCode, then closerExaminer. Never fall back to lookupCode /
+ * officeLookupCode — that was the bug that sent GLT as the examiner.
+ */
+export function resolveTitleExaminerLookup(titleOfficer?: ResolvedContact | null): string | null {
+  const examiner = (titleOfficer?.softproLookupCode ?? titleOfficer?.closerExaminer ?? '').trim();
+  if (!examiner) return null;
+
+  const branch = (titleOfficer?.lookupCode ?? titleOfficer?.officeLookupCode ?? '').trim();
+  if (branch && examiner.toLowerCase() === branch.toLowerCase()) {
+    // softpro_lookup_code wrongly filled with the branch — omit rather than send invalid examiner
+    return null;
+  }
+
+  return examiner;
 }
 
 export interface OpenerCompany {
@@ -156,7 +180,7 @@ export function buildSoftProPayload(
   const escrowOfficer = resolved.escrowOfficer;
 
   const salesRepLookup = salesRep?.lookupCode ?? '';
-  const titleOfficeLookup = titleOfficer?.lookupCode ?? '';
+  const examinerLookup = resolveTitleExaminerLookup(titleOfficer);
   const branchCode = resolveBranchCode(input.orderType, titleOfficer, escrowOfficer);
 
   return {
@@ -197,7 +221,8 @@ export function buildSoftProPayload(
     sellerDetails: buildSellerDetails(input),
     transactionDetails: {
       LookUpCodeTitleOffice: branchCode,
-      TitleOffice: titleOfficeLookup,
+      // Examiner person lookup only — omit when missing (never send branch as TitleOffice).
+      ...(examinerLookup ? { TitleOffice: examinerLookup } : {}),
       Product: input.transaction.product,
       EscrowNumber: input.transaction.escrowNumber ?? '',
       SalesAmount: input.transaction.salesAmount,

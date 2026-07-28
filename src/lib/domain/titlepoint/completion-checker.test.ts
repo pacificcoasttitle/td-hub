@@ -30,6 +30,7 @@ vi.mock('@/lib/db/schema', () => ({
     id: 'orders.id',
     createdAt: 'orders.created_at',
     openedAt: 'orders.opened_at',
+    emailStatus: 'orders.email_status',
   },
 }));
 
@@ -58,9 +59,10 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-describe('getConfirmationReadiness / maybeEnqueueConfirmation', () => {
+describe('getConfirmationReadiness / maybeEnqueueConfirmation (OC-3 legacy gate)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetModules();
     getSettingMock.mockImplementation(async (key: string) => {
       if (key === 'open_order_confirmation_enabled') return 'true';
       if (key === 'open_order_confirmation_timeout_minutes') return '10';
@@ -68,13 +70,15 @@ describe('getConfirmationReadiness / maybeEnqueueConfirmation', () => {
     });
   });
 
-  it('enqueues when all three searches are completed', async () => {
+  it('enqueues when Tax+LV are completed — grant deed NOT required', async () => {
     selectLimitMock
-      .mockReturnValueOnce(chainSelect([])) // hasConfirmationBeenSent
+      .mockReturnValueOnce(chainSelect([])) // outbox dedup
+      .mockReturnValueOnce(chainSelect([{ emailStatus: 'pending' }])) // email_status guard
       .mockReturnValueOnce(chainSelect([
         { searchType: 'legal_vesting', status: 'completed', createdAt: new Date() },
         { searchType: 'tax', status: 'completed', createdAt: new Date() },
-        { searchType: 'grant_deed', status: 'completed', createdAt: new Date() },
+        // grant_deed still processing — must not block
+        { searchType: 'grant_deed', status: 'processing', createdAt: new Date() },
       ]));
 
     const { maybeEnqueueConfirmation } = await import('./completion-checker');
@@ -88,12 +92,13 @@ describe('getConfirmationReadiness / maybeEnqueueConfirmation', () => {
     }));
   });
 
-  it('enqueues on hard-fail without waiting forever', async () => {
+  it('enqueues when Tax+LV are terminal even if one failed (no success required)', async () => {
     selectLimitMock
       .mockReturnValueOnce(chainSelect([]))
+      .mockReturnValueOnce(chainSelect([{ emailStatus: 'pending' }]))
       .mockReturnValueOnce(chainSelect([
         { searchType: 'legal_vesting', status: 'failed', createdAt: new Date() },
-        { searchType: 'tax', status: 'pending', createdAt: new Date() },
+        { searchType: 'tax', status: 'completed', createdAt: new Date() },
       ]));
 
     const { maybeEnqueueConfirmation } = await import('./completion-checker');
@@ -101,17 +106,33 @@ describe('getConfirmationReadiness / maybeEnqueueConfirmation', () => {
 
     expect(enqueued).toBe(true);
     expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
-      payload: expect.objectContaining({
-        enqueueReason: 'hard_fail',
-        missingSearches: expect.arrayContaining(['legal_vesting', 'tax', 'grant_deed']),
-      }),
+      payload: expect.objectContaining({ enqueueReason: 'hard_fail' }),
     }));
+  });
+
+  it('does NOT enqueue when LV failed but tax is still in-flight (wait for both)', async () => {
+    const recent = new Date();
+    selectLimitMock
+      .mockReturnValueOnce(chainSelect([]))
+      .mockReturnValueOnce(chainSelect([{ emailStatus: 'pending' }]))
+      .mockReturnValueOnce(chainSelect([
+        { searchType: 'legal_vesting', status: 'failed', createdAt: recent },
+        { searchType: 'tax', status: 'processing', createdAt: recent },
+      ]))
+      .mockReturnValueOnce(chainSelect([{ createdAt: recent, openedAt: recent }]));
+
+    const { maybeEnqueueConfirmation } = await import('./completion-checker');
+    const enqueued = await maybeEnqueueConfirmation(50);
+
+    expect(enqueued).toBe(false);
+    expect(insertValuesMock).not.toHaveBeenCalled();
   });
 
   it('enqueues on timeout when searches are still in-flight', async () => {
     const old = new Date(Date.now() - 15 * 60_000);
     selectLimitMock
       .mockReturnValueOnce(chainSelect([]))
+      .mockReturnValueOnce(chainSelect([{ emailStatus: 'pending' }]))
       .mockReturnValueOnce(chainSelect([
         { searchType: 'legal_vesting', status: 'processing', createdAt: old },
         { searchType: 'tax', status: 'processing', createdAt: old },
@@ -131,10 +152,23 @@ describe('getConfirmationReadiness / maybeEnqueueConfirmation', () => {
     const recent = new Date();
     selectLimitMock
       .mockReturnValueOnce(chainSelect([]))
+      .mockReturnValueOnce(chainSelect([{ emailStatus: 'pending' }]))
       .mockReturnValueOnce(chainSelect([
         { searchType: 'legal_vesting', status: 'processing', createdAt: recent },
       ]))
       .mockReturnValueOnce(chainSelect([{ createdAt: recent, openedAt: recent }]));
+
+    const { maybeEnqueueConfirmation } = await import('./completion-checker');
+    const enqueued = await maybeEnqueueConfirmation(50);
+
+    expect(enqueued).toBe(false);
+    expect(insertValuesMock).not.toHaveBeenCalled();
+  });
+
+  it('double-send guard: skips when email_status already sent', async () => {
+    selectLimitMock
+      .mockReturnValueOnce(chainSelect([])) // no outbox
+      .mockReturnValueOnce(chainSelect([{ emailStatus: 'sent' }]));
 
     const { maybeEnqueueConfirmation } = await import('./completion-checker');
     const enqueued = await maybeEnqueueConfirmation(50);

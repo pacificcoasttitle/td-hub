@@ -26,7 +26,7 @@
     },
     {
       "path": "/api/jobs/run?name=notifications.process_outbox",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/1 * * * *"
     },
     {
       "path": "/api/jobs/run?name=softpro.verify_sync",

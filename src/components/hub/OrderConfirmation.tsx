@@ -41,20 +41,37 @@ export interface ConfirmationData {
   parties?: { buyerAgent?: PartyInfo | null; listingAgent?: PartyInfo | null; lender?: PartyInfo | null; escrow?: PartyInfo | null };
 }
 
-function mapDocStatus(entry: TpDocEntry | undefined, label: string): DocStatus {
-  if (!entry || entry.status === 'not_started' || entry.status === 'failed')
+/** True only for a non-empty, downloadable URL (not "#"/placeholder). */
+export function hasRealS3Url(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const t = url.trim();
+  return t.length > 0 && t !== '#' && t.toLowerCase() !== 'null';
+}
+
+/**
+ * Ready ONLY when a real S3 URL exists (completed, downloadable PDF).
+ * Status alone is not enough — completed/success without s3Url stays processing.
+ */
+export function mapDocStatus(entry: TpDocEntry | undefined, label: string): DocStatus {
+  if (!entry || entry.status === 'not_started' || entry.status === 'failed') {
     return { status: 'not_available', url: null, label };
-  if (entry.status === 'pending' || entry.status === 'processing')
+  }
+  if (entry.status === 'pending' || entry.status === 'processing') {
     return { status: 'processing', url: null, label };
-  return { status: 'ready', url: entry.s3Url ?? null, label };
+  }
+  if (hasRealS3Url(entry.s3Url)) {
+    return { status: 'ready', url: entry.s3Url!, label };
+  }
+  // e.g. completed/success but PDF not stored yet — never false "Ready"
+  return { status: 'processing', url: null, label };
 }
 
 export function hasProcessingDocs(data: ConfirmationData): boolean {
   const d = data.titlePoint?.documents;
   if (!d) return false;
-  return [d.lv, d.grantDeed, d.tax].some(
-    (e) => e?.status === 'pending' || e?.status === 'processing',
-  );
+  return [d.lv, d.grantDeed, d.tax]
+    .map((e) => mapDocStatus(e, ''))
+    .some((doc) => doc.status === 'processing');
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -192,7 +209,7 @@ function DocCard({ doc }: { doc: DocStatus }) {
         <>
           <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-green-100 text-green-800">Ready</span>
           <button
-            onClick={() => window.open(doc.url ?? '#', '_blank')}
+            onClick={() => { if (doc.url) window.open(doc.url, '_blank'); }}
             className="mt-1 inline-flex items-center gap-1.5 px-4 py-2 bg-[#1B2A4A] text-white text-xs font-medium rounded-lg hover:bg-[#162240] transition-colors"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>

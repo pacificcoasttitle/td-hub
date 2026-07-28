@@ -14,7 +14,7 @@ const CRON_SCHEDULES: Record<string, string> = {
   'softpro.fetch_prelims': 'Every 15min',
   'softpro.retry_document_attach': 'Every 10min',
   'titlepoint.drain': 'Every 2min',
-  'notifications.process_outbox': 'Every 5min',
+  'notifications.process_outbox': 'Every 1min',
   'softpro.verify_sync': 'Daily 6:00 UTC',
   'softpro.sync_new_users': 'Daily 5:00 UTC',
   'softpro.sync_all_contacts': 'Daily 3:00 UTC / 8:00 PM PT compatibility runner (one due type only)',

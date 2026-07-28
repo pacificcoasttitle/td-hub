@@ -1,5 +1,5 @@
 import { db } from '@/lib/db/client';
-import { titlePointData, orderProperties, jobs } from '@/lib/db/schema';
+import { titlePointData, orderProperties } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { getOrderByIdSimple } from '@/lib/domain/orders/service';
 import { uploadDocument, attachToSoftPro } from '@/lib/domain/documents/service';
@@ -14,6 +14,7 @@ import { requestImage, getRequestStatus, getImage } from '@/lib/integrations/tit
 import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
 import { fetchGrantDeed } from '@/lib/domain/titlepoint/grant-deed';
 import { maybeEnqueueConfirmation } from '@/lib/domain/titlepoint/completion-checker';
+import { enqueueTitlePointPollJob } from '@/lib/domain/titlepoint/poll-queue';
 import type { TitlePointSearchType } from '@/lib/integrations/titlepoint/types';
 
 // Canonical flow docs: docs/titlepoint/TITLEPOINT_IMPLEMENTATION_SOURCE_OF_TRUTH.md
@@ -31,16 +32,15 @@ const POLL_INTERVAL_MS = 5_000;
 const PIPELINE_TIMEOUT_MS = 60_000;
 
 // ─── Initiate Search ────────────────────────────────────────────────────────
-// After successful createService, executes the full pipeline INLINE:
-//   poll → result → image → upload → softpro
-// On timeout/failure the search is marked failed (retry via retryFailedSearches).
-// Do NOT leave status='queued' titlepoint.poll jobs — nothing drains that queue.
+// After successful createService: brief short-sync attempt, then enqueue
+// titlepoint.poll for the titlepoint.drain cron (OC-2). Submit must not wait
+// on full PDF generation.
 
 export async function initiateSearch(
   orderId: number,
   searchType: TitlePointSearchType,
   userId: string
-): Promise<{ success: boolean; titlePointDataId?: number; error?: string }> {
+): Promise<{ success: boolean; titlePointDataId?: number; error?: string; enqueued?: boolean }> {
   const order = await getOrderByIdSimple(orderId);
   if (!order) return { success: false, error: 'Order not found' };
 
@@ -75,6 +75,8 @@ export async function initiateSearch(
       })
       .returning({ id: titlePointData.id });
 
+    try { await maybeEnqueueConfirmation(orderId); } catch { /* confirmation fallback */ }
+
     return { success: false, titlePointDataId: record!.id, error: result.error?.message };
   }
 
@@ -94,53 +96,13 @@ export async function initiateSearch(
 
   const tpDataId = record!.id;
 
-  // Insert job row for observability — will be marked completed after inline execution
-  const [jobRow] = await db
-    .insert(jobs)
-    .values({
-      jobType: 'titlepoint.poll',
-      orderId,
-      payload: { titlePointDataId: tpDataId } as Record<string, unknown>,
-      status: 'running',
-    })
-    .returning({ id: jobs.id });
-
-  // Execute full pipeline inline
-  const pipelineResult = await executePipeline(tpDataId);
-
-  // Mark job + search based on outcome. Never leave phantom status='queued'
-  // titlepoint.poll rows — nothing drains that queue (Tier 3 decision).
-  if (pipelineResult.success) {
-    await db.update(jobs).set({
-      status: 'completed',
-      endedAt: new Date(),
-      attempts: 1,
-    }).where(eq(jobs.id, jobRow!.id));
-  } else {
-    const message = pipelineResult.timedOut
-      ? `Pipeline timeout (retryable via manual retry): ${pipelineResult.error ?? 'timed out'}`
-      : (pipelineResult.error ?? 'Pipeline failed');
-
-    await db.update(titlePointData).set({
-      status: 'failed',
-      message,
-      updatedAt: new Date(),
-    }).where(eq(titlePointData.id, tpDataId));
-
-    await db.update(jobs).set({
-      status: 'failed',
-      error: message,
-      endedAt: new Date(),
-      attempts: 1,
-    }).where(eq(jobs.id, jobRow!.id));
-
-    try { await maybeEnqueueConfirmation(orderId); } catch { /* confirmation fallback */ }
-  }
-
+  // OC-2: createService is the sync handoff; PDF finish runs in titlepoint.drain.
+  // (Full inline pipeline blocked submit ~24s/doc when SoftPro attach succeeded.)
+  const q = await enqueueTitlePointPollJob({ titlePointDataId: tpDataId, orderId });
   return {
-    success: pipelineResult.success,
+    success: true,
     titlePointDataId: tpDataId,
-    error: pipelineResult.error,
+    enqueued: q.enqueued || !!q.jobId,
   };
 }
 

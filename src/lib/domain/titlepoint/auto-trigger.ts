@@ -20,11 +20,10 @@ interface AutoTriggerResult {
 }
 
 /**
- * Fire-and-forget TitlePoint searches after order creation.
- * Initiates Geo, Tax, and Legal Vesting searches sequentially.
- * Each initiateSearch() now runs the full pipeline inline
- * (poll → result → image → upload → softpro) so no separate
- * job queue is needed.
+ * Fire-and-forget TitlePoint searches after order creation (no pre-init session).
+ * Initiates Geo, Tax, and Legal Vesting sequentially via initiateSearch —
+ * each does createService + short-sync, then enqueues titlepoint.poll for
+ * the titlepoint.drain cron (OC-2). Submit must not wait on full PDF gen.
  * Respects the titlepoint_shut_off admin setting.
  * Failures are logged but never propagated to the caller.
  */

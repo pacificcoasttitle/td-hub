@@ -10,6 +10,10 @@ import type { SyncOrdersPayload } from '@/lib/jobs/handlers/sync-orders';
 import { handleSyncContacts } from '@/lib/jobs/handlers/sync-contacts';
 import type { SyncContactsPayload } from '@/lib/jobs/handlers/sync-contacts';
 import { handleTitlePointPoll } from '@/lib/jobs/handlers/titlepoint-poll';
+import {
+  findActiveTitlePointDrain,
+  handleTitlePointDrain,
+} from '@/lib/jobs/handlers/titlepoint-drain';
 import { ENRICH_ORDERS_RUNNING_WINDOW_MS, handleEnrichOrders } from '@/lib/jobs/handlers/enrich-orders';
 import { handleEnrichOrderDetails } from '@/lib/jobs/handlers/enrich-order-details';
 import { importOrdersFromSoftPro } from '@/lib/jobs/handlers/import-orders';
@@ -43,6 +47,7 @@ const payloadSchema = z.record(z.string(), z.unknown()).default({});
 type JobHandler = (payload: Record<string, unknown>) => Promise<unknown>;
 
 const ENRICH_ORDER_JOB_NAMES = new Set(['softpro.enrich_orders', 'enrich-orders']);
+const TITLEPOINT_DRAIN_JOB_NAMES = new Set(['titlepoint.drain']);
 
 const JOB_HANDLERS: Record<string, JobHandler> = {
   'softpro.sync_recent_orders': (payload) =>
@@ -59,6 +64,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleResolveOfficers(),
   'titlepoint.poll': (payload) =>
     handleTitlePointPoll(payload),
+  'titlepoint.drain': (payload) =>
+    handleTitlePointDrain(payload),
   'softpro.fetch_prelims': () =>
     handleFetchPrelims(),
   'softpro.verify_sync': () =>
@@ -166,6 +173,19 @@ async function executeJob(req: NextRequest, payload: Record<string, unknown>) {
     }
   }
 
+  if (TITLEPOINT_DRAIN_JOB_NAMES.has(jobName)) {
+    const runningJob = await findActiveTitlePointDrain(null);
+    if (runningJob) {
+      return NextResponse.json({
+        success: true,
+        job: jobName,
+        skipped: true,
+        reason: 'titlepoint.drain already running',
+        runningJob,
+      });
+    }
+  }
+
   const [job] = await db
     .insert(jobs)
     .values({ jobType: jobName, status: 'running', payload, startedAt: new Date(), attempts: 1 })
@@ -174,7 +194,7 @@ async function executeJob(req: NextRequest, payload: Record<string, unknown>) {
   const jobId = job!.id;
 
   try {
-    const handlerPayload = ENRICH_ORDER_JOB_NAMES.has(jobName)
+    const handlerPayload = ENRICH_ORDER_JOB_NAMES.has(jobName) || TITLEPOINT_DRAIN_JOB_NAMES.has(jobName)
       ? { ...payload, __jobId: jobId }
       : payload;
     const result = await handler(handlerPayload);

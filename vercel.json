@@ -21,6 +21,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/jobs/run?name=titlepoint.drain",
+      "schedule": "*/2 * * * *"
+    },
+    {
       "path": "/api/jobs/run?name=notifications.process_outbox",
       "schedule": "*/5 * * * *"
     },

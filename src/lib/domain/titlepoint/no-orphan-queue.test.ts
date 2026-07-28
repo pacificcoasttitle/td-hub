@@ -2,34 +2,47 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-describe('TitlePoint Tier-1: no new orphan titlepoint.poll queued jobs', () => {
-  it('pre-initiate does not insert status=queued titlepoint.poll jobs', () => {
-    // Still true after OC-1: background executePipeline, never jobs insert with queued.
-    const src = readFileSync(
-      join(process.cwd(), 'src/lib/domain/titlepoint/pre-initiate.ts'),
-      'utf8',
-    );
-    expect(src).not.toMatch(/jobType:\s*'titlepoint\.poll'/);
-    expect(src).not.toMatch(/status:\s*'queued'/);
-    expect(src).toMatch(/executePipeline/);
-  });
-
-  it('initiateSearch timeout marks failed instead of re-queuing', () => {
+describe('TitlePoint OC-2: poll queue + drain claimer', () => {
+  it('initiateSearch enqueues titlepoint.poll for drain (no full inline PDF wait)', () => {
     const src = readFileSync(
       join(process.cwd(), 'src/lib/domain/titlepoint/service.ts'),
       'utf8',
     );
-    // The old "leave job as queued for future cron pickup" path must be gone.
-    expect(src).not.toMatch(/leave job as queued for future cron/);
-    expect(src).toMatch(/retryable via manual retry/);
+    expect(src).toMatch(/enqueueTitlePointPollJob/);
+    expect(src).not.toMatch(/Execute full pipeline inline/);
   });
 
-  it('titlepoint-poll handler never requeues pending polls', () => {
+  it('linkSessionToOrder short-syncs then enqueues unfinished work', () => {
     const src = readFileSync(
-      join(process.cwd(), 'src/lib/jobs/handlers/titlepoint-poll.ts'),
+      join(process.cwd(), 'src/lib/domain/titlepoint/pre-initiate.ts'),
       'utf8',
     );
-    expect(src).not.toMatch(/status:\s*'queued'/);
-    expect(src).toMatch(/requeued:\s*false/);
+    expect(src).toMatch(/enqueueTitlePointPollJob/);
+    expect(src).toMatch(/TITLEPOINT_SHORT_SYNC_MS/);
+  });
+
+  it('titlepoint.drain claimer uses FOR UPDATE SKIP LOCKED', () => {
+    const src = readFileSync(
+      join(process.cwd(), 'src/lib/jobs/handlers/titlepoint-drain-claim.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/FOR UPDATE SKIP LOCKED/);
+    expect(src).toMatch(/findActiveTitlePointDrain/);
+  });
+
+  it('pre-initiate input path still runs executePipeline (OC-1 park); enqueue only in linkSessionToOrder', () => {
+    const src = readFileSync(
+      join(process.cwd(), 'src/lib/domain/titlepoint/pre-initiate.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/executePipeline/);
+    const linkIdx = src.indexOf('export async function linkSessionToOrder');
+    const preInitFn = src.slice(
+      src.indexOf('export async function preInitiateSearches'),
+      linkIdx,
+    );
+    // Call site only — import may appear at module top for linkSessionToOrder.
+    expect(preInitFn).not.toMatch(/await enqueueTitlePointPollJob/);
+    expect(src.slice(linkIdx)).toMatch(/enqueueTitlePointPollJob/);
   });
 });

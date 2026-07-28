@@ -6,6 +6,11 @@ import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
 import { executePipeline, fetchImage } from './service';
 import { fetchGrantDeed } from './grant-deed';
 import { maybeEnqueueConfirmation } from './completion-checker';
+import {
+  TITLEPOINT_MIN_IMAGE_BUDGET_MS,
+  TITLEPOINT_SHORT_SYNC_MS,
+  enqueueTitlePointPollJob,
+} from './poll-queue';
 import { getSetting } from '@/lib/domain/settings/service';
 import type { TitlePointSearchType } from '@/lib/integrations/titlepoint/types';
 
@@ -119,42 +124,67 @@ export async function preInitiateSearches(property: {
   return { sessionId, searches };
 }
 
+/**
+ * Link pre-init session rows to the new order, briefly attempt PDF finish,
+ * then enqueue unfinished work for the titlepoint.drain cron (OC-2).
+ * Must NOT block submit on full fetchImage / SoftPro attach.
+ */
 export async function linkSessionToOrder(
   sessionId: string,
   orderId: number,
   fileNumber: string,
-): Promise<{ linked: number; finished: number }> {
+): Promise<{ linked: number; finished: number; enqueued: number }> {
   const rows = await db
     .select({ id: titlePointData.id, status: titlePointData.status, searchType: titlePointData.searchType })
     .from(titlePointData)
     .where(eq(titlePointData.sessionId, sessionId));
 
-  if (rows.length === 0) return { linked: 0, finished: 0 };
+  if (rows.length === 0) return { linked: 0, finished: 0, enqueued: 0 };
 
+  // SYNC: worker/fetchImage require orderId + fileNumber on the rows.
   await db
     .update(titlePointData)
     .set({ orderId, fileNumber, updatedAt: new Date() })
     .where(eq(titlePointData.sessionId, sessionId));
 
+  const deadline = Date.now() + TITLEPOINT_SHORT_SYNC_MS;
   let finished = 0;
+  let enqueued = 0;
+
   for (const row of rows) {
-    if (row.status !== 'result_ready' && row.status !== 'completed') continue;
+    if (row.status === 'completed') {
+      finished++;
+      continue;
+    }
+    if (row.status !== 'result_ready') continue;
+
+    const remaining = deadline - Date.now();
+    if (remaining < TITLEPOINT_MIN_IMAGE_BUDGET_MS) {
+      const q = await enqueueTitlePointPollJob({ titlePointDataId: row.id, orderId });
+      if (q.enqueued || q.jobId) enqueued++;
+      continue;
+    }
 
     try {
-      if (row.status === 'result_ready') {
-        const imgResult = await fetchImage(row.id);
-        if (imgResult.success) finished++;
-      } else {
+      const imgResult = await fetchImage(row.id);
+      if (imgResult.success) {
         finished++;
+        if (row.searchType === 'legal_vesting') {
+          try { await fetchGrantDeed(row.id); } catch { /* non-blocking */ }
+        }
+      } else {
+        const q = await enqueueTitlePointPollJob({ titlePointDataId: row.id, orderId });
+        if (q.enqueued || q.jobId) enqueued++;
       }
-
-      if (row.searchType === 'legal_vesting') {
-        try { await fetchGrantDeed(row.id); } catch { /* non-blocking */ }
-      }
-    } catch { /* non-blocking */ }
+    } catch {
+      const q = await enqueueTitlePointPollJob({ titlePointDataId: row.id, orderId });
+      if (q.enqueued || q.jobId) enqueued++;
+    }
   }
 
+  // If short-sync finished everything, confirmation may enqueue now; otherwise
+  // the drain worker calls maybeEnqueueConfirmation when docs settle.
   try { await maybeEnqueueConfirmation(orderId); } catch { /* non-blocking */ }
 
-  return { linked: rows.length, finished };
+  return { linked: rows.length, finished, enqueued };
 }

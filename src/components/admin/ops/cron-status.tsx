@@ -29,6 +29,7 @@ interface EnrichmentCoverage {
 
 const JOB_LABELS: Record<string, string> = {
   'softpro.sync_recent_orders': 'Sync Recent Orders',
+  'titlepoint.drain': 'TitlePoint Drain',
   'softpro.enrich_orders': 'Enrich Orders',
   'softpro.fetch_prelims': 'Fetch Prelims',
   'notifications.process_outbox': 'Process Notifications',

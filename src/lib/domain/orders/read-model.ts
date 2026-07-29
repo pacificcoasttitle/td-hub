@@ -33,10 +33,8 @@ const PARTY_ROLE_ORDER = [
   'other',
 ] as const;
 
-const MILESTONE_KEYS = ['opened', 'prelim', 'recording', 'disbursement', 'closed'] as const;
-
 export type OrderReadModelVisibilityPolicy = 'internal' | 'staff' | 'client';
-export type OrderMilestoneKey = typeof MILESTONE_KEYS[number];
+export type OrderMilestoneKey = 'opened' | 'prelim' | 'recording' | 'disbursement' | 'closed';
 export type OrderMilestoneState = 'complete' | 'in_progress' | 'pending';
 
 /**
@@ -449,41 +447,40 @@ export function deriveOrderMilestones(data: OrderReadModelData): OrderReadModelM
   };
 
   const closed = Boolean(closedDate) || data.order.operationalStatus === 'closed';
-  const firstIncomplete = MILESTONE_KEYS.find((key) => !completion[key]);
 
   return [
     {
       key: 'opened',
       label: 'Order Opened',
-      state: completion.opened ? 'complete' : 'in_progress',
+      state: milestoneState('opened', completion, closed),
       date: formatOrderDate(completion.opened),
       documentId: null,
     },
     {
       key: 'prelim',
       label: 'Prelim Received',
-      state: milestoneState('prelim', completion, firstIncomplete, closed),
+      state: milestoneState('prelim', completion, closed),
       date: formatOrderDate(completion.prelim),
       documentId: firstPrelim?.id ?? null,
     },
     {
       key: 'recording',
       label: 'Recording Confirmation',
-      state: milestoneState('recording', completion, firstIncomplete, closed),
+      state: milestoneState('recording', completion, closed),
       date: formatOrderDate(completion.recording),
       documentId: null,
     },
     {
       key: 'disbursement',
       label: 'Funds Disbursed',
-      state: milestoneState('disbursement', completion, firstIncomplete, closed),
+      state: milestoneState('disbursement', completion, closed),
       date: formatOrderDate(completion.disbursement),
       documentId: null,
     },
     {
       key: 'closed',
       label: 'Order Closed',
-      state: completion.closed || closed ? 'complete' : milestoneState('closed', completion, firstIncomplete, closed),
+      state: milestoneState('closed', completion, closed),
       date: formatOrderDate(completion.closed),
       documentId: null,
     },
@@ -748,15 +745,18 @@ function rawMoney(value: number | string | null | undefined): string | null {
   return String(value);
 }
 
+/**
+ * Complete only with a real signal (openedAt, prelim doc, status_history
+ * recording/disbursement, closedAt/closed). No auto-advance "in_progress"
+ * for the next incomplete step — that fabricated progress on fresh orders.
+ */
 function milestoneState(
   key: OrderMilestoneKey,
   completion: Record<OrderMilestoneKey, Date | string | null>,
-  firstIncomplete: OrderMilestoneKey | undefined,
   closed: boolean,
 ): OrderMilestoneState {
   if (completion[key] || (closed && key === 'closed')) return 'complete';
-  if (closed) return 'pending';
-  return firstIncomplete === key ? 'in_progress' : 'pending';
+  return 'pending';
 }
 
 function firstDocument(docs: OrderReadModelDocumentSource[], category: string): OrderReadModelDocumentSource | null {

@@ -292,33 +292,63 @@ describe('document summary', () => {
 });
 
 describe('milestone derivation', () => {
-  it('gives a purchase sensible states from open through recording', () => {
+  it('marks complete only for steps with real signals (no fake in_progress)', () => {
     const milestones = deriveOrderMilestones(baseData);
 
     expect(milestones.map(({ key, state, date }) => ({ key, state, date }))).toEqual([
       { key: 'opened', state: 'complete', date: 'Jul 15, 2026' },
       { key: 'prelim', state: 'complete', date: 'Jul 16, 2026' },
       { key: 'recording', state: 'complete', date: 'Jul 18, 2026' },
-      { key: 'disbursement', state: 'in_progress', date: '—' },
+      { key: 'disbursement', state: 'pending', date: '—' },
       { key: 'closed', state: 'pending', date: '—' },
     ]);
+    expect(milestones.every((m) => m.state !== 'in_progress')).toBe(true);
   });
 
-  it('gives a refi without prelim a single in-progress next step', () => {
+  it('fresh order with opened + prelim: rest PENDING (no fabricated in_progress)', () => {
     const milestones = deriveOrderMilestones({
       ...baseData,
       order: { ...baseData.order, transactionType: 'Refinance', loanAmount: '650000.00' },
+      // prelim present (baseData docs); strip recording/disbursement history
+      statusHistory: [],
+    });
+
+    expect(milestones.map(({ key, state }) => ({ key, state }))).toEqual([
+      { key: 'opened', state: 'complete' },
+      { key: 'prelim', state: 'complete' },
+      { key: 'recording', state: 'pending' },
+      { key: 'disbursement', state: 'pending' },
+      { key: 'closed', state: 'pending' },
+    ]);
+  });
+
+  it('fresh order without prelim: only Opened complete; no fake next-step in_progress', () => {
+    const milestones = deriveOrderMilestones({
+      ...baseData,
       documents: [],
       statusHistory: [],
     });
 
     expect(milestones.map(({ key, state }) => ({ key, state }))).toEqual([
       { key: 'opened', state: 'complete' },
-      { key: 'prelim', state: 'in_progress' },
+      { key: 'prelim', state: 'pending' },
       { key: 'recording', state: 'pending' },
       { key: 'disbursement', state: 'pending' },
       { key: 'closed', state: 'pending' },
     ]);
+  });
+
+  it('real recording signal → Recording complete', () => {
+    const milestones = deriveOrderMilestones({
+      ...baseData,
+      statusHistory: [
+        { status: 'recording_confirmation', notes: 'Recording confirmed', changedAt: '2026-07-18T18:00:00.000Z' },
+      ],
+    });
+
+    const recording = milestones.find((m) => m.key === 'recording');
+    expect(recording).toMatchObject({ state: 'complete', date: 'Jul 18, 2026' });
+    expect(milestones.find((m) => m.key === 'disbursement')?.state).toBe('pending');
   });
 
   it('marks a closed order closed without fabricating missing intermediate dates', () => {

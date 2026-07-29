@@ -656,7 +656,7 @@ function MilestonesTab({
 
   return (
     <div>
-      <p className="text-xs text-[#6B7280] mb-4">Canonical order milestones from the shared read model.</p>
+      <p className="text-xs text-[#6B7280] mb-4">Order progress</p>
       <div className="space-y-3">
         {milestones.map((m, i) => (
           <div key={m.id} className="flex gap-3">

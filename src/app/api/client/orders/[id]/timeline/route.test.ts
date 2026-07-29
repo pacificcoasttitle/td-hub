@@ -26,7 +26,7 @@ const readModel = {
   milestones: [
     { key: 'opened', label: 'Order Opened', state: 'complete', date: 'Jul 15, 2026', documentId: null },
     { key: 'prelim', label: 'Prelim Received', state: 'complete', date: 'Jul 16, 2026', documentId: 10 },
-    { key: 'recording', label: 'Recording Confirmation', state: 'in_progress', date: '—', documentId: null },
+    { key: 'recording', label: 'Recording Confirmation', state: 'pending', date: '—', documentId: null },
     { key: 'disbursement', label: 'Funds Disbursed', state: 'pending', date: '—', documentId: null },
     { key: 'closed', label: 'Order Closed', state: 'pending', date: '—', documentId: null },
   ],
@@ -53,7 +53,7 @@ describe('GET /api/client/orders/[id]/timeline', () => {
       milestones: [
         { name: 'Order Opened', status: 'complete', date: 'Jul 15, 2026', documentId: null },
         { name: 'Prelim Received', status: 'complete', date: 'Jul 16, 2026', documentId: 10 },
-        { name: 'Recording Confirmation', status: 'in_progress', date: null, documentId: null },
+        { name: 'Recording Confirmation', status: 'pending', date: null, documentId: null },
         { name: 'Funds Disbursed', status: 'pending', date: null, documentId: null },
         { name: 'Order Closed', status: 'pending', date: null, documentId: null },
       ],

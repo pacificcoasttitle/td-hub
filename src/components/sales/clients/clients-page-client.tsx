@@ -6,6 +6,7 @@ import { RepSelector } from '../rep-selector';
 import { SkeletonRow, EmptyState, ErrorBlock, Pagination } from '@/components/admin/shared-table';
 import { ClientFormModal } from './client-form-modal';
 import { ClientDetailDrawer } from './client-detail-drawer';
+import { ImportClientsModal } from './import-clients-modal';
 import type { ClientListResponse, CrmClient } from './types';
 
 const PAGE_SIZE = 25;
@@ -33,6 +34,7 @@ export function ClientsPageClient({ role }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editClient, setEditClient] = useState<CrmClient | null>(null);
   const [openClientId, setOpenClientId] = useState<number | null>(null);
   const fetchCount = useRef(0);
@@ -86,15 +88,30 @@ export function ClientsPageClient({ role }: Props) {
           {role === 'sales_manager' && (
             <RepSelector selectedRepId={repId} onSelect={setRepId} ownLabel="My Clients" />
           )}
-          {/* Import/Export ship in the next release — rendered so the layout is final. */}
-          <button disabled title="Coming soon"
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 text-sm text-gray-300 cursor-not-allowed bg-white">
-            <Upload className="h-4 w-4" /> Import CSV
-          </button>
-          <button disabled title="Coming soon"
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 text-sm text-gray-300 cursor-not-allowed bg-white">
-            <Download className="h-4 w-4" /> Export
-          </button>
+          {/* Import/Export act on your own list only; disabled while viewing a rep's. */}
+          {readOnly ? (
+            <>
+              <button disabled title="Available on your own list"
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 text-sm text-gray-300 cursor-not-allowed bg-white">
+                <Upload className="h-4 w-4" /> Import CSV
+              </button>
+              <button disabled title="Available on your own list"
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 text-sm text-gray-300 cursor-not-allowed bg-white">
+                <Download className="h-4 w-4" /> Export
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setShowImport(true)}
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 text-sm text-gray-700 bg-white hover:border-[#F26B2B]/50 hover:text-[#F26B2B] transition-colors">
+                <Upload className="h-4 w-4" /> Import CSV
+              </button>
+              <a href="/api/sales/clients/export" download
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 text-sm text-gray-700 bg-white hover:border-[#F26B2B]/50 hover:text-[#F26B2B] transition-colors">
+                <Download className="h-4 w-4" /> Export
+              </a>
+            </>
+          )}
           {!readOnly && (
             <button onClick={() => setShowAdd(true)}
               className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-[#F26B2B] text-white text-sm font-medium hover:bg-[#E05A1A] transition-colors">
@@ -205,6 +222,14 @@ export function ClientsPageClient({ role }: Props) {
           client={editClient}
           onClose={() => { setShowAdd(false); setEditClient(null); }}
           onSaved={() => { setShowAdd(false); setEditClient(null); fetchClients(); }}
+        />
+      )}
+
+      {/* Import dialog */}
+      {showImport && (
+        <ImportClientsModal
+          onClose={() => setShowImport(false)}
+          onImported={fetchClients}
         />
       )}
 

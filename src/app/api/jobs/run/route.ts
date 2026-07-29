@@ -16,6 +16,7 @@ import {
 } from '@/lib/jobs/handlers/titlepoint-drain';
 import { ENRICH_ORDERS_RUNNING_WINDOW_MS, handleEnrichOrders } from '@/lib/jobs/handlers/enrich-orders';
 import { handleEnrichOrderDetails } from '@/lib/jobs/handlers/enrich-order-details';
+import { handleBackfillSitexProperty } from '@/lib/jobs/handlers/backfill-sitex-property';
 import { importOrdersFromSoftPro } from '@/lib/jobs/handlers/import-orders';
 import { handleResolveOfficers } from '@/lib/jobs/handlers/resolve-order-officers';
 import { handleFetchPrelims } from '@/lib/jobs/handlers/fetch-prelims';
@@ -58,6 +59,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleEnrichOrders(payload),
   'softpro.enrich_order_details': () =>
     handleEnrichOrderDetails(),
+  'sitex.backfill_property': () =>
+    handleBackfillSitexProperty(),
   'enrich-orders': (payload) =>
     handleEnrichOrders(payload),
   'resolve_officers': () =>

@@ -246,6 +246,7 @@ export async function processOrderDetail(
       address: item.Address || null,
       city: item.City || null,
       state: item.State || null,
+      zip: item.Zip?.trim() || null,
       county: item.Country || null,
     });
 
@@ -289,12 +290,14 @@ async function upsertOrderProperty(
   orderId: number,
   item: SoftProOrderDetailItem,
 ): Promise<void> {
-  const address = item.Address || null;
-  const city = item.City || null;
-  const state = item.State || null;
-  const county = item.Country || null;
+  const address = item.Address?.trim() || null;
+  const city = item.City?.trim() || null;
+  const state = item.State?.trim() || null;
+  const zip = item.Zip?.trim() || null;
+  const county = item.Country?.trim() || null;
 
-  if (!address && !city && !state && !county) return;
+  // SoftPro ProductType is order-level (orders.product_type) — never map to property_type.
+  if (!address && !city && !state && !zip && !county) return;
 
   const [existing] = await db
     .select({ id: orderProperties.id })
@@ -303,10 +306,12 @@ async function upsertOrderProperty(
     .limit(1);
 
   if (existing) {
+    // Preserve-on-empty: only write non-empty SoftPro values (never blank existing).
     await db.update(orderProperties).set({
       ...(address ? { address } : {}),
       ...(city ? { city } : {}),
       ...(state ? { state } : {}),
+      ...(zip ? { zip } : {}),
       ...(county ? { county } : {}),
       updatedAt: new Date(),
     }).where(eq(orderProperties.id, existing.id));
@@ -316,6 +321,7 @@ async function upsertOrderProperty(
       address,
       city,
       state,
+      zip,
       county,
     });
   }

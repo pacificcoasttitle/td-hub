@@ -8,11 +8,8 @@ import {
   upsertFromSoftPro,
   getOrderByFileNumber,
 } from '@/lib/domain/orders/service';
+import { applySiteXPropertyFields } from '@/lib/domain/orders/apply-sitex-property';
 import { propertyLookup } from '@/lib/integrations/sitex/client';
-import type { SiteXPropertyData } from '@/lib/integrations/sitex/types';
-import { db } from '@/lib/db/client';
-import { orderProperties } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
 
 export interface SyncOrdersPayload {
   dateFrom?: string;
@@ -120,21 +117,10 @@ async function enrichWithSiteX(
       return false;
     }
 
-    await applySiteXData(orderId, result.data);
-    return true;
+    // Preserve-on-empty / never-overwrite — only fill blank parcel fields.
+    const applied = await applySiteXPropertyFields(orderId, result.data);
+    return applied.applied;
   } catch {
     return false;
   }
-}
-
-async function applySiteXData(orderId: number, data: SiteXPropertyData): Promise<void> {
-  await db.update(orderProperties).set({
-    apn: data.apn,
-    legalDescription: data.legalDescription,
-    county: data.county,
-    propertyType: data.propertyType,
-    primaryOwner: data.primaryOwner,
-    secondaryOwner: data.secondaryOwner,
-    updatedAt: new Date(),
-  }).where(eq(orderProperties.orderId, orderId));
 }

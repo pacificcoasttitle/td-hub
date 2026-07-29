@@ -11,6 +11,7 @@ const CRON_SCHEDULES: Record<string, string> = {
   'softpro.sync_recent_orders': 'Hourly :00',
   'softpro.enrich_orders': 'Every 15min',
   'softpro.enrich_order_details': 'Every 15min',
+  'sitex.backfill_property': 'Every 15min',
   'softpro.fetch_prelims': 'Every 15min',
   'softpro.retry_document_attach': 'Every 10min',
   'titlepoint.drain': 'Every 2min',

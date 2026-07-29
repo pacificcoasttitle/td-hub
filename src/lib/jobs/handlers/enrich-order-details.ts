@@ -23,10 +23,13 @@ const MAX_DETAILS_ATTEMPTS = 20;
 
 /**
  * Per-order enrichment of softpro_sync orders missing GetOrderDetails-shaped
- * fields (address, sales rep, title officer, escrow officer). Mirrors the fetch-prelims
- * architecture: backlog-aware (asc lastDetailsFetchAt — NULLs first),
+ * fields (address, zip, sales rep, title officer, escrow officer). Mirrors the
+ * fetch-prelims architecture: backlog-aware (asc lastDetailsFetchAt — NULLs first),
  * 6-hour cooldown after each attempt, fails loudly if SoftPro returns
  * zero successes across the run.
+ *
+ * Zip is free from SoftPro GetOrderDetails; apn/legal/property_type are filled by
+ * sitex.backfill_property (SiteX), not here.
  */
 export async function handleEnrichOrderDetails(): Promise<EnrichOrderDetailsResult> {
   const startTime = Date.now();
@@ -51,6 +54,7 @@ export async function handleEnrichOrderDetails(): Promise<EnrichOrderDetailsResu
       sql`${orders.operationalStatus} in ('open', 'in_process', 'completed')`,
       or(
         isNull(orderProperties.address),
+        sql`(${orderProperties.zip} is null or trim(${orderProperties.zip}) = '')`,
         isNull(orders.salesRepId),
         isNull(orders.titleOfficerId),
         isNull(orders.escrowOfficerId),

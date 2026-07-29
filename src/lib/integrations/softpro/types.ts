@@ -35,6 +35,8 @@ export interface SoftProOrderDetailItem {
   City: string;
   State: string;
   Country: string;
+  /** Postal ZIP from GetOrderDetails — maps to order_properties.zip (not ProductType). */
+  Zip?: string;
   TitleOfficer: string;
   EscrowOfficer?: string;
   SalesPrice: string;

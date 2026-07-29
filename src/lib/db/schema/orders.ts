@@ -68,6 +68,8 @@ export const orders = pgTable('orders', {
   lastPrelimFetchAt: timestamp('last_prelim_fetch_at'),
   lastDetailsFetchAt: timestamp('last_details_fetch_at'),
   detailsAttemptCount: integer('details_attempt_count').notNull().default(0),
+  lastSitexFetchAt: timestamp('last_sitex_fetch_at'),
+  sitexAttemptCount: integer('sitex_attempt_count').notNull().default(0),
   lastContactsFetchAt: timestamp('last_contacts_fetch_at'),
   contactsEmptyConfirmed: boolean('contacts_empty_confirmed').notNull().default(false),
   isImported: boolean('is_imported').notNull().default(false),

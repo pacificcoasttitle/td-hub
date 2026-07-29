@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const orderUpdateSets: Array<Record<string, unknown>> = [];
+const propertyUpdateSets: Array<Record<string, unknown>> = [];
+const propertyInserts: Array<Record<string, unknown>> = [];
 const existingRows: Array<{ id: number; operationalStatus: string }> = [];
+const existingPropertyRows: Array<{ id: number }> = [];
 
 vi.mock('drizzle-orm', () => ({
   eq: (field: unknown, value: unknown) => ({ op: 'eq', field, value }),
@@ -55,7 +58,7 @@ vi.mock('@/lib/db/client', () => ({
         if (table.__table === 'order_properties') {
           return {
             where: vi.fn(() => ({
-              limit: vi.fn(async () => []),
+              limit: vi.fn(async () => existingPropertyRows),
             })),
           };
         }
@@ -66,16 +69,24 @@ vi.mock('@/lib/db/client', () => ({
         };
       }),
     })),
-    update: vi.fn(() => ({
+    update: vi.fn((table: { __table?: string }) => ({
       set: vi.fn((values: Record<string, unknown>) => {
-        orderUpdateSets.push(values);
+        if (table.__table === 'order_properties') {
+          propertyUpdateSets.push(values);
+        } else {
+          orderUpdateSets.push(values);
+        }
         return {
           where: vi.fn(async () => undefined),
         };
       }),
     })),
-    insert: vi.fn(() => ({
-      values: vi.fn(async () => undefined),
+    insert: vi.fn((table: { __table?: string }) => ({
+      values: vi.fn(async (values: Record<string, unknown>) => {
+        if (table.__table === 'order_properties') {
+          propertyInserts.push(values);
+        }
+      }),
     })),
   },
 }));
@@ -109,10 +120,44 @@ function detail(overrides: Partial<DetailInput> = {}): DetailInput {
 describe('processOrderDetail preserveExistingOnEmpty', () => {
   beforeEach(() => {
     orderUpdateSets.length = 0;
+    propertyUpdateSets.length = 0;
+    propertyInserts.length = 0;
+    existingPropertyRows.length = 0;
     existingRows.splice(0, existingRows.length, {
       id: 42,
       operationalStatus: 'in_process',
     });
+  });
+
+  it('maps SoftPro Zip to order_properties.zip and never blanks existing zip', async () => {
+    existingPropertyRows.push({ id: 7 });
+
+    await processOrderDetail(
+      detail({
+        Address: '123 Main St',
+        City: 'Glendale',
+        State: 'CA',
+        Zip: '91203',
+        ProductType: 'Residential Resale',
+      }),
+      { preserveExistingOnEmpty: true, salesReps: [], titleOfficers: [], escrowOfficers: [] },
+    );
+
+    expect(propertyUpdateSets).toHaveLength(1);
+    expect(propertyUpdateSets[0]).toMatchObject({
+      address: '123 Main St',
+      zip: '91203',
+    });
+    // ProductType stays order-level — never written onto property_type.
+    expect(propertyUpdateSets[0]).not.toHaveProperty('propertyType');
+    expect(orderUpdateSets[0]?.productType).toBe('Residential Resale');
+
+    propertyUpdateSets.length = 0;
+    await processOrderDetail(
+      detail({ Address: '123 Main St', Zip: '' }),
+      { preserveExistingOnEmpty: true, salesReps: [], titleOfficers: [], escrowOfficers: [] },
+    );
+    expect(propertyUpdateSets[0]).not.toHaveProperty('zip');
   });
 
   it('preserves existing SoftPro fields and status when SoftPro returns blanks (resync)', async () => {

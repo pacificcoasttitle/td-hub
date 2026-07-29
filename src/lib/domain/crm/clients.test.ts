@@ -55,6 +55,7 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((left, right) => ({ type: 'eq', left, right })),
   ilike: vi.fn((left, right) => ({ type: 'ilike', left, right })),
   inArray: vi.fn((left, values) => ({ type: 'inArray', left, values })),
+  notInArray: vi.fn((left, values) => ({ type: 'notInArray', left, values })),
   desc: vi.fn((field) => ({ type: 'desc', field })),
   exists: vi.fn((subquery) => ({ type: 'exists', subquery })),
   sql: Object.assign(
@@ -440,6 +441,43 @@ describe('composeTransactionClientSuggestions', () => {
       contactRows, new Set(), new Set(['jane@kw.com']),
     );
     expect(out.map(s => s.contactId)).toEqual([12]);
+  });
+
+  it('excludes consumer roles — the list is for business sources (spec §1)', () => {
+    const out = composeTransactionClientSuggestions(
+      [
+        { orderId: 1, contactId: 10, openedAt: d('2026-05-01'), role: 'buyer' },
+        { orderId: 2, contactId: 11, openedAt: d('2026-05-01'), role: 'seller' },
+        { orderId: 3, contactId: 12, openedAt: d('2026-05-01'), role: 'borrower' },
+      ],
+      contactRows, new Set(), new Set(),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('keeps a contact who is a consumer on one file but a business source on another', () => {
+    // An agent who also bought a house should still surface — as an agent,
+    // and the consumer order must not inflate their count.
+    const out = composeTransactionClientSuggestions(
+      [
+        { orderId: 1, contactId: 10, openedAt: d('2026-01-01'), role: 'buyer' },
+        { orderId: 2, contactId: 10, openedAt: d('2026-05-01'), role: 'listing_agent' },
+      ],
+      contactRows, new Set(), new Set(),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].orderCount).toBe(1);
+    expect(out[0].roles).toEqual(['listing_agent']);
+  });
+
+  it('keeps every business-source role', () => {
+    const roles = ['client', 'listing_agent', 'buyer_agent', 'lender', 'lender_contact', 'escrow_company', 'other'];
+    const out = composeTransactionClientSuggestions(
+      roles.map((role, i) => ({ orderId: i + 1, contactId: 10, openedAt: d('2026-05-01'), role })),
+      contactRows, new Set(), new Set(),
+    );
+    expect(out[0].roles).toEqual([...roles].sort());
+    expect(out[0].orderCount).toBe(roles.length);
   });
 
   it('ignores null contact ids and contacts with no synced row', () => {

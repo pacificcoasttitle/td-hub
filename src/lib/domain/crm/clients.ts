@@ -1,4 +1,4 @@
-import { and, desc, eq, exists, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, exists, ilike, inArray, notInArray, or, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   contacts, crmClientNotes, crmClients, orderParties, orders, profiles,
@@ -772,6 +772,21 @@ interface TxLinkRow {
 }
 
 /**
+ * Party roles that are consumers on a single transaction rather than business
+ * sources a rep cultivates. My Clients is for "the real estate agents, lenders,
+ * and escrow contacts they work" (spec §1), so these never seed the list —
+ * otherwise every one-time buyer would drown out the referral relationships.
+ *
+ * A contact who also appears in a business-source role still surfaces: the
+ * filter drops consumer ROWS, not people.
+ */
+export const CONSUMER_PARTY_ROLES = ['buyer', 'seller', 'borrower'] as const;
+
+function isBusinessSourceRole(role: string): boolean {
+  return !(CONSUMER_PARTY_ROLES as readonly string[]).includes(role);
+}
+
+/**
  * Pure merge/exclude/rank step. Counts distinct orders per contact, drops
  * contacts the rep already has (by linked contact id or matching email), and
  * ranks by how much business they represent.
@@ -789,6 +804,7 @@ export function composeTransactionClientSuggestions(
 
   for (const row of linkRows) {
     if (row.contactId === null) continue;
+    if (!isBusinessSourceRole(row.role)) continue;
     if (excludedContactIds.has(row.contactId)) continue;
     let entry = byContact.get(row.contactId);
     if (!entry) {
@@ -906,6 +922,9 @@ async function fetchTransactionClientSuggestions(
       .where(and(
         eq(orders.salesRepId, repContactId),
         sql`${orderParties.contactId} is not null`,
+        // Consumer roles never seed the list — filtered here so they don't
+        // leave the database, and again in the pure composer as the guard.
+        notInArray(orderParties.role, [...CONSUMER_PARTY_ROLES]),
       )),
     fetchOwnExclusions(session.id),
   ]);

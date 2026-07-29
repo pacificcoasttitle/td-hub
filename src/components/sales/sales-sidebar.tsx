@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, BarChart3, TrendingUp, Users, DollarSign,
-  Briefcase, Trophy, LogOut, Menu, X,
+  Briefcase, Trophy, Contact, LogOut, Menu, X,
 } from 'lucide-react';
 import { handleSignOut } from '@/lib/security/sign-out';
 
@@ -27,6 +27,7 @@ const RANKING: NavItem = { label: 'Ranking', href: '/sales/ranking', icon: <Trop
 
 const ORDER_ITEMS: NavItem[] = [
   { label: 'Orders', href: '/sales/orders', icon: <Briefcase className={ICON_CLS} /> },
+  { label: 'My Clients', href: '/sales/clients', icon: <Contact className={ICON_CLS} /> },
 ];
 
 function buildNav(role: Role): { top: NavItem[]; orders: NavItem[] } {

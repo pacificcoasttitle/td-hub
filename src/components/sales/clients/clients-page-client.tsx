@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, Plus, Search, Upload } from 'lucide-react';
+import { Briefcase, Download, Plus, Search, Upload } from 'lucide-react';
 import { RepSelector } from '../rep-selector';
 import { SkeletonRow, EmptyState, ErrorBlock, Pagination } from '@/components/admin/shared-table';
 import { ClientFormModal } from './client-form-modal';
 import { ClientDetailDrawer } from './client-detail-drawer';
 import { ImportClientsModal } from './import-clients-modal';
+import { AddFromTransactionsModal } from './add-from-transactions-modal';
 import type { ClientListResponse, CrmClient } from './types';
 
 const PAGE_SIZE = 25;
@@ -35,6 +36,7 @@ export function ClientsPageClient({ role }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showFromTx, setShowFromTx] = useState(false);
   const [editClient, setEditClient] = useState<CrmClient | null>(null);
   const [openClientId, setOpenClientId] = useState<number | null>(null);
   const fetchCount = useRef(0);
@@ -102,6 +104,10 @@ export function ClientsPageClient({ role }: Props) {
             </>
           ) : (
             <>
+              <button onClick={() => setShowFromTx(true)}
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 text-sm text-gray-700 bg-white hover:border-[#F26B2B]/50 hover:text-[#F26B2B] transition-colors">
+                <Briefcase className="h-4 w-4" /> Add from transactions
+              </button>
               <button onClick={() => setShowImport(true)}
                 className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 text-sm text-gray-700 bg-white hover:border-[#F26B2B]/50 hover:text-[#F26B2B] transition-colors">
                 <Upload className="h-4 w-4" /> Import CSV
@@ -148,12 +154,18 @@ export function ClientsPageClient({ role }: Props) {
               {!readOnly && (
                 <>
                   <p className="text-sm text-[#6B7280] mt-1">
-                    Add your first client or import a list to get started.
+                    The quickest start: pull in the people you&rsquo;ve already done deals with.
                   </p>
-                  <button onClick={() => setShowAdd(true)}
-                    className="mt-4 inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-[#F26B2B] text-white text-sm font-medium hover:bg-[#E05A1A] transition-colors">
-                    <Plus className="h-4 w-4" /> Add your first client
-                  </button>
+                  <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+                    <button onClick={() => setShowFromTx(true)}
+                      className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-[#F26B2B] text-white text-sm font-medium hover:bg-[#E05A1A] transition-colors">
+                      <Briefcase className="h-4 w-4" /> Add from transactions
+                    </button>
+                    <button onClick={() => setShowAdd(true)}
+                      className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg border border-gray-200 text-sm text-gray-700 bg-white hover:border-[#F26B2B]/50 hover:text-[#F26B2B] transition-colors">
+                      <Plus className="h-4 w-4" /> Add manually
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -222,6 +234,14 @@ export function ClientsPageClient({ role }: Props) {
           client={editClient}
           onClose={() => { setShowAdd(false); setEditClient(null); }}
           onSaved={() => { setShowAdd(false); setEditClient(null); fetchClients(); }}
+        />
+      )}
+
+      {/* Seed from the rep's own order history */}
+      {showFromTx && (
+        <AddFromTransactionsModal
+          onClose={() => setShowFromTx(false)}
+          onAdded={fetchClients}
         />
       )}
 

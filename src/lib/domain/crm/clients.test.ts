@@ -55,6 +55,7 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((left, right) => ({ type: 'eq', left, right })),
   ilike: vi.fn((left, right) => ({ type: 'ilike', left, right })),
   inArray: vi.fn((left, values) => ({ type: 'inArray', left, values })),
+  notInArray: vi.fn((left, values) => ({ type: 'notInArray', left, values })),
   desc: vi.fn((field) => ({ type: 'desc', field })),
   exists: vi.fn((subquery) => ({ type: 'exists', subquery })),
   sql: Object.assign(
@@ -69,17 +70,19 @@ vi.mock('@/lib/db/schema', () => {
   return {
     crmClients: table('crm_clients', ['id', 'ownerProfileId', 'name', 'company', 'email', 'phone', 'contactId', 'createdAt', 'updatedAt']),
     crmClientNotes: table('crm_client_notes', ['id', 'clientId', 'authorProfileId', 'body', 'createdAt']),
-    contacts: table('contacts', ['id', 'fullName', 'companyName', 'email', 'isActive']),
+    contacts: table('contacts', ['id', 'fullName', 'companyName', 'email', 'phone', 'isActive']),
     profiles: table('profiles', ['id', 'contactId', 'displayName']),
     orders: table('orders', ['id', 'fileNumber', 'operationalStatus', 'transactionType', 'salesRepId', 'clientContactId', 'openedAt', 'closedAt', 'salesPrice']),
-    orderParties: table('order_parties', ['id', 'orderId', 'contactId']),
+    orderParties: table('order_parties', ['id', 'orderId', 'contactId', 'role']),
   };
 });
 
 import {
   CrmAccessError,
+  addClientsFromTransactions,
   buildClientsCsv,
   composeBusinessSummaries,
+  composeTransactionClientSuggestions,
   createClient,
   deleteNote,
   getClientDetail,
@@ -351,19 +354,153 @@ describe('importClients', () => {
 // ─── CSV builder (pure) ─────────────────────────────────────────────────────
 
 describe('buildClientsCsv', () => {
+  const jane = {
+    id: 1,
+    name: 'Smith, Jane',
+    company: 'Keller "KW" Williams',
+    email: 'jane@kw.com',
+    phone: null,
+    createdAt: new Date('2026-07-29T10:00:00Z'),
+  };
+
   it('escapes commas and quotes and emits CRLF lines', () => {
-    const csv = buildClientsCsv([
-      {
-        name: 'Smith, Jane',
-        company: 'Keller "KW" Williams',
-        email: 'jane@kw.com',
-        phone: null,
-        createdAt: new Date('2026-07-29T10:00:00Z'),
-      },
-    ]);
-    expect(csv).toBe(
-      'name,company,email,phone,created\r\n' +
-      '"Smith, Jane","Keller ""KW"" Williams",jane@kw.com,,2026-07-29\r\n',
+    expect(buildClientsCsv([jane])).toBe(
+      'name,company,email,phone,created,note,note_author,note_date\r\n' +
+      '"Smith, Jane","Keller ""KW"" Williams",jane@kw.com,,2026-07-29,,,\r\n',
     );
+  });
+
+  it('emits one row per note, repeating the client columns', () => {
+    const csv = buildClientsCsv([jane], [
+      { clientId: 1, body: 'Prefers texts', authorName: 'Gerardo H.', createdAt: new Date('2026-07-20T10:00:00Z') },
+      { clientId: 1, body: 'Met at the mixer, said "hi"', authorName: 'Gerardo H.', createdAt: new Date('2026-06-02T10:00:00Z') },
+    ]);
+    const lines = csv.trimEnd().split('\r\n');
+    expect(lines).toHaveLength(3); // header + 2 notes
+    expect(lines[1]).toContain('Prefers texts,Gerardo H.,2026-07-20');
+    expect(lines[2]).toContain('"Met at the mixer, said ""hi""",Gerardo H.,2026-06-02');
+    expect(lines[2]).toContain('"Smith, Jane"'); // client columns repeat
+  });
+
+  it('keeps clients with no notes, with empty note columns', () => {
+    const csv = buildClientsCsv(
+      [jane, { ...jane, id: 2, name: 'Marcus', company: null, email: null }],
+      [{ clientId: 1, body: 'note', authorName: null, createdAt: new Date('2026-07-20T10:00:00Z') }],
+    );
+    const lines = csv.trimEnd().split('\r\n');
+    expect(lines).toHaveLength(3);
+    expect(lines[2]).toBe('Marcus,,,,2026-07-29,,,');
+  });
+});
+
+describe('composeTransactionClientSuggestions', () => {
+  const contactRows = [
+    { id: 10, fullName: 'Jane Smith', companyName: 'KW', email: 'jane@kw.com', phone: '555' },
+    { id: 11, fullName: 'Marcus Lee', companyName: 'Compass', email: 'marcus@c.com', phone: null },
+    { id: 12, fullName: 'Dana Ortiz', companyName: 'eXp', email: 'dana@exp.com', phone: null },
+  ];
+  const d = (s: string) => new Date(s);
+
+  it('counts distinct orders, merges roles, and ranks by business volume', () => {
+    const out = composeTransactionClientSuggestions(
+      [
+        // Jane on the same order twice (client + listing agent) — one order.
+        { orderId: 1, contactId: 10, openedAt: d('2026-05-01'), role: 'client' },
+        { orderId: 1, contactId: 10, openedAt: d('2026-05-01'), role: 'listing_agent' },
+        { orderId: 2, contactId: 10, openedAt: d('2026-06-01'), role: 'client' },
+        // Marcus on three orders.
+        { orderId: 3, contactId: 11, openedAt: d('2026-01-01'), role: 'buyer_agent' },
+        { orderId: 4, contactId: 11, openedAt: d('2026-02-01'), role: 'buyer_agent' },
+        { orderId: 5, contactId: 11, openedAt: d('2026-03-01'), role: 'buyer_agent' },
+      ],
+      contactRows, new Set(), new Set(),
+    );
+
+    expect(out.map(s => [s.contactId, s.orderCount])).toEqual([[11, 3], [10, 2]]);
+    expect(out[1].roles).toEqual(['client', 'listing_agent']);
+    expect(out[1].lastOrderAt).toEqual(d('2026-06-01'));
+  });
+
+  it('excludes contacts already linked in the rep list', () => {
+    const out = composeTransactionClientSuggestions(
+      [
+        { orderId: 1, contactId: 10, openedAt: d('2026-05-01'), role: 'client' },
+        { orderId: 2, contactId: 11, openedAt: d('2026-05-01'), role: 'client' },
+      ],
+      contactRows, new Set([10]), new Set(),
+    );
+    expect(out.map(s => s.contactId)).toEqual([11]);
+  });
+
+  it('excludes contacts whose email is already in the rep list, case-insensitively', () => {
+    const out = composeTransactionClientSuggestions(
+      [
+        { orderId: 1, contactId: 10, openedAt: d('2026-05-01'), role: 'client' },
+        { orderId: 2, contactId: 12, openedAt: d('2026-05-01'), role: 'client' },
+      ],
+      contactRows, new Set(), new Set(['jane@kw.com']),
+    );
+    expect(out.map(s => s.contactId)).toEqual([12]);
+  });
+
+  it('excludes consumer roles — the list is for business sources (spec §1)', () => {
+    const out = composeTransactionClientSuggestions(
+      [
+        { orderId: 1, contactId: 10, openedAt: d('2026-05-01'), role: 'buyer' },
+        { orderId: 2, contactId: 11, openedAt: d('2026-05-01'), role: 'seller' },
+        { orderId: 3, contactId: 12, openedAt: d('2026-05-01'), role: 'borrower' },
+      ],
+      contactRows, new Set(), new Set(),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('keeps a contact who is a consumer on one file but a business source on another', () => {
+    // An agent who also bought a house should still surface — as an agent,
+    // and the consumer order must not inflate their count.
+    const out = composeTransactionClientSuggestions(
+      [
+        { orderId: 1, contactId: 10, openedAt: d('2026-01-01'), role: 'buyer' },
+        { orderId: 2, contactId: 10, openedAt: d('2026-05-01'), role: 'listing_agent' },
+      ],
+      contactRows, new Set(), new Set(),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].orderCount).toBe(1);
+    expect(out[0].roles).toEqual(['listing_agent']);
+  });
+
+  it('keeps every business-source role', () => {
+    const roles = ['client', 'listing_agent', 'buyer_agent', 'lender', 'lender_contact', 'escrow_company', 'other'];
+    const out = composeTransactionClientSuggestions(
+      roles.map((role, i) => ({ orderId: i + 1, contactId: 10, openedAt: d('2026-05-01'), role })),
+      contactRows, new Set(), new Set(),
+    );
+    expect(out[0].roles).toEqual([...roles].sort());
+    expect(out[0].orderCount).toBe(roles.length);
+  });
+
+  it('ignores null contact ids and contacts with no synced row', () => {
+    const out = composeTransactionClientSuggestions(
+      [
+        { orderId: 1, contactId: null, openedAt: d('2026-05-01'), role: 'client' },
+        { orderId: 2, contactId: 999, openedAt: d('2026-05-01'), role: 'client' },
+      ],
+      contactRows, new Set(), new Set(),
+    );
+    expect(out).toEqual([]);
+  });
+});
+
+describe('addClientsFromTransactions', () => {
+  const session = { id: 'me', role: 'sales_rep', contactId: 7 } as never;
+
+  it('refuses contacts that are not on the caller’s own orders', async () => {
+    // orders / order_parties / existing-crm reads all come back empty, so
+    // nothing is eligible and no insert may happen.
+    query.rows.push([], [], []);
+    const result = await addClientsFromTransactions(session, [10, 11]);
+    expect(result).toEqual({ added: 0, skipped: 2, clients: [] });
+    expect(insertCalls).toHaveLength(0);
   });
 });

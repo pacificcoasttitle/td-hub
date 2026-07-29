@@ -1,4 +1,4 @@
-import { and, desc, eq, exists, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, exists, ilike, inArray, notInArray, or, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   contacts, crmClientNotes, crmClients, orderParties, orders, profiles,
@@ -656,18 +656,61 @@ function csvCell(value: string | null): string {
   return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
-/** Pure CSV builder for the four client columns + created date. */
-export function buildClientsCsv(
-  rows: Array<{ name: string; company: string | null; email: string | null; phone: string | null; createdAt: Date }>,
-): string {
-  const header = 'name,company,email,phone,created';
-  const lines = rows.map((r) => [
-    csvCell(r.name),
-    csvCell(r.company),
-    csvCell(r.email),
-    csvCell(r.phone),
-    r.createdAt.toISOString().slice(0, 10),
-  ].join(','));
+export interface ExportClientRow {
+  id: number;
+  name: string;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  createdAt: Date;
+}
+
+export interface ExportNoteRow {
+  clientId: number;
+  body: string;
+  authorName: string | null;
+  createdAt: Date;
+}
+
+/**
+ * Pure CSV builder. The first five columns are unchanged from the original
+ * export; notes are appended as three more columns, one row per note, so the
+ * rep's relationship intel travels with the file (spec §6 — no lock-in).
+ * A client with no notes still appears once, with the note columns empty.
+ */
+export function buildClientsCsv(rows: ExportClientRow[], notes: ExportNoteRow[] = []): string {
+  const header = 'name,company,email,phone,created,note,note_author,note_date';
+
+  const notesByClient = new Map<number, ExportNoteRow[]>();
+  for (const note of notes) {
+    const list = notesByClient.get(note.clientId);
+    if (list) list.push(note);
+    else notesByClient.set(note.clientId, [note]);
+  }
+
+  const lines: string[] = [];
+  for (const r of rows) {
+    const base = [
+      csvCell(r.name),
+      csvCell(r.company),
+      csvCell(r.email),
+      csvCell(r.phone),
+      r.createdAt.toISOString().slice(0, 10),
+    ];
+    const clientNotes = notesByClient.get(r.id) ?? [];
+    if (clientNotes.length === 0) {
+      lines.push([...base, '', '', ''].join(','));
+      continue;
+    }
+    for (const note of clientNotes) {
+      lines.push([
+        ...base,
+        csvCell(note.body),
+        csvCell(note.authorName),
+        note.createdAt.toISOString().slice(0, 10),
+      ].join(','));
+    }
+  }
   return [header, ...lines].join('\r\n') + '\r\n';
 }
 
@@ -677,6 +720,7 @@ export async function exportClients(session: SessionUser): Promise<string> {
 
   const rows = await db
     .select({
+      id: crmClients.id,
       name: crmClients.name,
       company: crmClients.company,
       email: crmClients.email,
@@ -687,5 +731,275 @@ export async function exportClients(session: SessionUser): Promise<string> {
     .where(eq(crmClients.ownerProfileId, session.id))
     .orderBy(crmClients.name);
 
-  return buildClientsCsv(rows);
+  if (rows.length === 0) return buildClientsCsv([], []);
+
+  // Notes for the caller's own clients only — same ownership fence as above.
+  const noteRows = await db
+    .select({
+      clientId: crmClientNotes.clientId,
+      body: crmClientNotes.body,
+      authorName: profiles.displayName,
+      createdAt: crmClientNotes.createdAt,
+    })
+    .from(crmClientNotes)
+    .innerJoin(crmClients, eq(crmClientNotes.clientId, crmClients.id))
+    .leftJoin(profiles, eq(crmClientNotes.authorProfileId, profiles.id))
+    .where(eq(crmClients.ownerProfileId, session.id))
+    .orderBy(crmClientNotes.clientId, desc(crmClientNotes.createdAt));
+
+  return buildClientsCsv(rows, noteRows);
+}
+
+// ─── Seed from transactions (READ-ONLY over orders/order_parties/contacts) ───
+
+export interface TransactionClientSuggestion {
+  contactId: number;
+  name: string | null;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  /** Distinct roles this contact held on the rep's orders, most useful first. */
+  roles: string[];
+  orderCount: number;
+  lastOrderAt: Date | null;
+}
+
+interface TxLinkRow {
+  orderId: number;
+  contactId: number | null;
+  openedAt: Date;
+  role: string;
+}
+
+/**
+ * Party roles that are consumers on a single transaction rather than business
+ * sources a rep cultivates. My Clients is for "the real estate agents, lenders,
+ * and escrow contacts they work" (spec §1), so these never seed the list —
+ * otherwise every one-time buyer would drown out the referral relationships.
+ *
+ * A contact who also appears in a business-source role still surfaces: the
+ * filter drops consumer ROWS, not people.
+ */
+export const CONSUMER_PARTY_ROLES = ['buyer', 'seller', 'borrower'] as const;
+
+function isBusinessSourceRole(role: string): boolean {
+  return !(CONSUMER_PARTY_ROLES as readonly string[]).includes(role);
+}
+
+/**
+ * Pure merge/exclude/rank step. Counts distinct orders per contact, drops
+ * contacts the rep already has (by linked contact id or matching email), and
+ * ranks by how much business they represent.
+ */
+export function composeTransactionClientSuggestions(
+  linkRows: TxLinkRow[],
+  contactRows: Array<{
+    id: number; fullName: string | null; companyName: string | null;
+    email: string | null; phone: string | null;
+  }>,
+  excludedContactIds: Set<number>,
+  excludedEmailsLower: Set<string>,
+): TransactionClientSuggestion[] {
+  const byContact = new Map<number, { orders: Set<number>; roles: Set<string>; lastOrderAt: Date | null }>();
+
+  for (const row of linkRows) {
+    if (row.contactId === null) continue;
+    if (!isBusinessSourceRole(row.role)) continue;
+    if (excludedContactIds.has(row.contactId)) continue;
+    let entry = byContact.get(row.contactId);
+    if (!entry) {
+      entry = { orders: new Set(), roles: new Set(), lastOrderAt: null };
+      byContact.set(row.contactId, entry);
+    }
+    entry.orders.add(row.orderId);
+    entry.roles.add(row.role);
+    if (!entry.lastOrderAt || row.openedAt > entry.lastOrderAt) entry.lastOrderAt = row.openedAt;
+  }
+
+  const contactsById = new Map(contactRows.map((c) => [c.id, c]));
+  const out: TransactionClientSuggestion[] = [];
+
+  for (const [contactId, entry] of byContact) {
+    const contact = contactsById.get(contactId);
+    if (!contact) continue;
+    const email = normalizeEmail(contact.email);
+    if (email && excludedEmailsLower.has(email)) continue;
+    out.push({
+      contactId,
+      name: contact.fullName,
+      company: contact.companyName,
+      email: contact.email,
+      phone: contact.phone,
+      roles: Array.from(entry.roles).sort(),
+      orderCount: entry.orders.size,
+      lastOrderAt: entry.lastOrderAt,
+    });
+  }
+
+  // Most business first; ties broken by recency, then name for stability.
+  out.sort((a, b) =>
+    b.orderCount - a.orderCount
+    || (b.lastOrderAt?.getTime() ?? 0) - (a.lastOrderAt?.getTime() ?? 0)
+    || (a.name ?? '').localeCompare(b.name ?? ''));
+
+  return out;
+}
+
+/** Contacts already in the caller's list, by linked id and by email. */
+async function fetchOwnExclusions(ownerProfileId: string) {
+  const existing = await db
+    .select({ contactId: crmClients.contactId, email: crmClients.email })
+    .from(crmClients)
+    .where(eq(crmClients.ownerProfileId, ownerProfileId));
+
+  return {
+    contactIds: new Set(
+      existing.map((r) => r.contactId).filter((id): id is number => id !== null),
+    ),
+    emails: new Set(
+      existing.map((r) => normalizeEmail(r.email)).filter((e): e is string => e !== null),
+    ),
+  };
+}
+
+export interface TransactionClientsParams {
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * Suggests people the caller has actually done deals with, so a new rep can
+ * seed their list instead of typing it. READ-ONLY: this never writes to
+ * orders/order_parties/contacts — it only reads them to suggest.
+ * Always the CALLER'S OWN transactions (owner-only action).
+ */
+export async function listTransactionClients(
+  session: SessionUser,
+  params: TransactionClientsParams = {},
+) {
+  await resolveCrmScope(session); // sales-role gate (404 for other roles)
+
+  const page = Math.max(1, params.page ?? 1);
+  const pageSize = Math.min(Math.max(1, params.pageSize ?? 25), 100);
+  const all = await fetchTransactionClientSuggestions(session);
+
+  return {
+    suggestions: all.slice((page - 1) * pageSize, page * pageSize),
+    total: all.length,
+    page,
+    pageSize,
+  };
+}
+
+/** Unpaginated suggestion set — shared by the list route and the add action. */
+async function fetchTransactionClientSuggestions(
+  session: SessionUser,
+): Promise<TransactionClientSuggestion[]> {
+  const repContactId = session.contactId;
+  if (repContactId === null || repContactId === undefined) return [];
+
+  const [direct, viaParties, exclusions] = await Promise.all([
+    db
+      .select({
+        orderId: orders.id,
+        contactId: orders.clientContactId,
+        openedAt: orders.openedAt,
+      })
+      .from(orders)
+      .where(and(
+        eq(orders.salesRepId, repContactId),
+        sql`${orders.clientContactId} is not null`,
+      )),
+    db
+      .select({
+        orderId: orders.id,
+        contactId: orderParties.contactId,
+        openedAt: orders.openedAt,
+        role: orderParties.role,
+      })
+      .from(orderParties)
+      .innerJoin(orders, eq(orderParties.orderId, orders.id))
+      .where(and(
+        eq(orders.salesRepId, repContactId),
+        sql`${orderParties.contactId} is not null`,
+        // Consumer roles never seed the list — filtered here so they don't
+        // leave the database, and again in the pure composer as the guard.
+        notInArray(orderParties.role, [...CONSUMER_PARTY_ROLES]),
+      )),
+    fetchOwnExclusions(session.id),
+  ]);
+
+  const linkRows: TxLinkRow[] = [
+    ...direct.map((r) => ({ ...r, role: 'client' })),
+    ...viaParties.map((r) => ({ orderId: r.orderId, contactId: r.contactId, openedAt: r.openedAt, role: String(r.role) })),
+  ];
+
+  const candidateIds = Array.from(new Set(
+    linkRows
+      .map((r) => r.contactId)
+      .filter((id): id is number => id !== null && !exclusions.contactIds.has(id)),
+  ));
+
+  const contactRows = candidateIds.length > 0
+    ? await db
+      .select({
+        id: contacts.id,
+        fullName: contacts.fullName,
+        companyName: contacts.companyName,
+        email: contacts.email,
+        phone: contacts.phone,
+      })
+      .from(contacts)
+      .where(inArray(contacts.id, candidateIds))
+    : [];
+
+  return composeTransactionClientSuggestions(
+    linkRows, contactRows, exclusions.contactIds, exclusions.emails,
+  );
+}
+
+/**
+ * Creates crm_clients rows for contacts the rep explicitly chose. The
+ * contactId is pre-linked because the rep picked them off their own order
+ * history — the link is confirmed by that choice, not guessed.
+ * WRITES ONLY to crm_clients. Owner-only.
+ */
+export async function addClientsFromTransactions(session: SessionUser, contactIds: number[]) {
+  await resolveCrmScope(session); // sales-role gate
+
+  const repContactId = session.contactId;
+  if (repContactId === null || repContactId === undefined) {
+    throw new CrmAccessError('Not found', 404);
+  }
+  const requested = Array.from(new Set(contactIds));
+  if (requested.length === 0) return { added: 0, skipped: 0, clients: [] };
+
+  // Only contacts that genuinely appear on this rep's own orders may be added
+  // this way — re-verified server-side against the full set, never trusted
+  // from the request body.
+  const eligible = await fetchTransactionClientSuggestions(session);
+  const byId = new Map(eligible.map((s) => [s.contactId, s]));
+  const toInsert = requested
+    .map((id) => byId.get(id))
+    .filter((s): s is TransactionClientSuggestion => s !== undefined);
+
+  if (toInsert.length === 0) return { added: 0, skipped: requested.length, clients: [] };
+
+  const created = await db
+    .insert(crmClients)
+    .values(toInsert.map((s) => ({
+      ownerProfileId: session.id,
+      name: (s.name ?? s.email ?? 'Unnamed contact').trim(),
+      company: cleanOptional(s.company),
+      email: normalizeEmail(s.email),
+      phone: cleanOptional(s.phone),
+      contactId: s.contactId,
+    })))
+    .returning();
+
+  return {
+    added: created.length,
+    skipped: requested.length - created.length,
+    clients: created.map((c) => ({ ...c, canEdit: true })),
+  };
 }

@@ -6,9 +6,11 @@ import type { SalesRep } from './types';
 interface Props {
   selectedRepId: number | null;
   onSelect: (id: number | null) => void;
+  /** Label for the "viewing my own data" option. Defaults to the dashboard wording. */
+  ownLabel?: string;
 }
 
-export function RepSelector({ selectedRepId, onSelect }: Props) {
+export function RepSelector({ selectedRepId, onSelect, ownLabel = 'My Stats' }: Props) {
   const [reps, setReps] = useState<SalesRep[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -33,7 +35,7 @@ export function RepSelector({ selectedRepId, onSelect }: Props) {
       className="h-9 px-3 pr-8 border border-gray-200 rounded-lg text-sm bg-white text-gray-900
                  focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A] cursor-pointer"
     >
-      <option value="">My Stats</option>
+      <option value="">{ownLabel}</option>
       {reps.slice(1).map(r => (
         <option key={r.id} value={r.id}>{r.fullName || r.email}</option>
       ))}

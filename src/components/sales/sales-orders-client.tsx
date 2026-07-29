@@ -33,6 +33,15 @@ export function SalesOrdersClient({ role }: Props) {
   const [error, setError] = useState<string | null>(null);
   const { handleOrderAction, modals } = useSalesOrderActions();
 
+  // Deep links (e.g. from My Clients business history) pre-fill the search box.
+  useEffect(() => {
+    const initial = new URLSearchParams(window.location.search).get('search')?.trim();
+    if (initial) {
+      setSearchInput(initial);
+      setDebouncedSearch(initial);
+    }
+  }, []);
+
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
     return () => clearTimeout(t);

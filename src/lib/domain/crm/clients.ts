@@ -1,10 +1,11 @@
-import { and, desc, eq, exists, ilike, inArray, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, exists, ilike, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   contacts, crmClientNotes, crmClients, orderParties, orders, profiles,
 } from '@/lib/db/schema';
 import { getSalesScopedContactIds, isSalesScopedRole } from '@/lib/security/permissions';
 import type { SessionUser } from '@/lib/security/auth';
+import { deriveClientType, type CrmClientType } from './types';
 
 // My Clients (sales rep CRM). The client list is independent of SoftPro:
 // this module never writes to contacts/orders/companies — reads on those
@@ -34,6 +35,7 @@ export interface CrmClientInput {
   company?: string | null;
   email?: string | null;
   phone?: string | null;
+  type?: CrmClientType | null;
 }
 
 export interface CrmClientPatch extends Partial<CrmClientInput> {
@@ -288,6 +290,8 @@ export interface ListClientsParams {
   page?: number;
   pageSize?: number;
   repId?: string | null;
+  /** Server-side classification filter. Undefined = all types. */
+  type?: CrmClientType | null;
 }
 
 export async function listClients(session: SessionUser, params: ListClientsParams) {
@@ -296,6 +300,7 @@ export async function listClients(session: SessionUser, params: ListClientsParam
   const pageSize = Math.min(Math.max(1, params.pageSize ?? 25), 100);
 
   const conditions = [inArray(crmClients.ownerProfileId, scope.visibleOwnerProfileIds)];
+  if (params.type) conditions.push(eq(crmClients.type, params.type));
   const q = params.search?.trim();
   if (q) {
     const safe = escapeLike(q);
@@ -495,6 +500,7 @@ export async function createClient(session: SessionUser, input: CrmClientInput) 
       company: cleanOptional(input.company),
       email,
       phone: cleanOptional(input.phone),
+      type: input.type ?? null,
     })
     .returning();
 
@@ -519,6 +525,9 @@ export async function updateClient(session: SessionUser, clientId: number, patch
     }
     values.email = email;
   }
+  // An explicit pick always wins and is applied before any derivation below.
+  if (patch.type !== undefined) values.type = patch.type ?? null;
+
   if (patch.contactId !== undefined) {
     if (patch.contactId === null) {
       values.contactId = null;
@@ -530,6 +539,14 @@ export async function updateClient(session: SessionUser, clientId: number, patch
         .limit(1);
       if (!contact) throw new CrmAccessError('Contact not found', 400);
       values.contactId = patch.contactId;
+
+      // Derive on link — but ONLY into an empty type. Suggest, don't override:
+      // a type the rep chose (or one set by a previous link) is never clobbered.
+      const typeAfterPatch = patch.type !== undefined ? patch.type : existing.type;
+      if (!typeAfterPatch) {
+        const derived = await deriveTypeForContact(session, patch.contactId);
+        if (derived) values.type = derived;
+      }
     }
   }
 
@@ -964,6 +981,63 @@ async function fetchTransactionClientSuggestions(
  * history — the link is confirmed by that choice, not guessed.
  * WRITES ONLY to crm_clients. Owner-only.
  */
+/**
+ * Resolves a contact's party roles across the CALLER'S OWN orders and maps them
+ * to a client type. READ-ONLY over orders/order_parties — writes nothing.
+ * Returns null when the contact doesn't appear on the caller's orders, or when
+ * their roles don't imply a classification.
+ */
+export async function deriveTypeForContact(
+  session: SessionUser,
+  contactId: number,
+): Promise<CrmClientType | null> {
+  const repContactId = session.contactId;
+  if (repContactId === null || repContactId === undefined) return null;
+
+  const rows = await db
+    .select({ role: orderParties.role })
+    .from(orderParties)
+    .innerJoin(orders, eq(orderParties.orderId, orders.id))
+    .where(and(
+      eq(orders.salesRepId, repContactId),
+      eq(orderParties.contactId, contactId),
+    ));
+
+  return deriveClientType(rows.map((r) => String(r.role)));
+}
+
+/**
+ * Fills in `type` for the caller's existing clients that are linked to a
+ * contact but still unclassified. Idempotent and fill-when-empty only — it
+ * never changes a type that is already set. Owner's own list only.
+ */
+export async function backfillClientTypes(session: SessionUser) {
+  await resolveCrmScope(session); // sales-role gate
+
+  const candidates = await db
+    .select({ id: crmClients.id, contactId: crmClients.contactId })
+    .from(crmClients)
+    .where(and(
+      eq(crmClients.ownerProfileId, session.id),
+      isNull(crmClients.type),
+      isNotNull(crmClients.contactId),
+    ));
+
+  let updated = 0;
+  for (const row of candidates) {
+    const derived = await deriveTypeForContact(session, row.contactId!);
+    if (!derived) continue;
+    await db
+      .update(crmClients)
+      .set({ type: derived, updatedAt: new Date() })
+      // Re-assert the empty check in the WHERE so a concurrent manual pick wins.
+      .where(and(eq(crmClients.id, row.id), isNull(crmClients.type)));
+    updated++;
+  }
+
+  return { examined: candidates.length, updated };
+}
+
 export async function addClientsFromTransactions(session: SessionUser, contactIds: number[]) {
   await resolveCrmScope(session); // sales-role gate
 
@@ -994,6 +1068,8 @@ export async function addClientsFromTransactions(session: SessionUser, contactId
       email: normalizeEmail(s.email),
       phone: cleanOptional(s.phone),
       contactId: s.contactId,
+      // Seeded clients arrive already classified from their party roles.
+      type: deriveClientType(s.roles),
     })))
     .returning();
 

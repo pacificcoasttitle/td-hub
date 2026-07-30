@@ -8,6 +8,8 @@ import { ClientFormModal } from './client-form-modal';
 import { ClientDetailDrawer } from './client-detail-drawer';
 import { ImportClientsModal } from './import-clients-modal';
 import { AddFromTransactionsModal } from './add-from-transactions-modal';
+import { TypeBadge } from './type-badge';
+import { CRM_CLIENT_TYPES, CRM_TYPE_LABEL_PLURAL } from '@/lib/domain/crm/types';
 import type { ClientListResponse, CrmClient } from './types';
 
 const PAGE_SIZE = 25;
@@ -36,6 +38,7 @@ export function ClientsPageClient({ role }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<string>('');
   const [showFromTx, setShowFromTx] = useState(false);
   const [editClient, setEditClient] = useState<CrmClient | null>(null);
   const [openClientId, setOpenClientId] = useState<number | null>(null);
@@ -49,7 +52,7 @@ export function ClientsPageClient({ role }: Props) {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  useEffect(() => { setPage(1); }, [debouncedSearch, repId]);
+  useEffect(() => { setPage(1); }, [debouncedSearch, repId, typeFilter]);
 
   const fetchClients = useCallback(() => {
     const seq = ++fetchCount.current;
@@ -58,6 +61,7 @@ export function ClientsPageClient({ role }: Props) {
     const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
     if (debouncedSearch) params.set('search', debouncedSearch);
     if (repId !== null) params.set('repId', String(repId));
+    if (typeFilter) params.set('type', typeFilter);
 
     fetch(`/api/sales/clients?${params}`)
       .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
@@ -67,7 +71,7 @@ export function ClientsPageClient({ role }: Props) {
       })
       .catch(() => { if (seq === fetchCount.current) setError('Failed to load your clients'); })
       .finally(() => { if (seq === fetchCount.current) setLoading(false); });
-  }, [page, debouncedSearch, repId]);
+  }, [page, debouncedSearch, repId, typeFilter]);
 
   useEffect(() => { fetchClients(); }, [fetchClients]);
 
@@ -127,16 +131,30 @@ export function ClientsPageClient({ role }: Props) {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-4 max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-        <input
-          value={searchInput}
-          onChange={e => setSearchInput(e.target.value)}
-          placeholder="Search by name, company, or email"
-          className="w-full h-9 pl-9 pr-3 border border-gray-200 rounded-lg text-sm bg-white
-                     focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A]"
-        />
+      {/* Search + type filter */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            placeholder="Search by name, company, or email"
+            className="w-full h-9 pl-9 pr-3 border border-gray-200 rounded-lg text-sm bg-white
+                       focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A]"
+          />
+        </div>
+        <select
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          aria-label="Filter by client type"
+          className="h-9 px-3 pr-8 border border-gray-200 rounded-lg text-sm bg-white text-gray-900
+                     focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A] cursor-pointer"
+        >
+          <option value="">All types</option>
+          {CRM_CLIENT_TYPES.map(t => (
+            <option key={t} value={t}>{CRM_TYPE_LABEL_PLURAL[t]}</option>
+          ))}
+        </select>
       </div>
 
       {/* Table */}
@@ -192,7 +210,10 @@ export function ClientsPageClient({ role }: Props) {
                         onClick={() => setOpenClientId(client.id)}
                         className="hover:bg-gray-50 cursor-pointer transition-colors">
                         <td className="px-4 py-3">
-                          <p className="font-medium text-gray-900">{client.name}</p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-medium text-gray-900">{client.name}</p>
+                            <TypeBadge type={client.type} />
+                          </div>
                           <p className="text-xs text-gray-500 sm:hidden">{client.company ?? ''}</p>
                         </td>
                         <td className="px-4 py-3 text-gray-600 hidden sm:table-cell">{client.company ?? '—'}</td>

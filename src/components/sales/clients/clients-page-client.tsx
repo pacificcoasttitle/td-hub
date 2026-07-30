@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Briefcase, Download, Plus, Search, Upload } from 'lucide-react';
+import { Briefcase, Clock, Download, Plus, Search, Upload } from 'lucide-react';
 import { RepSelector } from '../rep-selector';
 import { SkeletonRow, EmptyState, ErrorBlock, Pagination } from '@/components/admin/shared-table';
 import { ClientFormModal } from './client-form-modal';
@@ -9,6 +9,7 @@ import { ClientDetailDrawer } from './client-detail-drawer';
 import { ImportClientsModal } from './import-clients-modal';
 import { AddFromTransactionsModal } from './add-from-transactions-modal';
 import { TypeBadge } from './type-badge';
+import { RecentActivity } from './recent-activity';
 import { CRM_CLIENT_TYPES, CRM_TYPE_LABEL_PLURAL } from '@/lib/domain/crm/types';
 import type { ClientListResponse, CrmClient } from './types';
 
@@ -39,6 +40,8 @@ export function ClientsPageClient({ role }: Props) {
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [typeFilter, setTypeFilter] = useState<string>('');
+  const [quietOnly, setQuietOnly] = useState(false);
+  const [activityKey, setActivityKey] = useState(0);
   const [showFromTx, setShowFromTx] = useState(false);
   const [editClient, setEditClient] = useState<CrmClient | null>(null);
   const [openClientId, setOpenClientId] = useState<number | null>(null);
@@ -52,7 +55,7 @@ export function ClientsPageClient({ role }: Props) {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  useEffect(() => { setPage(1); }, [debouncedSearch, repId, typeFilter]);
+  useEffect(() => { setPage(1); }, [debouncedSearch, repId, typeFilter, quietOnly]);
 
   const fetchClients = useCallback(() => {
     const seq = ++fetchCount.current;
@@ -62,6 +65,7 @@ export function ClientsPageClient({ role }: Props) {
     if (debouncedSearch) params.set('search', debouncedSearch);
     if (repId !== null) params.set('repId', String(repId));
     if (typeFilter) params.set('type', typeFilter);
+    if (quietOnly) params.set('quiet', '1');
 
     fetch(`/api/sales/clients?${params}`)
       .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
@@ -71,14 +75,18 @@ export function ClientsPageClient({ role }: Props) {
       })
       .catch(() => { if (seq === fetchCount.current) setError('Failed to load your clients'); })
       .finally(() => { if (seq === fetchCount.current) setLoading(false); });
-  }, [page, debouncedSearch, repId, typeFilter]);
+  }, [page, debouncedSearch, repId, typeFilter, quietOnly]);
 
   useEffect(() => { fetchClients(); }, [fetchClients]);
 
   const clients = data?.clients ?? [];
   const total = data?.total ?? 0;
+  const quietCount = data?.quietCount ?? 0;
+  const quietMonths = data?.quietAfterMonths ?? 3;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const hasAnySearch = debouncedSearch.length > 0;
+  // A filtered-to-zero list must not read as "you have no clients".
+  const hasAnyFilter = typeFilter !== '' || quietOnly;
 
   return (
     <div className="p-4 md:p-6 max-w-6xl mx-auto">
@@ -131,6 +139,13 @@ export function ClientsPageClient({ role }: Props) {
         </div>
       </div>
 
+      {/* Recent activity across all clients */}
+      <RecentActivity
+        repId={repId}
+        refreshKey={activityKey}
+        onOpenClient={setOpenClientId}
+      />
+
       {/* Search + type filter */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -155,6 +170,28 @@ export function ClientsPageClient({ role }: Props) {
             <option key={t} value={t}>{CRM_TYPE_LABEL_PLURAL[t]}</option>
           ))}
         </select>
+
+        {/* Quiet summary doubles as the filter toggle. */}
+        {quietCount > 0 && (
+          <button
+            onClick={() => setQuietOnly(v => !v)}
+            aria-pressed={quietOnly}
+            className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-sm transition-colors ${
+              quietOnly
+                ? 'border-amber-300 bg-amber-50 text-amber-800'
+                : 'border-gray-200 bg-white text-gray-700 hover:border-amber-300 hover:text-amber-800'
+            }`}
+          >
+            <Clock className="h-4 w-4" />
+            {quietCount} gone quiet
+          </button>
+        )}
+        {quietOnly && (
+          <button onClick={() => setQuietOnly(false)}
+            className="h-9 px-2 text-sm text-gray-500 hover:text-gray-800 transition-colors">
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -162,8 +199,14 @@ export function ClientsPageClient({ role }: Props) {
         {error ? (
           <ErrorBlock message={error} />
         ) : !loading && clients.length === 0 ? (
-          hasAnySearch ? (
-            <EmptyState message={`No clients match “${debouncedSearch}”`} />
+          hasAnySearch || hasAnyFilter ? (
+            <EmptyState message={
+              hasAnySearch
+                ? `No clients match “${debouncedSearch}”`
+                : quietOnly
+                  ? 'No clients have gone quiet — nice.'
+                  : 'No clients of that type yet'
+            } />
           ) : (
             <div className="p-12 text-center">
               <p className="text-[#1A1A2E] font-medium">
@@ -222,13 +265,23 @@ export function ClientsPageClient({ role }: Props) {
                           {client.phone && <p className="text-xs text-gray-500">{client.phone}</p>}
                         </td>
                         <td className="px-4 py-3">
-                          {biz ? (
-                            <span className="inline-block text-xs font-medium text-[#1B2A4A] bg-[#1B2A4A]/5 rounded-full px-2.5 py-1 whitespace-nowrap">
-                              {biz}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray-400">—</span>
-                          )}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {biz ? (
+                              <span className="inline-block text-xs font-medium text-[#1B2A4A] bg-[#1B2A4A]/5 rounded-full px-2.5 py-1 whitespace-nowrap">
+                                {biz}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-400">—</span>
+                            )}
+                            {client.isQuiet && (
+                              <span
+                                title={`No new orders in ${quietMonths}+ months`}
+                                className="inline-flex items-center gap-1 text-xs font-medium text-amber-800 bg-amber-50 rounded-full px-2 py-0.5 whitespace-nowrap"
+                              >
+                                <Clock className="h-3 w-3" /> Quiet
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell max-w-[220px]">
                           {client.latestNote ? (
@@ -281,7 +334,7 @@ export function ClientsPageClient({ role }: Props) {
           repId={repId}
           onClose={() => setOpenClientId(null)}
           onEdit={(client) => { setOpenClientId(null); setEditClient(client); }}
-          onChanged={fetchClients}
+          onChanged={() => { fetchClients(); setActivityKey(k => k + 1); }}
         />
       )}
     </div>

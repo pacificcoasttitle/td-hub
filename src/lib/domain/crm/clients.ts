@@ -292,6 +292,77 @@ export interface ListClientsParams {
   repId?: string | null;
   /** Server-side classification filter. Undefined = all types. */
   type?: CrmClientType | null;
+  /** When true, restrict to clients that have gone quiet (see isGoneQuiet). */
+  quietOnly?: boolean;
+}
+
+// ─── "Gone quiet" insight (derived on read — no stored state) ───────────────
+
+/**
+ * A client is "quiet" when they have prior business with this rep but no order
+ * opened in this many months. One fixed constant, deliberately NOT per-rep
+ * configurable — the signal is only useful if it means the same thing to
+ * everyone looking at it.
+ */
+export const QUIET_AFTER_MONTHS = 3;
+
+/**
+ * Pure rule. Unlinked clients have no business summary and are therefore never
+ * quiet — "quiet" means a relationship that went cold, not one we can't see.
+ */
+export function isGoneQuiet(
+  business: BusinessSummary | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!business || business.orderCount === 0) return false;
+  if (!business.lastOpenedAt) return false;
+  const cutoff = new Date(now);
+  cutoff.setMonth(cutoff.getMonth() - QUIET_AFTER_MONTHS);
+  return business.lastOpenedAt < cutoff;
+}
+
+/**
+ * Ids of every linked client in scope that has gone quiet. Computed over the
+ * WHOLE scoped set (not just the current page) so the summary count is honest
+ * and the filter can page correctly. READ-ONLY over orders/order_parties.
+ */
+async function fetchQuietClientIds(scope: CrmScope): Promise<Set<number>> {
+  const all = await db
+    .select({
+      id: crmClients.id,
+      contactId: crmClients.contactId,
+      ownerProfileId: crmClients.ownerProfileId,
+    })
+    .from(crmClients)
+    .where(and(
+      inArray(crmClients.ownerProfileId, scope.visibleOwnerProfileIds),
+      isNotNull(crmClients.contactId),
+    ));
+
+  if (all.length === 0) return new Set();
+
+  const summaryInput = all.map((r) => ({
+    id: r.id,
+    contactId: r.contactId,
+    ownerContactId: scope.ownerContactIdByProfile.get(r.ownerProfileId) ?? null,
+  }));
+  const ownerContactIds = Array.from(new Set(
+    summaryInput.map((r) => r.ownerContactId).filter((v): v is number => v !== null),
+  ));
+  const linkedContactIds = Array.from(new Set(
+    summaryInput.filter((r) => r.contactId !== null && r.ownerContactId !== null)
+      .map((r) => r.contactId as number),
+  ));
+
+  const linkRows = await fetchOrderLinkRows(ownerContactIds, linkedContactIds);
+  const summaries = composeBusinessSummaries(summaryInput, linkRows);
+
+  const now = new Date();
+  const quiet = new Set<number>();
+  for (const [clientId, summary] of summaries) {
+    if (isGoneQuiet(summary, now)) quiet.add(clientId);
+  }
+  return quiet;
 }
 
 export async function listClients(session: SessionUser, params: ListClientsParams) {
@@ -299,8 +370,17 @@ export async function listClients(session: SessionUser, params: ListClientsParam
   const page = Math.max(1, params.page ?? 1);
   const pageSize = Math.min(Math.max(1, params.pageSize ?? 25), 100);
 
+  // Derived on read — nothing about "quiet" is stored, so it self-updates as
+  // deals flow. Needed up front because it both filters and is summarised.
+  const quietIds = await fetchQuietClientIds(scope);
+
   const conditions = [inArray(crmClients.ownerProfileId, scope.visibleOwnerProfileIds)];
   if (params.type) conditions.push(eq(crmClients.type, params.type));
+  if (params.quietOnly) {
+    conditions.push(quietIds.size > 0
+      ? inArray(crmClients.id, Array.from(quietIds))
+      : sql`false`);
+  }
   const q = params.search?.trim();
   if (q) {
     const safe = escapeLike(q);
@@ -363,11 +443,57 @@ export async function listClients(session: SessionUser, params: ListClientsParam
       canEdit: r.ownerProfileId === session.id,
       business: summaries.get(r.id) ?? null,
       latestNote: latestNoteByClient.get(r.id) ?? null,
+      isQuiet: quietIds.has(r.id),
     })),
     total: Number(countResult[0]?.total ?? 0),
     page,
     pageSize,
+    /** Across the whole scoped list, not just this page. */
+    quietCount: quietIds.size,
+    quietAfterMonths: QUIET_AFTER_MONTHS,
   };
+}
+
+// ─── Recent activity feed ───────────────────────────────────────────────────
+
+export interface RecentNote {
+  id: number;
+  clientId: number;
+  clientName: string;
+  body: string;
+  createdAt: Date;
+  authorName: string | null;
+}
+
+/**
+ * The rep's most recent notes across ALL their clients. Scoped exactly like
+ * the list: own notes by default, a managed rep's when repId is supplied.
+ * READ-ONLY.
+ */
+export async function listRecentNotes(
+  session: SessionUser,
+  params: { repId?: string | null; limit?: number } = {},
+): Promise<RecentNote[]> {
+  const scope = await resolveCrmScope(session, params.repId);
+  const limit = Math.min(Math.max(1, params.limit ?? 10), 50);
+
+  const rows = await db
+    .select({
+      id: crmClientNotes.id,
+      clientId: crmClientNotes.clientId,
+      clientName: crmClients.name,
+      body: crmClientNotes.body,
+      createdAt: crmClientNotes.createdAt,
+      authorName: profiles.displayName,
+    })
+    .from(crmClientNotes)
+    .innerJoin(crmClients, eq(crmClientNotes.clientId, crmClients.id))
+    .leftJoin(profiles, eq(crmClientNotes.authorProfileId, profiles.id))
+    .where(inArray(crmClients.ownerProfileId, scope.visibleOwnerProfileIds))
+    .orderBy(desc(crmClientNotes.createdAt))
+    .limit(limit);
+
+  return rows;
 }
 
 // ─── Detail ──────────────────────────────────────────────────────────────────

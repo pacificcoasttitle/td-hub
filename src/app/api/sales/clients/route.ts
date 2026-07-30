@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
       pageSize: Math.min(Math.max(1, Number(sp.get('pageSize') ?? '25')), 100),
       repId: sp.get('repId'),
       type: rawType && isCrmClientType(rawType) ? rawType : undefined,
+      quietOnly: sp.get('quiet') === '1',
     });
     return NextResponse.json(result);
   } catch (err) {

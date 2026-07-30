@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Pencil, Trash2, X } from 'lucide-react';
 import { statusLabel } from '@/lib/domain/orders/status-format';
 import { TypeBadge } from './type-badge';
+import { displayClientName } from './display';
 import { formatCurrency } from '@/components/admin/dashboards/shared';
 import type { ClientDetailResponse, ContactSuggestion, CrmClient } from './types';
 
@@ -127,10 +128,14 @@ export function ClientDetailDrawer({ clientId, repId, onClose, onEdit, onChanged
               ) : (
                 <>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h2 className="text-white font-semibold truncate">{client?.name ?? '—'}</h2>
+                    <h2 className="text-white font-semibold truncate">
+                      {client ? displayClientName(client.name, client.company) : '—'}
+                    </h2>
                     <TypeBadge type={client?.type ?? null} />
                   </div>
-                  {client?.company && <p className="text-white/60 text-sm truncate">{client.company}</p>}
+                  {client?.company && displayClientName(client.name, client.company) !== client.company && (
+                    <p className="text-white/60 text-sm truncate">{client.company}</p>
+                  )}
                 </>
               )}
             </div>

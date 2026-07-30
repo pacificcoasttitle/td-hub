@@ -19,6 +19,8 @@ export interface CrmClient {
   canEdit: boolean;
   business?: CrmBusinessSummary | null;
   latestNote?: { body: string; createdAt: string } | null;
+  /** Derived on read: prior business but no order in the quiet window. */
+  isQuiet?: boolean;
 }
 
 export interface CrmNote {
@@ -52,6 +54,9 @@ export interface ClientListResponse {
   total: number;
   page: number;
   pageSize: number;
+  /** Quiet clients across the whole scoped list, not just this page. */
+  quietCount?: number;
+  quietAfterMonths?: number;
 }
 
 export interface ClientDetailResponse {

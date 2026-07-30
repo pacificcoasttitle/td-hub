@@ -85,6 +85,8 @@ import {
   composeBusinessSummaries,
   composeTransactionClientSuggestions,
   createClient,
+  isGoneQuiet,
+  QUIET_AFTER_MONTHS,
   deleteNote,
   getClientDetail,
   resolveCrmScope,
@@ -491,6 +493,44 @@ describe('composeTransactionClientSuggestions', () => {
       contactRows, new Set(), new Set(),
     );
     expect(out).toEqual([]);
+  });
+});
+
+// ─── "Gone quiet" insight ───────────────────────────────────────────────────
+
+describe('isGoneQuiet', () => {
+  const NOW = new Date('2026-07-30T12:00:00Z');
+  const summary = (orderCount: number, lastOpenedAt: Date | null) =>
+    ({ orderCount, lastOpenedAt, lastClosedAt: null });
+
+  it('flags a client with prior business and no recent order', () => {
+    expect(isGoneQuiet(summary(4, new Date('2026-01-15')), NOW)).toBe(true);
+  });
+
+  it('does not flag a client with a recent order', () => {
+    expect(isGoneQuiet(summary(4, new Date('2026-07-01')), NOW)).toBe(false);
+  });
+
+  it('never flags an unlinked client (no summary at all)', () => {
+    expect(isGoneQuiet(null, NOW)).toBe(false);
+    expect(isGoneQuiet(undefined, NOW)).toBe(false);
+  });
+
+  it('never flags a client with no prior business', () => {
+    expect(isGoneQuiet(summary(0, null), NOW)).toBe(false);
+    expect(isGoneQuiet(summary(0, new Date('2020-01-01')), NOW)).toBe(false);
+  });
+
+  it('does not flag when the last order date is unknown', () => {
+    expect(isGoneQuiet(summary(3, null), NOW)).toBe(false);
+  });
+
+  it('uses the shared threshold and is stable right at the boundary', () => {
+    expect(QUIET_AFTER_MONTHS).toBe(3);
+    const cutoff = new Date(NOW); cutoff.setMonth(cutoff.getMonth() - QUIET_AFTER_MONTHS);
+    // exactly at the cutoff is not yet quiet; a moment earlier is
+    expect(isGoneQuiet(summary(1, cutoff), NOW)).toBe(false);
+    expect(isGoneQuiet(summary(1, new Date(cutoff.getTime() - 1000)), NOW)).toBe(true);
   });
 });
 

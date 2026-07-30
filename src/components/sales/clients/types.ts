@@ -11,6 +11,8 @@ export interface CrmClient {
   company: string | null;
   email: string | null;
   phone: string | null;
+  /** agent | lender | escrow | title | other, or null when unclassified. */
+  type: string | null;
   contactId: number | null;
   createdAt: string;
   updatedAt: string;

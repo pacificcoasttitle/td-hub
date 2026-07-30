@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { dbMock, query, getSalesScopedContactIdsMock, insertCalls, txInsertCalls } = vi.hoisted(() => {
+const { dbMock, query, getSalesScopedContactIdsMock, insertCalls, txInsertCalls, setCalls } = vi.hoisted(() => {
   const query = { rows: [] as unknown[][] };
   const insertCalls = [] as unknown[];
   const txInsertCalls = [] as unknown[];
+  const setCalls = [] as Record<string, unknown>[];
 
   const builder: Record<string, unknown> = {};
   const chain = (impl?: (...args: unknown[]) => void) => vi.fn((...args: unknown[]) => {
@@ -19,7 +20,7 @@ const { dbMock, query, getSalesScopedContactIdsMock, insertCalls, txInsertCalls 
     innerJoin: chain(),
     leftJoin: chain(),
     values: chain((v) => insertCalls.push(v)),
-    set: chain(),
+    set: chain((v) => setCalls.push(v as Record<string, unknown>)),
     returning: vi.fn(async () => query.rows.shift() ?? []),
     then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
       Promise.resolve(query.rows.shift() ?? []).then(resolve, reject),
@@ -39,7 +40,7 @@ const { dbMock, query, getSalesScopedContactIdsMock, insertCalls, txInsertCalls 
     transaction: vi.fn(async (fn: (tx: typeof txMock) => Promise<void>) => fn(txMock)),
   };
 
-  return { dbMock, query, getSalesScopedContactIdsMock: vi.fn(), insertCalls, txInsertCalls };
+  return { dbMock, query, getSalesScopedContactIdsMock: vi.fn(), insertCalls, txInsertCalls, setCalls };
 });
 
 vi.mock('@/lib/db/client', () => ({ db: dbMock }));
@@ -113,6 +114,7 @@ async function expectCrmError(promise: Promise<unknown>, status: number) {
 beforeEach(() => {
   vi.clearAllMocks();
   query.rows = [];
+  setCalls.length = 0;
   insertCalls.length = 0;
   txInsertCalls.length = 0;
   getSalesScopedContactIdsMock.mockResolvedValue([]);
@@ -492,8 +494,72 @@ describe('composeTransactionClientSuggestions', () => {
   });
 });
 
+// ─── Type derivation on link (suggest, never override) ──────────────────────
+
+describe('updateClient — derive type on link', () => {
+  const rep = session('sales_rep', 7, 'rep-a');
+
+  /** Queue the query results updateClient consumes, in order. */
+  function queueLink(existingType: string | null, roles: string[]) {
+    query.rows.push([{ id: 5, ownerProfileId: 'rep-a', name: 'Jane', type: existingType }]); // owned client
+    query.rows.push([{ id: 42 }]);                                    // contact exists
+    query.rows.push(roles.map((role) => ({ role })));                 // party roles on caller's orders
+    query.rows.push([{ id: 5, ownerProfileId: 'rep-a', name: 'Jane' }]); // update ... returning
+  }
+
+  it('fills type from the contact roles when the client is unclassified', async () => {
+    queueLink(null, ['listing_agent']);
+    await updateClient(rep, 5, { contactId: 42 });
+    expect(setCalls.at(-1)).toMatchObject({ contactId: 42, type: 'agent' });
+  });
+
+  it('does NOT overwrite a type the rep already chose', async () => {
+    queueLink('lender', ['listing_agent']);
+    await updateClient(rep, 5, { contactId: 42 });
+    const written = setCalls.at(-1)!;
+    expect(written).toMatchObject({ contactId: 42 });
+    expect(written).not.toHaveProperty('type'); // left exactly as it was
+  });
+
+  it('lets an explicit pick in the same request win over derivation', async () => {
+    queueLink(null, ['listing_agent']);
+    await updateClient(rep, 5, { contactId: 42, type: 'title' });
+    expect(setCalls.at(-1)).toMatchObject({ contactId: 42, type: 'title' });
+  });
+
+  it('leaves type empty when the contact has no classifying role', async () => {
+    queueLink(null, ['client']);
+    await updateClient(rep, 5, { contactId: 42 });
+    expect(setCalls.at(-1)).not.toHaveProperty('type');
+  });
+
+  it('does not derive when unlinking', async () => {
+    query.rows.push([{ id: 5, ownerProfileId: 'rep-a', name: 'Jane', type: null }]);
+    query.rows.push([{ id: 5, ownerProfileId: 'rep-a', name: 'Jane' }]);
+    await updateClient(rep, 5, { contactId: null });
+    expect(setCalls.at(-1)).toMatchObject({ contactId: null });
+    expect(setCalls.at(-1)).not.toHaveProperty('type');
+  });
+});
+
 describe('addClientsFromTransactions', () => {
   const session = { id: 'me', role: 'sales_rep', contactId: 7 } as never;
+
+  it('classifies seeded clients from their party roles', async () => {
+    // Queue order matches execution: fetchOwnExclusions runs first (it is
+    // invoked while the Promise.all array is built), then direct, then parties.
+    query.rows.push([]);                                                    // existing crm clients (no exclusions)
+    query.rows.push([]);                                                    // orders.clientContactId rows
+    query.rows.push([{ orderId: 1, contactId: 42, openedAt: new Date('2026-05-01'), role: 'listing_agent' }]);
+    query.rows.push([{ id: 42, fullName: 'Jane Smith', companyName: 'KW', email: 'j@kw.com', phone: null }]);
+    query.rows.push([{ id: 1, ownerProfileId: 'rep-a', name: 'Jane Smith' }]); // insert ... returning
+
+    const result = await addClientsFromTransactions(session, [42]);
+
+    expect(result.added).toBe(1);
+    const inserted = (insertCalls.at(-1) as Array<Record<string, unknown>>)[0];
+    expect(inserted).toMatchObject({ contactId: 42, type: 'agent' });
+  });
 
   it('refuses contacts that are not on the caller’s own orders', async () => {
     // orders / order_parties / existing-crm reads all come back empty, so

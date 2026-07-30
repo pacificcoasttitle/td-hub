@@ -4,6 +4,7 @@ import { getSession } from '@/lib/security/auth';
 import {
   CrmAccessError, deleteClient, getClientDetail, updateClient,
 } from '@/lib/domain/crm/clients';
+import { CRM_CLIENT_TYPES } from '@/lib/domain/crm/types';
 
 function errorResponse(err: unknown) {
   if (err instanceof CrmAccessError) {
@@ -45,6 +46,7 @@ const patchSchema = z.object({
   email: z.string().email().max(200).optional().nullable().or(z.literal('')),
   phone: z.string().max(50).optional().nullable(),
   contactId: z.number().int().positive().optional().nullable(),
+  type: z.enum(CRM_CLIENT_TYPES).optional().nullable(),
 });
 
 export async function PATCH(

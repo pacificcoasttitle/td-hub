@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ModalShell } from '@/components/shared/action-modals/modal-shell';
+import { CRM_CLIENT_TYPES, CRM_TYPE_LABEL } from '@/lib/domain/crm/types';
 import type { ContactSuggestion, CrmClient } from './types';
 
 interface Props {
@@ -19,6 +20,7 @@ export function ClientFormModal({ client, onClose, onSaved }: Props) {
   const [company, setCompany] = useState(client?.company ?? '');
   const [email, setEmail] = useState(client?.email ?? '');
   const [phone, setPhone] = useState(client?.phone ?? '');
+  const [type, setType] = useState(client?.type ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // After a successful add, PR1 may suggest transaction contacts to link.
@@ -37,6 +39,7 @@ export function ClientFormModal({ client, onClose, onSaved }: Props) {
         company: company.trim() || null,
         email: email.trim() || null,
         phone: phone.trim() || null,
+        type: type || null,
       };
       const res = await fetch(isEdit ? `/api/sales/clients/${client.id}` : '/api/sales/clients', {
         method: isEdit ? 'PATCH' : 'POST',
@@ -134,6 +137,21 @@ export function ClientFormModal({ client, onClose, onSaved }: Props) {
               <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
               <input value={phone} onChange={e => setPhone(e.target.value)} className={INPUT_CLS}
                 type="tel" placeholder="(714) 555-0100" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
+              <select value={type} onChange={e => setType(e.target.value)}
+                className={`${INPUT_CLS} cursor-pointer pr-8`}>
+                <option value="">Not set</option>
+                {CRM_CLIENT_TYPES.map(t => (
+                  <option key={t} value={t}>{CRM_TYPE_LABEL[t]}</option>
+                ))}
+              </select>
+              {!isEdit && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Filled in automatically when you link them to transactions.
+                </p>
+              )}
             </div>
 
             {error && <p className="text-sm text-red-600">{error}</p>}

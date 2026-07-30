@@ -18,6 +18,13 @@ export const crmClients = pgTable('crm_clients', {
   company: varchar('company', { length: 200 }),
   email: varchar('email', { length: 200 }),
   phone: varchar('phone', { length: 50 }),
+  /**
+   * Business-source classification: agent | lender | escrow | title | other.
+   * Nullable — unclassified is a valid state. Plain varchar with a DB CHECK
+   * rather than a pg enum, so drizzle-kit generate/journal stays untouched;
+   * the app validates with a Zod union (CRM_CLIENT_TYPES).
+   */
+  type: varchar('type', { length: 20 }),
   contactId: integer('contact_id').references(() => contacts.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

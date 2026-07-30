@@ -1,8 +1,15 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { formatCurrency } from '@/components/admin/dashboards/shared';
 import type { BranchCode, SalesDashboardStats } from './types';
 import { ProductionCountsBox } from './production-counts-box';
+import { DeltaChip } from './delta-chip';
+import { MiniSparkline } from './mini-sparkline';
+import { SevenDayStrip } from './seven-day-strip';
+import {
+  computeDeltas, sixMonthSeries, type TrendsLike,
+} from '@/lib/domain/sales/header-metrics';
 import {
   BRANCH_CODE_LABELS,
   orderedLocationCodes,
@@ -17,9 +24,27 @@ interface Props {
    * Reps do not get this framing (no assigned-territory data; ask came from managers).
    */
   role?: 'sales_rep' | 'sales_manager';
+  /** Manager's selected rep, so the header's own fetches match the page scope. */
+  repId?: number | null;
 }
 
-export function DashboardKpi({ loading, stats, onOpenClosings, role }: Props) {
+export function DashboardKpi({ loading, stats, onOpenClosings, role, repId = null }: Props) {
+  // Trends back the delta chips and the six-month sparkline. Fetched here
+  // rather than folded into the dashboard payload so a trends outage degrades
+  // those two elements only, leaving the rest of the header intact.
+  const [trends, setTrends] = useState<TrendsLike | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams();
+    if (repId != null) params.set('repId', String(repId));
+    fetch(`/api/sales/trends${params.toString() ? `?${params}` : ''}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled) setTrends(d ?? null); })
+      .catch(() => { if (!cancelled) setTrends(null); });
+    return () => { cancelled = true; };
+  }, [repId]);
+
   if (loading) {
     return (
       <div className="mb-6">
@@ -43,16 +68,45 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role }: Props) {
   const closings = stats.closings;
   const showBranchSplit = role === 'sales_manager';
 
+  const now = new Date();
+  const deltas = computeDeltas(trends, projected?.revenue ?? null, now);
+  const revenueSeries = sixMonthSeries(trends, 'revenue', now);
+
+  // Zero-value categories don't get a column — they stay in the footer
+  // breakdown. TSG is footer-only by decision (see the spec addendum).
+  const splitColumns: Array<{ label: string; value: number; share: number | null }> = production
+    ? ([
+      { label: 'Title', value: production.title },
+      { label: 'Escrow', value: production.escrow },
+    ]
+      .filter((c) => c.value > 0)
+      .map((c) => ({
+        ...c,
+        share: production.total > 0 ? Math.round((c.value / production.total) * 100) : null,
+      })))
+    : [];
+
   return (
     <div className="mb-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <button
           type="button"
           onClick={onOpenClosings}
-          className="bg-[#1B2A4A] rounded-xl p-6 cursor-pointer hover:bg-[#233358] transition-colors relative overflow-hidden text-left w-full"
+          className="bg-[#1B2A4A] rounded-xl px-6 py-[22px] cursor-pointer hover:bg-[#233358] transition-colors relative overflow-hidden text-left w-full"
         >
-          <p className="text-xs text-white/60 uppercase tracking-wider">PRODUCTION (MTD)</p>
-          <p className="text-[42px] font-semibold text-white leading-tight mt-1">
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-[11px] font-semibold text-[#93A4C4] uppercase tracking-[1.2px]">
+              PRODUCTION (MTD)
+            </p>
+            {(deltas.mom || deltas.yoy) && (
+              <div className="flex gap-1.5 flex-wrap justify-end">
+                <DeltaChip delta={deltas.mom} />
+                <DeltaChip delta={deltas.yoy} />
+              </div>
+            )}
+          </div>
+
+          <p className="text-[40px] font-bold text-white leading-tight tracking-[-1px] mt-1.5">
             {formatCurrency(production ? production.total : 0)}
           </p>
 
@@ -60,20 +114,43 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role }: Props) {
             <p className="text-[11px] text-white/50 mt-2">Production data unavailable</p>
           )}
 
-          {production && (
-            <div className="mt-3 flex gap-6 flex-wrap">
-              <div>
-                <p className="text-xs text-white/50">Title</p>
-                <p className="text-base text-white font-medium">{formatCurrency(production.title)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-white/50">Escrow</p>
-                <p className="text-base text-white font-medium">{formatCurrency(production.escrow)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-white/50">TSG</p>
-                <p className="text-base text-white font-medium">{formatCurrency(production.tsg)}</p>
-              </div>
+          {/* Projection is the forward-looking element (no goal exists to pace against). */}
+          {hasMrMtd && projected && (
+            <p className="text-[13px] text-[#7DE2B0] font-semibold mt-2">
+              On pace to finish ~{formatCurrency(projected.revenue)}
+              {typeof projected.workingDaysLeft === 'number' && (
+                <span className="text-[11px] font-normal text-[#8FA0BF]">
+                  {' '}· {projected.workingDaysLeft} working {projected.workingDaysLeft === 1 ? 'day' : 'days'} left
+                </span>
+              )}
+            </p>
+          )}
+
+          {production && (splitColumns.length > 0 || revenueSeries) && (
+            <div className="mt-4 pt-3.5 border-t border-white/10 flex items-center gap-6 flex-wrap">
+              {splitColumns.map((col) => (
+                <div key={col.label}>
+                  <p className="text-[11px] text-[#8FA0BF] mb-0.5">{col.label}</p>
+                  <p className="text-[19px] font-bold text-white leading-none">
+                    {formatCurrency(col.value)}
+                    {col.share !== null && (
+                      <span className="text-[11px] font-medium text-[#8FA0BF]"> {col.share}%</span>
+                    )}
+                  </p>
+                </div>
+              ))}
+              {revenueSeries && (
+                <div className="ml-auto text-right">
+                  <p className="text-[10px] text-[#7B8CAB] tracking-[0.4px]">6-MO TREND</p>
+                  <div className="mt-0.5 flex justify-end">
+                    <MiniSparkline
+                      values={revenueSeries}
+                      color="#FF8C4A"
+                      ariaLabel={`Production revenue trend over the last ${revenueSeries.length} months`}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -107,7 +184,13 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role }: Props) {
           </div>
         </button>
 
-        <ProductionCountsBox openings={openings} closings={closings} />
+        <ProductionCountsBox
+          openings={openings}
+          closings={closings}
+          closingRatio={stats.closingRatio}
+          openingsSeries={sixMonthSeries(trends, 'openings', now)}
+          closingsSeries={sixMonthSeries(trends, 'closings', now)}
+        />
       </div>
 
       {showBranchSplit && (
@@ -119,43 +202,14 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role }: Props) {
         />
       )}
 
+      {/* Reps get the seven-day strip; managers keep Production by Branch above. */}
       {!showBranchSplit && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-[11px] text-gray-500 uppercase tracking-wide">YESTERDAY</p>
-          <YesterdayLine yesterday={yesterday} />
-        </div>
+        <SevenDayStrip repId={repId} yesterday={yesterday} />
       )}
     </div>
   );
 }
 
-function YesterdayLine({
-  yesterday,
-}: {
-  yesterday: { closed: number; revenue: number; opens: number } | null;
-}) {
-  if (!yesterday) {
-    return (
-      <div className="flex items-baseline gap-2 mt-1">
-        <span className="text-[28px] font-semibold text-gray-400">—</span>
-        <span className="text-xs text-gray-500">No data</span>
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-baseline gap-2 mt-1 flex-wrap">
-      <span className="text-[28px] font-semibold text-gray-900 tabular-nums">
-        {yesterday.closed.toLocaleString()}
-      </span>
-      <span className="text-xs text-gray-500">
-        closed · {formatCurrency(yesterday.revenue)}
-        {yesterday.opens > 0 && (
-          <> · {yesterday.opens.toLocaleString()} opened</>
-        )}
-      </span>
-    </div>
-  );
-}
 
 function ProductionByBranchSection({
   productionByBranch,

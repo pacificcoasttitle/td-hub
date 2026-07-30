@@ -121,6 +121,7 @@ export function DashboardContent({ displayName, role }: Props) {
         stats={stats}
         onOpenClosings={() => setClosingsOpen(true)}
         role={role}
+        repId={repId}
       />
 
       <SectionCard title="Recent Orders" action={{ label: 'View all orders →', href: '/sales/orders' }}>

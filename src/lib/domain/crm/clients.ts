@@ -460,6 +460,8 @@ export interface RecentNote {
   id: number;
   clientId: number;
   clientName: string;
+  /** Included so the UI can fall back to it when the name is just an email. */
+  clientCompany: string | null;
   body: string;
   createdAt: Date;
   authorName: string | null;
@@ -482,6 +484,7 @@ export async function listRecentNotes(
       id: crmClientNotes.id,
       clientId: crmClientNotes.clientId,
       clientName: crmClients.name,
+      clientCompany: crmClients.company,
       body: crmClientNotes.body,
       createdAt: crmClientNotes.createdAt,
       authorName: profiles.displayName,

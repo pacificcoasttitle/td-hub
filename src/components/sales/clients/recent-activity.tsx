@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { MessageSquare } from 'lucide-react';
+import { displayClientName } from './display';
 
 interface RecentNote {
   id: number;
   clientId: number;
   clientName: string;
+  clientCompany: string | null;
   body: string;
   createdAt: string;
   authorName: string | null;
@@ -71,7 +73,7 @@ export function RecentActivity({ repId, refreshKey, onOpenClient }: Props) {
                 className="w-full text-left py-1.5 group flex items-baseline gap-2"
               >
                 <span className="text-sm font-medium text-gray-900 group-hover:text-[#F26B2B] transition-colors shrink-0 max-w-[40%] truncate">
-                  {note.clientName}
+                  {displayClientName(note.clientName, note.clientCompany)}
                 </span>
                 <span className="text-sm text-gray-500 truncate flex-1">{note.body}</span>
                 <span className="text-xs text-gray-400 shrink-0">{fmtDate(note.createdAt)}</span>

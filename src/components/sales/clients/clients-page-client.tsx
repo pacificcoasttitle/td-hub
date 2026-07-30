@@ -10,6 +10,7 @@ import { ImportClientsModal } from './import-clients-modal';
 import { AddFromTransactionsModal } from './add-from-transactions-modal';
 import { TypeBadge } from './type-badge';
 import { RecentActivity } from './recent-activity';
+import { displayClientName } from './display';
 import { CRM_CLIENT_TYPES, CRM_TYPE_LABEL_PLURAL } from '@/lib/domain/crm/types';
 import type { ClientListResponse, CrmClient } from './types';
 
@@ -254,10 +255,15 @@ export function ClientsPageClient({ role }: Props) {
                         className="hover:bg-gray-50 cursor-pointer transition-colors">
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-medium text-gray-900">{client.name}</p>
+                            <p className="font-medium text-gray-900">
+                              {displayClientName(client.name, client.company)}
+                            </p>
                             <TypeBadge type={client.type} />
                           </div>
-                          <p className="text-xs text-gray-500 sm:hidden">{client.company ?? ''}</p>
+                          {/* Don't repeat the company when it is already standing in as the name. */}
+                          {client.company && displayClientName(client.name, client.company) !== client.company && (
+                            <p className="text-xs text-gray-500 sm:hidden">{client.company}</p>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-gray-600 hidden sm:table-cell">{client.company ?? '—'}</td>
                         <td className="px-4 py-3 hidden md:table-cell">

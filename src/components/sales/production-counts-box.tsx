@@ -1,10 +1,19 @@
 'use client';
 
 import type { SalesDashboardStats } from './types';
+import { MiniSparkline } from './mini-sparkline';
 
 interface Props {
   openings: SalesDashboardStats['openings'];
   closings: SalesDashboardStats['closings'];
+  /**
+   * Managers Report's authoritative cohort figure. NOT closed ÷ opened — those
+   * are different cohorts (see the spec addendum, §3).
+   */
+  closingRatio?: SalesDashboardStats['closingRatio'];
+  /** Trailing six months, for the per-hero sparklines. Omitted when unavailable. */
+  openingsSeries?: number[] | null;
+  closingsSeries?: number[] | null;
 }
 
 type Line = { label: string; value: number };
@@ -64,7 +73,13 @@ function closingsLines(c: NonNullable<SalesDashboardStats['closings']>): Line[] 
   return lines;
 }
 
-export function ProductionCountsBox({ openings, closings }: Props) {
+export function ProductionCountsBox({
+  openings,
+  closings,
+  closingRatio = null,
+  openingsSeries = null,
+  closingsSeries = null,
+}: Props) {
   const hasData = openings !== null || closings !== null;
 
   if (!hasData) {
@@ -94,11 +109,45 @@ export function ProductionCountsBox({ openings, closings }: Props) {
   const projectedClosings = typeof closings?.projected === 'number' ? closings.projected : null;
   const showProjected = projectedOpens !== null || projectedClosings !== null;
 
+  // Pull-through is MR's own closed/created cohort ratio; omitted when absent
+  // rather than substituted with a hand-computed figure.
+  const pullThrough = closingRatio && closingRatio.total > 0
+    ? Math.round((closingRatio.closed / closingRatio.total) * 100)
+    : null;
+
   return (
-    <div className="bg-[#1B2A4A] rounded-xl p-6">
-      <div className="grid grid-cols-2 gap-6">
-        <Hero label="OPENED" total={openTotal} lines={openLines} hasData={openings !== null} />
-        <Hero label="CLOSED" total={closedTotal} lines={closedLines} hasData={closings !== null} />
+    <div className="bg-[#1B2A4A] rounded-xl px-6 py-[22px]">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-[11px] font-semibold text-[#93A4C4] uppercase tracking-[1.2px]">
+          PIPELINE (MTD)
+        </p>
+        {pullThrough !== null && (
+          <p
+            className="text-[11px] text-[#93A4C4] shrink-0"
+            title={`Managers Report closing ratio: ${closingRatio!.closed.toLocaleString()} closed of ${closingRatio!.total.toLocaleString()} created`}
+          >
+            Pull-through{' '}
+            <span className="text-[13px] font-bold text-[#7DE2B0]">{pullThrough}%</span>
+          </p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-[18px] mt-2">
+        <Hero
+          label="OPENED"
+          total={openTotal}
+          lines={openLines}
+          hasData={openings !== null}
+          series={openingsSeries}
+        />
+        <Hero
+          label="CLOSED"
+          total={closedTotal}
+          lines={closedLines}
+          hasData={closings !== null}
+          series={closingsSeries}
+          bordered
+        />
       </div>
 
       {(showProjected || openMismatch || closedMismatch) && (
@@ -147,36 +196,65 @@ function Hero({
   total,
   lines,
   hasData,
+  series = null,
+  bordered = false,
 }: {
   label: string;
   total: number;
   lines: Line[];
   hasData: boolean;
+  series?: number[] | null;
+  bordered?: boolean;
 }) {
   return (
-    <div>
-      <p className="text-xs text-white/60 uppercase tracking-wider">{label}</p>
+    <div className={bordered ? 'border-l border-white/10 pl-[18px]' : undefined}>
       {hasData ? (
         <>
-          <p className="text-[42px] font-semibold text-[#F26B2B] leading-tight mt-1 tabular-nums">
-            {total.toLocaleString()}
-          </p>
+          <div className="flex items-baseline gap-2">
+            <span className="text-[36px] font-bold text-[#F26B2B] leading-none tabular-nums">
+              {total.toLocaleString()}
+            </span>
+            <span className="text-xs font-semibold text-white/60 uppercase tracking-[0.5px]">
+              {label}
+            </span>
+            {series && (
+              /* Secondary context — dropped on narrow screens rather than
+                 squeezing the count it sits beside. */
+              <span className="ml-auto shrink-0 hidden sm:inline-block">
+                <MiniSparkline
+                  values={series}
+                  color="#8FA0BF"
+                  width={66}
+                  height={20}
+                  ariaLabel={`${label.toLowerCase()} trend over the last ${series.length} months`}
+                />
+              </span>
+            )}
+          </div>
           {lines.length > 0 && (
-            <div className="flex gap-6 mt-3 flex-wrap">
-              {lines.map((line) => (
-                <div key={line.label}>
-                  <p className="text-xs text-white/50">{line.label}</p>
-                  <p className="text-base text-white font-medium tabular-nums">
-                    {line.value.toLocaleString()}
-                  </p>
-                </div>
-              ))}
+            <div className="flex gap-5 mt-3 flex-wrap">
+              {lines.map((line) => {
+                // Escrow is real data but an order of magnitude smaller —
+                // dimmed so it doesn't compete visually with purchase.
+                const dim = line.label === 'Escrow';
+                return (
+                  <div key={line.label} className={dim ? 'opacity-50' : undefined}>
+                    <p className="text-[10px] text-white/50">{line.label}</p>
+                    <p className={`text-base text-white tabular-nums ${dim ? 'font-semibold' : 'font-bold'}`}>
+                      {line.value.toLocaleString()}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
           )}
         </>
       ) : (
         <>
-          <p className="text-[42px] font-semibold text-white/30 leading-tight mt-1">—</p>
+          <div className="flex items-baseline gap-2">
+            <span className="text-[36px] font-bold text-white/30 leading-none">—</span>
+            <span className="text-xs font-semibold text-white/60 uppercase tracking-[0.5px]">{label}</span>
+          </div>
           <p className="text-xs text-white/50 mt-2">No data</p>
         </>
       )}

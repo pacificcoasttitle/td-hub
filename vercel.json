@@ -86,7 +86,7 @@
     },
     {
       "path": "/api/jobs/run?name=ops.daily_report",
-      "schedule": "0 15 * * *"
+      "schedule": "0 13 * * *"
     }
   ]
 }

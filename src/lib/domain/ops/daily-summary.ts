@@ -20,6 +20,8 @@ import {
   type SectionResult,
 } from './daily-report';
 import { formatDayLabel, previousPacificDay, type CalendarDayWindow } from './calendar-day';
+import { db } from '@/lib/db/client';
+import { sql } from 'drizzle-orm';
 
 /** Per-section cap. Generous — sections measure well under a second in practice. */
 export const SECTION_TIMEOUT_MS = 15_000;
@@ -79,14 +81,45 @@ function plural(n: number, one: string, many: string): string {
   return n === 1 ? one : many;
 }
 
+/**
+ * Emails actually sent, counted from the SendGrid call log.
+ *
+ * Deliberately NOT taken from notification_logs: that table only records the
+ * outbox pipeline (milestones and order confirmations). Prelim deliveries —
+ * the bulk of what customers receive — call SendGrid directly and never appear
+ * there. Counting notification_logs made the report say "none went out" on a
+ * day 38 customer emails were sent.
+ */
+export async function getEmailsSection(
+  windowStart: Date,
+  windowEnd: Date,
+): Promise<SectionResult<{ sent: number; failed: number }>> {
+  try {
+    const rows = await db.execute(sql`
+      select
+        count(*) filter (where success)::int as sent,
+        count(*) filter (where not success)::int as failed
+      from vendor_api_logs
+      where vendor = 'sendgrid'
+        and created_at >= ${windowStart.toISOString()}
+        and created_at < ${windowEnd.toISOString()}
+    `) as unknown as Array<{ sent: number; failed: number }>;
+    const row = rows[0];
+    return { ok: true, data: { sent: Number(row?.sent ?? 0), failed: Number(row?.failed ?? 0) } };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Email counts unavailable' };
+  }
+}
+
 /** Composes the attention sentences. Pure, so the wording is testable. */
 export function composeAttention(input: {
   orderFlow: SectionResult<{ newlyStuckOver6Hours: number }>;
   notifications: SectionResult<{
-    failed: number;
     confirmationMissingClient: number;
     confirmationNoRecipients: number;
   }>;
+  /** Real SendGrid outcomes — see getEmailsSection. */
+  emails: SectionResult<{ sent: number; failed: number }>;
   syncHealth: SectionResult<{ rows: Array<{ jobType: string; failed: number }> }>;
   vendorApiHealth: SectionResult<{ rows: Array<{ vendor: string; successRate: number; calls: number }> }>;
   cpls: SectionResult<{ failedByVendor: Array<{ vendor: string; count: number }> }>;
@@ -107,9 +140,11 @@ export function composeAttention(input: {
         `${n.confirmationNoRecipients} order ${plural(n.confirmationNoRecipients, 'confirmation', 'confirmations')} could not be sent to anyone — no email addresses were found on the order.`,
       );
     }
-    if (n.failed > 0) {
-      out.push(`${n.failed} ${plural(n.failed, 'email', 'emails')} failed to send.`);
-    }
+  }
+
+  if (input.emails.ok && input.emails.data.failed > 0) {
+    const f = input.emails.data.failed;
+    out.push(`${f} ${plural(f, 'email', 'emails')} failed to send.`);
   }
 
   if (input.orderFlow.ok && input.orderFlow.data.newlyStuckOver6Hours > 0) {
@@ -200,11 +235,12 @@ export async function buildDailySummary(now: Date = new Date()): Promise<DailySu
   const window = previousPacificDay(now);
   const { start, end } = window;
 
-  const [orderFlow, prelims, cpls, notifications, syncHealth, vendorApiHealth] = await Promise.all([
+  const [orderFlow, prelims, cpls, notifications, emails, syncHealth, vendorApiHealth] = await Promise.all([
     withTimeout('Orders', getOrderFlowSection(start, end)),
     withTimeout('Title reports', getPrelimsSection(start, end)),
     withTimeout('CPLs', getCplsSection(start, end)),
-    withTimeout('Emails', getNotificationsSection(start, end)),
+    withTimeout('Order notifications', getNotificationsSection(start, end)),
+    withTimeout('Emails', getEmailsSection(start, end)),
     withTimeout('Background jobs', getSyncHealthSection(start, end)),
     withTimeout('Vendor health', getVendorApiHealthSection(start, end)),
   ]);
@@ -213,7 +249,8 @@ export async function buildDailySummary(now: Date = new Date()): Promise<DailySu
     ['Orders', orderFlow],
     ['Title reports', prelims],
     ['CPLs', cpls],
-    ['Emails', notifications],
+    ['Order notifications', notifications],
+    ['Emails', emails],
     ['Background jobs', syncHealth],
     ['Vendor health', vendorApiHealth],
   ];
@@ -223,15 +260,15 @@ export async function buildDailySummary(now: Date = new Date()): Promise<DailySu
     dayLabel: formatDayLabel(window.ymd),
     window,
     generatedAt: now,
-    attention: composeAttention({ orderFlow, notifications, syncHealth, vendorApiHealth, cpls }),
+    attention: composeAttention({ orderFlow, notifications, emails, syncHealth, vendorApiHealth, cpls }),
     numbers: {
       ordersFromSoftPro: orderFlow.ok ? orderFlow.data.syncedFromSoftPro : null,
       ordersCreatedHere: orderFlow.ok ? orderFlow.data.createdInTdHub : null,
       prelimsDelivered: prelims.ok ? prelims.data.fetched : null,
       prelimsSummarised: prelims.ok ? prelims.data.tessaAnalysesCompleted : null,
       cplsGenerated: cpls.ok ? cpls.data.generatedDocuments : null,
-      emailsSent: notifications.ok ? notifications.data.delivered : null,
-      emailsFailed: notifications.ok ? notifications.data.failed : null,
+      emailsSent: emails.ok ? emails.data.sent : null,
+      emailsFailed: emails.ok ? emails.data.failed : null,
     },
     complete: unavailable.length === 0,
     unavailable,

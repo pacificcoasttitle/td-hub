@@ -8,7 +8,8 @@ const bad = (error: string) => ({ ok: false as const, error });
 
 const CLEAN = {
   orderFlow: ok({ newlyStuckOver6Hours: 0 }),
-  notifications: ok({ failed: 0, confirmationMissingClient: 0, confirmationNoRecipients: 0 }),
+  notifications: ok({ confirmationMissingClient: 0, confirmationNoRecipients: 0 }),
+  emails: ok({ sent: 47, failed: 0 }),
   syncHealth: ok({ rows: [{ jobType: 'softpro.enrich_orders', failed: 0 }] }),
   vendorApiHealth: ok({ rows: [{ vendor: 'softpro', successRate: 99.8, calls: 400 }] }),
   cpls: ok({ failedByVendor: [] }),
@@ -22,7 +23,7 @@ describe('composeAttention', () => {
   it('leads with a client who did not get their confirmation', () => {
     const out = composeAttention({
       ...CLEAN,
-      notifications: ok({ failed: 0, confirmationMissingClient: 1, confirmationNoRecipients: 0 }),
+      notifications: ok({ confirmationMissingClient: 1, confirmationNoRecipients: 0 }),
     });
     expect(out).toHaveLength(1);
     expect(out[0]).toContain('went out without reaching the client');
@@ -80,6 +81,7 @@ describe('composeAttention', () => {
     expect(composeAttention({
       orderFlow: bad('timed out'),
       notifications: bad('timed out'),
+      emails: bad('timed out'),
       syncHealth: bad('timed out'),
       vendorApiHealth: bad('timed out'),
       cpls: bad('timed out'),
@@ -190,5 +192,23 @@ describe('number lines never read nonsensically', () => {
     s.numbers.emailsSent = 0;
     s.numbers.emailsFailed = 2;
     expect(renderDailySummaryText(s, 'x')).toContain('Emails — 0 sent, 2 failed');
+  });
+});
+
+describe('email counts come from actual sends, not the outbox table', () => {
+  it('reports emails that SendGrid actually sent', () => {
+    const s = summary([]);
+    s.numbers.emailsSent = 38;
+    s.numbers.emailsFailed = 0;
+    expect(renderDailySummaryText(s, 'x')).toContain('Emails — 38 sent, all delivered');
+  });
+
+  it('raises failures from the send log', () => {
+    const out = composeAttention({ ...CLEAN, emails: ok({ sent: 30, failed: 2 }) });
+    expect(out).toContain('2 emails failed to send.');
+  });
+
+  it('says nothing about email when the send log is unreadable', () => {
+    expect(composeAttention({ ...CLEAN, emails: bad('timed out') })).toEqual([]);
   });
 });

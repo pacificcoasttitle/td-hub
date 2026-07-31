@@ -19,8 +19,10 @@ export async function POST() {
     return NextResponse.json({
       success: true,
       sentTo: result.sentTo,
-      sectionsLoaded: result.sectionsLoaded,
-      sectionsFailed: result.sectionsFailed,
+      day: result.day,
+      attentionCount: result.attentionCount,
+      complete: result.complete,
+      unavailable: result.unavailable,
     });
   } catch (err) {
     console.error('[send-report] failed:', err);

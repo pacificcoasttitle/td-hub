@@ -140,4 +140,22 @@ describe('handleBackfillSitexProperty', () => {
     expect(result.filled).toBe(0);
     expect(applySiteXMock).not.toHaveBeenCalled();
   });
+
+  // A multi-match now arrives as a SUCCESS (previously a 300 was misclassified
+  // as an API error). It must still never be written: the candidates disagree
+  // on APN by definition, so auto-filling one would be a guess.
+  it('never auto-fills from an ambiguous multi-match', async () => {
+    propertyLookupMock.mockResolvedValue({
+      success: true,
+      data: { matchCode: 'M' },
+    });
+
+    const result = await handleBackfillSitexProperty();
+
+    expect(result.filled).toBe(0);
+    expect(result.noMatch).toBe(1);
+    expect(applySiteXMock).not.toHaveBeenCalled();
+    // Not an error either — it is a real answer, just an ambiguous one.
+    expect(result.errors).toHaveLength(0);
+  });
 });

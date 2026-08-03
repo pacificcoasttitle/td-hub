@@ -3,6 +3,7 @@ import { orders, documents, prelimAnalyses } from '@/lib/db/schema';
 import { sql, and, eq, or, isNull, asc } from 'drizzle-orm';
 import { getAttachedDocuments } from '@/lib/integrations/softpro';
 import { analyzePrelim } from '@/lib/tessa';
+import { budgetMsFor } from '@/lib/jobs/time-budget';
 import {
   isTessaAutoAnalysisEnabled,
   logCronCycleAutoAnalysisPaused,
@@ -29,7 +30,9 @@ type TessaCandidateRow = {
   storage_key: string;
 };
 
-const TIME_BUDGET_MS = 240_000;
+// Sized from the measured p99 of ONE unit (an order's fetch + inline TESSA
+// analysis, ~90s), not a flat number — see src/lib/jobs/time-budget.ts.
+const TIME_BUDGET_MS = budgetMsFor('softpro.fetch_prelims');
 // Cap retries at 5: prevents runaway retries on permanent failures
 // (e.g., image-based PDFs that can't be text-extracted).
 // See: ops report incident 2026-05-26 (Orders 324, 3259)

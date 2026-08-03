@@ -216,4 +216,43 @@ describe('handleEnrichOrderDetails preserveExistingOnEmpty', () => {
     expect(set.marketingSource).toBe('Referral');
     expect(set.operationalStatus).toBe('in_process');
   });
+  // ── Terminal-state guarantee ───────────────────────────────────────────────
+  // The whole point of the time budget: a run that hits its deadline must
+  // RETURN (so the job runner writes a terminal status) with a partial batch —
+  // never keep working until Vercel kills it mid-flight and leaves the row at
+  // 'running' for the watchdog to reap.
+  describe('time budget', () => {
+    it('exits in a terminal state with a partial batch instead of running to the ceiling', async () => {
+      // Three candidates; make each unit consume more than the whole budget so
+      // the deadline trips after the first.
+      candidates.length = 0;
+      candidates.push(
+        { id: 1, fileNumber: 'A-1', lastDetailsFetchAt: null },
+        { id: 2, fileNumber: 'A-2', lastDetailsFetchAt: null },
+        { id: 3, fileNumber: 'A-3', lastDetailsFetchAt: null },
+      );
+
+      const realNow = Date.now;
+      let clock = realNow();
+      vi.spyOn(Date, 'now').mockImplementation(() => clock);
+
+      getOrderDetailsMock.mockImplementation(async () => {
+        clock += 200_000; // each unit burns 200s of the 210s budget
+        return { success: true, data: [{ OrderStatus: 'In Process' }] };
+      });
+
+      // Must resolve — not throw, not hang.
+      const result = await handleEnrichOrderDetails();
+
+      vi.mocked(Date.now).mockRestore();
+
+      expect(result.timedOut).toBe(true);          // stopped on the deadline
+      expect(result.eligible).toBe(3);             // saw three
+      expect(result.attempted).toBeLessThan(3);    // did NOT process them all
+      expect(result.attempted).toBeGreaterThan(0); // did real work
+      // The unclaimed candidates are simply left for the next scheduled run —
+      // they were never stamped, so nothing is skipped and nothing is redone.
+      expect(orderUpdateSets.length).toBe(result.attempted);
+    });
+  });
 });

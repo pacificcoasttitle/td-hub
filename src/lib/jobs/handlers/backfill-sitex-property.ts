@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import { orders, orderProperties } from '@/lib/db/schema';
 import { applySiteXPropertyFields } from '@/lib/domain/orders/apply-sitex-property';
 import { propertyLookup } from '@/lib/integrations/sitex/client';
+import { budgetMsFor } from '@/lib/jobs/time-budget';
 import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm';
 
 export interface BackfillSitexPropertyResult {
@@ -14,7 +15,10 @@ export interface BackfillSitexPropertyResult {
 }
 
 /** ~5s/SiteX call → ~40 fits under a 4-minute budget with headroom. */
-const TIME_BUDGET_MS = 240_000;
+// Sized from the measured p99 of one SiteX lookup — see
+// src/lib/jobs/time-budget.ts. This job's units are short, so its budget is
+// the most generous of the set.
+const TIME_BUDGET_MS = budgetMsFor('sitex.backfill_property');
 const BATCH_SIZE = 40;
 const MAX_SITEX_ATTEMPTS = 8;
 /**

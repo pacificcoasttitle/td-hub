@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client';
 import { documents } from '@/lib/db/schema';
 import { attachToSoftPro } from '@/lib/domain/documents/service';
 import { SOFTPRO_ATTACH_MAX_ATTEMPTS } from '@/lib/domain/documents/softpro-attach-retry';
+import { budgetMsFor } from '@/lib/jobs/time-budget';
 
 export interface RetrySoftProDocumentAttachResult {
   total: number;
@@ -14,7 +15,9 @@ export interface RetrySoftProDocumentAttachResult {
 }
 
 const BATCH_LIMIT = 25;
-const TIME_BUDGET_MS = 240_000;
+// Sized from the measured p99 of one upload_document call (60s client
+// timeout) — see src/lib/jobs/time-budget.ts.
+const TIME_BUDGET_MS = budgetMsFor('softpro.retry_document_attach');
 
 /**
  * Categories TD Hub generates and may push to SoftPro.

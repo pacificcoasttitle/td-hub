@@ -6,6 +6,9 @@ import {
 import { getSalesScopedContactIds, isSalesScopedRole } from '@/lib/security/permissions';
 import type { SessionUser } from '@/lib/security/auth';
 import { deriveClientType, type CrmClientType } from './types';
+import {
+  computeClientMetrics, type ClientOrderMetrics, type ClientOrderRow,
+} from './client-metrics';
 
 // My Clients (sales rep CRM). The client list is independent of SoftPro:
 // this module never writes to contacts/orders/companies — reads on those
@@ -499,6 +502,84 @@ export async function listRecentNotes(
   return rows;
 }
 
+// ─── Health snapshot (READ-ONLY; one client's own orders) ───────────────────
+
+/**
+ * Loads the order rows for ONE client, using the exact predicate the Business
+ * section already uses: this rep's orders where the client's linked contact is
+ * either the order's client contact or a party on the order.
+ *
+ * Bounded, and measured rather than assumed. On prod (6.6k orders, 30.6k
+ * order_parties) the plan for the heaviest real client — 98 orders — is:
+ *
+ *   Index Scan using orders_sales_rep_idx  (sales_rep_id = $1)   -> 3.76ms total
+ *     Filter: client_contact_id = $2 OR id = ANY(hashed SubPlan)
+ *     SubPlan -> Seq Scan on order_parties (contact_id = $2)
+ *
+ * So: no full scan of `orders` — the leading equality is index-served and the
+ * busiest rep has 824 orders. `order_parties.contact_id` has no index, so the
+ * EXISTS is one hashed seq scan of order_parties, run ONCE per query (not per
+ * order). At 30.6k rows that is ~3ms. It grows linearly with order_parties, so
+ * if that table gets an order of magnitude bigger this wants an index on
+ * `order_parties(contact_id)` — a schema change, deliberately out of scope here.
+ *
+ * This is the same predicate the Business section above already runs on every
+ * drawer open, so the snapshot adds one query of an existing cost class.
+ *
+ * No LIMIT: full history is required for first-order date, average monthly
+ * volume and the same-period-last-year window.
+ */
+async function fetchClientMetricRows(
+  ownerContactId: number,
+  contactId: number,
+): Promise<ClientOrderRow[]> {
+  const rows = await db
+    .select({
+      orderId: orders.id,
+      openedAt: orders.openedAt,
+      closedAt: orders.closedAt,
+      operationalStatus: orders.operationalStatus,
+    })
+    .from(orders)
+    .where(and(
+      eq(orders.salesRepId, ownerContactId),
+      or(
+        eq(orders.clientContactId, contactId),
+        exists(
+          db.select({ id: orderParties.id })
+            .from(orderParties)
+            .where(and(
+              eq(orderParties.orderId, orders.id),
+              eq(orderParties.contactId, contactId),
+            )),
+        ),
+      ),
+    ));
+
+  return rows;
+}
+
+/**
+ * The client's health snapshot.
+ *
+ * Keys off exactly what the My Clients list keys off — this crm_clients row and
+ * its own linked contact. Two rows for the same firm get two snapshots; nothing
+ * is stitched. Returns a zeroed, `unlinked` snapshot when there is no contact
+ * link or no rep contact, rather than omitting the section.
+ */
+async function loadClientMetrics(
+  clientId: number,
+  contactId: number | null,
+  ownerContactId: number | null,
+  now: Date = new Date(),
+): Promise<ClientOrderMetrics> {
+  const orderRows = contactId !== null && ownerContactId !== null
+    ? await fetchClientMetricRows(ownerContactId, contactId)
+    : [];
+
+  return computeClientMetrics({ clientId, contactId, orders: orderRows, now });
+}
+
 // ─── Detail ──────────────────────────────────────────────────────────────────
 
 async function getVisibleClient(session: SessionUser, clientId: number, repId?: string | null) {
@@ -587,10 +668,13 @@ export async function getClientDetail(session: SessionUser, clientId: number, re
     ? await suggestContacts(row.name, row.email)
     : [];
 
+  const metrics = await loadClientMetrics(row.id, row.contactId, ownerContactId);
+
   return {
     client: { ...row, canEdit: row.ownerProfileId === session.id },
     notes,
     business,
+    metrics,
     suggestions,
   };
 }

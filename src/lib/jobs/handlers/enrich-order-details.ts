@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import { orders, orderProperties } from '@/lib/db/schema';
 import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import { getOrderDetails } from '@/lib/integrations/softpro';
+import { budgetMsFor } from '@/lib/jobs/time-budget';
 import {
   loadEscrowOfficers,
   loadSalesReps,
@@ -17,7 +18,10 @@ export interface EnrichOrderDetailsResult {
   timedOut: boolean;
 }
 
-const TIME_BUDGET_MS = 240_000; // 4 min — leaves headroom under the 5-min route maxDuration
+// Sized from the measured p99 of ONE unit, not a flat number: the old 240s
+// left no room for a worst-case unit under the 300s ceiling.
+// See src/lib/jobs/time-budget.ts.
+const TIME_BUDGET_MS = budgetMsFor('softpro.enrich_order_details');
 const BATCH_SIZE = 50;
 const MAX_DETAILS_ATTEMPTS = 20;
 

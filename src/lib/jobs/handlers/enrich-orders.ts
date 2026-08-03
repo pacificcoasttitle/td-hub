@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import { orders, orderParties, contacts, companies, vendorApiLogs, jobs } from '@/lib/db/schema';
 import { eq, and, isNull, or, sql } from 'drizzle-orm';
 import { getOrderContacts, mapOrderContacts } from '@/lib/integrations/softpro';
+import { budgetMsFor } from '@/lib/jobs/time-budget';
 import type { MappedOrderContacts, MappedResolvedParty } from '@/lib/integrations/softpro';
 import type { SoftProOrderContactsData } from '@/lib/integrations/softpro/types';
 import { resolveClientContactId } from '@/lib/domain/orders/client-resolver';
@@ -59,7 +60,11 @@ interface EnrichOrdersPayload {
 
 const ENRICH_ORDERS_MAX_DURATION_MS = 300_000;
 const DEFAULT_ENRICH_ORDERS_BATCH_SIZE = 25;
-const DEFAULT_ENRICH_ORDERS_TIME_BUDGET_MS = Math.floor(ENRICH_ORDERS_MAX_DURATION_MS * 0.8);
+// Was ENRICH_ORDERS_MAX_DURATION_MS * 0.8 = 240s, which left no room for a
+// worst-case unit (get_order_contacts can reach its 60s client timeout):
+// 240 + 60 = 300, exactly the ceiling. Now sized from the measured unit p99.
+// See src/lib/jobs/time-budget.ts.
+const DEFAULT_ENRICH_ORDERS_TIME_BUDGET_MS = budgetMsFor('softpro.enrich_orders');
 export const ENRICH_ORDERS_RUNNING_WINDOW_MS = 10 * 60 * 1000;
 
 function positiveIntegerFromEnv(name: string, defaultValue: number): number {

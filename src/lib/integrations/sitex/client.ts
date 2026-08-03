@@ -13,6 +13,74 @@ function inferMatchCode(raw: SiteXSearchResponse): string {
   return 'N';
 }
 
+/**
+ * SiteX signals two ordinary search outcomes with non-2xx status codes:
+ *
+ *   404 + ERROR_MESSAGES[].ErrorMessageCategoryCode === 'NotFound'
+ *        → no property at that address. A normal answer, not a failure.
+ *   300 + Locations[]
+ *        → several candidate properties matched. Also a normal answer, and the
+ *          body carries usable FIPS / APN / address for each candidate.
+ *
+ * Treating either as an API error made SiteX look ~30% broken when its real
+ * error rate was zero, and silently discarded every multi-match response.
+ * See docs/sitex-and-jobs-page-review.md.
+ */
+export type NonOkOutcome =
+  | { kind: 'no_match' }
+  | { kind: 'multi_match'; raw: SiteXSearchResponse }
+  | { kind: 'error'; body: string };
+
+/** Pure classifier over an already-read body, so it can be unit tested. */
+export function classifyNonOkBody(status: number, body: string): NonOkOutcome {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { kind: 'error', body };
+  }
+
+  if (status === 404 && isNotFoundPayload(parsed)) {
+    return { kind: 'no_match' };
+  }
+
+  if (status === 300) {
+    const raw = parsed as SiteXSearchResponse;
+    if (Array.isArray(raw?.Locations) && raw.Locations.length > 0) {
+      return { kind: 'multi_match', raw };
+    }
+  }
+
+  // Anything else — 5xx, auth, an unexpected 404 shape — stays an error.
+  return { kind: 'error', body };
+}
+
+function isNotFoundPayload(parsed: unknown): boolean {
+  const messages = (parsed as { ERROR_MESSAGES?: unknown })?.ERROR_MESSAGES;
+  if (!Array.isArray(messages)) return false;
+  return messages.some((m) => {
+    const category = (m as { ErrorMessageCategoryCode?: unknown })?.ErrorMessageCategoryCode;
+    const code = (m as { ErrorMessageCode?: unknown })?.ErrorMessageCode;
+    return category === 'NotFound' || (typeof code === 'string' && code.startsWith('SXP-NotFound'));
+  });
+}
+
+/** Reads the body once and classifies it. */
+async function classifyNonOk(response: Response): Promise<NonOkOutcome> {
+  const body = await response.text().catch(() => '');
+  return classifyNonOkBody(response.status, body);
+}
+
+function mapLocations(raw: SiteXSearchResponse) {
+  return (raw.Locations ?? []).map((loc) => ({
+    address: loc.Address ?? '',
+    city: loc.City ?? '',
+    state: loc.State ?? '',
+    zip: loc.Zip ?? '',
+    apn: loc.APN ?? '',
+  }));
+}
+
 export async function propertySearch(
   params: PropertyLookupParams
 ): Promise<VendorResult<PropertySearchResult>> {
@@ -38,8 +106,20 @@ export async function propertySearch(
     const durationMs = Date.now() - startedAt.getTime();
 
     if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
-      await logRequest({ operation: 'property_search', requestId, startedAt, success: false, errorCategory: 'API_ERROR', requestMeta: { addr: params.street, lastLine }, responseMeta: { status: response.status, body: errorBody.slice(0, 500) } });
+      const outcome = await classifyNonOk(response);
+
+      if (outcome.kind === 'no_match') {
+        await logRequest({ operation: 'property_search', requestId, startedAt, success: true, requestMeta: { addr: params.street, lastLine }, responseMeta: { match: 'none', matchCode: 'N', httpStatus: response.status } });
+        return vendorSuccess<PropertySearchResult>({ match: 'none', property: null, locations: [] }, { requestId, durationMs });
+      }
+
+      if (outcome.kind === 'multi_match') {
+        const locations = mapLocations(outcome.raw);
+        await logRequest({ operation: 'property_search', requestId, startedAt, success: true, requestMeta: { addr: params.street, lastLine }, responseMeta: { match: 'multi', matchCode: 'M', httpStatus: response.status, locationCount: locations.length, candidates: locations.slice(0, 10) } });
+        return vendorSuccess<PropertySearchResult>({ match: 'multi', property: null, locations }, { requestId, durationMs });
+      }
+
+      await logRequest({ operation: 'property_search', requestId, startedAt, success: false, errorCategory: 'API_ERROR', requestMeta: { addr: params.street, lastLine }, responseMeta: { status: response.status, body: outcome.body.slice(0, 500) } });
       return vendorError<PropertySearchResult>(VENDOR, 'SEARCH_FAILED', `SiteX ${response.status}`, { httpStatus: response.status, retryable: response.status >= 500, requestId, durationMs });
     }
 
@@ -90,8 +170,23 @@ export async function propertyLookup(
     const durationMs = Date.now() - startedAt.getTime();
 
     if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
-      await logRequest({ operation: 'property_lookup', requestId, startedAt, success: false, errorCategory: 'API_ERROR', requestMeta: { addr: params.street, lastLine, feedId: config.feedId }, responseMeta: { status: response.status, body: errorBody.slice(0, 500) } });
+      const outcome = await classifyNonOk(response);
+
+      if (outcome.kind === 'no_match') {
+        await logRequest({ operation: 'property_lookup', requestId, startedAt, success: true, requestMeta: { addr: params.street, lastLine, feedId: config.feedId }, responseMeta: { matchCode: 'N', httpStatus: response.status } });
+        return vendorSuccess<SiteXPropertyData>(emptyResult('N'), { requestId, durationMs });
+      }
+
+      if (outcome.kind === 'multi_match') {
+        // Candidates are recorded on the log so an ambiguous address can be
+        // resolved later. The returned matchCode stays 'M', which every
+        // consumer already refuses to auto-fill from.
+        const candidates = mapLocations(outcome.raw);
+        await logRequest({ operation: 'property_lookup', requestId, startedAt, success: true, requestMeta: { addr: params.street, lastLine, feedId: config.feedId }, responseMeta: { matchCode: 'M', httpStatus: response.status, locationCount: candidates.length, candidates: candidates.slice(0, 10) } });
+        return vendorSuccess<SiteXPropertyData>(emptyResult('M'), { requestId, durationMs });
+      }
+
+      await logRequest({ operation: 'property_lookup', requestId, startedAt, success: false, errorCategory: 'API_ERROR', requestMeta: { addr: params.street, lastLine, feedId: config.feedId }, responseMeta: { status: response.status, body: outcome.body.slice(0, 500) } });
       return vendorError<SiteXPropertyData>(VENDOR, 'SEARCH_FAILED', `SiteX ${response.status}`, { httpStatus: response.status, retryable: response.status >= 500, requestId, durationMs });
     }
 
@@ -136,8 +231,20 @@ export async function apnLookup(
     const durationMs = Date.now() - startedAt.getTime();
 
     if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
-      await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: false, errorCategory: 'API_ERROR', requestMeta: { apn: params.apn, county: params.county }, responseMeta: { status: response.status, body: errorBody.slice(0, 500) } });
+      const outcome = await classifyNonOk(response);
+
+      if (outcome.kind === 'no_match') {
+        await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: true, requestMeta: { apn: params.apn, county: params.county }, responseMeta: { matchCode: 'N', httpStatus: response.status } });
+        return vendorSuccess<SiteXPropertyData>(emptyResult('N'), { requestId, durationMs });
+      }
+
+      if (outcome.kind === 'multi_match') {
+        const candidates = mapLocations(outcome.raw);
+        await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: true, requestMeta: { apn: params.apn, county: params.county }, responseMeta: { matchCode: 'M', httpStatus: response.status, locationCount: candidates.length, candidates: candidates.slice(0, 10) } });
+        return vendorSuccess<SiteXPropertyData>(emptyResult('M'), { requestId, durationMs });
+      }
+
+      await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: false, errorCategory: 'API_ERROR', requestMeta: { apn: params.apn, county: params.county }, responseMeta: { status: response.status, body: outcome.body.slice(0, 500) } });
       return vendorError<SiteXPropertyData>(VENDOR, 'SEARCH_FAILED', `SiteX ${response.status}`, { httpStatus: response.status, retryable: response.status >= 500, requestId, durationMs });
     }
 

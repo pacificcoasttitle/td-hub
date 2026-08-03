@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Pencil, Trash2, X } from 'lucide-react';
 import { statusLabel } from '@/lib/domain/orders/status-format';
 import { TypeBadge } from './type-badge';
+import { HealthSnapshot } from './health-snapshot';
 import { displayClientName } from './display';
 import { formatCurrency } from '@/components/admin/dashboards/shared';
 import type { ClientDetailResponse, ContactSuggestion, CrmClient } from './types';
@@ -170,6 +171,20 @@ export function ClientDetailDrawer({ clientId, repId, onClose, onEdit, onChanged
 
           {!error && (
             <>
+              {/* Health snapshot — read-only, computed from this client's own orders */}
+              {loading ? (
+                <div className="px-5 py-4 border-b border-gray-100 bg-gray-50/60">
+                  <div className="h-4 w-32 bg-gray-200 rounded animate-pulse mb-3" />
+                  <div className="grid grid-cols-3 gap-3">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="h-9 bg-gray-200 rounded animate-pulse" />
+                    ))}
+                  </div>
+                </div>
+              ) : data?.metrics ? (
+                <HealthSnapshot metrics={data.metrics} />
+              ) : null}
+
               {/* Notes — the main event */}
               <div className="px-5 pt-5 pb-4 border-b border-gray-100">
                 <h3 className="text-sm font-semibold text-gray-900 mb-3">Notes</h3>

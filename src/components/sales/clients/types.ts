@@ -59,9 +59,47 @@ export interface ClientListResponse {
   quietAfterMonths?: number;
 }
 
+/** Wire shape of ClientOrderMetrics — Dates arrive as ISO strings over JSON. */
+export interface CrmClientMetrics {
+  clientId: number;
+  contactId: number | null;
+  computedAt: string;
+  unlinked: boolean;
+  counts: {
+    thisMonth: number;
+    last90: number;
+    prior90: number;
+    same90LastYear: number;
+    open: number;
+    total: number;
+  };
+  recency: {
+    lastOrderAt: string | null;
+    daysSinceLastOrder: number | null;
+    firstOrderAt: string | null;
+  };
+  rate: {
+    avgMonthlyOrders: number | null;
+    monthsObserved: number;
+  };
+  trend: {
+    direction: 'up' | 'flat' | 'down' | 'not_enough_history';
+    changePct: number | null;
+    basis: string;
+    confidence: 'high' | 'low' | 'none';
+  };
+  confidence: {
+    attribution: 'high' | 'low' | 'none';
+    clientIdentity: 'high' | 'low' | 'none';
+    trend: 'high' | 'low' | 'none';
+    openOrders: 'high' | 'low' | 'none';
+  };
+}
+
 export interface ClientDetailResponse {
   client: CrmClient;
   notes: CrmNote[];
   business: CrmBusinessOrder[];
+  metrics: CrmClientMetrics;
   suggestions: ContactSuggestion[];
 }

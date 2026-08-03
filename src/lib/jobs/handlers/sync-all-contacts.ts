@@ -11,9 +11,37 @@ import {
 } from './sync-contacts';
 
 const CONTACT_SYNC_COOLDOWN_MS = 16 * 60 * 60 * 1000;
-// Contact lookup tables are thousands of rows; 3k keeps each invocation bounded
-// while allowing the largest type to finish within the 24h freshness target.
-const CONTACT_SYNC_BATCH_SIZE = 3000;
+
+/**
+ * Rows processed per invocation.
+ *
+ * This job has no interruptible per-item loop at this level — it hands the
+ * whole batch to syncContactRows() as one bulk operation and commits the
+ * cursor once afterwards. So unlike the other long-runners it cannot be
+ * protected by a deadline guard (see src/lib/jobs/time-budget.ts); the batch
+ * size IS its time budget.
+ *
+ * At the previous 3,000 a full batch measured 237–288s against a 300s Vercel
+ * ceiling — which is why softpro.sync_all_contacts accounts for all 95 of the
+ * watchdog kills recorded between Apr 3 and Jul 13, while the per-type jobs
+ * (which sync one smaller lookup table each) have never been killed.
+ *
+ * At the measured ~0.09s/row, 1,000 rows lands near 90s — comfortably inside
+ * the same ~270s worst-case target the deadline-guarded jobs use.
+ *
+ * Throughput is unaffected: progress is cursor-based, and the per-type jobs
+ * run hourly or 3-hourly, so the drain rate is 8,000–24,000 rows/day/type
+ * against ~21,600 total contacts.
+ */
+const CONTACT_SYNC_BATCH_SIZE = 1000;
+
+/** Ceiling this batch size is sized against; exported for the sizing test. */
+export const CONTACT_SYNC_BATCH_LIMITS = {
+  batchSize: CONTACT_SYNC_BATCH_SIZE,
+  measuredSecondsPerRow: 0.09,
+  worstCaseTargetSeconds: 270,
+  functionCeilingSeconds: 300,
+} as const;
 
 export const CONTACT_SYNC_JOB_CONFIGS = {
   'softpro.sync_contacts.order_contact_person': 'Order Contact - Person',

@@ -3,6 +3,7 @@ import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { vendorApiLogs } from '@/lib/db/schema';
 import { sql, gte, and, lt } from 'drizzle-orm';
+import { classifyVendorStatus } from '@/lib/domain/ops/vendor-health';
 
 const ADMIN_ROLES = ['super_admin', 'admin'];
 
@@ -57,12 +58,9 @@ export async function GET(req: NextRequest) {
     };
 
     const vendors: VendorEntry[] = realtimeRows.map((r) => {
-      const pct = r.total > 0 ? (r.success / r.total) * 100 : 0;
-      let status: string;
-      if (r.total === 0) status = 'inactive';
-      else if (pct > 95) status = 'healthy';
-      else if (pct >= 80) status = 'degraded';
-      else status = 'critical';
+      // Volume-aware: a percentage over a handful of calls cannot raise an
+      // alarm. See src/lib/domain/ops/vendor-health.ts.
+      const status = classifyVendorStatus({ total: r.total, success: r.success });
 
       const m = monthlyMap.get(r.vendor);
       return {

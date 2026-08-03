@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Send } from 'lucide-react';
 import { IntegrationHealth } from '@/components/admin/ops/integration-health';
+import { OpsHeadline } from '@/components/admin/ops/ops-headline';
 import { CronStatus } from '@/components/admin/ops/cron-status';
 import { TessaStatus } from '@/components/admin/ops/tessa-status';
 import { NotificationStatus } from '@/components/admin/ops/notification-status';
@@ -134,8 +135,9 @@ export default function OperationsPage() {
 
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
+          <OpsHeadline />
           <section>
-            <h2 className="text-lg font-semibold text-gray-900 mb-3">Integration health</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-3">Integrations used</h2>
             <IntegrationHealth month={month} year={year} />
           </section>
           <CronStatus month={month} year={year} />

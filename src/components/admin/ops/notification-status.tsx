@@ -60,7 +60,7 @@ export function NotificationStatus({ month, year }: { month: number; year: numbe
 
   return (
     <section>
-      <h2 className="text-lg font-semibold text-gray-900 mb-3">Notifications</h2>
+      <h2 className="text-lg font-semibold text-gray-900 mb-3">Order notifications</h2>
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

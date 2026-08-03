@@ -1,6 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import {
+  statusExplanation, VENDOR_STATUS_LABEL, type VendorStatus,
+} from '@/lib/domain/ops/vendor-health';
 
 interface VendorHealth {
   vendor: string;
@@ -14,6 +17,7 @@ const STATUS_DOT: Record<string, string> = {
   healthy: 'bg-green-500',
   degraded: 'bg-yellow-500',
   critical: 'bg-red-500',
+  low_volume: 'bg-gray-300',
   inactive: 'bg-gray-400',
 };
 
@@ -21,14 +25,9 @@ const STATUS_TEXT: Record<string, string> = {
   healthy: 'text-green-700',
   degraded: 'text-yellow-700',
   critical: 'text-red-700',
+  low_volume: 'text-gray-500',
   inactive: 'text-gray-500',
 };
-
-const ALL_VENDORS = [
-  'softpro', 's3', 'managers_report', 'titlepoint', 'westcor',
-  'fnf', 'sendgrid', 'twilio', 'anthropic', 'title_production',
-  'sitex', 'softpro_webhook',
-];
 
 const VENDOR_LABELS: Record<string, string> = {
   softpro: 'SoftPro', s3: 'AWS S3', managers_report: 'Mgrs Report',
@@ -59,19 +58,14 @@ export function IntegrationHealth({ month, year }: { month: number; year: number
     fetch(`/api/admin/ops/health?month=${month}&year=${year}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
+        // Only vendors actually used in the window. Rendering a fixed roster
+        // meant permanently-empty tiles (Twilio, Title Prod, SP Webhooks),
+        // which trains the reader to skip the whole grid.
         const apiVendors: VendorHealth[] = d?.vendors ?? [];
-        const apiMap = new Map(apiVendors.map(v => [v.vendor, v]));
-        const merged = ALL_VENDORS.map(key => {
-          const data = apiMap.get(key);
-          return data ?? {
-            vendor: key,
-            displayName: VENDOR_LABELS[key] || key,
-            health: { status: 'inactive', lastSuccess: null, lastFailure: null },
-            last24h: { total: 0, success: 0, failed: 0, avgMs: 0 },
-            monthly: { total: 0, success: 0, failed: 0 },
-          };
-        });
-        setVendors(merged);
+        const used = apiVendors
+          .filter(v => (v.last24h?.total ?? 0) > 0 || (v.monthly?.total ?? 0) > 0)
+          .sort((a, b) => (b.monthly?.total ?? 0) - (a.monthly?.total ?? 0));
+        setVendors(used);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -97,31 +91,41 @@ export function IntegrationHealth({ month, year }: { month: number; year: number
     );
   }
 
+  if (vendors.length === 0) {
+    return <p className="text-sm text-gray-500">No integrations were called in this period.</p>;
+  }
+
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
       {vendors.map(v => {
-        const status = v.health?.status ?? 'inactive';
+        const status = (v.health?.status ?? 'inactive') as VendorStatus;
         const isCritical = status === 'critical';
         const lastCall = v.health?.lastSuccess ?? v.health?.lastFailure ?? null;
+        const counts = { total: v.last24h?.total ?? 0, success: v.last24h?.success ?? 0 };
+        const explanation = statusExplanation(status, counts);
         return (
           <div key={v.vendor}
             className={`rounded-lg p-3 ${isCritical ? 'bg-red-50 border border-red-300' : 'bg-white border border-gray-200'}`}>
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${STATUS_DOT[status] ?? 'bg-gray-400'}`} />
-                <span className="font-semibold text-sm text-gray-900">
+            <div className="flex items-center justify-between mb-1 gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[status] ?? 'bg-gray-400'}`} />
+                <span className="font-semibold text-sm text-gray-900 truncate">
                   {VENDOR_LABELS[v.vendor] ?? v.displayName}
                 </span>
               </div>
-              <span className={`text-xs font-medium ${STATUS_TEXT[status] ?? 'text-gray-500'}`}>
-                {status}
+              <span className={`text-xs font-medium shrink-0 ${STATUS_TEXT[status] ?? 'text-gray-500'}`}>
+                {VENDOR_STATUS_LABEL[status] ?? status}
               </span>
             </div>
             <p className="text-xs text-gray-500">
-              {fmtNum(v.monthly.total)} calls · {v.monthly.failed > 0 ? `${v.monthly.failed} failed` : 'no failures'}
+              {fmtNum(v.monthly.total)} calls this month
+              {v.monthly.failed > 0 ? ` · ${fmtNum(v.monthly.failed)} failed` : ' · no failures'}
             </p>
-            <p className="text-xs text-gray-400" title={lastCall ?? undefined}>
-              Last: {relTime(lastCall)}
+            {explanation && (
+              <p className="text-xs text-gray-500 mt-0.5">{explanation}</p>
+            )}
+            <p className="text-xs text-gray-400 mt-0.5" title={lastCall ?? undefined}>
+              Last call {relTime(lastCall)}
             </p>
           </div>
         );

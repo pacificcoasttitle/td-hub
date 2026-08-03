@@ -28,16 +28,20 @@ interface EnrichmentCoverage {
 }
 
 const JOB_LABELS: Record<string, string> = {
-  'softpro.sync_recent_orders': 'Sync Recent Orders',
-  'titlepoint.drain': 'TitlePoint Drain',
-  'softpro.enrich_orders': 'Enrich Orders',
-  'softpro.fetch_prelims': 'Fetch Prelims',
-  'notifications.process_outbox': 'Process Notifications',
-  'softpro.verify_sync': 'Verify Sync',
-  'softpro.sync_new_users': 'Sync New Users',
-  'softpro.sync_all_contacts': 'Sync All Contacts',
-  'import-orders': 'Import Orders',
-  'ops.daily_report': 'Daily Ops Report',
+  'softpro.sync_recent_orders': 'New orders from SoftPro',
+  'titlepoint.drain': 'Title data lookups',
+  'softpro.enrich_orders': 'Order detail lookups',
+  'softpro.enrich_order_details': 'Order detail lookups',
+  'softpro.fetch_prelims': 'Title report fetch',
+  'notifications.process_outbox': 'Email queue',
+  'softpro.verify_sync': 'Sync verification',
+  'softpro.sync_new_users': 'New user sync',
+  'softpro.sync_all_contacts': 'Contact sync',
+  'softpro.retry_document_attach': 'Document upload retry',
+  'sitex.backfill_property': 'Property data lookups',
+  'jobs.watchdog': 'Stuck-job cleanup',
+  'import-orders': 'Order import',
+  'ops.daily_report': 'Daily report email',
 };
 
 const STATUS_CLS: Record<string, string> = {
@@ -96,14 +100,14 @@ export function CronStatus({ month, year }: { month: number; year: number }) {
 
   return (
     <section>
-      <h2 className="text-lg font-semibold text-gray-900 mb-3">Scheduled jobs</h2>
+      <h2 className="text-lg font-semibold text-gray-900 mb-3">Scheduled background jobs</h2>
       {coverage?.ok && coverage.data && (
         <div className={`mb-4 rounded-lg border p-4 ${coverage.data.alerts.length > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h3 className="text-sm font-semibold text-gray-900">Enrichment Coverage</h3>
+              <h3 className="text-sm font-semibold text-gray-900">Orders still missing details</h3>
               <p className="text-xs text-gray-500 mt-1">
-                Real residue: {coverage.data.zeroPartyUnconfirmed} zero-party unconfirmed · {coverage.data.emptyConfirmedTotal} empty-confirmed · {coverage.data.fkOnlyStuck} FK-only stuck
+                {coverage.data.zeroPartyUnconfirmed} with nobody attached yet · {coverage.data.emptyConfirmedTotal} confirmed as having no parties · {coverage.data.fkOnlyStuck} waiting on a linked record
               </p>
             </div>
             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${coverage.data.alerts.length > 0 ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}`}>
@@ -111,10 +115,10 @@ export function CronStatus({ month, year }: { month: number; year: number }) {
             </span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
-            <CoverageStat label="Zero-party total" value={coverage.data.zeroPartyTotal} />
-            <CoverageStat label="Current backlog" value={coverage.data.currentBacklogSize} />
-            <CoverageStat label="Real participants" value={coverage.data.ordersWithRealParticipant} />
-            <CoverageStat label="Last enrich run" value={coverage.data.minutesSinceLastCompleted === null ? 'Never' : `${coverage.data.minutesSinceLastCompleted}m ago`} />
+            <CoverageStat label="Orders with no people attached" value={coverage.data.zeroPartyTotal} />
+            <CoverageStat label="Waiting to be filled in" value={coverage.data.currentBacklogSize} />
+            <CoverageStat label="Orders with people attached" value={coverage.data.ordersWithRealParticipant} />
+            <CoverageStat label="Last detail lookup" value={coverage.data.minutesSinceLastCompleted === null ? 'Never' : `${coverage.data.minutesSinceLastCompleted}m ago`} />
           </div>
           {coverage.data.alerts.length > 0 && (
             <ul className="mt-3 list-disc pl-5 text-xs text-amber-800">

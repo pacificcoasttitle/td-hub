@@ -50,7 +50,7 @@ export function SyncStatus({ month, year }: { month: number; year: number }) {
 
   return (
     <section>
-      <h2 className="text-lg font-semibold text-gray-900 mb-3">Order sync &amp; enrichment</h2>
+      <h2 className="text-lg font-semibold text-gray-900 mb-3">Orders received and filled in</h2>
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -67,7 +67,7 @@ export function SyncStatus({ month, year }: { month: number; year: number }) {
             <Stat label="Total orders" value={o.total} />
             <Stat label="With address" value={`${o.withAddress} / ${o.total}`} />
             <Stat label="With sales rep" value={`${o.withSalesRep} / ${o.total}`} />
-            <Stat label="Missing enrichment" value={o.missingEnrichment}
+            <Stat label="Missing address, rep or escrow officer" value={o.missingEnrichment}
               color={o.missingEnrichment > 0 ? 'text-red-600' : undefined} />
           </div>
 

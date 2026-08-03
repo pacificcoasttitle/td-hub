@@ -102,24 +102,27 @@ export function HealthSnapshot({ metrics }: { metrics: CrmClientMetrics }) {
       <div className="grid grid-cols-3 gap-x-3 gap-y-3">
         <Stat label="orders this month" value={String(counts.thisMonth)} />
         <Stat label="last 90 days" value={String(counts.last90)} />
-        {/* Not "open right now" — `in_process` is a catch-all files never leave,
-            so this is only trustworthy as "hasn't reached a terminal status". */}
-        <Stat label="files not yet closed" value={String(counts.open)} />
+        <Stat label="same 90 days last year" value={String(counts.same90LastYear)} />
 
-        <Stat
-          label="same 90 days last year"
-          value={String(counts.same90LastYear)}
-        />
+        {/* No open-orders tile in v1. The engine still computes `counts.open`
+            and tags it `confidence.openOrders: 'low'`, but `in_process` is a
+            catch-all files never leave (4,010 of 6,612 orders org-wide), so the
+            number only grows and never means "active work". A prominent count
+            a rep would act on is not made safe by a caveat underneath it —
+            better to withhold it until the status hygiene is understood. */}
+
         <Stat
           label="avg per month"
           value={avg === null ? '—' : avg.toFixed(1)}
           hint={avg === null ? 'under a month of history' : undefined}
         />
-        <Stat
-          label="last order"
-          value={relativeDays(recency.daysSinceLastOrder) || '—'}
-          hint={fmtDate(recency.lastOrderAt)}
-        />
+        <div className="col-span-2">
+          <Stat
+            label="last order"
+            value={relativeDays(recency.daysSinceLastOrder) || '—'}
+            hint={fmtDate(recency.lastOrderAt)}
+          />
+        </div>
       </div>
 
       {/* The rule, stated plainly, so the pill above is never a black box. */}

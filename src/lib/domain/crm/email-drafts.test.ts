@@ -66,6 +66,14 @@ describe('grounding instructions', () => {
     expect(DRAFT_SYSTEM_PROMPT).toContain('Do not use placeholders');
   });
 
+  it('asks for the rep’s notes to be used, but without inventing timing', () => {
+    // Opus spontaneously worked the rep's voicemail note into a draft; the
+    // faster model needed to be asked. The second half is the guard: notes are
+    // passed without dates, so naming a day would be a fabrication.
+    expect(DRAFT_SYSTEM_PROMPT).toContain('Do not say WHEN it happened');
+    expect(DRAFT_SYSTEM_PROMPT).toContain('you are not given the date');
+  });
+
   it('states the only-these-facts rule and the length limits', () => {
     expect(DRAFT_SYSTEM_PROMPT).toContain('Use ONLY the facts given to you');
     expect(DRAFT_SYSTEM_PROMPT).toContain(String(MAX_BODY_CHARS));

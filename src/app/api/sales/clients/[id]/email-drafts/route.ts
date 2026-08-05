@@ -77,10 +77,15 @@ export async function POST(
     const response = await anthropic.messages.create({
       model: DRAFT_MODEL,
       max_tokens: 4000,
-      // Short, well-specified writing task — low effort keeps the rep's wait
-      // and the per-call cost down without hurting the output.
+      // NO effort parameter: DRAFT_MODEL is Haiku 4.5, which rejects it with a
+      // 400. That failure would be near-invisible here — the catch below turns
+      // every error into 200-with-empty-drafts, so a rejected parameter reads
+      // to a rep as "the AI just never works". A test asserts effort is absent.
+      //
+      // max_tokens is a ceiling, not a target: real generations run ~280 output
+      // tokens, so this is headroom against a truncated (and therefore
+      // unparseable) JSON response, not a cost or latency lever.
       output_config: {
-        effort: 'low',
         format: { type: 'json_schema', schema: draftResponseSchema(intents) },
       },
       system: DRAFT_SYSTEM_PROMPT,

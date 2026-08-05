@@ -4,8 +4,20 @@ import { db } from '@/lib/db/client';
 import { sql } from 'drizzle-orm';
 import { classifyVendorStatus } from '@/lib/domain/ops/vendor-health';
 import { friendlyJobName } from '@/lib/domain/ops/daily-summary';
+import { classifyDrift, driftContext, driftPct } from '@/lib/domain/ops/status-drift';
 
 const ADMIN_ROLES = ['super_admin', 'admin'];
+
+/** Shape the drift detector records on its own job row. */
+interface DriftRunPayload {
+  checked: number;
+  drifted: number;
+  unchecked: number;
+  notSampled: number;
+  stoppedEarly?: boolean;
+  driftedTo?: Record<string, number>;
+  byBand?: Record<string, { checked: number; drifted: number }>;
+}
 
 /**
  * Read-only aggregate for the operations page headline and the watchdog
@@ -18,7 +30,7 @@ export async function GET() {
   }
 
   try {
-    const [jobRows, vendorRows, watchdog24h, watchdog7d] = await Promise.all([
+    const [jobRows, vendorRows, watchdog24h, watchdog7d, driftRows] = await Promise.all([
       db.execute(sql`
         select job_type, count(*) filter (where status = 'failed')::int as failed
         from jobs
@@ -50,6 +62,19 @@ export async function GET() {
         where error ilike '%watchdog%' and created_at > now() - interval '7 days'
         group by job_type order by 2 desc
       `) as unknown as Promise<Array<{ job_type: string; kills: number; last_kill: string }>>,
+
+      // Status-drift detector runs, newest first. The counts live on the job's
+      // own payload because the runner does not persist handler results.
+      db.execute(sql`
+        select payload -> 'statusDrift' as drift,
+               to_char(created_at, 'Mon DD HH24:MI') as ran_at
+        from jobs
+        where job_type = 'softpro.verify_sync'
+          and status = 'completed'
+          and payload -> 'statusDrift' is not null
+        order by created_at desc
+        limit 15
+      `) as unknown as Promise<Array<{ drift: DriftRunPayload | null; ran_at: string }>>,
     ]);
 
     const failingVendors = vendorRows
@@ -81,8 +106,39 @@ export async function GET() {
       );
     }
 
+    // ─── Order status drift ──────────────────────────────────────────────
+    // The absolute rate is always reported. Only the ALARM is baseline-relative,
+    // because drift stays high until the look-back sync ships and a panel that
+    // is permanently red stops being read.
+    const runs = driftRows.filter((r): r is { drift: DriftRunPayload; ran_at: string } => r.drift != null);
+    const [latest, ...priorRuns] = runs;
+    let statusDrift = null;
+    if (latest) {
+      const priorPcts = priorRuns
+        .map((r) => driftPct(r.drift))
+        .filter((p): p is number => p !== null);
+      const verdict = classifyDrift(
+        {
+          checked: latest.drift.checked,
+          drifted: latest.drift.drifted,
+          unchecked: latest.drift.unchecked,
+          notSampled: latest.drift.notSampled,
+        },
+        priorPcts,
+      );
+      if (verdict.alert) attention.push(verdict.summary);
+      statusDrift = {
+        ...verdict,
+        context: driftContext(verdict.driftPct),
+        ranAt: latest.ran_at,
+        counts: latest.drift,
+        history: runs.slice(0, 10).map((r) => ({ ranAt: r.ran_at, pct: driftPct(r.drift) })),
+      };
+    }
+
     return NextResponse.json({
       attention,
+      statusDrift,
       watchdog: {
         last24h: kills24h,
         byJob7d: watchdog7d.map((r) => ({

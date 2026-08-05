@@ -49,6 +49,12 @@ type JobHandler = (payload: Record<string, unknown>) => Promise<unknown>;
 
 const ENRICH_ORDER_JOB_NAMES = new Set(['softpro.enrich_orders', 'enrich-orders']);
 const TITLEPOINT_DRAIN_JOB_NAMES = new Set(['titlepoint.drain']);
+/**
+ * Jobs that need their own job id, because the runner does not persist handler
+ * return values — `jobs.payload` holds only the input. The drift detector writes
+ * its counts back onto its own row so the ops panel can trend them.
+ */
+const NEEDS_JOB_ID = new Set(['softpro.verify_sync']);
 
 const JOB_HANDLERS: Record<string, JobHandler> = {
   'softpro.sync_recent_orders': (payload) =>
@@ -71,8 +77,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleTitlePointDrain(payload),
   'softpro.fetch_prelims': () =>
     handleFetchPrelims(),
-  'softpro.verify_sync': () =>
-    handleVerifyOrderSync(),
+  'softpro.verify_sync': (payload) =>
+    handleVerifyOrderSync(payload),
   'softpro.sync_new_users': () =>
     handleSyncNewUsers(),
   'softpro.sync_all_contacts': () =>
@@ -197,7 +203,7 @@ async function executeJob(req: NextRequest, payload: Record<string, unknown>) {
   const jobId = job!.id;
 
   try {
-    const handlerPayload = ENRICH_ORDER_JOB_NAMES.has(jobName) || TITLEPOINT_DRAIN_JOB_NAMES.has(jobName)
+    const handlerPayload = ENRICH_ORDER_JOB_NAMES.has(jobName) || TITLEPOINT_DRAIN_JOB_NAMES.has(jobName) || NEEDS_JOB_ID.has(jobName)
       ? { ...payload, __jobId: jobId }
       : payload;
     const result = await handler(handlerPayload);

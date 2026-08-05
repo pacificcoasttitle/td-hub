@@ -1,63 +1,237 @@
 import { db } from '@/lib/db/client';
-import { orders, orderParties, contacts } from '@/lib/db/schema';
+import { jobs, orders, orderParties, contacts } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
-import { getOrderContacts, mapOrderContacts } from '@/lib/integrations/softpro';
+import { getOrderContacts, getOrderDetails, mapOrderContacts } from '@/lib/integrations/softpro';
 import type { MappedOrderContacts } from '@/lib/integrations/softpro';
+import { mapStatus } from '@/lib/domain/orders/status-map';
+import { createDeadline } from '@/lib/jobs/time-budget';
+import type { DriftCounts } from '@/lib/domain/ops/status-drift';
 
 type ExistingParty = typeof orderParties.$inferSelect;
 
-export interface VerifyOrderSyncResult {
-  total: number;
-  verified: number;
-  updated: number;
-  skipped: number;
-  errors: Array<{ fileNumber: string; error: string }>;
+// ─── Status drift detector ──────────────────────────────────────────────────
+//
+// This job used to filter `where operational_status = 'open'` — a status only 2
+// of 6,612 rows have ever held — so it examined 2 orders daily and reported
+// success. That false green is why ~24% order-status drift accumulated
+// unnoticed (docs/order-status-hygiene.md).
+//
+// It now samples the `in_process` population, asks SoftPro for each order's
+// CURRENT status, and reports how many have already moved on.
+//
+// READ-ONLY BY DESIGN. It writes no order status and performs no reconciliation.
+// Correcting the data is the look-back sync's job; conflating "detect" with
+// "fix" is what makes a broken detector invisible. The only write is this job
+// recording its own counts on its own `jobs` row so the panel can trend them.
+
+/**
+ * Orders sampled per run. Comfortably above MIN_CHECKED_FOR_ALERT (20) even if
+ * a quarter of the calls time out, and at ~2-4s per call it lands inside the
+ * 254s budget with room to spare.
+ */
+export const DRIFT_SAMPLE_SIZE = 40;
+
+/**
+ * Per-call ceiling. `getOrderDetails` hardcodes 120s, far too long here — one
+ * hung request would burn the whole run. This is not hypothetical: an ad-hoc
+ * sampler wedged during the spike, sitting on a single request for 20 minutes.
+ *
+ * SIZED FROM MEASURED LATENCY, and the first sizing was wrong. A 15s cap was
+ * calibrated against the vendor's *degraded* behaviour and it cut off calls that
+ * would have succeeded — a live run logged 20/20 HTTP 200s averaging 19.1s while
+ * the handler recorded 13 of them as "unchecked". Normal baseline over 7 days is
+ * p50 2.4s / p95 3.6s, so 30s is ~8x normal p95 and still a quarter of the
+ * client's own timeout: generous when the vendor is healthy, still bounded when
+ * it is not.
+ */
+const PER_CALL_TIMEOUT_MS = 30_000;
+
+/**
+ * Calls in flight at once.
+ *
+ * Sequential sampling makes total runtime hostage to per-call latency: at the
+ * 19s average observed under load, 40 orders cannot finish inside the budget and
+ * the run reports "too few checked to judge" exactly when something is wrong.
+ * A small pool decouples throughput from latency while keeping the request rate
+ * close to what sequential sampling produces at normal speed.
+ */
+const CONCURRENCY = 3;
+
+/** Spacing between call launches. The spike saw throttling under rapid fire. */
+const INTER_CALL_DELAY_MS = 250;
+
+/** Statuses that mean SoftPro considers the file finished. */
+const TERMINAL = new Set(['closed', 'completed', 'canceled', 'duplicate']);
+
+export interface VerifyOrderSyncResult extends DriftCounts {
+  /** True when the time budget stopped the run before the sample was exhausted. */
+  stoppedEarly: boolean;
+  /** Drift rate over `checked`, or null when nothing was checked. */
+  driftPct: number | null;
+  /** What SoftPro said instead, for the drifted orders. */
+  driftedTo: Record<string, number>;
+  sampleSize: number;
+  /** Per-age-band breakdown. Reporting detail only — never weights the headline. */
+  byBand: Record<string, { checked: number; drifted: number }>;
 }
 
-const BATCH_SIZE = 20;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function handleVerifyOrderSync(): Promise<VerifyOrderSyncResult> {
-  const allOrders = await db
-    .select({ id: orders.id, fileNumber: orders.fileNumber, titleOfficerId: orders.titleOfficerId, escrowOfficerId: orders.escrowOfficerId, salesRepId: orders.salesRepId })
-    .from(orders)
-    .where(eq(orders.operationalStatus, 'open'))
-    .limit(200);
+/**
+ * Races a promise against a timeout. The underlying request is abandoned rather
+ * than cancelled — the SoftPro client owns its own socket — but the run moves
+ * on, which is the property that matters. At most `sampleSize` requests can be
+ * outstanding, so this cannot grow unbounded.
+ */
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | { __timedOut: true }> {
+  return Promise.race([p, sleep(ms).then(() => ({ __timedOut: true }) as const)]);
+}
 
-  let verified = 0;
-  let updated = 0;
-  let skipped = 0;
-  const errors: Array<{ fileNumber: string; error: string }> = [];
+/**
+ * Simple random sample of the `in_process` population.
+ *
+ * Deliberately NOT equal-allocation stratified. Drift varies sharply by age
+ * (~11% under 30 days, ~36% at 30-90 days, ~18% at 90-180), and the bands are
+ * very unevenly sized (917 / 1,759 / 1,132 / 202). Taking an equal number from
+ * each band would over-represent the small old-file band by 5x and understate
+ * the true rate — roughly 21% against an actual 24%. A stratified draw only
+ * helps if the results are re-weighted by population, and an unweighted headline
+ * is exactly the kind of quietly-wrong number this job exists to catch.
+ *
+ * So: random draw for an unbiased headline rate, with the age band recorded per
+ * order for breakdown only. It never influences the top-line number.
+ *
+ * `md5(file_number || today)` makes the draw stable within a day and rotated
+ * across days — reruns are reproducible, and coverage still spreads over time.
+ */
+async function sampleInProcessOrders(limit: number) {
+  const rows = await db.execute(sql`
+    select id, file_number,
+           case
+             when opened_at > now() - interval '30 days'  then '<30d'
+             when opened_at > now() - interval '90 days'  then '30-90d'
+             when opened_at > now() - interval '180 days' then '90-180d'
+             else '>180d'
+           end as band
+    from orders
+    where operational_status = 'in_process'
+    order by md5(file_number || to_char(now(), 'YYYY-MM-DD'))
+    limit ${limit}
+  `) as unknown as Array<{ id: number; file_number: string; band: string }>;
+  return rows;
+}
 
-  for (let i = 0; i < allOrders.length; i += BATCH_SIZE) {
-    const batch = allOrders.slice(i, i + BATCH_SIZE);
+export async function handleVerifyOrderSync(
+  payload: Record<string, unknown> = {},
+): Promise<VerifyOrderSyncResult> {
+  const sample = await sampleInProcessOrders(DRIFT_SAMPLE_SIZE);
+  const deadline = createDeadline('softpro.verify_sync');
 
-    for (const order of batch) {
-      try {
-        const result = await getOrderContacts(order.fileNumber);
-        if (!result.success || !result.data) {
-          skipped++;
-          continue;
-        }
+  let checked = 0;
+  let drifted = 0;
+  let unchecked = 0;
+  const driftedTo: Record<string, number> = {};
+  const byBand: Record<string, { checked: number; drifted: number }> = {};
+  let stoppedEarly = false;
+  let attempted = 0;
 
-        const mapped = mapOrderContacts(result.data);
-        const changes = await reconcileParties(order.id, mapped);
-        const officerChanges = await reconcileOfficers(order, mapped);
-
-        if (changes > 0 || officerChanges > 0) {
-          updated++;
-        } else {
-          verified++;
-        }
-      } catch (err) {
-        errors.push({
-          fileNumber: order.fileNumber,
-          error: err instanceof Error ? err.message : 'Unknown error',
-        });
+  let cursor = 0;
+  async function worker() {
+    for (;;) {
+      // The deadline is checked before claiming the next order — never
+      // mid-call — so there is always room for one worst-case unit inside the
+      // 300s function ceiling.
+      if (deadline.exceeded()) {
+        stoppedEarly = true;
+        return;
       }
+      const index = cursor++;
+      if (index >= sample.length) return;
+      const order = sample[index]!;
+      attempted++;
+
+      const raced = await withTimeout(
+        getOrderDetails({ dateFrom: '', orderNumber: order.file_number, orderId: order.id })
+          .catch(() => null),
+        PER_CALL_TIMEOUT_MS,
+      );
+
+      // A timeout or a failed call is UNCHECKED — we learned nothing about this
+      // order. It must never enter the drift denominator, or a bad SoftPro day
+      // would read as an improvement.
+      if (raced === null || (raced as { __timedOut?: true }).__timedOut) {
+        unchecked++;
+        await sleep(INTER_CALL_DELAY_MS);
+        continue;
+      }
+
+      const result = raced as Awaited<ReturnType<typeof getOrderDetails>>;
+      const detail = result.success && result.data
+        ? (result.data.find((d) => d.OrderNumber === order.file_number) ?? null)
+        : null;
+      const mapped = detail ? mapStatus(detail.OrderStatus) : null;
+
+      if (!detail || mapped === null) {
+        unchecked++;
+        await sleep(INTER_CALL_DELAY_MS);
+        continue;
+      }
+
+      checked++;
+      byBand[order.band] ??= { checked: 0, drifted: 0 };
+      byBand[order.band]!.checked++;
+      if (TERMINAL.has(mapped)) {
+        drifted++;
+        byBand[order.band]!.drifted++;
+        driftedTo[detail.OrderStatus] = (driftedTo[detail.OrderStatus] ?? 0) + 1;
+      }
+
+      await sleep(INTER_CALL_DELAY_MS);
     }
   }
 
-  return { total: allOrders.length, verified, updated, skipped, errors };
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, sample.length) }, () => worker()),
+  );
+
+  const result: VerifyOrderSyncResult = {
+    checked,
+    drifted,
+    unchecked,
+    notSampled: sample.length - attempted,
+    stoppedEarly,
+    driftPct: checked > 0 ? (drifted / checked) * 100 : null,
+    driftedTo,
+    sampleSize: sample.length,
+    byBand,
+  };
+
+  await recordRunCounts(payload, result);
+  return result;
+}
+
+/**
+ * Persists the counts onto this job's own `jobs` row.
+ *
+ * The runner does not store handler return values — `jobs.payload` holds only
+ * the input — so without this there is nothing for the panel to trend. Writing
+ * to our own job row keeps that inside the job-tracking table and touches no
+ * order data. Failure here must never fail the detector.
+ */
+async function recordRunCounts(
+  payload: Record<string, unknown>,
+  result: VerifyOrderSyncResult,
+): Promise<void> {
+  const jobId = typeof payload.__jobId === 'number' ? payload.__jobId : null;
+  if (jobId === null) return;
+  try {
+    await db
+      .update(jobs)
+      .set({ payload: { ...payload, __jobId: undefined, statusDrift: result } })
+      .where(eq(jobs.id, jobId));
+  } catch {
+    /* trending is best-effort; never fail the run over it */
+  }
 }
 
 export async function verifySingleOrder(

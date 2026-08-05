@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Clock } from 'lucide-react';
+import { StatusDriftPanel, type StatusDrift } from './status-drift-panel';
 
 interface WatchdogJob {
   jobType: string;
@@ -12,6 +13,7 @@ interface WatchdogJob {
 
 interface SummaryData {
   attention: string[];
+  statusDrift: StatusDrift | null;
   watchdog: { last24h: number; byJob7d: WatchdogJob[] };
 }
 
@@ -70,6 +72,7 @@ export function OpsHeadline() {
         </div>
       </div>
 
+      {data.statusDrift && <StatusDriftPanel drift={data.statusDrift} />}
       <WatchdogPanel watchdog={data.watchdog} />
     </div>
   );

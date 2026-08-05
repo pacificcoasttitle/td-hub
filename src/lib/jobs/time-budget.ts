@@ -48,6 +48,13 @@ export const UNIT_P99_MS = {
   'softpro.retry_document_attach': 60_000,
   /** One order: sitex property_lookup, p99 12.1s, observed max 23.5s. */
   'sitex.backfill_property': 25_000,
+  /**
+   * One order: a get_order_details call the drift detector caps at 30s itself,
+   * plus its 250ms inter-call delay. Unlike the other entries this worst case is
+   * enforced rather than observed — the detector races each call against its own
+   * timeout precisely so a hung request cannot blow the budget.
+   */
+  'softpro.verify_sync': 31_000,
 } as const;
 
 export type BudgetedJob = keyof typeof UNIT_P99_MS;

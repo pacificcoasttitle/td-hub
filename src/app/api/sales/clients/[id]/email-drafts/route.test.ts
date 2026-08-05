@@ -40,7 +40,7 @@ vi.mock('@/lib/integrations/anthropic/client', () => {
   class AnthropicNotConfiguredError extends Error {}
   return {
     AnthropicNotConfiguredError,
-    DRAFT_MODEL: 'claude-opus-5',
+    DRAFT_MODEL: 'claude-haiku-4-5',
     getAnthropicClient: () => {
       calls.order.push('anthropic');
       return getClientMock();
@@ -178,10 +178,20 @@ describe('generation', () => {
     const arg = messagesCreateMock.mock.calls[0]![0];
     expect(arg.system).toContain('Use ONLY the facts given to you');
     expect(arg.output_config.format.type).toBe('json_schema');
-    expect(arg.model).toBe('claude-opus-5');
+    expect(arg.model).toBe('claude-haiku-4-5');
     // Sampling params are rejected on this model — they must not be sent.
     expect(arg).not.toHaveProperty('temperature');
     expect(arg).not.toHaveProperty('top_p');
+  });
+
+  it('never sends output_config.effort, which Haiku 4.5 rejects with a 400', async () => {
+    await POST(req(), params());
+    const arg = messagesCreateMock.mock.calls[0]![0];
+    // Regression guard. Haiku 4.5 reports effort.supported = false and returns
+    // "400 This model does not support the effort parameter". Because every
+    // error in this route degrades to 200-with-empty-drafts, sending it would
+    // not surface as an outage — it would just quietly never produce a draft.
+    expect(arg.output_config).not.toHaveProperty('effort');
   });
 });
 

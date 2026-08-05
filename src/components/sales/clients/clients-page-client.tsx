@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Briefcase, Clock, Download, Plus, Search, Upload } from 'lucide-react';
+import { Briefcase, ChevronRight, Clock, Download, Plus, Search, Upload } from 'lucide-react';
 import { RepSelector } from '../rep-selector';
 import { SkeletonRow, EmptyState, ErrorBlock, Pagination } from '@/components/admin/shared-table';
 import { ClientFormModal } from './client-form-modal';
@@ -285,7 +285,7 @@ export function ClientsPageClient({ role }: Props) {
                   <th className="text-left px-4 py-2.5 font-medium text-gray-500 hidden sm:table-cell">Company</th>
                   <th className="text-left px-4 py-2.5 font-medium text-gray-500 hidden md:table-cell">Contact</th>
                   <th className="text-left px-4 py-2.5 font-medium text-gray-500">Business</th>
-                  <th className="text-left px-4 py-2.5 font-medium text-gray-500 hidden lg:table-cell">Latest note</th>
+                  <th className="px-4 py-2.5"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -294,9 +294,12 @@ export function ClientsPageClient({ role }: Props) {
                   : clients.map(client => {
                     const biz = fmtBusinessIndicator(client.business ?? null);
                     return (
+                      // The latest note is detail, not glance — it lives on the
+                      // profile now; hovering the row still surfaces it.
                       <tr key={client.id}
                         onClick={() => { rememberScroll(window.scrollY); router.push(profileHref(client.id, listState)); }}
-                        className="hover:bg-gray-50 cursor-pointer transition-colors">
+                        title={client.latestNote?.body ?? undefined}
+                        className="group hover:bg-gray-50 cursor-pointer transition-colors">
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2 flex-wrap">
                             {/* A real anchor so middle-click and copy-link work. */}
@@ -339,12 +342,18 @@ export function ClientsPageClient({ role }: Props) {
                             </p>
                           )}
                         </td>
-                        <td className="px-4 py-3 hidden lg:table-cell max-w-[220px]">
-                          {client.latestNote ? (
-                            <p className="text-xs text-gray-500 truncate">{client.latestNote.body}</p>
-                          ) : (
-                            <span className="text-xs text-gray-400">—</span>
-                          )}
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          {/* Every row visibly leads somewhere. Deliberately a
+                              plain button — no signal-driven action wording. */}
+                          <Link
+                            href={profileHref(client.id, listState)}
+                            onClick={(e) => { e.stopPropagation(); rememberScroll(window.scrollY); }}
+                            className="inline-flex items-center gap-1 h-8 px-3 rounded-lg border border-gray-200 bg-white
+                                       text-xs font-medium text-gray-700 transition-colors
+                                       hover:border-[#F26B2B]/50 hover:text-[#F26B2B] group-hover:border-[#F26B2B]/50"
+                          >
+                            View details <ChevronRight className="h-3.5 w-3.5" />
+                          </Link>
                         </td>
                       </tr>
                     );

@@ -10,6 +10,7 @@ import { SignalChip } from './signal-chip';
 import { HealthSnapshot } from './health-snapshot';
 import { ClientFormModal } from './client-form-modal';
 import { displayClientName } from './display';
+import { monthAxisLabels } from './month-axis';
 import type { ClientDetailResponse, ContactSuggestion, MonthBucket } from './types';
 
 /** Canned openers, so adding a note costs one click instead of a sentence. */
@@ -134,7 +135,7 @@ export function ClientProfilePage({ clientId, role, repId, backQuery }: Props) {
 
   if (loading) {
     return (
-      <div className="p-4 md:p-6 max-w-5xl mx-auto">
+      <div className="p-4 md:p-6 max-w-7xl mx-auto">
         <div className="h-6 w-32 bg-gray-200 rounded animate-pulse mb-4" />
         <div className="h-28 bg-gray-100 rounded-lg animate-pulse mb-4" />
         <div className="h-64 bg-gray-100 rounded-lg animate-pulse" />
@@ -144,7 +145,7 @@ export function ClientProfilePage({ clientId, role, repId, backQuery }: Props) {
 
   if (error || !client) {
     return (
-      <div className="p-4 md:p-6 max-w-5xl mx-auto">
+      <div className="p-4 md:p-6 max-w-7xl mx-auto">
         <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 mb-4">
           <ArrowLeft className="h-4 w-4" /> Back to My Clients
         </Link>
@@ -158,7 +159,7 @@ export function ClientProfilePage({ clientId, role, repId, backQuery }: Props) {
   const title = displayClientName(client.name, client.company);
 
   return (
-    <div className="p-4 md:p-6 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 max-w-7xl mx-auto">
       <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 mb-3">
         <ArrowLeft className="h-4 w-4" /> Back to My Clients
       </Link>
@@ -226,62 +227,8 @@ export function ClientProfilePage({ clientId, role, repId, backQuery }: Props) {
           <OrdersByMonth buckets={data.ordersByMonth} />
         )}
 
-        <div className="grid md:grid-cols-2 gap-0 md:divide-x divide-gray-100">
-          {/* Notes */}
-          <div className="px-5 py-4 border-b md:border-b-0 border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-900 mb-3">Notes</h2>
-            {canEdit && (
-              <div className="mb-3">
-                <textarea
-                  value={noteInput}
-                  onChange={e => setNoteInput(e.target.value)}
-                  rows={2}
-                  placeholder="Add a note — met at the mixer, prefers texts…"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm resize-none
-                             focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A]"
-                />
-                <div className="flex items-center justify-between gap-2 mt-1.5 flex-wrap">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {QUICK_NOTES.map(q => (
-                      <button key={q} onClick={() => addNote(q)} disabled={savingNote}
-                        className="text-xs px-2 py-1 rounded-full border border-gray-200 text-gray-600 hover:border-[#F26B2B]/50 hover:text-[#F26B2B] disabled:opacity-40 transition-colors">
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                  <button onClick={() => addNote(noteInput)} disabled={savingNote || !noteInput.trim()}
-                    className="h-8 px-3.5 rounded-lg bg-[#F26B2B] text-white text-xs font-medium hover:bg-[#E05A1A] disabled:opacity-40 transition-colors">
-                    {savingNote ? 'Adding…' : 'Add note'}
-                  </button>
-                </div>
-              </div>
-            )}
-            {(data?.notes.length ?? 0) === 0 ? (
-              <p className="text-sm text-gray-400">
-                {canEdit ? 'No notes yet — jot down anything worth remembering.' : 'No notes yet.'}
-              </p>
-            ) : (
-              <div className="space-y-2.5 max-h-96 overflow-y-auto">
-                {data!.notes.map(note => (
-                  <div key={note.id} className="group bg-gray-50 rounded-lg px-3 py-2.5">
-                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{note.body}</p>
-                    <div className="flex items-center justify-between mt-1.5">
-                      <p className="text-xs text-gray-400">
-                        {note.authorName ?? 'Unknown'} · {fmtDate(note.createdAt)}
-                      </p>
-                      {canEdit && (
-                        <button onClick={() => deleteNote(note.id)} aria-label="Delete note"
-                          className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
+        {/* Files and company contacts stay side by side — both are short lists. */}
+        <div className="grid md:grid-cols-2 gap-0 md:divide-x divide-gray-100 border-b border-gray-100">
           {/* Recent files + company contacts */}
           <div className="px-5 py-4">
             <h2 className="text-sm font-semibold text-gray-900 mb-3">Recent files</h2>
@@ -339,6 +286,65 @@ export function ClientProfilePage({ clientId, role, repId, backQuery }: Props) {
           </div>
         </div>
 
+        {/* Notes get the full width of the page. They are the thing reps
+            actually write into, and a narrow column made both the compose
+            box and the thread feel cramped. */}
+        {/* Notes */}
+        <div className="px-5 py-4 border-b md:border-b-0 border-gray-100">
+          <h2 className="text-sm font-semibold text-gray-900 mb-3">Notes</h2>
+          {canEdit && (
+            <div className="mb-3">
+              <textarea
+                value={noteInput}
+                onChange={e => setNoteInput(e.target.value)}
+                rows={5}
+                placeholder="Add a note — met at the mixer, prefers texts…"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm resize-none
+                           focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A]"
+              />
+              <div className="flex items-center justify-between gap-2 mt-1.5 flex-wrap">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {QUICK_NOTES.map(q => (
+                    <button key={q} onClick={() => addNote(q)} disabled={savingNote}
+                      className="text-xs px-2 py-1 rounded-full border border-gray-200 text-gray-600 hover:border-[#F26B2B]/50 hover:text-[#F26B2B] disabled:opacity-40 transition-colors">
+                      {q}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => addNote(noteInput)} disabled={savingNote || !noteInput.trim()}
+                  className="h-8 px-3.5 rounded-lg bg-[#F26B2B] text-white text-xs font-medium hover:bg-[#E05A1A] disabled:opacity-40 transition-colors">
+                  {savingNote ? 'Adding…' : 'Add note'}
+                </button>
+              </div>
+            </div>
+          )}
+          {(data?.notes.length ?? 0) === 0 ? (
+            <p className="text-sm text-gray-400">
+              {canEdit ? 'No notes yet — jot down anything worth remembering.' : 'No notes yet.'}
+            </p>
+          ) : (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-[32rem] overflow-y-auto pr-1">
+              {data!.notes.map(note => (
+                <div key={note.id} className="group bg-gray-50 rounded-lg px-3 py-2.5">
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{note.body}</p>
+                  <div className="flex items-center justify-between mt-1.5">
+                    <p className="text-xs text-gray-400">
+                      {note.authorName ?? 'Unknown'} · {fmtDate(note.createdAt)}
+                    </p>
+                    {canEdit && (
+                      <button onClick={() => deleteNote(note.id)} aria-label="Delete note"
+                        className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+
         {/* Danger zone */}
         {canEdit && (
           <div className="px-5 py-3 border-t border-gray-100">
@@ -378,22 +384,31 @@ export function ClientProfilePage({ clientId, role, repId, backQuery }: Props) {
 /** Twelve months of order volume. Same rows as the snapshot above it. */
 function OrdersByMonth({ buckets }: { buckets: MonthBucket[] }) {
   const max = useMemo(() => Math.max(1, ...buckets.map(b => b.orders)), [buckets]);
+  // Month names, with the year on January — "09 10 11 12 01" made the reader
+  // translate numbers and hid the year wrap entirely.
+  const axis = useMemo(() => monthAxisLabels(buckets.map(b => b.month)), [buckets]);
+
   return (
     <div className="px-5 py-4 border-b border-gray-100">
       <h2 className="text-sm font-semibold text-gray-900 mb-3">Orders by month</h2>
-      <div className="flex items-end gap-1.5 h-24">
-        {buckets.map(b => {
-          const [, m] = b.month.split('-');
+      <div className="flex items-end gap-2 h-28">
+        {buckets.map((b, i) => {
+          const a = axis[i];
           return (
             <div key={b.month} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+              <span className="text-[11px] text-gray-500 tabular-nums">{b.orders > 0 ? b.orders : ''}</span>
               <div className="w-full flex items-end justify-center" style={{ height: '72px' }}>
                 <div
-                  title={`${b.month}: ${b.orders} order${b.orders === 1 ? '' : 's'}`}
+                  title={`${a?.label ?? b.month}: ${b.orders} order${b.orders === 1 ? '' : 's'}`}
                   className={`w-full rounded-t ${b.orders > 0 ? 'bg-[#1B2A4A]/70' : 'bg-gray-100'}`}
                   style={{ height: `${Math.max(3, Math.round((b.orders / max) * 72))}px` }}
                 />
               </div>
-              <span className="text-[10px] text-gray-400 tabular-nums">{m}</span>
+              <span
+                className={`text-[10px] whitespace-nowrap ${a?.startsYear ? 'font-semibold text-gray-600' : 'text-gray-400'}`}
+              >
+                {a?.label ?? ''}
+              </span>
             </div>
           );
         })}

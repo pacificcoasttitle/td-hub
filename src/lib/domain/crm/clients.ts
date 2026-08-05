@@ -9,6 +9,7 @@ import { deriveClientType, type CrmClientType } from './types';
 import {
   computeClientMetrics, type ClientOrderMetrics, type ClientOrderRow,
 } from './client-metrics';
+import { deriveSignal } from './client-signals';
 
 // My Clients (sales rep CRM). The client list is independent of SoftPro:
 // this module never writes to contacts/orders/companies — reads on those
@@ -66,6 +67,8 @@ interface OrderLinkRow {
   contactId: number | null;
   openedAt: Date;
   closedAt: Date | null;
+  /** Carried so list rows can reuse the metrics engine without a second query. */
+  operationalStatus: string | null;
 }
 
 export interface ImportRowInput {
@@ -198,6 +201,47 @@ export function composeBusinessSummaries(
   return result;
 }
 
+/**
+ * Full per-client metrics for a page of list rows, from the SAME bulk link
+ * query the business summary already runs — one round trip, no N+1.
+ *
+ * Same identity rules as composeBusinessSummaries: owner-scoped, deduped by
+ * order id, and strictly per crm_clients row. Two rows pointing at the same
+ * firm get two independent snapshots; nothing is stitched.
+ */
+export function composeClientMetrics(
+  clients: Array<{ id: number; contactId: number | null; ownerContactId: number | null }>,
+  linkRows: OrderLinkRow[],
+  now: Date = new Date(),
+): Map<number, ClientOrderMetrics> {
+  const result = new Map<number, ClientOrderMetrics>();
+  for (const client of clients) {
+    const rows: ClientOrderRow[] = [];
+    if (client.contactId !== null && client.ownerContactId !== null) {
+      for (const row of linkRows) {
+        if (row.contactId !== client.contactId) continue;
+        if (row.salesRepId !== client.ownerContactId) continue;
+        rows.push({
+          orderId: row.orderId,
+          openedAt: row.openedAt,
+          closedAt: row.closedAt,
+          operationalStatus: row.operationalStatus,
+        });
+      }
+    }
+    result.set(
+      client.id,
+      computeClientMetrics({
+        clientId: client.id,
+        contactId: client.contactId,
+        orders: rows,
+        now,
+      }),
+    );
+  }
+  return result;
+}
+
 async function fetchOrderLinkRows(
   ownerContactIds: number[],
   linkedContactIds: number[],
@@ -212,6 +256,7 @@ async function fetchOrderLinkRows(
         contactId: orders.clientContactId,
         openedAt: orders.openedAt,
         closedAt: orders.closedAt,
+        operationalStatus: orders.operationalStatus,
       })
       .from(orders)
       .where(and(
@@ -225,6 +270,7 @@ async function fetchOrderLinkRows(
         contactId: orderParties.contactId,
         openedAt: orders.openedAt,
         closedAt: orders.closedAt,
+        operationalStatus: orders.operationalStatus,
       })
       .from(orders)
       .innerJoin(orderParties, eq(orderParties.orderId, orders.id))
@@ -440,14 +486,24 @@ export async function listClients(session: SessionUser, params: ListClientsParam
     }
   }
 
+  // Per-row triage signal, computed off the metrics engine from the link rows
+  // already fetched above. Keys on opened_at and counts only — never
+  // operational_status, which is ~24% stale (docs/order-status-hygiene.md).
+  const metricsByClient = composeClientMetrics(summaryInput, linkRows);
+
   return {
-    clients: rows.map((r) => ({
-      ...r,
-      canEdit: r.ownerProfileId === session.id,
-      business: summaries.get(r.id) ?? null,
-      latestNote: latestNoteByClient.get(r.id) ?? null,
-      isQuiet: quietIds.has(r.id),
-    })),
+    clients: rows.map((r) => {
+      const metrics = metricsByClient.get(r.id) ?? null;
+      return {
+        ...r,
+        canEdit: r.ownerProfileId === session.id,
+        business: summaries.get(r.id) ?? null,
+        latestNote: latestNoteByClient.get(r.id) ?? null,
+        isQuiet: quietIds.has(r.id),
+        signal: metrics ? deriveSignal(metrics) : null,
+        lastOrderAt: metrics?.recency.lastOrderAt ?? null,
+      };
+    }),
     total: Number(countResult[0]?.total ?? 0),
     page,
     pageSize,
@@ -572,12 +628,126 @@ async function loadClientMetrics(
   contactId: number | null,
   ownerContactId: number | null,
   now: Date = new Date(),
-): Promise<ClientOrderMetrics> {
+): Promise<{ metrics: ClientOrderMetrics; orderRows: ClientOrderRow[] }> {
   const orderRows = contactId !== null && ownerContactId !== null
     ? await fetchClientMetricRows(ownerContactId, contactId)
     : [];
 
-  return computeClientMetrics({ clientId, contactId, orders: orderRows, now });
+  return {
+    metrics: computeClientMetrics({ clientId, contactId, orders: orderRows, now }),
+    orderRows,
+  };
+}
+
+export interface MonthBucket {
+  /** YYYY-MM, chronological. */
+  month: string;
+  orders: number;
+}
+
+/**
+ * Orders per calendar month for the profile chart, oldest first.
+ *
+ * Pure, and derived from the same rows the metrics engine used — the chart can
+ * never disagree with the snapshot above it. Months with no orders are filled
+ * in as zero so the shape of a gap is visible rather than collapsed away.
+ */
+export function bucketOrdersByMonth(
+  orderRows: ClientOrderRow[],
+  months: number,
+  now: Date = new Date(),
+): MonthBucket[] {
+  const buckets = new Map<string, number>();
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    buckets.set(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, 0);
+  }
+  const seen = new Set<number>();
+  for (const row of orderRows) {
+    if (seen.has(row.orderId)) continue;
+    seen.add(row.orderId);
+    const d = row.openedAt;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (buckets.has(key)) buckets.set(key, buckets.get(key)! + 1);
+  }
+  return Array.from(buckets, ([month, orders]) => ({ month, orders }));
+}
+
+export interface CompanyContact {
+  id: number;
+  fullName: string | null;
+  email: string | null;
+  companyName: string | null;
+  /** Orders this rep has with that person. */
+  orderCount: number;
+}
+
+/**
+ * Other people at the same company this rep has done business with —
+ * "who else works with us".
+ *
+ * READ-ONLY, and deliberately NOT an identity decision. It does not change who
+ * is in the client list, does not merge anyone, and does not imply these people
+ * are clients. It answers "who else at this shop sends us files".
+ *
+ * MATCHES ON `contacts.company_name`, NOT `contact_company_links`.
+ * The link table looked like the right join, but it is empty — 0 rows in the
+ * whole table — so a section built on it would render nothing for every client
+ * forever. `company_name` is populated for 8,525 of 21,652 contacts, so it is
+ * the linkage that actually carries data today. The trade is that it matches on
+ * a string rather than a key, hence the normalisation and guards below:
+ * SoftPro has written the literal text "null" into this column (contact 7228
+ * has exactly that), and blank-vs-null is inconsistent.
+ *
+ * Bounded to this rep's own orders, so it can never surface another rep's book.
+ *
+ * EXPECT IT TO BE EMPTY OFTEN, AND THAT IS CORRECT. Measured on production:
+ * 227 of 980 client-contact/rep pairs (23.2%) have at least one same-company
+ * peer with the same rep. Dropping the rep scope would take that to 74.9%, but
+ * it would show a rep other people's relationships, which is exactly the
+ * owner-scoping rule the rest of this module enforces. Both CRM clients that
+ * exist today land in the empty 77% — one is the only contact at their firm,
+ * the other has the literal string "null" for a company.
+ */
+async function fetchCompanyContacts(
+  contactId: number | null,
+  ownerContactId: number | null,
+  limit = 8,
+): Promise<CompanyContact[]> {
+  if (contactId === null || ownerContactId === null) return [];
+
+  const rows = await db.execute(sql`
+    with me as (
+      select nullif(nullif(btrim(coalesce(company_name, '')), ''), 'null') as company
+      from contacts where id = ${contactId}
+    )
+    select c.id, c.full_name, c.email, c.company_name,
+           count(distinct o.id)::int as order_count
+    from contacts c
+    cross join me
+    join orders o on (
+      o.client_contact_id = c.id
+      or exists (select 1 from order_parties op where op.order_id = o.id and op.contact_id = c.id)
+    )
+    where me.company is not null
+      and lower(btrim(coalesce(c.company_name, ''))) = lower(me.company)
+      and c.id <> ${contactId}
+      and o.sales_rep_id = ${ownerContactId}
+    group by c.id, c.full_name, c.email, c.company_name
+    order by count(distinct o.id) desc, c.id
+    limit ${limit}
+  `) as unknown as Array<{
+    id: number; full_name: string | null; email: string | null;
+    company_name: string | null; order_count: number;
+  }>;
+
+  return rows.map((r) => ({
+    id: r.id,
+    fullName: r.full_name,
+    email: r.email,
+    companyName: r.company_name,
+    orderCount: Number(r.order_count),
+  }));
 }
 
 // ─── Detail ──────────────────────────────────────────────────────────────────
@@ -668,13 +838,19 @@ export async function getClientDetail(session: SessionUser, clientId: number, re
     ? await suggestContacts(row.name, row.email)
     : [];
 
-  const metrics = await loadClientMetrics(row.id, row.contactId, ownerContactId);
+  const { metrics, orderRows } = await loadClientMetrics(row.id, row.contactId, ownerContactId);
+  const companyContacts = await fetchCompanyContacts(row.contactId, ownerContactId);
 
   return {
     client: { ...row, canEdit: row.ownerProfileId === session.id },
     notes,
     business,
     metrics,
+    // Both are reads on the engine's own rows — the profile can never disagree
+    // with the snapshot at the top of it.
+    signal: deriveSignal(metrics),
+    ordersByMonth: bucketOrdersByMonth(orderRows, 12),
+    companyContacts,
     suggestions,
   };
 }

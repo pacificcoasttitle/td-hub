@@ -1,16 +1,21 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Briefcase, Clock, Download, Plus, Search, Upload } from 'lucide-react';
 import { RepSelector } from '../rep-selector';
 import { SkeletonRow, EmptyState, ErrorBlock, Pagination } from '@/components/admin/shared-table';
 import { ClientFormModal } from './client-form-modal';
-import { ClientDetailDrawer } from './client-detail-drawer';
 import { ImportClientsModal } from './import-clients-modal';
 import { AddFromTransactionsModal } from './add-from-transactions-modal';
 import { TypeBadge } from './type-badge';
 import { RecentActivity } from './recent-activity';
 import { displayClientName } from './display';
+import { SignalChip } from './signal-chip';
+import {
+  decodeListState, encodeListState, profileHref, rememberScroll, takeRememberedScroll,
+} from './list-state';
 import { CRM_CLIENT_TYPES, CRM_TYPE_LABEL_PLURAL } from '@/lib/domain/crm/types';
 import type { ClientListResponse, CrmClient } from './types';
 
@@ -26,27 +31,44 @@ export function fmtBusinessIndicator(business: CrmClient['business']): string | 
   return `${n} order${n === 1 ? '' : 's'}${when}`;
 }
 
+/** Short, scannable last-order date for a list row: "Jul 29, 2026". */
+export function fmtLastOrder(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+  });
+}
+
 interface Props {
   role: 'sales_rep' | 'sales_manager';
 }
 
 export function ClientsPageClient({ role }: Props) {
-  const [repId, setRepId] = useState<number | null>(null);
-  const [page, setPage] = useState(1);
-  const [searchInput, setSearchInput] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Seeded once from the URL: arriving via Back from a profile must rebuild the
+  // exact list the rep left, not a fresh unfiltered one.
+  const initial = useRef(decodeListState(searchParams.toString())).current;
+
+  const [repId, setRepId] = useState<number | null>(initial.repId);
+  const [page, setPage] = useState(initial.page);
+  const [searchInput, setSearchInput] = useState(initial.search);
+  const [debouncedSearch, setDebouncedSearch] = useState(initial.search);
   const [data, setData] = useState<ClientListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
-  const [typeFilter, setTypeFilter] = useState<string>('');
-  const [quietOnly, setQuietOnly] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<string>(initial.type);
+  const [quietOnly, setQuietOnly] = useState(initial.quietOnly);
   const [activityKey, setActivityKey] = useState(0);
   const [showFromTx, setShowFromTx] = useState(false);
   const [editClient, setEditClient] = useState<CrmClient | null>(null);
-  const [openClientId, setOpenClientId] = useState<number | null>(null);
   const fetchCount = useRef(0);
+  const restoredScroll = useRef(false);
+
+  const listState = {
+    search: debouncedSearch, type: typeFilter, quietOnly, page, repId,
+  };
 
   // A manager looking at a rep's list is a guest: read-only (spec §5/§9).
   const readOnly = role === 'sales_manager' && repId !== null;
@@ -56,7 +78,20 @@ export function ClientsPageClient({ role }: Props) {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  useEffect(() => { setPage(1); }, [debouncedSearch, repId, typeFilter, quietOnly]);
+  const firstRun = useRef(true);
+  useEffect(() => {
+    // Skip on mount, or restoring "page 3 filtered by escrow" would snap to 1.
+    if (firstRun.current) { firstRun.current = false; return; }
+    setPage(1);
+  }, [debouncedSearch, repId, typeFilter, quietOnly]);
+
+  // Keep the URL in step so Back, refresh and a pasted link all agree.
+  useEffect(() => {
+    const qs = encodeListState(listState);
+    const next = qs ? `/sales/clients?${qs}` : '/sales/clients';
+    router.replace(next, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, typeFilter, quietOnly, page, repId]);
 
   const fetchClients = useCallback(() => {
     const seq = ++fetchCount.current;
@@ -79,6 +114,15 @@ export function ClientsPageClient({ role }: Props) {
   }, [page, debouncedSearch, repId, typeFilter, quietOnly]);
 
   useEffect(() => { fetchClients(); }, [fetchClients]);
+
+  // Restore where the rep was in the list, once the rows that make that
+  // position meaningful are actually on the page.
+  useEffect(() => {
+    if (loading || restoredScroll.current) return;
+    restoredScroll.current = true;
+    const y = takeRememberedScroll();
+    if (y !== null) requestAnimationFrame(() => window.scrollTo(0, y));
+  }, [loading]);
 
   const clients = data?.clients ?? [];
   const total = data?.total ?? 0;
@@ -144,7 +188,7 @@ export function ClientsPageClient({ role }: Props) {
       <RecentActivity
         repId={repId}
         refreshKey={activityKey}
-        onOpenClient={setOpenClientId}
+        onOpenClient={(id) => { rememberScroll(window.scrollY); router.push(profileHref(id, listState)); }}
       />
 
       {/* Search + type filter */}
@@ -251,13 +295,18 @@ export function ClientsPageClient({ role }: Props) {
                     const biz = fmtBusinessIndicator(client.business ?? null);
                     return (
                       <tr key={client.id}
-                        onClick={() => setOpenClientId(client.id)}
+                        onClick={() => { rememberScroll(window.scrollY); router.push(profileHref(client.id, listState)); }}
                         className="hover:bg-gray-50 cursor-pointer transition-colors">
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-medium text-gray-900">
+                            {/* A real anchor so middle-click and copy-link work. */}
+                            <Link
+                              href={profileHref(client.id, listState)}
+                              onClick={() => rememberScroll(window.scrollY)}
+                              className="font-medium text-gray-900 hover:text-[#F26B2B] transition-colors"
+                            >
                               {displayClientName(client.name, client.company)}
-                            </p>
+                            </Link>
                             <TypeBadge type={client.type} />
                           </div>
                           {/* Don't repeat the company when it is already standing in as the name. */}
@@ -279,15 +328,16 @@ export function ClientsPageClient({ role }: Props) {
                             ) : (
                               <span className="text-xs text-gray-400">—</span>
                             )}
-                            {client.isQuiet && (
-                              <span
-                                title={`No new orders in ${quietMonths}+ months`}
-                                className="inline-flex items-center gap-1 text-xs font-medium text-amber-800 bg-amber-50 rounded-full px-2 py-0.5 whitespace-nowrap"
-                              >
-                                <Clock className="h-3 w-3" /> Quiet
-                              </span>
-                            )}
+                            {/* One signal per row, off the metrics engine. It
+                                supersedes the old blanket "Quiet" pill, which
+                                used the same 3-month rule for every client. */}
+                            <SignalChip signal={client.signal} />
                           </div>
+                          {client.lastOrderAt && (
+                            <p className="text-xs text-gray-400 mt-1">
+                              last {fmtLastOrder(client.lastOrderAt)}
+                            </p>
+                          )}
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell max-w-[220px]">
                           {client.latestNote ? (
@@ -313,7 +363,7 @@ export function ClientsPageClient({ role }: Props) {
         <ClientFormModal
           client={editClient}
           onClose={() => { setShowAdd(false); setEditClient(null); }}
-          onSaved={() => { setShowAdd(false); setEditClient(null); fetchClients(); }}
+          onSaved={() => { setShowAdd(false); setEditClient(null); fetchClients(); setActivityKey(k => k + 1); }}
         />
       )}
 
@@ -321,7 +371,7 @@ export function ClientsPageClient({ role }: Props) {
       {showFromTx && (
         <AddFromTransactionsModal
           onClose={() => setShowFromTx(false)}
-          onAdded={fetchClients}
+          onAdded={() => { fetchClients(); setActivityKey(k => k + 1); }}
         />
       )}
 
@@ -329,20 +379,10 @@ export function ClientsPageClient({ role }: Props) {
       {showImport && (
         <ImportClientsModal
           onClose={() => setShowImport(false)}
-          onImported={fetchClients}
+          onImported={() => { fetchClients(); setActivityKey(k => k + 1); }}
         />
       )}
 
-      {/* Detail drawer */}
-      {openClientId !== null && (
-        <ClientDetailDrawer
-          clientId={openClientId}
-          repId={repId}
-          onClose={() => setOpenClientId(null)}
-          onEdit={(client) => { setOpenClientId(null); setEditClient(client); }}
-          onChanged={() => { fetchClients(); setActivityKey(k => k + 1); }}
-        />
-      )}
     </div>
   );
 }

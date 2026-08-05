@@ -21,6 +21,16 @@ export interface CrmClient {
   latestNote?: { body: string; createdAt: string } | null;
   /** Derived on read: prior business but no order in the quiet window. */
   isQuiet?: boolean;
+  /** Triage signal from the metrics engine — gone-quiet / momentum / trend. */
+  signal?: CrmSignal | null;
+  lastOrderAt?: string | null;
+}
+
+export interface CrmSignal {
+  kind: 'quiet' | 'momentum' | 'declining' | 'steady' | 'unknown';
+  tone: 'success' | 'warning' | 'neutral' | 'muted';
+  label: string;
+  detail: string | null;
 }
 
 export interface CrmNote {
@@ -96,10 +106,26 @@ export interface CrmClientMetrics {
   };
 }
 
+export interface MonthBucket {
+  month: string;
+  orders: number;
+}
+
+export interface CompanyContact {
+  id: number;
+  fullName: string | null;
+  email: string | null;
+  companyName: string | null;
+  orderCount: number;
+}
+
 export interface ClientDetailResponse {
   client: CrmClient;
   notes: CrmNote[];
   business: CrmBusinessOrder[];
   metrics: CrmClientMetrics;
+  signal: CrmSignal;
+  ordersByMonth: MonthBucket[];
+  companyContacts: CompanyContact[];
   suggestions: ContactSuggestion[];
 }

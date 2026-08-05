@@ -272,9 +272,9 @@ describe('composeBusinessSummaries', () => {
     const summaries = composeBusinessSummaries(
       [{ id: 1, contactId: 500, ownerContactId: 10 }],
       [
-        { orderId: 100, salesRepId: 10, contactId: 500, openedAt: d('2026-01-05'), closedAt: d('2026-02-01') },
-        { orderId: 100, salesRepId: 10, contactId: 500, openedAt: d('2026-01-05'), closedAt: d('2026-02-01') },
-        { orderId: 101, salesRepId: 10, contactId: 500, openedAt: d('2026-03-01'), closedAt: null },
+        { orderId: 100, salesRepId: 10, contactId: 500, openedAt: d('2026-01-05'), closedAt: d('2026-02-01') , operationalStatus: 'closed' },
+        { orderId: 100, salesRepId: 10, contactId: 500, openedAt: d('2026-01-05'), closedAt: d('2026-02-01') , operationalStatus: 'closed' },
+        { orderId: 101, salesRepId: 10, contactId: 500, openedAt: d('2026-03-01'), closedAt: null , operationalStatus: 'closed' },
       ],
     );
     expect(summaries.get(1)).toEqual({
@@ -288,7 +288,7 @@ describe('composeBusinessSummaries', () => {
     const summaries = composeBusinessSummaries(
       [{ id: 1, contactId: 500, ownerContactId: 10 }],
       [
-        { orderId: 100, salesRepId: 99, contactId: 500, openedAt: d('2026-01-05'), closedAt: null },
+        { orderId: 100, salesRepId: 99, contactId: 500, openedAt: d('2026-01-05'), closedAt: null , operationalStatus: 'closed' },
       ],
     );
     expect(summaries.has(1)).toBe(false);
@@ -301,7 +301,7 @@ describe('composeBusinessSummaries', () => {
         { id: 2, contactId: 500, ownerContactId: null },
       ],
       [
-        { orderId: 100, salesRepId: 10, contactId: 500, openedAt: d('2026-01-05'), closedAt: null },
+        { orderId: 100, salesRepId: 10, contactId: 500, openedAt: d('2026-01-05'), closedAt: null , operationalStatus: 'closed' },
       ],
     );
     expect(summaries.size).toBe(0);

@@ -49,14 +49,22 @@ export function OrderActions({ order, onAction, tessaPrelimEnabled = false }: Pr
               Prelim Summary
             </button>
           )}
-          <button
-            type="button"
-            title="Update Prelim"
-            onClick={() => onAction('update_prelim', order)}
-            className={secondaryBtn}
-          >
-            Update Prelim
-          </button>
+          {/*
+            No "Update Prelim" button here — it could never work, so it is not
+            hidden for tidiness but because it was a bug on screen.
+
+            It rendered only when hasPrelim === true, and fetchPrelimsForOrder
+            early-returns the moment an order already has an active prelim
+            (fetch-prelims.ts). Same predicate on both ends, so the click could
+            never reach SoftPro: it returned documentsFound: 0 and the modal
+            then showed "No prelim available yet in SoftPro" directly above the
+            prelim it already had.
+
+            Do not re-add it. Catching an UPDATED prelim needs change detection
+            (the parked GetAttachedDocumentsPrelim/ModifiedAt polling), not
+            another fetch button. "Get Prelim Doc" in the hasPrelim === false
+            branch below is the real, working on-demand fetch — leave it alone.
+          */}
           <button
             type="button"
             title="View Contacts"

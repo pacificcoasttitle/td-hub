@@ -9,6 +9,7 @@ import { TypeBadge } from './type-badge';
 import { SignalChip } from './signal-chip';
 import { HealthSnapshot } from './health-snapshot';
 import { ClientFormModal } from './client-form-modal';
+import { EmailDraftModal } from './email-draft-modal';
 import { displayClientName } from './display';
 import { monthAxisLabels } from './month-axis';
 import type { ClientDetailResponse, ContactSuggestion, MonthBucket } from './types';
@@ -58,6 +59,7 @@ export function ClientProfilePage({ clientId, role, repId, backQuery }: Props) {
   const [savingNote, setSavingNote] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showDrafts, setShowDrafts] = useState(false);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -192,14 +194,24 @@ export function ClientProfilePage({ clientId, role, repId, backQuery }: Props) {
         </div>
 
         {/* Outlook shortcuts */}
-        {client.email && (
-          <div className="mt-3 flex items-center gap-2 flex-wrap">
-            <a
-              href={`mailto:${client.email}`}
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/10 text-white text-xs font-medium hover:bg-white/20 transition-colors"
-            >
-              <Mail className="h-3.5 w-3.5" /> Email in Outlook
-            </a>
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          {/* Drafts are picked before Outlook opens — nothing can be injected
+              into an Outlook window that is already up. */}
+          <button
+            onClick={() => setShowDrafts(true)}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/10 text-white text-xs font-medium hover:bg-white/20 transition-colors"
+          >
+            <Mail className="h-3.5 w-3.5" /> Email in Outlook
+          </button>
+          {/* The plain path the rep had before, untouched. */}
+          <a
+            href={`mailto:${client.email ?? ''}`}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/10 text-white text-xs font-medium hover:bg-white/20 transition-colors"
+          >
+            Blank email
+          </a>
+          {/* Copy email keeps working exactly as before. */}
+          {client.email && (
             <button
               onClick={copyEmail}
               className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/10 text-white text-xs font-medium hover:bg-white/20 transition-colors"
@@ -207,8 +219,8 @@ export function ClientProfilePage({ clientId, role, repId, backQuery }: Props) {
               {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
               {copied ? 'Copied' : 'Copy email'}
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <div className="bg-white border border-t-0 border-gray-200 rounded-b-lg">
@@ -369,6 +381,15 @@ export function ClientProfilePage({ clientId, role, repId, backQuery }: Props) {
           </div>
         )}
       </div>
+
+      {showDrafts && client && (
+        <EmailDraftModal
+          clientId={client.id}
+          clientName={displayClientName(client.name, client.company)}
+          clientEmail={client.email}
+          onClose={() => setShowDrafts(false)}
+        />
+      )}
 
       {showEdit && (
         <ClientFormModal

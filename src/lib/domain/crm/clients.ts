@@ -778,6 +778,42 @@ async function getOwnedClient(session: SessionUser, clientId: number) {
   return row;
 }
 
+/**
+ * Everything the AI email drafter is allowed to know about a client.
+ *
+ * Uses getOwnedClient, so the same rule that governs edits governs this: the
+ * caller must OWN the client. A manager browsing a rep's list gets the 403 they
+ * already get for editing — spending the rep's AI budget on their behalf is a
+ * write-shaped action, not a read.
+ *
+ * Returns only counts, recency and the rep's own notes. No revenue, no order
+ * numbers, no addresses — the model cannot leak a fact it was never given.
+ */
+export async function getEmailDraftContext(session: SessionUser, clientId: number) {
+  const row = await getOwnedClient(session, clientId);
+
+  const scope = await resolveCrmScope(session, null);
+  const ownerContactId = scope.ownerContactIdByProfile.get(row.ownerProfileId) ?? null;
+
+  const [{ metrics }, notes] = await Promise.all([
+    loadClientMetrics(row.id, row.contactId, ownerContactId),
+    db
+      .select({ body: crmClientNotes.body, createdAt: crmClientNotes.createdAt })
+      .from(crmClientNotes)
+      .where(eq(crmClientNotes.clientId, row.id))
+      .orderBy(desc(crmClientNotes.createdAt))
+      .limit(5),
+  ]);
+
+  return {
+    client: row,
+    metrics,
+    signal: deriveSignal(metrics),
+    notes,
+    repName: session.displayName ?? session.email ?? 'Your Pacific Coast Title rep',
+  };
+}
+
 export async function getClientDetail(session: SessionUser, clientId: number, repId?: string | null) {
   const { row, scope } = await getVisibleClient(session, clientId, repId);
 

@@ -7,7 +7,7 @@ import {
   emptyCounts,
   LOOKBACK_MAX_AGE_DAYS,
   LOOKBACK_MIN_AGE_DAYS,
-  LOOKBACK_NOTE_PREFIX,
+  LOOKBACK_PHASE2_MAX_AGE_DAYS,
   LOOKBACK_STATUS_SOURCE,
   type LookbackOrderRow,
 } from './lookback-diff';
@@ -30,24 +30,33 @@ describe('window bands', () => {
   it('matches the measured drift bands', () => {
     expect(bandFor(29)).toBe('other');          // under 30d: 0/45 drifted, skipped
     expect(bandFor(LOOKBACK_MIN_AGE_DAYS)).toBe('30-90d');
-    expect(bandFor(89)).toBe('30-90d');         // hot band, 30.6%
+    expect(bandFor(89)).toBe('30-90d');
+    // The ACTIVE sweep stops at 90 (phase 1), but 90-180d stays classifiable
+    // so phase-2 reporting needs no change.
+    expect(LOOKBACK_MAX_AGE_DAYS).toBe(90);
     expect(bandFor(90)).toBe('90-180d');
     expect(bandFor(179)).toBe('90-180d');
-    expect(bandFor(LOOKBACK_MAX_AGE_DAYS)).toBe('other');
+    expect(bandFor(LOOKBACK_PHASE2_MAX_AGE_DAYS)).toBe('other');
     expect(bandFor(400)).toBe('other');
   });
 });
 
 describe('the status-history tag must stay enum-legal', () => {
   it('uses a value the status_change_source enum actually has', () => {
-    // The enum is softpro_sync | manual | system | webhook. Writing anything
-    // else fails at runtime with `invalid input value for enum` — and because a
-    // dry run writes nothing, that failure would first appear in production.
-    expect(['softpro_sync', 'manual', 'system', 'webhook']).toContain(LOOKBACK_STATUS_SOURCE);
+    // Writing a value the enum lacks fails at runtime with `invalid input value
+    // for enum` — and because a dry run writes nothing, that failure would
+    // first appear in production, on the write pass, on every corrected order.
+    // 'lookback_sync' is legal ONLY once docs/migration-lookback-sync-enum.sql
+    // has been applied; this list must track the database.
+    expect(['softpro_sync', 'manual', 'system', 'webhook', 'lookback_sync'])
+      .toContain(LOOKBACK_STATUS_SOURCE);
   });
 
-  it('carries a distinguishing marker so the feed can exclude it', () => {
-    expect(LOOKBACK_NOTE_PREFIX).toBe('[lookback_sync]');
+  it('is a typed enum value, not a string marker hidden in notes', () => {
+    // Provenance belongs in a column. Guards against regressing to the
+    // notes-prefix workaround this replaced.
+    expect(LOOKBACK_STATUS_SOURCE).toBe('lookback_sync');
+    expect(LOOKBACK_STATUS_SOURCE).not.toContain('[');
   });
 });
 

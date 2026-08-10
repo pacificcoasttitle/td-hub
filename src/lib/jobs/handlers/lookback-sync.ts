@@ -11,13 +11,13 @@ import {
   emptyCounts,
   LOOKBACK_MAX_AGE_DAYS,
   LOOKBACK_MIN_AGE_DAYS,
-  LOOKBACK_NOTE_PREFIX,
   LOOKBACK_STATUS_SOURCE,
   type LookbackBand,
   type LookbackCounts,
   type LookbackOrderRow,
 } from '@/lib/domain/orders/lookback-diff';
 import { createDeadline } from '@/lib/jobs/time-budget';
+import { getSetting } from '@/lib/domain/settings/service';
 
 // ─── Order look-back sync ───────────────────────────────────────────────────
 //
@@ -39,12 +39,19 @@ import { createDeadline } from '@/lib/jobs/time-budget';
 // use it as an INCLUSION filter, so closing an order removes it from their
 // scope. The suppression is structural, not configured.
 //
-// The one visible consequence is handled here: history rows carry the
-// LOOKBACK_NOTE_PREFIX marker and the dashboard activity feed excludes them, so
-// a bulk correction cannot bury days of real activity. (The marker lives in
-// `notes` rather than a dedicated `source` value because status_change_source
-// is an enum that cannot be extended without a migration — see
-// LOOKBACK_STATUS_SOURCE.)
+// The one visible consequence is handled here: history rows are written with
+// source = 'lookback_sync' and the dashboard activity feed excludes that
+// source, so a bulk correction cannot bury days of real activity.
+//
+// TWO GATES, because this job is the heaviest consumer of an adapter the whole
+// business depends on. The dry run drove get_order_details from a 2.2s baseline
+// to 17.7s, so it must not run while anyone is working:
+//   1. OFF-PEAK ONLY  — refuses outside the cron's own UTC window, so a manual
+//      trigger cannot start a sweep during business hours either.
+//   2. KILL SWITCH    — a runtime setting that stops it mid-sweep with no
+//      deploy. Deliberately DB-backed rather than an env var: changing a Vercel
+//      env var needs a redeploy to take effect, which is exactly what you
+//      cannot wait for when the vendor is falling over.
 
 export const PER_CALL_TIMEOUT_MS = 30_000;
 export const CONCURRENCY = 3;
@@ -57,8 +64,31 @@ export const INTER_CALL_DELAY_MS = 250;
  */
 export const BATCH_SIZE = 400;
 
+/**
+ * Runtime kill switch. Set this setting to 'true' to stop the job taking new
+ * work; it takes effect on the next run with no deploy.
+ */
+export const LOOKBACK_SHUT_OFF_SETTING = 'lookback_sync_shut_off';
+
+/**
+ * Off-peak window in UTC hours, inclusive. Mirrors the cron in vercel.json
+ * (every 15 minutes, UTC hours 1 through 14) so a manual trigger obeys the
+ * same rule the schedule does.
+ *
+ * 01:00-14:59 UTC is roughly 18:00-07:59 Pacific during PDT, and an hour
+ * earlier during PST. Both sit outside business hours, which is the property
+ * that matters; the guard is stated in UTC so it cannot drift with the clock.
+ */
+export const OFF_PEAK_UTC_HOURS = { start: 1, end: 14 } as const;
+
+export function isOffPeakHour(utcHour: number): boolean {
+  return utcHour >= OFF_PEAK_UTC_HOURS.start && utcHour <= OFF_PEAK_UTC_HOURS.end;
+}
+
 export interface LookbackSyncResult extends LookbackCounts {
   dryRun: boolean;
+  /** Set when the run declined to take work. Counts are all zero. */
+  skipped: 'shut_off' | 'business_hours' | null;
   correctionPct: number | null;
   /** Order id to resume from next run; null once the window is exhausted. */
   nextCursorId: number | null;
@@ -71,6 +101,21 @@ export interface LookbackSyncResult extends LookbackCounts {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** A run that declined to take work. Zero counts, and no cursor movement. */
+function skippedResult(reason: 'shut_off' | 'business_hours', dryRun: boolean): LookbackSyncResult {
+  return {
+    ...emptyCounts(),
+    dryRun,
+    skipped: reason,
+    correctionPct: null,
+    nextCursorId: null,
+    remaining: 0,
+    stoppedEarly: false,
+    windowComplete: false,
+    windowDays: { min: LOOKBACK_MIN_AGE_DAYS, max: LOOKBACK_MAX_AGE_DAYS },
+  };
+}
 
 /**
  * Races a call against a timeout. The request is abandoned rather than
@@ -112,7 +157,8 @@ async function readCursor(): Promise<number> {
  * Claims the next slice of the window, ordered by id so the cursor is a simple
  * high-water mark.
  *
- * `opened_at` bounds are inclusive-of-band: >= 30 days and < 180 days old.
+ * `opened_at` bounds follow the ACTIVE window: >= LOOKBACK_MIN_AGE_DAYS and
+ * < LOOKBACK_MAX_AGE_DAYS old (phase 1 = 30-90d).
  */
 async function claimOrders(cursorId: number, limit: number): Promise<LookbackOrderRow[]> {
   const rows = await db.execute(sql`
@@ -148,6 +194,11 @@ export interface LookbackSyncPayload {
   cursorId?: number;
   /** Cap for this run; defaults to BATCH_SIZE. */
   limit?: number;
+  /**
+   * Permits a DRY RUN outside the off-peak window. Ignored for write passes —
+   * a sweep that mutates orders is never allowed during business hours.
+   */
+  allowAnyHour?: boolean;
   __jobId?: number;
 }
 
@@ -159,6 +210,32 @@ export async function handleLookbackSync(
   const limit = typeof input.limit === 'number' && input.limit > 0
     ? Math.min(input.limit, BATCH_SIZE)
     : BATCH_SIZE;
+
+  // ── Gate 1: kill switch ──
+  // Checked before anything else, so flipping the setting stops the next run
+  // even mid-sweep. The cursor is untouched, so resuming later picks up exactly
+  // where it left off.
+  if ((await getSetting(LOOKBACK_SHUT_OFF_SETTING)) === 'true') {
+    console.warn('[lookback-sync] skipped — kill switch is on');
+    return skippedResult('shut_off', dryRun);
+  }
+
+  // ── Gate 2: off-peak only ──
+  // The cron cannot fire during business hours, but a manual /api/jobs/run can.
+  // This makes the schedule a property of the job rather than of the crontab.
+  // allowAnyHour exists for deliberate dry runs; a WRITE pass is never allowed
+  // to override it.
+  const utcHour = new Date().getUTCHours();
+  if (!isOffPeakHour(utcHour)) {
+    const override = input.allowAnyHour === true && dryRun;
+    if (!override) {
+      console.warn('[lookback-sync] skipped — outside the off-peak window', {
+        utcHour, window: OFF_PEAK_UTC_HOURS, dryRun,
+      });
+      return skippedResult('business_hours', dryRun);
+    }
+    console.warn('[lookback-sync] running a DRY RUN outside off-peak hours by explicit override', { utcHour });
+  }
 
   const startCursor = typeof input.cursorId === 'number' ? input.cursorId : await readCursor();
   const claimed = await claimOrders(startCursor, limit);
@@ -209,7 +286,6 @@ export async function handleLookbackSync(
             // partial record can never erase good local data.
             preserveExistingOnEmpty: true,
             statusHistorySource: LOOKBACK_STATUS_SOURCE,
-            statusHistoryNotePrefix: LOOKBACK_NOTE_PREFIX,
           });
         } catch (err) {
           console.error('[lookback-sync] write failed', {
@@ -237,6 +313,7 @@ export async function handleLookbackSync(
   const result: LookbackSyncResult = {
     ...counts,
     dryRun,
+    skipped: null,
     correctionPct: correctionPct(counts),
     nextCursorId: windowComplete ? null : highWater,
     remaining: claimed.length - attempted,

@@ -136,13 +136,7 @@ export interface ProcessOrderDetailOptions {
    * excludes it, otherwise one backfill would bury days of real events.
    * Defaults to the import/webhook value.
    */
-  statusHistorySource?: 'softpro_sync' | 'manual' | 'system' | 'webhook';
-  /**
-   * Prepended to `order_status_history.notes`. The look-back sync uses a stable
-   * marker here because `source` is an enum it cannot extend without a
-   * migration — see LOOKBACK_NOTE_PREFIX.
-   */
-  statusHistoryNotePrefix?: string;
+  statusHistorySource?: 'softpro_sync' | 'manual' | 'system' | 'webhook' | 'lookback_sync';
 }
 
 export async function processOrderDetail(
@@ -155,7 +149,6 @@ export async function processOrderDetail(
   const preserveExistingOnEmpty = options.preserveExistingOnEmpty === true;
   const emptyField = preserveExistingOnEmpty ? undefined : null;
   const statusHistorySource = options.statusHistorySource ?? 'softpro_sync';
-  const notePrefix = options.statusHistoryNotePrefix ? `${options.statusHistoryNotePrefix} ` : '';
 
   const salesReps = options.salesReps ?? await loadSalesReps();
   const titleOfficers = options.titleOfficers ?? await loadTitleOfficers();
@@ -233,7 +226,7 @@ export async function processOrderDetail(
         orderId: existing.id,
         status: mappedStatus,
         source: statusHistorySource,
-        notes: `${notePrefix}Import: status changed from ${existing.operationalStatus} to ${mappedStatus}`,
+        notes: `Import: status changed from ${existing.operationalStatus} to ${mappedStatus}`,
       });
     }
   } else {
@@ -271,7 +264,7 @@ export async function processOrderDetail(
       orderId: newOrder!.id,
       status: operationalStatus,
       source: statusHistorySource,
-      notes: `${notePrefix}Imported via GetOrderDetails`,
+      notes: 'Imported via GetOrderDetails',
     });
 
     await refreshOfficerContact(titleOfficerId, item.TitleOfficerContact);

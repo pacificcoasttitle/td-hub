@@ -20,7 +20,11 @@ export const orderSourceEnum = pgEnum('order_source', [
 ]);
 
 export const statusChangeSourceEnum = pgEnum('status_change_source', [
-  'softpro_sync', 'manual', 'system', 'webhook',
+  // 'lookback_sync' is applied to prod by hand — see
+  // docs/migration-lookback-sync-enum.sql. The migration runner does not
+  // reliably apply enum changes, so it must be confirmed present in the
+  // database before code that writes it ships.
+  'softpro_sync', 'manual', 'system', 'webhook', 'lookback_sync',
 ]);
 
 export const partyRoleEnum = pgEnum('party_role', [

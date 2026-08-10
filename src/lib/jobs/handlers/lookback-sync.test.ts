@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { rows, getDetailsMock, processMock, dbMock, deadlineMock } = vi.hoisted(() => ({
+const { rows, getDetailsMock, processMock, dbMock, deadlineMock, settings, clock } = vi.hoisted(() => ({
   rows: { claimed: [] as unknown[], cursor: [] as unknown[] },
   getDetailsMock: vi.fn(),
   processMock: vi.fn(async (_item: unknown, _opts: Record<string, unknown>) => undefined),
   dbMock: { updates: [] as unknown[] },
   deadlineMock: { exceededAfter: Number.POSITIVE_INFINITY, calls: 0 },
+  settings: { shutOff: 'false' },
+  clock: { utcHour: 3 },
 }));
 
 vi.mock('@/lib/db/client', () => ({
@@ -20,6 +22,9 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 vi.mock('@/lib/db/schema', () => ({ jobs: { id: 'id' } }));
+vi.mock('@/lib/domain/settings/service', () => ({
+  getSetting: async () => settings.shutOff,
+}));
 vi.mock('@/lib/integrations/softpro', () => ({
   getOrderDetails: (args: { orderNumber: string; orderId: number; dateFrom: string }) => getDetailsMock(args),
 }));
@@ -35,8 +40,10 @@ vi.mock('@/lib/jobs/time-budget', () => ({
   }),
 }));
 
-const { handleLookbackSync, PER_CALL_TIMEOUT_MS, CONCURRENCY } = await import('./lookback-sync');
-const { LOOKBACK_NOTE_PREFIX, LOOKBACK_STATUS_SOURCE } = await import('@/lib/domain/orders/lookback-diff');
+vi.spyOn(Date.prototype, 'getUTCHours').mockImplementation(() => clock.utcHour);
+
+const { handleLookbackSync, PER_CALL_TIMEOUT_MS, CONCURRENCY, isOffPeakHour, OFF_PEAK_UTC_HOURS } = await import('./lookback-sync');
+const { LOOKBACK_STATUS_SOURCE } = await import('@/lib/domain/orders/lookback-diff');
 
 function claimed(n: number, startId = 100) {
   return Array.from({ length: n }, (_, i) => ({
@@ -57,6 +64,7 @@ beforeEach(() => {
   getDetailsMock.mockReset(); processMock.mockClear();
   dbMock.updates.length = 0;
   deadlineMock.exceededAfter = Number.POSITIVE_INFINITY; deadlineMock.calls = 0;
+  settings.shutOff = 'false'; clock.utcHour = 3;
   getDetailsMock.mockImplementation(async ({ orderNumber }: { orderNumber: string }) =>
     detail(orderNumber, 'Closed'));
 });
@@ -87,7 +95,6 @@ describe('dry run writes nothing', () => {
     // good local data.
     expect(opts.preserveExistingOnEmpty).toBe(true);
     expect(opts.statusHistorySource).toBe(LOOKBACK_STATUS_SOURCE);
-    expect(opts.statusHistoryNotePrefix).toBe(LOOKBACK_NOTE_PREFIX);
   });
 
   it('defaults to a dry run when the flag is absent', async () => {
@@ -206,6 +213,79 @@ describe('runtime shape', () => {
   it('reports the window it swept', async () => {
     rows.claimed = claimed(1);
     const r = await handleLookbackSync({ dryRun: true });
-    expect(r.windowDays).toEqual({ min: 30, max: 180 });
+    // Phase 1 is 30-90d only. 90-180d is held until the first band is proven.
+    expect(r.windowDays).toEqual({ min: 30, max: 90 });
+  });
+});
+
+// ─── Gates ──────────────────────────────────────────────────────────────────
+
+describe('kill switch', () => {
+  it('takes no work when the setting is on, and does not move the cursor', async () => {
+    rows.claimed = claimed(10);
+    settings.shutOff = 'true';
+    const r = await handleLookbackSync({ dryRun: false });
+
+    expect(r.skipped).toBe('shut_off');
+    expect(r.examined).toBe(0);
+    expect(r.nextCursorId).toBeNull();
+    expect(getDetailsMock).not.toHaveBeenCalled();
+    expect(processMock).not.toHaveBeenCalled();
+  });
+
+  it('is checked before any vendor call, so it can stop a sweep in flight', async () => {
+    rows.claimed = claimed(400);
+    settings.shutOff = 'true';
+    await handleLookbackSync({});
+    expect(getDetailsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('off-peak guard — it must not be able to run in business hours', () => {
+  it('mirrors the cron window', () => {
+    expect(OFF_PEAK_UTC_HOURS).toEqual({ start: 1, end: 14 });
+    expect(isOffPeakHour(0)).toBe(false);   // 17:00 PDT — business hours
+    expect(isOffPeakHour(1)).toBe(true);
+    expect(isOffPeakHour(14)).toBe(true);
+    expect(isOffPeakHour(15)).toBe(false);  // 08:00 PDT — business hours
+    expect(isOffPeakHour(20)).toBe(false);  // 13:00 PDT — mid-afternoon
+  });
+
+  it('refuses a WRITE pass triggered manually during business hours', async () => {
+    rows.claimed = claimed(10);
+    clock.utcHour = 20; // 1pm Pacific
+    const r = await handleLookbackSync({ dryRun: false });
+
+    expect(r.skipped).toBe('business_hours');
+    expect(getDetailsMock).not.toHaveBeenCalled();
+    expect(processMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses a write pass EVEN WITH allowAnyHour — the override is dry-run only', async () => {
+    rows.claimed = claimed(10);
+    clock.utcHour = 20;
+    const r = await handleLookbackSync({ dryRun: false, allowAnyHour: true });
+    expect(r.skipped).toBe('business_hours');
+    expect(processMock).not.toHaveBeenCalled();
+  });
+
+  it('allows a DRY run in business hours only when explicitly overridden', async () => {
+    rows.claimed = claimed(3);
+    clock.utcHour = 20;
+    const blocked = await handleLookbackSync({ dryRun: true });
+    expect(blocked.skipped).toBe('business_hours');
+
+    const allowed = await handleLookbackSync({ dryRun: true, allowAnyHour: true });
+    expect(allowed.skipped).toBeNull();
+    expect(allowed.examined).toBe(3);
+    expect(processMock).not.toHaveBeenCalled();
+  });
+
+  it('runs normally inside the window', async () => {
+    rows.claimed = claimed(2);
+    clock.utcHour = 6;
+    const r = await handleLookbackSync({ dryRun: true });
+    expect(r.skipped).toBeNull();
+    expect(r.examined).toBe(2);
   });
 });

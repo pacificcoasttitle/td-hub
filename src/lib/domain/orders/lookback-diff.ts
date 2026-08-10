@@ -24,27 +24,32 @@ import type { SoftProOrderDetailItem } from '@/lib/integrations/softpro/types';
  * population is 219 orders.
  */
 export const LOOKBACK_MIN_AGE_DAYS = 30;
-export const LOOKBACK_MAX_AGE_DAYS = 180;
 
 /**
- * How look-back-written `order_status_history` rows are tagged.
+ * Upper bound of the ACTIVE sweep.
  *
- * The design called for `source: 'lookback_sync'`. That is NOT possible without
- * a migration: `status_change_source` is a Postgres enum whose only values are
- * softpro_sync | manual | system | webhook, so writing 'lookback_sync' fails
- * with `invalid input value for enum`. Adding it needs ALTER TYPE, and this
- * work is explicitly migration-free.
+ * Phase 1 is 30-90d only — the hot band, and the smaller blast radius. The
+ * 90-180d band is held back deliberately until we see how the first behaves;
+ * raising this to LOOKBACK_PHASE2_MAX_AGE_DAYS is the whole change.
  *
- * So the tag is a legal enum value ('system' — this IS a system-initiated
- * change, not a SoftPro push) plus a stable marker at the front of `notes`.
- * The activity feed filters on the marker. It is precise, needs no schema
- * change, and if the one-line enum migration is later approved, switching to a
- * dedicated source value is a two-constant edit.
+ * Dry run measured 90-180d at 26.9% over 119 checks (against the 15.5% a
+ * 40-order sample suggested), so phase 2 is worth doing — just not first.
  */
-export const LOOKBACK_STATUS_SOURCE = 'system' as const;
+export const LOOKBACK_MAX_AGE_DAYS = 90;
 
-/** Marker prefixed to `order_status_history.notes` for look-back rows. */
-export const LOOKBACK_NOTE_PREFIX = '[lookback_sync]';
+/** The full design window, for when phase 1 is proven. Not swept today. */
+export const LOOKBACK_PHASE2_MAX_AGE_DAYS = 180;
+
+/**
+ * `order_status_history.source` for rows this job writes.
+ *
+ * A real enum value, not a marker in free text — provenance belongs in a typed
+ * column. It requires the hand-applied migration in
+ * docs/migration-lookback-sync-enum.sql to be present in the database FIRST:
+ * without it every write fails with `invalid input value for enum`, and a dry
+ * run cannot catch that because a dry run writes nothing.
+ */
+export const LOOKBACK_STATUS_SOURCE = 'lookback_sync' as const;
 
 /** Statuses meaning SoftPro considers the file finished. */
 const TERMINAL = new Set<OperationalStatus>(['closed', 'completed', 'canceled', 'duplicate']);
@@ -53,7 +58,9 @@ export type LookbackBand = '30-90d' | '90-180d' | 'other';
 
 export function bandFor(ageDays: number): LookbackBand {
   if (ageDays >= LOOKBACK_MIN_AGE_DAYS && ageDays < 90) return '30-90d';
-  if (ageDays >= 90 && ageDays < LOOKBACK_MAX_AGE_DAYS) return '90-180d';
+  // Still classifiable so phase-2 reporting works unchanged, even though the
+  // active sweep stops at LOOKBACK_MAX_AGE_DAYS.
+  if (ageDays >= 90 && ageDays < LOOKBACK_PHASE2_MAX_AGE_DAYS) return '90-180d';
   return 'other';
 }
 

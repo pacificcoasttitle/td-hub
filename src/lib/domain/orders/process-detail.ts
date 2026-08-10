@@ -128,6 +128,21 @@ export interface ProcessOrderDetailOptions {
    * keeps import/webhook behavior: empty → null.
    */
   preserveExistingOnEmpty?: boolean;
+  /**
+   * `order_status_history.source` for rows written by this call.
+   *
+   * The look-back sync passes 'lookback_sync' so a bulk correction is
+   * distinguishable from ordinary sync activity — the dashboard activity feed
+   * excludes it, otherwise one backfill would bury days of real events.
+   * Defaults to the import/webhook value.
+   */
+  statusHistorySource?: 'softpro_sync' | 'manual' | 'system' | 'webhook';
+  /**
+   * Prepended to `order_status_history.notes`. The look-back sync uses a stable
+   * marker here because `source` is an enum it cannot extend without a
+   * migration — see LOOKBACK_NOTE_PREFIX.
+   */
+  statusHistoryNotePrefix?: string;
 }
 
 export async function processOrderDetail(
@@ -139,6 +154,8 @@ export async function processOrderDetail(
 
   const preserveExistingOnEmpty = options.preserveExistingOnEmpty === true;
   const emptyField = preserveExistingOnEmpty ? undefined : null;
+  const statusHistorySource = options.statusHistorySource ?? 'softpro_sync';
+  const notePrefix = options.statusHistoryNotePrefix ? `${options.statusHistoryNotePrefix} ` : '';
 
   const salesReps = options.salesReps ?? await loadSalesReps();
   const titleOfficers = options.titleOfficers ?? await loadTitleOfficers();
@@ -215,8 +232,8 @@ export async function processOrderDetail(
       await db.insert(orderStatusHistory).values({
         orderId: existing.id,
         status: mappedStatus,
-        source: 'softpro_sync',
-        notes: `Import: status changed from ${existing.operationalStatus} to ${mappedStatus}`,
+        source: statusHistorySource,
+        notes: `${notePrefix}Import: status changed from ${existing.operationalStatus} to ${mappedStatus}`,
       });
     }
   } else {
@@ -253,8 +270,8 @@ export async function processOrderDetail(
     await db.insert(orderStatusHistory).values({
       orderId: newOrder!.id,
       status: operationalStatus,
-      source: 'softpro_sync',
-      notes: 'Imported via GetOrderDetails',
+      source: statusHistorySource,
+      notes: `${notePrefix}Imported via GetOrderDetails`,
     });
 
     await refreshOfficerContact(titleOfficerId, item.TitleOfficerContact);

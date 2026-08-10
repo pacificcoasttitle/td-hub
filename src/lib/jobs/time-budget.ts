@@ -55,6 +55,16 @@ export const UNIT_P99_MS = {
    * timeout precisely so a hung request cannot blow the budget.
    */
   'softpro.verify_sync': 31_000,
+  /**
+   * One order: a get_order_details call this job caps at 30s itself, plus the
+   * 250ms inter-call delay and the processOrderDetail write.
+   *
+   * Enforced rather than observed, same as verify_sync — and here that matters
+   * more, because the observed tail is severe: over 4,330 calls in 7 days,
+   * p50 2.2s but p95 21s, p99 42s, max 65s. Sizing this off the median would
+   * put the run past the ceiling on any bad vendor day.
+   */
+  'softpro.lookback_sync': 31_000,
 } as const;
 
 export type BudgetedJob = keyof typeof UNIT_P99_MS;

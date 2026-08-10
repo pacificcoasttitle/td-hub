@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, orderStatusHistory } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
+import { LOOKBACK_NOTE_PREFIX } from '@/lib/domain/orders/lookback-diff';
 
 const querySchema = z.object({
   limit: z.coerce.number().min(1).max(50).default(10),
@@ -31,6 +32,14 @@ export async function GET(req: NextRequest) {
       })
       .from(orderStatusHistory)
       .innerJoin(orders, eq(orderStatusHistory.orderId, orders.id))
+      // Exclude the look-back sync. It corrects hundreds of stale orders in a
+      // single pass, and this feed is an unfiltered "most recent N" — without
+      // this, one backfill run buries days of genuine activity behind a wall of
+      // identical bulk corrections. The corrections are still visible on each
+      // order's own milestone history; they just do not claim the feed.
+      // coalesce, because notes is nullable and `NULL not like ...` is NULL,
+      // which would silently drop every row without a note.
+      .where(sql`coalesce(${orderStatusHistory.notes}, '') not like ${LOOKBACK_NOTE_PREFIX + '%'}`)
       .orderBy(desc(orderStatusHistory.changedAt))
       .limit(limit);
 

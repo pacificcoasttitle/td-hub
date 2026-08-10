@@ -6,7 +6,12 @@ import { ActivityFeed } from '@/components/shared/activity-feed';
 import { NotesTab } from './notes-tab';
 import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
 import { formatOrderDate, formatOrderDateTime } from '@/lib/domain/orders/date-format';
-import { formatCounty, formatOrderMoney } from '@/lib/domain/orders/order-format';
+import {
+  formatCounty,
+  formatOrderMoney,
+  isMeaningfulMoney,
+  isRefinanceTransaction,
+} from '@/lib/domain/orders/order-format';
 import { statusLabel } from '@/lib/domain/orders/status-format';
 
 interface Assignment {
@@ -15,7 +20,7 @@ interface Assignment {
   email?: string | null;
 }
 
-interface OrderDetail {
+export interface OrderDetail {
   id: number; fileNumber: string; operationalStatus: string;
   propertyStreet: string | null; propertyCity: string | null; propertyState: string | null; propertyZip: string | null;
   propertyCounty: string | null; propertyApn: string | null; propertyLegalDescription: string | null;
@@ -201,9 +206,6 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
     return () => clearTimeout(timeout);
   }, [open, base]);
 
-  const seller = order ? [order.sellerFirstName, order.sellerLastName].filter(Boolean).join(' ') : '';
-  const buyer = order ? [order.buyerFirstName, order.buyerLastName].filter(Boolean).join(' ') : '';
-
   return (
     <ModalShell open={open} onClose={onClose} title={`Order ${fileNumber}`} subtitle={address} size="xl" accentColor={accentColor}>
       {loading ? (
@@ -223,19 +225,7 @@ export function DetailModal({ open, onClose, orderId, fileNumber, address, isCli
           <div className="p-5">
             {tab === 'Overview' && (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <F l="Status" v={statusLabel(order.operationalStatus)} />
-                  <F l="Transaction" v={order.transactionType ?? '—'} />
-                  <F l="Product" v={order.productType ?? '—'} />
-                  <F l="Opened" v={formatOrderDate(order.openedAt)} />
-                  <F l="Closed" v={formatOrderDate(order.closedAt)} />
-                  <F l="Sales Price" v={displayMoney(order.salesPrice)} />
-                  <F l="Loan Amount" v={displayMoney(order.loanAmount)} />
-                  <F l="Seller" v={seller || '—'} />
-                  <F l="Buyer" v={buyer || '—'} />
-                  {/* Staff-only: client detail omits source; UI gates on !isClient. */}
-                  {!isClient && <F l="Source" v={formatSource(order.source)} />}
-                </div>
+                <OverviewFields order={order} isClient={isClient} />
                 {/* Staff-only: client path never receives assignments (API + applyVisibility). */}
                 {!isClient && order.assignments && (
                   <AssignmentsBlock assignments={order.assignments} />
@@ -386,6 +376,50 @@ function normalizeOrderDetail(data: AdminDetailResponse | LegacyDetailResponse |
 function normalizeMilestones(data: AdminDetailResponse | LegacyDetailResponse | null): Milestone[] {
   if (!data || isLegacyDetailResponse(data)) return [];
   return data.milestones ?? [];
+}
+
+/**
+ * The Overview tab's field grid. Split out of DetailModal (which can only fill
+ * itself from a fetch inside useEffect) so the render rules below can be tested
+ * directly against real order shapes.
+ */
+export function OverviewFields({ order, isClient }: { order: OrderDetail; isClient?: boolean }) {
+  const seller = [order.sellerFirstName, order.sellerLastName].filter(Boolean).join(' ');
+  const buyer = [order.buyerFirstName, order.buyerLastName].filter(Boolean).join(' ');
+  const isRefi = isRefinanceTransaction(order.transactionType);
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <F l="Status" v={statusLabel(order.operationalStatus)} />
+      <F l="Transaction" v={order.transactionType ?? '—'} />
+      <F l="Product" v={order.productType ?? '—'} />
+      <F l="Opened" v={formatOrderDate(order.openedAt)} />
+      <F l="Closed" v={formatOrderDate(order.closedAt)} />
+      {/*
+        On a refinance there is no sale and no seller: SoftPro returns
+        SalesPrice "0" and Sellers: null, so these two are correct-empty rather
+        than missing. Rendering them as "—" reads on screen as data we failed
+        to fetch.
+
+        Purchases keep both fields even when blank — a purchase with no seller
+        IS a real gap, and hiding it would bury it.
+      */}
+      {!isRefi && <F l="Sales Price" v={displayMoney(order.salesPrice)} />}
+      {/*
+        Loan Amount is value-gated for EVERY transaction type, not type-gated:
+        GetOrderDetails carries no loan field at all, so it is blank on 6,700 of
+        6,702 orders. It reappears by itself for the orders that do have one,
+        and once the API team ships the field.
+      */}
+      {isMeaningfulMoney(order.loanAmount) && (
+        <F l="Loan Amount" v={displayMoney(order.loanAmount)} />
+      )}
+      {!isRefi && <F l="Seller" v={seller || '—'} />}
+      <F l="Buyer" v={buyer || '—'} />
+      {/* Staff-only: client detail omits source; UI gates on !isClient. */}
+      {!isClient && <F l="Source" v={formatSource(order.source)} />}
+    </div>
+  );
 }
 
 function F({ l, v }: { l: string; v: string }) {

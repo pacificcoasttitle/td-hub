@@ -1,4 +1,9 @@
 import { detailsRow as row, esc } from './email-layout';
+import {
+  isMeaningfulMoney,
+  isPurchaseTransaction,
+  isRefinanceTransaction,
+} from '@/lib/domain/orders/order-format';
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? 'https://hub.pctitle.com').replace(/\/+$/, '');
 const LOGO_URL = 'https://www.pct.com/logo2.png';
@@ -68,28 +73,21 @@ export interface FullConfirmationData {
   isTitlePointActive: boolean;
 }
 
-/** True for a displayable money string that is not empty/dash/zero. */
-export function isMeaningfulMoney(value: string | null | undefined): boolean {
-  if (!value) return false;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === '—' || trimmed === '-' || trimmed.toLowerCase() === 'n/a') return false;
-  const normalized = trimmed.replace(/[$,\s]/g, '');
-  if (!normalized) return false;
-  const n = Number(normalized);
-  if (Number.isFinite(n) && n === 0) return false;
-  return true;
-}
+// isMeaningfulMoney and the transaction-type predicates moved to
+// domain/orders/order-format so the order overview can share them without
+// pulling this email template into the client bundle. Re-exported here so
+// existing importers of isMeaningfulMoney keep working unchanged.
+export { isMeaningfulMoney };
 
 export function moneyForTransaction(
   transactionType: string | null | undefined,
   salesPrice: string | null | undefined,
   loanAmount: string | null | undefined,
 ): { label: string; value: string } | null {
-  const t = transactionType?.toLowerCase().trim() ?? '';
-  if (t === 'purchase') {
+  if (isPurchaseTransaction(transactionType)) {
     return isMeaningfulMoney(salesPrice) ? { label: 'Sales price', value: salesPrice! } : null;
   }
-  if (t === 'refinance') {
+  if (isRefinanceTransaction(transactionType)) {
     return isMeaningfulMoney(loanAmount) ? { label: 'Loan amount', value: loanAmount! } : null;
   }
   return null;

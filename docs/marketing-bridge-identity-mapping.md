@@ -1,244 +1,225 @@
 # Marketing bridge — identity mapping
 
-**Status:** investigation + proposal. No schema changes, no code.
-**Date:** Aug 10, 2026 · **Companion:** [marketing-bridge-design.md](./marketing-bridge-design.md)
+**Status:** measured against the confirmed pct.com roster (Aug 10). No code, no schema.
+**Companion:** [marketing-bridge-design.md](./marketing-bridge-design.md)
 
-How a TD Hub sales rep resolves to a Mailchimp audience — and why naive email
-matching breaks on exactly the people who matter most.
-
----
-
-## ⚠️ Read this before trusting the numbers
-
-**I cannot see the pct.com side.** `vcard_employees` and `mailchimp_audience_id`
-do not exist in the TD Hub database, and there is no pct.com connection string,
-credential, or client anywhere in this codebase — I checked every schema, every
-table name matching `vcard|employee|mailchimp|audience|subscriber`, and every
-column matching `mailchimp|audience`. All returned nothing.
-
-So this document is built from:
-
-- **Measured, verifiable:** everything on the TD Hub side — rep roster, order
-  volume, listing-agent counts, emails, house accounts. All queried from prod.
-- **Taken from the ticket, NOT verified by me:** Team Meza → Jorge Mesa's TMG
-  audience; Angeline Wu is Angeline Ahn / `awu@pct.com`; Nicholas Watt is
-  `nwatt@pct.com`; Kevin Green has no marketing row.
-- **Assumed, needs checking:** that the remaining `@pct.com` reps have a
-  `vcard_employees` row *with* a populated `mailchimp_audience_id`.
-
-That last assumption is doing real work in the coverage number. §6 lists exactly
-what to check to convert it into a fact.
+How a TD Hub sales rep resolves to a Mailchimp audience.
 
 ---
 
-## 1. Why naive email matching fails
+## 1. Headline
 
-46 reps opened **6,286 orders** in the last 12 months. Matching
-`contacts.email` to `vcard_employees.email` fails or misleads on:
+| | Rep-agent pairs | Order volume |
+|---|---|---|
+| **Routable (nominal)** | **741 / 844 = 87.8%** | **5,134 / 6,286 = 81.7%** |
+| **Realistic band** | **50.4% – 85.8%** | see §5 |
 
-| Rep | TD email | Marketing identity | Orders (12mo) | % of volume |
+**The 87.8% is an upper bound that cannot be reached.** 372 of those pairs rest
+on reps *assumed* to match by email, and the roster arithmetic in §5 proves at
+least 12 of them have no marketing record at all. The honest number is a band,
+and every point of it is below the headline.
+
+## 2. Confirmed roster (Aug 10)
+
+34 active sales records — **23 with a Mailchimp audience, 11 without**.
+
+> **Readiness query correction, worth keeping.** `COUNT(mailchimp_audience_id)`
+> counts empty strings as present, so it overstates readiness. Use:
+> ```sql
+> COUNT(*) FILTER (WHERE NULLIF(TRIM(mailchimp_audience_id), '') IS NOT NULL)
+> ```
+> Any future roster-health check should use this form. The same trap applies to
+> our side — `contacts.email` has the same empty-string-vs-NULL ambiguity.
+
+## 3. Classification of all 46 active TD reps
+
+Measured over 12 months: 6,286 orders, 844 rep-agent pairs.
+
+| Bucket | Reps | Orders | % vol | Pairs | % pairs |
+|---|---|---|---|---|---|
+| ✅ `routable_explicit` | 6 | 2,393 | 38.1% | 369 | 43.7% |
+| ⚠️ `routable_email_assumed` | 30 | 2,741 | 43.6% | 372 | 44.1% |
+| ⚪ `skipped_no_audience` | 5 | 503 | 8.0% | 41 | 4.9% |
+| 🔴 `blocked` | 1 | 12 | 0.2% | 5 | 0.6% |
+| ⚪ `rep_unmapped` | 1 | 51 | 0.8% | 0 | 0.0% |
+| ⛔ `denylisted` | 3 | 586 | 9.3% | 57 | 6.8% |
+
+### 3a. Explicit bridge rows — confirmed audiences
+
+| TD rep | Marketing identity | Audience | Orders | Pairs |
 |---|---|---|---|---|
-| **Angeline Wu** | `aahn@angelineahn.com` | Angeline **Ahn** / `awu@pct.com` | **815** | 13.0% |
-| **Team Meza** | `teammeza@pct.com` | **Jorge Mesa**'s TMG audience | **750** | 11.9% |
-| **Kevin Green** | `kgreen@pct.com` | *no marketing row* | **350** | 5.6% |
-| **Ventura House Account** | `ventura1@pct.com` | must map to **nothing** | 229 | 3.6% |
-| **Orange County House Account** | *(no email)* | must map to **nothing** | 192 | 3.1% |
-| **Glendale House Account** | *(no email)* | must map to **nothing** | 165 | 2.6% |
-| **Nicholas Watt** | `nick@joinnickwatt.com` | `nwatt@pct.com` | 138 | 2.2% |
+| Angeline Wu | Angeline Ahn (`awu@pct.com`) | `51b5235061` | 815 | 44 |
+| Team Meza | Jorge Mesa (TMG) | `545f3afd67` | 750 | 120 |
+| **Lopez Team** | **Hugo Lopez** (`teamlopez@pct.com`) | `cea2911e34` | 515 | **145** |
+| Title Team | Nicole Ahn (`titleteam@pct.com`) | `ce54190039` | 171 | 34 |
+| Nicholas Watt | Nick Watt (`nwatt@pct.com`) | `2cc3f87657` | 138 | 25 |
+| Jorge Mesa | Jorge Mesa (TMG) | `545f3afd67` | 4 | 1 |
 
-**2,639 orders — 42.0% of all volume — are wrong or absent under email-only
-matching.** Not an edge case: the #1 and #2 reps are both in this table.
+**Alias convergence:** Team Meza and Jorge Mesa resolve to the *same*
+`545f3afd67`. Two bridge rows, one audience. The audience id must never be
+copied onto members as an attribute — it is the destination, not a property of
+the subscriber, or the convergence turns into a duplicate list on the next edit.
 
-Two failure shapes, and they are not symmetric:
+The team mailboxes were the open question in the previous revision and they all
+resolved — **Lopez Team alone is 145 pairs, the largest single pool in the
+company.** That is the bulk of the jump from 69.6% to 87.8%.
 
-- **Silent miss** (Angeline, Nicholas): different domain entirely → no match →
-  those agents never reach an audience. Quiet, and the highest-volume rep is
-  affected.
-- **Silent mis-route** (Team Meza): a team alias that *would* match a
-  `teammeza@` row if one existed, but belongs to Jorge Mesa's audience. Worse
-  than a miss — subscribers land somewhere plausible but wrong.
+### 3b. Blocked — distinct from unmapped
 
-There is also a name/email tripwire worth flagging: **Dan Culnane** is
-`kculnane@pct.com`. A matcher that falls back to first-initial+surname would
-match him to a "K. Culnane" that may or may not be the same person.
+| TD rep | Audience | Orders | Pairs |
+|---|---|---|---|
+| Title Gals | `0cae582d6c` — owner **Janelly Marquez, INACTIVE** | 12 | 5 |
 
-## 2. Proposed bridge table
+An audience exists, so this is not `rep_unmapped`; but its owner is inactive, so
+ingesting would file subscribers under someone who has left. **`blocked` is its
+own terminal result** — it must not be silently retried, and it must not be
+"helpfully" resolved by matching to the nearest active person.
 
-On **pct.com**, next to the marketing roster it resolves against.
+### 3c. `skipped_no_audience` — active record, no audience
 
-```sql
-marketing_rep_audience (
-  id                    serial primary key,
-  td_rep_identity       text not null unique,   -- 'contact:22117' — stable, survives email changes
-  td_rep_email          text,                   -- recorded for humans, NOT the matcher
-  td_rep_name           text,
-  mailchimp_audience_id text,                   -- NULL = deliberately no audience
-  mapping_kind          text not null,          -- 'explicit' | 'house_account' | 'no_audience'
-  note                  text,                   -- why this row exists
-  created_at            timestamptz default now(),
-  updated_at            timestamptz default now()
-)
-```
+Of the 11 named, only **5 have any TD order volume**:
 
-`td_rep_identity` is the TD Hub **contact id**, not the email. Angeline is the
-argument: her address is a personal domain that could change tomorrow, while her
-contact id is stable. Emails are recorded for humans to read, never matched on.
+| Rep | Orders | Pairs |
+|---|---|---|
+| Kevin Green | 350 | 17 |
+| Laurie Briggs | 92 | 14 |
+| Jane Phan | 58 | 9 |
+| Jesse Lopez | 1 | 1 |
+| Gerardo Hernandez *(= "Jerry Hernandez"?)* | 2 | 0 |
+| **Total** | **503** | **41** |
 
-**A NULL `mailchimp_audience_id` with `mapping_kind='house_account'` is a
-decision, not a gap.** That distinction is the point of `mapping_kind` — it
-separates "we decided this routes nowhere" from "nobody has looked at this yet",
-which otherwise look identical and get "fixed" by someone helpful.
+The other six — Al Alfonso, Anthony Zamora, Edgar Rivas, Izzy Lopez, Justin
+Dominguez, Michael Caballero — have **zero TD orders in 12 months**. Giving them
+audiences unlocks nothing today. That materially shrinks the "11 reps need
+audiences" ask; see §6.
 
-### Precedence — strict, and it never guesses
+⚠️ **`Jerry Hernandez` vs TD's `Gerardo Hernandez`** is a probable same-person
+match I have *not* confirmed. It is worth 0 pairs, so it changes no number —
+but it is the same class of trap as Culnane and should be settled by a human,
+not inferred.
 
-```
-1. EXPLICIT   bridge row for td_rep_identity
-                 → audience_id, or NULL for house/no-audience (terminal)
-2. EMAIL      exact, case-insensitive match on vcard_employees.email
-                 → that row's mailchimp_audience_id
-3. UNMAPPED   return rep_unmapped. Do not fuzzy-match, do not fall back to
-              name similarity, do not pick a default audience.
-```
+**These must never count as success.** `skipped_no_audience` means "we know who
+this is, they have no list" — a roster fact, not a delivery.
 
-Rule 3 is the load-bearing one. The cost of a miss is one agent not receiving
-marketing; the cost of a wrong guess is a client's contact landing in a
-competitor-colleague's list. Those are not comparable, so the tie always breaks
-toward doing nothing. `rep_unmapped` is designed to be **visible** — it is the
-roster-hygiene backlog, not an error to suppress.
+### 3d. `rep_unmapped` — and the case that proves the rule
 
-## 3. The actual mapping
+**Dan Culnane** (51 orders) has **no vcard record**. HR confirms his address is
+`dculnane@pct.com`.
 
-Ordered by TD volume. "Agents" = distinct listing-agent emails routed through
-that rep in 12 months (844 rep-agent pairs total).
+> **`kculnane@pct.com` is KATIE Culnane — a different person.**
 
-### 3a. Needs an EXPLICIT row (email match fails or misleads)
+TD Hub stores Dan's contact email as `kculnane@pct.com`. So a matcher with *any*
+fuzzy or first-initial fallback would have matched Dan Culnane to Katie
+Culnane's record and **subscribed Dan's listing agents into Katie's audience** —
+silently, with a plausible-looking match and no error anywhere.
 
-| Rep | Orders | Agents | Maps to | Why |
-|---|---|---|---|---|
-| Angeline Wu | 815 | 44 | `awu@pct.com`'s audience | personal domain in TD |
-| Team Meza | 750 | 120 | **Jorge Mesa / TMG** | team alias → individual |
-| Nicholas Watt | 138 | 25 | `nwatt@pct.com`'s audience | personal domain in TD |
-| Jorge Mesa | 4 | 1 | **same TMG audience** | must not be a second list |
+This is the concrete justification for precedence terminating at
+`rep_unmapped`. The cost of stopping is 0 pairs unrouted. The cost of guessing
+is a rep's client relationships appearing in a colleague's marketing list.
+**Never fuzzy-match. Never fall back to initials. Never pick a default
+audience.**
 
-Note Jorge Mesa exists *separately* in TD with 4 orders. Both he and Team Meza
-must resolve to one audience, or TMG's list is split in two.
+### 3e. `denylisted` — house accounts
 
-### 3b. Must map to NOTHING (house accounts)
-
-| Rep | Orders | Agents |
+| Account | Orders | Pairs |
 |---|---|---|
 | Ventura House Account | 229 | 26 |
 | Orange County House Account | 192 | 17 |
 | Glendale House Account | 165 | 14 |
-| **Total** | **586 (9.3%)** | **57** |
+| **Total** | **586 (9.3%)** | **57 (6.8%)** |
 
-Unassigned-desk buckets, not people. Two have no email at all, so they cannot
-match by rule 2 — but they still need explicit `house_account` rows so they read
-as *decided* rather than *missed*.
+**Explicitly denylisted, not left to fail roster matching.** Two have no email
+at all, so they would fail to match anyway — but "fails to match" and "must
+never be ingested" are different states, and relying on the accident of a
+missing email is not a control. A denylist entry survives someone helpfully
+adding `ventura1@pct.com` to the roster.
 
-### 3c. No audience exists
-
-| Rep | Orders | Agents | Note |
-|---|---|---|---|
-| Kevin Green | 350 (5.6%) | 17 | no marketing row (per ticket) |
-
-`skipped_no_audience`, not `rep_unmapped` — we know who he is; he has no list.
-Either create one or accept 17 agents going nowhere. **A decision, not a bug.**
-
-### 3d. Shared team mailboxes — DECISION NEEDED
-
-| Rep | Orders | Agents | Question |
-|---|---|---|---|
-| **Lopez Team** | 515 | **145** | own audience, or an individual's? |
-| Title Team | 171 | 34 | is this a marketing entity at all? |
-| Title Gals | 12 | 5 | same |
-
-**Lopez Team owns the single largest agent pool in the company — 145 distinct
-listing agents, more than Team Meza's 120.** The ticket named Team Meza as the
-alias case but not these. They have the same shape: a shared `@pct.com` mailbox
-that may or may not correspond to a marketing audience. Left `rep_unmapped` by
-default, because guessing here would misroute 184 agents.
-
-### 3e. Excluded — test / non-marketing
-
-| Rep | Orders | Note |
-|---|---|---|
-| Aashima Narang | 4 | `@yopmail.com` — disposable test domain |
-| Gerardo Hernandez | 2 | internal |
-
-### 3f. Expected to resolve by email match (rule 2)
-
-The remaining **34 reps** — Sandra Millar, Sonia Flores, David Gomez, Simon Wu,
-Justin Nouri, Corey Velasquez, Linda Ruiz, Michael Nouri, Richard Bohn, Laurie
-Briggs, Veronica Sanchez, Mark Neveu, Jane Phan, Neil Torquato, Christy Coffey,
-Kevin Cameron, Dan Culnane, Louis Morreale, Tony Baumgartner, Zaccaria Ackad,
-Chuck Cota, Nini Kerns, Ronnie Castillo, Maria Basilio, Rouanne Garcia, Janelly
-Marquez, Saeed Ghaffari, Nelson Torres, Felicia Pantoja, Jennifer Simms, David
-Ortiz, Jesse Lopez, Vito D'Alessandro, Sandra Millar — all `@pct.com`, all
-expected to match on email.
-
-**Expected, not verified** — this is the §6 assumption. Dan Culnane
-(`kculnane@pct.com`) is the one to check first.
-
-## 4. Coverage
-
-By **rep-agent pairs** (844 total — the thing that actually gets subscribed):
-
-| Bucket | Pairs | % |
-|---|---|---|
-| ✅ Resolve by email (34 reps, assumed) | 397 | 47.0% |
-| ✅ Resolve via explicit row (Angeline, Team Meza, N. Watt, J. Mesa) | 190 | 22.5% |
-| **Routable subtotal** | **587** | **69.6%** |
-| ⚪ House accounts — deliberately nothing | 57 | 6.8% |
-| ⚪ Kevin Green — no audience | 17 | 2.0% |
-| 🟡 Team mailboxes — decision pending | 184 | 21.8% |
-| ⚪ Test/internal | 2 | 0.2% |
-
-### **Coverage: 69.6% of listing agents route to an audience today.**
-
-- **91.4%** if the three team mailboxes get audiences (§3d) — the single
-  highest-leverage decision available.
-- **93.4%** if Kevin Green also gets one.
-- The remaining 6.6% is house accounts, which is correct behaviour, not a gap.
-
-Without the bridge table — email matching alone — routable drops to **47.0%**,
-and 22.5% of pairs would either silently vanish or land in the wrong list.
-**The bridge table is worth 22.5 points of coverage and eliminates the
-mis-routing class entirely.**
-
-## 5. Reps needing a roster fix
-
-Ranked by what it unlocks:
-
-1. **Lopez Team** (145 agents) — decide entity, then audience or exclusion.
-2. **Team Meza / Jorge Mesa** (121 combined) — confirm one shared TMG audience.
-3. **Angeline Wu** (44) — confirm `awu@pct.com` is the marketing row.
-4. **Title Team** (34) — marketing entity or not?
-5. **Nicholas Watt** (25) — confirm `nwatt@pct.com`.
-6. **Kevin Green** (17) — create an audience, or accept the skip.
-7. **Title Gals** (5) — as Title Team.
-
-## 6. To turn assumptions into facts
-
-Run against pct.com, which I could not reach:
+## 4. Bridge table — seed rows
 
 ```sql
--- 1. Which of the 34 email-match reps actually have an audience?
-SELECT email, mailchimp_audience_id
-  FROM vcard_employees
- WHERE lower(email) IN ( … the 34 @pct.com addresses … );
--- Any NULL audience_id = skipped_no_audience, not a match.
-
--- 2. Do the named identities exist?
-SELECT email, mailchimp_audience_id FROM vcard_employees
- WHERE lower(email) IN ('awu@pct.com','nwatt@pct.com','jmesa@pct.com','kgreen@pct.com');
-
--- 3. Do the team mailboxes exist as marketing entities?
-SELECT email, mailchimp_audience_id FROM vcard_employees
- WHERE lower(email) IN ('teamlopez@pct.com','titleteam@pct.com','titlegals@pct.com','teammeza@pct.com');
+-- mapping_kind: explicit | blocked | house_account | no_audience
+INSERT INTO marketing_rep_audience
+  (td_rep_identity, td_rep_email, td_rep_name, mailchimp_audience_id, mapping_kind, note) VALUES
+ ('contact:22117','aahn@angelineahn.com','Angeline Wu','51b5235061','explicit','Angeline Ahn; TD holds a personal domain'),
+ ('contact:<meza>','teammeza@pct.com','Team Meza','545f3afd67','explicit','Jorge Mesa / TMG — converges with Jorge Mesa row'),
+ ('contact:<jmesa>','jmesa@pct.com','Jorge Mesa','545f3afd67','explicit','same TMG audience as Team Meza — do NOT split'),
+ ('contact:<lopez>','teamlopez@pct.com','Lopez Team','cea2911e34','explicit','Hugo Lopez'),
+ ('contact:<ttm>','titleteam@pct.com','Title Team','ce54190039','explicit','Nicole Ahn'),
+ ('contact:<nwatt>','nick@joinnickwatt.com','Nicholas Watt','2cc3f87657','explicit','Nick Watt; TD holds a personal domain'),
+ ('contact:<tgals>','titlegals@pct.com','Title Gals',NULL,'blocked','audience 0cae582d6c owned by INACTIVE Janelly Marquez'),
+ ('contact:<ventura>','ventura1@pct.com','Ventura House Account',NULL,'house_account','unassigned desk — never ingest'),
+ ('contact:<oc>',NULL,'Orange County House Account',NULL,'house_account','unassigned desk — never ingest'),
+ ('contact:<glendale>',NULL,'Glendale House Account',NULL,'house_account','unassigned desk — never ingest');
 ```
 
-Result 1 is the one that moves the 69.6% number. Every `@pct.com` rep without a
-populated `mailchimp_audience_id` shifts pairs out of "routable" and into
-`skipped_no_audience` — so the real figure is **at most** 69.6%, and could be
-materially lower. I would not quote it externally until that query has run.
+Keyed on TD **contact id**, never email — Angeline and Nicholas both hold
+personal domains that can change, and Dan Culnane's email points at a different
+human entirely.
+
+`mapping_kind` distinguishes *decided* from *unexamined*: a NULL audience with
+`house_account` is a policy, a NULL with no row is a backlog item. Without that
+column they are indistinguishable and someone eventually "fixes" the policy.
+
+## 5. Why the headline is a band, not a number
+
+The 372 assumed pairs are bounded by roster arithmetic:
+
+```
+  34  active pct.com records
+-  5  consumed by the explicit mappings
+       (Angeline Ahn, Jorge Mesa, Hugo Lopez, Nicole Ahn, Nick Watt)
+- 11  active records with NO audience
+= 18  records left to cover 30 assumed-routable TD reps
+```
+
+**At least 12 of the 30 have no marketing record and will return
+`rep_unmapped`.** Dan Culnane already proves the pattern exists.
+
+Which 12 decides the answer, and the spread is enormous:
+
+| If the 12 unrecorded reps are… | Pairs lost | Coverage |
+|---|---|---|
+| the smallest | 17 | **85.8%** |
+| the largest | 316 | **50.4%** |
+
+Most exposed, by pairs: **Simon Wu (57), Richard Bohn (43), David Gomez (42),
+Sonia Flores (35), Corey Velasquez (34)**, then Christy Coffey (21), Michael
+Nouri (19), Veronica Sanchez (15), Rouanne Garcia (15), Linda Ruiz (13), Mark
+Neveu (12), Justin Nouri (10).
+
+**One query settles it** — for the 30 names, return `email, mailchimp_audience_id`
+from `vcard_employees`, using the `NULLIF(TRIM(...))` form from §2. Every miss
+is a `rep_unmapped` row; every present-but-empty is `skipped_no_audience`.
+
+## 6. Roster-hygiene upside — the business ask
+
+**Assigning audiences to the 11 no-audience reps: +4.9 points of pairs
+(41), +8.0 points of order volume (503). Coverage 87.8% → 92.7%.**
+
+Dominated by three people — Kevin Green (17), Laurie Briggs (14), Jane Phan (9)
+— which is 40 of the 41 pairs. **Six of the eleven have zero TD volume**, so the
+ask is really "give audiences to Kevin Green, Laurie Briggs and Jane Phan".
+
+Unblocking Title Gals (an active owner for `0cae582d6c`) adds 5 more → **93.2%**.
+
+### But the bigger prize is the missing records
+
+| Fix | Pairs unlocked | Points |
+|---|---|---|
+| Audiences for the 11 no-audience reps | 41 | +4.9 |
+| **Records + audiences for the ≥12 unrecorded reps** | **up to 316** | **up to +37.4** |
+
+**The missing-record gap is worth up to 7× the named ask.** 46 active TD reps
+against 34 active marketing records is the headline hygiene problem; the 11
+without audiences is the smaller, more visible one.
+
+Recommended order:
+1. **Run the §5 query** — converts the 50.4–85.8% band into a number and names
+   the missing records. Costs one query and is a precondition for the rest.
+2. **Create records + audiences for whichever of Simon Wu, Richard Bohn, David
+   Gomez, Sonia Flores, Corey Velasquez are missing** — the top five are 211
+   pairs on their own.
+3. **Audiences for Kevin Green, Laurie Briggs, Jane Phan** — +40 pairs.
+4. **Resolve Title Gals ownership** — +5, and clears a blocked state.
+5. **Confirm Jerry Hernandez = Gerardo Hernandez, and Dan Culnane's record** —
+   0 pairs today, but both are identity traps that will bite later.

@@ -104,8 +104,9 @@ X-Signature:   sha256=<hmac(secret, raw_body)>   # optional but recommended
   },
   "consent": {
     "basis": "transactional_relationship",  // OPEN — see §8
-    "captured_at": "2026-08-10T20:15:00Z",
-    "status": "OPEN_PENDING_COMPLIANCE"     // subscribed vs pending — not decided
+    "captured_at": "2026-08-10T20:15:00Z"
+    // NOTE: no status field. subscribed-vs-pending is the GATEWAY's config
+    // decision (§8), deliberately not something a caller can set.
   }
 }
 ```
@@ -120,6 +121,7 @@ work", which a bare HTTP code cannot.
 | `skipped_no_audience` | 200 | Rep resolved, but has no `mailchimp_audience_id` | success-skip; count it |
 | `skipped_denylist` | 200 | Internal / rep / house-account address | success-skip |
 | `skipped_unsubscribed` | 200 | Already `unsubscribed` or `cleaned` | **success-skip — never retry** |
+| `blocked` | 200 | Audience exists but its owner is inactive | success-skip; **never auto-resolve to another owner** |
 | `rep_unmapped` | 200 | No bridge row and no email match | success-skip; **surfaces roster gaps** |
 | `mailchimp_error` | 502 | Upstream failure | retry with backoff |
 | — | 401 | Bad/missing token | alert, do not retry |
@@ -131,10 +133,16 @@ work", which a bare HTTP code cannot.
   "subscriber_hash": "9f2c…", "already_present": true }
 ```
 
-The distinction between `skipped_no_audience` and `rep_unmapped` matters: the
-first means "we know who this is, they have no list"; the second means "we do
-not know who this is". They drive different fixes — one is a marketing-roster
-gap, the other a bridge-table gap.
+Three near-miss results are deliberately kept apart, because they drive
+different fixes and collapsing them hides the difference:
+
+- `skipped_no_audience` — we know who this is, they have no list (roster gap).
+- `blocked` — a list exists but its owner is inactive (ownership gap).
+- `rep_unmapped` — we do not know who this is (bridge-table or record gap).
+
+Measured today: 41 pairs, 5 pairs, and at least 12 reps' worth respectively —
+see the mapping doc. Reporting them as one "skipped" number would make the
+largest of the three invisible.
 
 ## 4. Idempotency
 

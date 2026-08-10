@@ -37,6 +37,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/jobs/run?name=softpro.lookback_sync",
+      "schedule": "*/15 1-14 * * *"
+    },
+    {
       "path": "/api/jobs/run?name=softpro.sync_new_users",
       "schedule": "0 5 * * *"
     },

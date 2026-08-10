@@ -128,6 +128,15 @@ export interface ProcessOrderDetailOptions {
    * keeps import/webhook behavior: empty → null.
    */
   preserveExistingOnEmpty?: boolean;
+  /**
+   * `order_status_history.source` for rows written by this call.
+   *
+   * The look-back sync passes 'lookback_sync' so a bulk correction is
+   * distinguishable from ordinary sync activity — the dashboard activity feed
+   * excludes it, otherwise one backfill would bury days of real events.
+   * Defaults to the import/webhook value.
+   */
+  statusHistorySource?: 'softpro_sync' | 'manual' | 'system' | 'webhook' | 'lookback_sync';
 }
 
 export async function processOrderDetail(
@@ -139,6 +148,7 @@ export async function processOrderDetail(
 
   const preserveExistingOnEmpty = options.preserveExistingOnEmpty === true;
   const emptyField = preserveExistingOnEmpty ? undefined : null;
+  const statusHistorySource = options.statusHistorySource ?? 'softpro_sync';
 
   const salesReps = options.salesReps ?? await loadSalesReps();
   const titleOfficers = options.titleOfficers ?? await loadTitleOfficers();
@@ -215,7 +225,7 @@ export async function processOrderDetail(
       await db.insert(orderStatusHistory).values({
         orderId: existing.id,
         status: mappedStatus,
-        source: 'softpro_sync',
+        source: statusHistorySource,
         notes: `Import: status changed from ${existing.operationalStatus} to ${mappedStatus}`,
       });
     }
@@ -253,7 +263,7 @@ export async function processOrderDetail(
     await db.insert(orderStatusHistory).values({
       orderId: newOrder!.id,
       status: operationalStatus,
-      source: 'softpro_sync',
+      source: statusHistorySource,
       notes: 'Imported via GetOrderDetails',
     });
 

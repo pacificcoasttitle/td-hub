@@ -1,0 +1,45 @@
+-- Migration: add_lookback_sync_to_status_change_source
+-- Date: 2026-08-10
+-- Purpose: Give the order look-back sync its own provenance value on
+--          order_status_history, so bulk corrections are distinguishable from
+--          ordinary SoftPro sync activity.
+--
+-- WHY HAND-APPLIED, NOT A DRIZZLE MIGRATION
+--   The migration runner does not reliably apply enum changes — an ALTER TYPE
+--   can pass silently without taking effect, which would leave the code writing
+--   a value the database still rejects. Enum changes are applied by hand and
+--   verified before the code that depends on them is deployed.
+--
+-- WHY IT MATTERS HERE
+--   status_change_source is an enum: softpro_sync | manual | system | webhook.
+--   Writing 'lookback_sync' before this runs fails with
+--     invalid input value for enum status_change_source: "lookback_sync"
+--   on EVERY corrected order. A dry run never surfaces it, because a dry run
+--   writes nothing — so the first place it would appear is the write pass,
+--   against production.
+--
+-- ORDER OF OPERATIONS (do not reorder)
+--   1. Apply this SQL to production.
+--   2. Verify with the SELECT at the bottom.
+--   3. Only then deploy the code that writes 'lookback_sync'.
+--
+-- SAFETY
+--   Additive and non-blocking. ADD VALUE does not rewrite the table, does not
+--   take an exclusive lock, and cannot invalidate existing rows. IF NOT EXISTS
+--   makes it idempotent, so re-running is harmless.
+--
+--   Postgres note: a value added by ALTER TYPE ... ADD VALUE cannot be used in
+--   the SAME transaction that adds it. Run this statement on its own (not
+--   wrapped in BEGIN/COMMIT with other work), which is how the Supabase SQL
+--   editor executes it by default.
+
+ALTER TYPE status_change_source ADD VALUE IF NOT EXISTS 'lookback_sync';
+
+-- ── Verification — expect four rows now plus 'lookback_sync' ────────────────
+-- SELECT enumlabel
+--   FROM pg_enum e
+--   JOIN pg_type t ON t.oid = e.enumtypid
+--  WHERE t.typname = 'status_change_source'
+--  ORDER BY e.enumsortorder;
+--
+-- Expected: softpro_sync, manual, system, webhook, lookback_sync

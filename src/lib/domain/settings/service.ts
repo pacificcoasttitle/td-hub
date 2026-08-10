@@ -77,6 +77,14 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
   },
   // ── Notification Shutoffs ──
   {
+    key: 'lookback_sync_shut_off',
+    label: 'Look-back Sync Shut Off',
+    description: 'When enabled, the order look-back sync stops taking new work on its next run. Takes effect without a deploy; the cursor is preserved so it resumes where it stopped.',
+    category: 'Notifications',
+    type: 'boolean',
+    defaultValue: 'false',
+  },
+  {
     key: 'prelim_summary_shut_off',
     label: 'Prelim Summary Shut Off',
     description: 'When enabled, prelim summary webhooks are received but not processed.',

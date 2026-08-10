@@ -21,6 +21,7 @@ import { importOrdersFromSoftPro } from '@/lib/jobs/handlers/import-orders';
 import { handleResolveOfficers } from '@/lib/jobs/handlers/resolve-order-officers';
 import { handleFetchPrelims } from '@/lib/jobs/handlers/fetch-prelims';
 import { handleVerifyOrderSync } from '@/lib/jobs/handlers/verify-order-sync';
+import { handleLookbackSync } from '@/lib/jobs/handlers/lookback-sync';
 import { handleSyncNewUsers } from '@/lib/jobs/handlers/sync-new-users';
 import { handleSyncAllContacts, handleSyncContactType } from '@/lib/jobs/handlers/sync-all-contacts';
 import { handleJobsWatchdog } from '@/lib/jobs/handlers/jobs-watchdog';
@@ -54,7 +55,7 @@ const TITLEPOINT_DRAIN_JOB_NAMES = new Set(['titlepoint.drain']);
  * return values — `jobs.payload` holds only the input. The drift detector writes
  * its counts back onto its own row so the ops panel can trend them.
  */
-const NEEDS_JOB_ID = new Set(['softpro.verify_sync']);
+const NEEDS_JOB_ID = new Set(['softpro.verify_sync', 'softpro.lookback_sync']);
 
 const JOB_HANDLERS: Record<string, JobHandler> = {
   'softpro.sync_recent_orders': (payload) =>
@@ -79,6 +80,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleFetchPrelims(),
   'softpro.verify_sync': (payload) =>
     handleVerifyOrderSync(payload),
+  'softpro.lookback_sync': (payload) =>
+    handleLookbackSync(payload),
   'softpro.sync_new_users': () =>
     handleSyncNewUsers(),
   'softpro.sync_all_contacts': () =>

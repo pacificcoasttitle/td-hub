@@ -223,3 +223,95 @@ Recommended order:
 4. **Resolve Title Gals ownership** — +5, and clears a blocked state.
 5. **Confirm Jerry Hernandez = Gerardo Hernandez, and Dan Culnane's record** —
    0 pairs today, but both are identity traps that will bite later.
+
+---
+
+## 7. The 30-rep verification ask (ready to send)
+
+The list below is the entire `routable_email_assumed` bucket — **372 rep-agent
+pairs, 2,745 orders, 44.1% of coverage** resting on an assumption. One pass over
+it collapses the 50.4%–85.8% band to a single number.
+
+**Two entries need handling before this is treated as a straight roster
+lookup** — see the notes under the table.
+
+| # | Rep (TD Hub) | Email TD Hub holds | Agents | Orders |
+|---|---|---|---|---|
+| 1 | **Simon Wu** | `swu@pct.com` | **57** | 203 |
+| 2 | **Richard Bohn** | `rbohn@pct.com` | **43** | 102 |
+| 3 | **David Gomez** | `dgomez@pct.com` | **42** | 207 |
+| 4 | **Sonia Flores** | `sflores@pct.com` | **35** | 380 |
+| 5 | **Corey Velasquez** | `cvelasquez@pct.com` | **34** | 170 |
+| 6 | Christy Coffey | `ccoffey@pct.com` | 21 | 55 |
+| 7 | Michael Nouri | `mnouri@pct.com` | 19 | 150 |
+| 8 | Veronica Sanchez | `vsanchez@pct.com` | 15 | 75 |
+| 9 | Rouanne Garcia | `rgarcia@pct.com` | 15 | 21 |
+| 10 | Linda Ruiz | `lruiz@pct.com` | 13 | 153 |
+| 11 | Mark Neveu | `mneveu@pct.com` | 12 | 67 |
+| 12 | Justin Nouri | `jnouri@pct.com` | 10 | 175 |
+| 13 | Sandra Millar | `smillar@pct.com` | 9 | 531 |
+| 14 | ⚠️ Janelly Marquez | `jmarquez@pct.com` | 9 | 20 | 
+| 15 | Louis Morreale | `lmorreale@pct.com` | 7 | 51 |
+| 16 | Nelson Torres | `ntorres@pct.com` | 6 | 16 |
+| 17 | Neil Torquato | `neil@pct.com` | 4 | 57 |
+| 18 | Saeed Ghaffari | `sghaffari@pct.com` | 4 | 20 |
+| 19 | Nini Kerns | `nkerns@pct.com` | 3 | 33 |
+| 20 | Jennifer Simms | `jsimms@pct.com` | 3 | 6 |
+| 21 | Chuck Cota | `ccota@pct.com` | 2 | 38 |
+| 22 | ⚠️ Aashima Narang | `aashimanarang@yopmail.com` | 2 | 4 |
+| 23 | David Ortiz | `dortiz@pct.com` | 2 | 3 |
+| 24 | Kevin Cameron | `kcameron@pct.com` | 1 | 54 |
+| 25 | Tony Baumgartner | `tbaumgartner@pct.com` | 1 | 47 |
+| 26 | Ronnie Castillo | `rcastillo@pct.com` | 1 | 30 |
+| 27 | Maria Basilio | `mbasilio@pct.com` | 1 | 27 |
+| 28 | Felicia Pantoja | `fpantoja@pct.com` | 1 | 10 |
+| 29 | Zaccaria Ackad | `zackad@pct.com` | 0 | 39 |
+| 30 | Vito D'Alessandro | `vdalessandro@pct.com` | 0 | 1 |
+
+**#14 Janelly Marquez — already known to be inactive.** She is the inactive owner
+of Title Gals' audience `0cae582d6c` (§3b), yet she has 20 orders and 9 agents of
+her *own* TD volume in the last 12 months. She should probably not be in this
+bucket at all; she is likely a second `blocked` or `rep_unmapped` case. Worth
+asking about directly rather than as part of the bulk lookup.
+
+**#22 Aashima Narang — a test account.** `@yopmail.com` is a disposable domain
+and is already on the denylist (design doc §2). Not a real rep; excluded from any
+audience regardless of the roster answer.
+
+So the genuine unknown is **28 reps / 361 pairs**, with the top five —
+Simon Wu, Richard Bohn, David Gomez, Sonia Flores, Corey Velasquez — accounting
+for **211 pairs (25.0% of all coverage) on their own.**
+
+Note #13 and #29/#30 for contrast: Sandra Millar is the #3 rep by order volume
+(531) but only 9 agents, while Zaccaria Ackad and Vito D'Alessandro carry 0
+listing agents. Order volume is not a proxy for marketing value here — pairs are.
+
+### SQL for the answer
+
+```sql
+SELECT email,
+       mailchimp_audience_id,
+       NULLIF(TRIM(mailchimp_audience_id), '') IS NOT NULL AS has_audience,
+       active
+  FROM vcard_employees
+ WHERE lower(email) IN (
+   'swu@pct.com','rbohn@pct.com','dgomez@pct.com','sflores@pct.com','cvelasquez@pct.com',
+   'ccoffey@pct.com','mnouri@pct.com','vsanchez@pct.com','rgarcia@pct.com','lruiz@pct.com',
+   'mneveu@pct.com','jnouri@pct.com','smillar@pct.com','jmarquez@pct.com','lmorreale@pct.com',
+   'ntorres@pct.com','neil@pct.com','sghaffari@pct.com','nkerns@pct.com','jsimms@pct.com',
+   'ccota@pct.com','dortiz@pct.com','kcameron@pct.com','tbaumgartner@pct.com',
+   'rcastillo@pct.com','mbasilio@pct.com','fpantoja@pct.com','zackad@pct.com',
+   'vdalessandro@pct.com'
+ );
+```
+
+Three outcomes per rep, and they are different problems:
+
+| Outcome | Result | Fix |
+|---|---|---|
+| Record + audience | `accepted` | none |
+| Record, no audience | `skipped_no_audience` | assign an audience |
+| **No record returned** | **`rep_unmapped`** | **create the vcard record** |
+
+Any email absent from the result set is the third case. Those are the ones that
+push the band toward 50.4%.

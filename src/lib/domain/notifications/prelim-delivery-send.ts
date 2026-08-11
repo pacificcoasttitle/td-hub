@@ -1,7 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { documents } from '@/lib/db/schema';
-import { downloadFile } from '@/lib/integrations/s3/client';
+import { downloadFile, getSignedUrl } from '@/lib/integrations/s3/client';
 import { sendEmail, type SendGridAttachment } from '@/lib/integrations/sendgrid/client';
 import { applyVisibility, getOrderReadModel } from '@/lib/domain/orders/read-model';
 import {
@@ -70,6 +70,8 @@ export interface PrelimDeliverySampleData {
   titleOfficerEmail: string | null;
   titleOfficerPhone: string | null;
   attachmentSizeBytes: number;
+  /** Placeholder stand-in for the presigned URL; the sample sender has no S3 object. */
+  attachmentUrl?: string | null;
 }
 
 interface OrderEmailContext {
@@ -86,6 +88,15 @@ interface PrelimDocumentAttachment {
   filename: string;
   contentType: string;
   sizeBytes: number;
+  /**
+   * Presigned S3 URL for the attachment pill.
+   *
+   * Recipients are EXTERNAL — escrow officers with no TD Hub login — so the
+   * authenticated download route would 401 them. Null when presigning fails;
+   * the pill then renders unlinked rather than pointing at a broken URL. The
+   * PDF is attached either way, so this degrades softly.
+   */
+  downloadUrl: string | null;
   attachment: SendGridAttachment;
 }
 
@@ -120,6 +131,9 @@ function buildTestBlock(intendedRecipients: ReviewedPrelimRecipients): { text: s
   };
 }
 
+/** S3 SigV4 caps presigned URLs at 7 days. */
+const PRELIM_LINK_EXPIRY_SECONDS = 7 * 24 * 60 * 60;
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -128,7 +142,7 @@ function formatBytes(bytes: number): string {
 
 function buildEmailContent(params: {
   context: OrderEmailContext;
-  attachment: Pick<PrelimDocumentAttachment, 'sizeBytes'>;
+  attachment: Pick<PrelimDocumentAttachment, 'sizeBytes' | 'downloadUrl'>;
   intendedRecipients: ReviewedPrelimRecipients;
   testMode: boolean;
 }): { html: string; text: string; subject: string } {
@@ -170,12 +184,29 @@ function buildEmailContent(params: {
 
   const detailRows = details.map(([label, value]) => detailsRow(label, value)).join('');
 
+  // Outlook's Word engine ignores border-radius on a <div> and renders
+  // display:inline-block as a flat box, so the pill is a one-cell table with the
+  // background on the <td> — the same shape as the button() helper.
+  //
+  // The anchor wraps the WHOLE label (glyph, filename and size) and is
+  // display:block, so the entire chip is the click target rather than a few
+  // words of it.
+  const pillInner = `<span style="color:${PCT_ORANGE};font-size:15px;margin-right:8px;">▣</span>${esc(attachmentLabel)}`;
+  const pillCellStyle = `background:#FFFFFF;border:1px solid ${BORDER_SOFT};border-radius:999px;padding:9px 14px;`;
+  const attachmentPill = attachment.downloadUrl
+    ? `<table cellpadding="0" cellspacing="0" style="margin:0 0 20px;"><tr>
+      <td style="${pillCellStyle}">
+        <a href="${esc(attachment.downloadUrl)}" target="_blank" style="color:${TEXT_PRIMARY};text-decoration:none;font-size:13px;font-weight:700;display:block;">${pillInner}</a>
+      </td>
+    </tr></table>`
+    : `<table cellpadding="0" cellspacing="0" style="margin:0 0 20px;"><tr>
+      <td style="${pillCellStyle}color:${TEXT_PRIMARY};font-size:13px;font-weight:700;">${pillInner}</td>
+    </tr></table>`;
+
   const body = `${testBlock?.html ?? ''}
     <p style="margin:0 0 10px;font-size:16px;font-weight:700;color:${PCT_NAVY};">Hello,</p>
     <p style="margin:0 0 18px;font-size:15px;color:${TEXT_PRIMARY};line-height:1.6;">${esc(intro)} <b>${esc(review)}</b></p>
-    <div style="display:inline-block;border:1px solid ${BORDER_SOFT};border-radius:999px;padding:9px 14px;margin:0 0 20px;background:#FFFFFF;color:${TEXT_PRIMARY};font-size:13px;font-weight:700;">
-      <span style="color:${PCT_ORANGE};font-size:15px;margin-right:8px;">▣</span>${esc(attachmentLabel)}
-    </div>
+    ${attachmentPill}
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border-radius:10px;margin:0 0 20px;border:1px solid ${BORDER_SOFT};">${detailRows}</table>
     <div style="background:${ORANGE_TINT};border-left:3px solid ${PCT_ORANGE};padding:14px 16px;margin:0 0 4px;">
       <p style="margin:0;font-size:14px;color:${TEXT_PRIMARY};line-height:1.6;"><strong>Questions about this prelim?</strong> Contact the title unit — reply to this email or call the number below.</p>
@@ -195,7 +226,10 @@ export function prelimDeliverySampleTemplate(data: PrelimDeliverySampleData): { 
       titleOfficerEmail: data.titleOfficerEmail,
       titleOfficerPhone: data.titleOfficerPhone,
     },
-    attachment: { sizeBytes: data.attachmentSizeBytes },
+    attachment: {
+      sizeBytes: data.attachmentSizeBytes,
+      downloadUrl: data.attachmentUrl ?? 'https://example.com/sample-prelim.pdf',
+    },
     intendedRecipients: {
       to: { email: 'escrow.officer@example.com', name: 'Escrow Officer', role: 'escrow_officer' },
       cc: [
@@ -258,8 +292,20 @@ async function loadPrelimPdfAttachment(orderId: number): Promise<PrelimDocumentA
     throw new Error(download.error?.message ?? 'Failed to download prelim PDF');
   }
 
+  // 7 days is the SigV4 maximum. A link that outlives the recipient's attention
+  // span is the point; if it does expire, the attached PDF still works, which is
+  // why a presign failure below is not fatal.
+  const signed = await getSignedUrl(prelim.storageKey, PRELIM_LINK_EXPIRY_SECONDS);
+  if (!signed.success || !signed.data) {
+    console.warn('[prelim-delivery] presign failed — sending an unlinked pill', {
+      documentId: prelim.id,
+      message: signed.error?.message,
+    });
+  }
+
   return {
     documentId: prelim.id,
+    downloadUrl: signed.success ? (signed.data ?? null) : null,
     filename: prelim.filename,
     contentType: prelim.contentType ?? 'application/pdf',
     sizeBytes: download.data.length,

@@ -4,6 +4,7 @@ import { documents } from '@/lib/db/schema';
 import { downloadFile, getSignedUrl } from '@/lib/integrations/s3/client';
 import { sendEmail, type SendGridAttachment } from '@/lib/integrations/sendgrid/client';
 import { applyVisibility, getOrderReadModel } from '@/lib/domain/orders/read-model';
+import { checkPrelimPdf, type PrelimContentAssessment } from './prelim-content-check';
 import {
   BORDER_SOFT,
   ORANGE_TINT,
@@ -70,6 +71,8 @@ export interface PrelimDeliverySampleData {
   titleOfficerEmail: string | null;
   titleOfficerPhone: string | null;
   attachmentSizeBytes: number;
+  /** Real document filename; the sample sender has no document row. */
+  attachmentFilename?: string;
   /** Placeholder stand-in for the presigned URL; the sample sender has no S3 object. */
   attachmentUrl?: string | null;
 }
@@ -97,6 +100,8 @@ interface PrelimDocumentAttachment {
    * PDF is attached either way, so this degrades softly.
    */
   downloadUrl: string | null;
+  /** Content gate result — see prelim-content-check.ts. */
+  contentCheck: PrelimContentAssessment;
   attachment: SendGridAttachment;
 }
 
@@ -142,7 +147,7 @@ function formatBytes(bytes: number): string {
 
 function buildEmailContent(params: {
   context: OrderEmailContext;
-  attachment: Pick<PrelimDocumentAttachment, 'sizeBytes' | 'downloadUrl'>;
+  attachment: Pick<PrelimDocumentAttachment, 'sizeBytes' | 'downloadUrl' | 'filename'>;
   intendedRecipients: ReviewedPrelimRecipients;
   testMode: boolean;
 }): { html: string; text: string; subject: string } {
@@ -160,7 +165,11 @@ function buildEmailContent(params: {
   const intro = 'The Preliminary Title Report for the property below is attached.';
   const review = 'Please review it carefully.';
   const guidance = 'Questions about this prelim? Contact the title unit — reply to this email or call the number below.';
-  const attachmentLabel = `Preliminary Title Report.pdf · ${formatBytes(attachment.sizeBytes)}`;
+  // The REAL document filename, not a hardcoded label. The Aug 11 wrong-document
+  // delivery was invisible precisely because this said "Preliminary Title
+  // Report.pdf" while the attachment was named dnu_140209.pdf — the two never
+  // had to agree. Now a mismatch is visible to sender and recipient.
+  const attachmentLabel = `${attachment.filename} · ${formatBytes(attachment.sizeBytes)}`;
   const details = [
     ['Property', propertyAddress],
     ['File number', context.fileNumber],
@@ -227,6 +236,7 @@ export function prelimDeliverySampleTemplate(data: PrelimDeliverySampleData): { 
       titleOfficerPhone: data.titleOfficerPhone,
     },
     attachment: {
+      filename: data.attachmentFilename ?? 'Preliminary Title Report.pdf',
       sizeBytes: data.attachmentSizeBytes,
       downloadUrl: data.attachmentUrl ?? 'https://example.com/sample-prelim.pdf',
     },
@@ -292,6 +302,10 @@ async function loadPrelimPdfAttachment(orderId: number): Promise<PrelimDocumentA
     throw new Error(download.error?.message ?? 'Failed to download prelim PDF');
   }
 
+  // Look at what the document actually IS before it can be auto-delivered.
+  // The buffer is already in hand here, so this costs no extra download.
+  const contentCheck = await checkPrelimPdf(download.data);
+
   // 7 days is the SigV4 maximum. A link that outlives the recipient's attention
   // span is the point; if it does expire, the attached PDF still works, which is
   // why a presign failure below is not fatal.
@@ -306,6 +320,7 @@ async function loadPrelimPdfAttachment(orderId: number): Promise<PrelimDocumentA
   return {
     documentId: prelim.id,
     downloadUrl: signed.success ? (signed.data ?? null) : null,
+    contentCheck,
     filename: prelim.filename,
     contentType: prelim.contentType ?? 'application/pdf',
     sizeBytes: download.data.length,
@@ -318,10 +333,39 @@ async function loadPrelimPdfAttachment(orderId: number): Promise<PrelimDocumentA
   };
 }
 
+/**
+ * Thrown when an AUTO delivery is refused because the document does not read as
+ * a preliminary report. Auto-delivery maps this to a manual-review outcome; it
+ * is deliberately distinct from a send failure, because the send never happened
+ * and retrying would not help.
+ */
+export class PrelimContentCheckFailedError extends Error {
+  constructor(
+    readonly reason: string,
+    readonly filename: string,
+    readonly matched: string[],
+  ) {
+    super(`Prelim content check failed (${reason}) for ${filename}`);
+    this.name = 'PrelimContentCheckFailedError';
+  }
+}
+
+export interface SendPrelimDeliveryOptions {
+  /**
+   * Require the document to read as a prelim before sending.
+   *
+   * TRUE for automatic delivery — nobody looked at the file. FALSE (default)
+   * for a manual send, where a human chose the document and may legitimately be
+   * sending something the marker rules do not recognise.
+   */
+  requirePrelimContent?: boolean;
+}
+
 export async function sendPrelimDeliveryEmail(
   orderId: number,
   reviewedRecipients: ReviewedPrelimRecipients,
   actor: PrelimDeliveryActor,
+  options: SendPrelimDeliveryOptions = {},
 ): Promise<PrelimDeliveryResult> {
   const resolvedRecipients = await resolvePrelimRecipients(orderId);
   if (resolvedRecipients.blocked || !resolvedRecipients.to) {
@@ -337,6 +381,24 @@ export async function sendPrelimDeliveryEmail(
     loadOrderEmailContext(orderId),
     loadPrelimPdfAttachment(orderId),
   ]);
+
+  // The gate. Refuse BEFORE building or sending anything, so a wrong document
+  // cannot leave the building on the automatic path.
+  if (options.requirePrelimContent && !prelimAttachment.contentCheck.passed) {
+    console.warn('[prelim-delivery] refused: document does not read as a prelim', {
+      orderId,
+      documentId: prelimAttachment.documentId,
+      filename: prelimAttachment.filename,
+      reason: prelimAttachment.contentCheck.reason,
+      matchedMarkers: prelimAttachment.contentCheck.matched,
+      textChars: prelimAttachment.contentCheck.textChars,
+    });
+    throw new PrelimContentCheckFailedError(
+      prelimAttachment.contentCheck.reason,
+      prelimAttachment.filename,
+      prelimAttachment.contentCheck.matched,
+    );
+  }
 
   const testMode = deliveryMode.mode === 'test';
   const { html, text, subject } = buildEmailContent({

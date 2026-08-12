@@ -227,7 +227,10 @@ describe('sendPrelimDeliveryEmail', () => {
     expect(emailParams.html).toContain('TO: Escrow Officer &lt;eo@example.com&gt;');
     expect(emailParams.html).toContain('CC: Title Rep &lt;title@example.com&gt;');
     expect(emailParams.html).toContain('The Preliminary Title Report for the property below is attached. <b>Please review it carefully.</b>');
-    expect(emailParams.html).toContain('Preliminary Title Report.pdf · 15 B');
+    // The pill shows the REAL document filename now, not a hardcoded label —
+    // that mismatch is what hid the Aug 11 wrong-document delivery.
+    expect(emailParams.html).toContain('prelim-report.pdf · 15 B');
+    expect(emailParams.html).not.toContain('Preliminary Title Report.pdf ·');
     // Presigned, because recipients are EXTERNAL and the authenticated download
     // route would 401 them. 604800s = 7 days = the SigV4 maximum.
     expect(getSignedUrl).toHaveBeenCalledWith('prelim/prelim-report.pdf', 604800);
@@ -236,7 +239,7 @@ describe('sendPrelimDeliveryEmail', () => {
     expect(emailParams.html).toContain(
       '<a href="https://s3.example.com/prelim.pdf?X-Amz-Signature=abc&amp;X-Amz-Expires=604800"'
       + ' target="_blank" style="color:#1B2A4A;text-decoration:none;font-size:13px;font-weight:700;display:block;">'
-      + '<span style="color:#F26B2B;font-size:15px;margin-right:8px;">▣</span>Preliminary Title Report.pdf · 15 B</a>',
+      + '<span style="color:#F26B2B;font-size:15px;margin-right:8px;">▣</span>prelim-report.pdf · 15 B</a>',
     );
     // Outlook-safe: background on a <td>, not a bare <div> with inline-block.
     expect(emailParams.html).not.toContain('display:inline-block;border:1px solid');
@@ -247,7 +250,7 @@ describe('sendPrelimDeliveryEmail', () => {
     expect(emailParams.text).toContain('Hello,');
     expect(emailParams.text).toContain('The Preliminary Title Report for the property below is attached.');
     expect(emailParams.text).toContain('Please review it carefully.');
-    expect(emailParams.text).toContain('Preliminary Title Report.pdf · 15 B');
+    expect(emailParams.text).toContain('prelim-report.pdf · 15 B');
     expect(emailParams.text).toContain('APN: 999-111-222');
     expect(emailParams.html).toContain('Title Unit 42 · unit42@pct.com · 562-555-0100');
     expect(emailParams.text).toContain('Title officer: Title Unit 42 · unit42@pct.com · 562-555-0100');
@@ -306,7 +309,7 @@ describe('sendPrelimDeliveryEmail', () => {
     }));
     const emailParams = sendEmail.mock.calls[0]?.[0];
     expect(emailParams.html).not.toContain('TEST — would have gone to:');
-    expect(emailParams.html).toContain('Preliminary Title Report.pdf · 15 B');
+    expect(emailParams.html).toContain('prelim-report.pdf · 15 B');
     expect(emailParams.html).toContain('background:#FFF4EE;border-left:3px solid #F26B2B');
     expect(emailParams.text).not.toContain('TEST — would have gone to:');
     expect(emailParams.to).not.toBe('safe-test@example.com');
@@ -352,7 +355,7 @@ describe('sendPrelimDeliveryEmail', () => {
     // No anchor around the chip...
     expect(emailParams.html).not.toContain('<a href="https://s3.example.com');
     // ...but the label and the attachment are both still there.
-    expect(emailParams.html).toContain('Preliminary Title Report.pdf · 15 B');
+    expect(emailParams.html).toContain('prelim-report.pdf · 15 B');
     expect(emailParams.attachments).toHaveLength(1);
     expect(result.messageId).toBe('sg-message-id');
   });

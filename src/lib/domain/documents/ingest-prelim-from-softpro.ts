@@ -99,6 +99,23 @@ export function isNewerThanExisting(
   return occurredAt.getTime() >= latestExistingAt.getTime();
 }
 
+/**
+ * URL path segments arrive percent-encoded, so a document SoftPro calls
+ * "Preliminary Title Report.pdf" was stored — and shown to recipients — as
+ * `Preliminary%20Title%20Report.pdf`. That affected 515 of 518 prelim
+ * deliveries.
+ *
+ * A malformed sequence must not throw: a name we cannot decode is still a
+ * usable name, and losing the document over its filename would be worse.
+ */
+export function decodeFilename(name: string): string {
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
 export async function downloadPrelimFromUrl(
   url: string,
   preferredFilename?: string | null,
@@ -109,7 +126,7 @@ export async function downloadPrelimFromUrl(
   const arrayBuffer = await response.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
   const fromUrl = new URL(url).pathname.split('/').pop() ?? `prelim_${Date.now()}.pdf`;
-  const filename = (preferredFilename?.trim() || fromUrl).replace(/[\\/]/g, '_');
+  const filename = decodeFilename(preferredFilename?.trim() || fromUrl).replace(/[\\/]/g, '_');
   return { buffer, filename };
 }
 

@@ -3,7 +3,7 @@ import { db } from '@/lib/db/client';
 import { adminActivityLogs } from '@/lib/db/schema';
 import { getPrelimDeliveryMode } from './prelim-delivery-mode';
 import { resolvePrelimRecipients } from './prelim-recipient-resolution';
-import { sendPrelimDeliveryEmail } from './prelim-delivery-send';
+import { PrelimContentCheckFailedError, sendPrelimDeliveryEmail } from './prelim-delivery-send';
 
 export type PrelimAutoDeliveryOutcome =
   | 'delivered'
@@ -11,7 +11,12 @@ export type PrelimAutoDeliveryOutcome =
   | 'skipped_already_delivered'
   | 'blocked_no_recipient'
   | 'not_armed'
-  | 'delivery_failed';
+  | 'delivery_failed'
+  /**
+   * The document did not read as a preliminary report, so it was NOT sent.
+   * Needs a human: never silently skipped, never silently delivered.
+   */
+  | 'blocked_content_check';
 
 export interface PrelimAutoDeliveryInput {
   orderId: number;
@@ -138,7 +143,7 @@ export async function maybeAutoDeliverPrelim(input: PrelimAutoDeliveryInput): Pr
     const delivery = await sendPrelimDeliveryEmail(input.orderId, {
       to: recipients.to,
       cc: recipients.cc,
-    }, AUTO_DELIVERY_ACTOR);
+    }, AUTO_DELIVERY_ACTOR, { requirePrelimContent: true });
 
     return finish(input, {
       outcome: 'delivered',
@@ -147,6 +152,17 @@ export async function maybeAutoDeliverPrelim(input: PrelimAutoDeliveryInput): Pr
       messageId: delivery.messageId,
     });
   } catch (err) {
+    // A refused document is not a failed send — it never left. Distinct outcome
+    // so the ops panel can tell "the vendor broke" from "we caught a wrong
+    // document", which need completely different responses.
+    if (err instanceof PrelimContentCheckFailedError) {
+      return finish(input, {
+        outcome: 'blocked_content_check',
+        sent: false,
+        needsManualDelivery: true,
+        reason: err.message,
+      });
+    }
     return finish(input, {
       outcome: 'delivery_failed',
       sent: false,

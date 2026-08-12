@@ -59,6 +59,20 @@ vi.mock('./prelim-delivery-mode', () => ({
 
 vi.mock('./prelim-delivery-send', () => ({
   sendPrelimDeliveryEmail: sendPrelimDeliveryEmailMock,
+  // Declared on the mock so `instanceof` in the handler resolves against the
+  // same constructor the test throws. A look-alike class would fall through to
+  // the generic delivery_failed branch and the test would pass for the wrong
+  // reason.
+  PrelimContentCheckFailedError: class PrelimContentCheckFailedError extends Error {
+    constructor(
+      public reason: string,
+      public filename: string,
+      public matched: string[],
+    ) {
+      super(`Prelim content check failed (${reason}) for ${filename}`);
+      this.name = 'PrelimContentCheckFailedError';
+    }
+  },
 }));
 
 import { maybeAutoDeliverPrelim } from './prelim-auto-delivery';
@@ -132,8 +146,36 @@ describe('maybeAutoDeliverPrelim', () => {
       5029,
       { to: resolvedRecipients.to, cc: resolvedRecipients.cc },
       expect.objectContaining({ id: 'system:prelim_auto_delivery' }),
+      // Automatic delivery MUST demand the content gate. A manual send does not:
+      // there, a human chose the document.
+      { requirePrelimContent: true },
     );
     expect(latestOutcome()).toMatchObject({ outcome: 'delivered', message_id: 'sg-message-id' });
+  });
+
+  it('routes a refused document to manual review — never sent, never silently skipped', async () => {
+    // The Aug 11 case: an internal bundle that does not read as a prelim. The
+    // send throws PrelimContentCheckFailedError, and auto-delivery must record a
+    // DISTINCT outcome so "we caught a wrong document" is not filed under "the
+    // vendor broke" — those need completely different responses.
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+
+    const { PrelimContentCheckFailedError } = await import('./prelim-delivery-send');
+    sendPrelimDeliveryEmailMock.mockRejectedValueOnce(
+      new PrelimContentCheckFailedError('no_prelim_markers', 'dnu_140209.pdf', []),
+    );
+
+    const result = await maybeAutoDeliverPrelim({ ...baseInput });
+
+    expect(result.sent).toBe(false);
+    expect(result.outcome).toBe('blocked_content_check');
+    expect(result.needsManualDelivery).toBe(true);
+    expect(result.outcome).not.toBe('delivery_failed');
+    expect(latestOutcome()).toMatchObject({
+      outcome: 'blocked_content_check',
+      needs_manual_delivery: true,
+    });
   });
 
   it('blocks a second send for the same prelim document via idempotency', async () => {

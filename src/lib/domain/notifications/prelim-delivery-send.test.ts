@@ -3,6 +3,7 @@ import { sendPrelimDeliveryEmail } from './prelim-delivery-send';
 
 const {
   downloadFile,
+  getSignedUrl,
   getOrderReadModelMock,
   prelimDocRows,
   resolvePrelimRecipients,
@@ -10,6 +11,7 @@ const {
   writePrelimDeliveryProofs,
 } = vi.hoisted(() => ({
   downloadFile: vi.fn(),
+  getSignedUrl: vi.fn(),
   getOrderReadModelMock: vi.fn(),
   prelimDocRows: [] as Array<{
     id: number;
@@ -95,6 +97,7 @@ vi.mock('./prelim-recipient-resolution', () => ({
 
 vi.mock('@/lib/integrations/s3/client', () => ({
   downloadFile,
+  getSignedUrl,
 }));
 
 vi.mock('@/lib/integrations/sendgrid/client', () => ({
@@ -153,6 +156,10 @@ describe('sendPrelimDeliveryEmail', () => {
     downloadFile.mockResolvedValue({
       success: true,
       data: Buffer.from('%PDF smoke test'),
+    });
+    getSignedUrl.mockResolvedValue({
+      success: true,
+      data: 'https://s3.example.com/prelim.pdf?X-Amz-Signature=abc&X-Amz-Expires=604800',
     });
     sendEmail.mockResolvedValue({
       success: true,
@@ -221,6 +228,18 @@ describe('sendPrelimDeliveryEmail', () => {
     expect(emailParams.html).toContain('CC: Title Rep &lt;title@example.com&gt;');
     expect(emailParams.html).toContain('The Preliminary Title Report for the property below is attached. <b>Please review it carefully.</b>');
     expect(emailParams.html).toContain('Preliminary Title Report.pdf · 15 B');
+    // Presigned, because recipients are EXTERNAL and the authenticated download
+    // route would 401 them. 604800s = 7 days = the SigV4 maximum.
+    expect(getSignedUrl).toHaveBeenCalledWith('prelim/prelim-report.pdf', 604800);
+    // The WHOLE chip is the click target: the anchor opens before the glyph and
+    // closes after the size, with nothing between it and the label.
+    expect(emailParams.html).toContain(
+      '<a href="https://s3.example.com/prelim.pdf?X-Amz-Signature=abc&amp;X-Amz-Expires=604800"'
+      + ' target="_blank" style="color:#1B2A4A;text-decoration:none;font-size:13px;font-weight:700;display:block;">'
+      + '<span style="color:#F26B2B;font-size:15px;margin-right:8px;">▣</span>Preliminary Title Report.pdf · 15 B</a>',
+    );
+    // Outlook-safe: background on a <td>, not a bare <div> with inline-block.
+    expect(emailParams.html).not.toContain('display:inline-block;border:1px solid');
     expect(emailParams.html).toContain('Property');
     expect(emailParams.html).toContain('123 Main St, Downey, CA 90241');
     expect(emailParams.html).toContain('Questions about this prelim?');
@@ -316,6 +335,26 @@ describe('sendPrelimDeliveryEmail', () => {
 
     expect(downloadFile).not.toHaveBeenCalled();
     expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('still sends, with an UNLINKED pill, when presigning fails', async () => {
+    // The PDF is attached regardless, so a presign failure must degrade the
+    // pill rather than fail the delivery.
+    getSignedUrl.mockResolvedValue({ success: false, error: { message: 'AccessDenied' } });
+
+    const result = await sendPrelimDeliveryEmail(123, {
+      to: { email: 'eo@example.com', name: 'Escrow Officer', role: 'escrow_officer' },
+      cc: [],
+    }, { id: 'user-1', name: 'PCT User', email: 'user@pct.com' });
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    const emailParams = sendEmail.mock.calls[0]![0];
+    // No anchor around the chip...
+    expect(emailParams.html).not.toContain('<a href="https://s3.example.com');
+    // ...but the label and the attachment are both still there.
+    expect(emailParams.html).toContain('Preliminary Title Report.pdf · 15 B');
+    expect(emailParams.attachments).toHaveLength(1);
+    expect(result.messageId).toBe('sg-message-id');
   });
 
   it('falls back to open orders as Reply-To when no title officer email resolves', async () => {

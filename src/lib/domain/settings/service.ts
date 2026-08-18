@@ -85,6 +85,14 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     defaultValue: 'false',
   },
   {
+    key: 'party_wizard_invite_shut_off',
+    label: 'Party Wizard Invite Shut Off',
+    description: 'When enabled, the party-collection invite job stops emailing escrow officers on its next run. Links already sent keep working; only new invites stop. Takes effect without a deploy.',
+    category: 'Notifications',
+    type: 'boolean',
+    defaultValue: 'false',
+  },
+  {
     key: 'prelim_summary_shut_off',
     label: 'Prelim Summary Shut Off',
     description: 'When enabled, prelim summary webhooks are received but not processed.',

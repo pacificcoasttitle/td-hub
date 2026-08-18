@@ -91,6 +91,10 @@
     {
       "path": "/api/jobs/run?name=ops.daily_report",
       "schedule": "0 13 * * *"
+    },
+    {
+      "schedule": "0 16 * * 1-5",
+      "path": "/api/jobs/run?name=party_wizard.invite"
     }
   ]
 }

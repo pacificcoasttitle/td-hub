@@ -12,6 +12,10 @@ function isPublic(pathname: string): boolean {
   if (pathname.startsWith('/api/webhooks/softpro/')) return true;
   // SoftPro AddDocuments downloads FileURL; HMAC verified in the route handler.
   if (pathname.startsWith('/api/softpro/fetch-doc/')) return true;
+  // Party wizard links go to external parties with no TD Hub login; the HMAC
+  // token in the path is the credential and is verified in the handler.
+  if (pathname.startsWith('/party-wizard/')) return true;
+  if (pathname.startsWith('/api/party-wizard/')) return true;
   if (pathname.startsWith('/_next/')) return true;
   if (pathname.startsWith('/favicon')) return true;
   return false;

@@ -143,6 +143,15 @@ export const orderParties = pgTable('order_parties', {
   externalPhone: varchar('external_phone', { length: 50 }),
 
   isPrimary: boolean('is_primary').notNull().default(false),
+
+  /**
+   * Provenance of the row that created this party. NULL on everything that
+   * predates the wizard, which is all existing rows. Records origin only — it
+   * does NOT protect the value: both writers merge per field, so a non-empty
+   * SoftPro value still wins field by field. party_submissions is the record.
+   */
+  source: varchar('source', { length: 20 }),
+
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (table) => ({
   orderRoleIdx: index('order_parties_order_role_idx').on(table.orderId, table.role),

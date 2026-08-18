@@ -56,8 +56,8 @@ vi.mock('@/lib/domain/parties/party-wizard-service', () => ({
 }));
 
 import {
-  handlePartyWizardInvite, PARTY_INVITE_DELAY_DAYS, PARTY_INVITE_STATUSES,
-  PARTY_INVITE_SHUT_OFF_SETTING,
+  handlePartyWizardInvite, PARTY_INVITE_DELAY_DAYS, PARTY_INVITE_MAX_AGE_DAYS,
+  PARTY_INVITE_STATUSES, PARTY_INVITE_SHUT_OFF_SETTING,
 } from './party-wizard-invite';
 
 function candidate(over: Record<string, unknown> = {}) {
@@ -99,6 +99,16 @@ describe('party wizard invite', () => {
   it('targets in_process, not just open — the near-unused status', () => {
     expect(PARTY_INVITE_STATUSES).toContain('in_process');
     expect(PARTY_INVITE_STATUSES).toContain('open');
+  });
+
+  /**
+   * Pilot bound. At 30 days the first run clears a 27-day backlog in one
+   * morning (93 emails measured against production); at 7 it sends 11. Widen
+   * only once real sends are confirmed to land and get forwarded.
+   */
+  it('ships with a narrow pilot window, not the full 30 days', () => {
+    expect(PARTY_INVITE_MAX_AGE_DAYS).toBe(7);
+    expect(PARTY_INVITE_MAX_AGE_DAYS).toBeGreaterThan(PARTY_INVITE_DELAY_DAYS);
   });
 
   it('does not chase agents on finished or abandoned files', () => {

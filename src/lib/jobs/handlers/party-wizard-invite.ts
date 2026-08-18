@@ -9,6 +9,7 @@ import {
 } from '@/lib/domain/parties/party-wizard-email';
 import { findLiveLink, mintLinkForOrder } from '@/lib/domain/parties/party-wizard-service';
 import type { PartyRole } from '@/lib/domain/parties/party-wizard-fields';
+import { ACTIVE_ORDER_STATUSES, statusSqlList } from '@/lib/domain/orders/status-map';
 
 // ─── Party wizard invite ─────────────────────────────────────────────────────
 //
@@ -24,24 +25,32 @@ import type { PartyRole } from '@/lib/domain/parties/party-wizard-fields';
 // The counters are the deliverable as much as the emails are.
 
 export const PARTY_INVITE_DELAY_DAYS = 3;
-export const PARTY_INVITE_MAX_AGE_DAYS = 30;
+
+/**
+ * Upper bound on order age. Deliberately narrow for the pilot.
+ *
+ * At 30 days the first run would clear a 27-day backlog in one morning — ~93
+ * emails, from an untested template, to the exact escrow officers whose
+ * VOLUNTARY forwarding the whole feature depends on. If the copy reads wrong
+ * we would rather learn it at five emails than ninety-three.
+ *
+ * Widen to 30 once the first sends are confirmed to land and get forwarded.
+ */
+export const PARTY_INVITE_MAX_AGE_DAYS = 7;
 export const PARTY_INVITE_BATCH = 100;
 export const PARTY_INVITE_ROLE: PartyRole = 'listing_agent';
 
 /**
- * Statuses worth chasing an agent for.
+ * Statuses worth chasing an agent for: live work only.
  *
- * NOT just 'open' — that value is nearly unused (2 rows in production); the
- * live working state is 'in_process' (903 of the 944 orders in this job's
- * window). Scoping to 'open' made the job scan nothing while reporting a clean
- * all-zero result, which is the worst kind of broken.
+ * ACTIVE rather than ENRICHABLE — the enrichment jobs include 'completed'
+ * because backfilling data on a finished file is harmless, but this job emails
+ * a person asking them to chase someone, and on a completed order that is a
+ * false alarm.
  *
- * Deliberately narrower than the ('open','in_process','completed') convention
- * the enrichment jobs use: those backfill data and are harmless on a finished
- * file, whereas this one emails a person asking them to chase someone. On a
- * completed order that is a false alarm.
+ * See status-map.ts for why 'open' alone is a trap.
  */
-export const PARTY_INVITE_STATUSES = ['open', 'in_process'] as const;
+export const PARTY_INVITE_STATUSES = ACTIVE_ORDER_STATUSES;
 
 /** Runtime kill switch. DB-backed so stopping it needs no redeploy. */
 export const PARTY_INVITE_SHUT_OFF_SETTING = 'party_wizard_invite_shut_off';
@@ -105,7 +114,7 @@ async function loadCandidates(limit: number): Promise<CandidateRow[]> {
     .leftJoin(orderProperties, eq(orderProperties.orderId, orders.id))
     .leftJoin(contacts, eq(contacts.id, orders.escrowOfficerId))
     .where(and(
-      sql`${orders.operationalStatus} in ('open', 'in_process')`,
+      sql`${orders.operationalStatus} in (${sql.raw(statusSqlList(PARTY_INVITE_STATUSES))})`,
       sql`${orders.openedAt} <= NOW() - INTERVAL '${sql.raw(String(PARTY_INVITE_DELAY_DAYS))} days'`,
       sql`${orders.openedAt} >= NOW() - INTERVAL '${sql.raw(String(PARTY_INVITE_MAX_AGE_DAYS))} days'`,
       // No listing agent with anything usable on it.

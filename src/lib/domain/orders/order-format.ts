@@ -63,8 +63,16 @@ export function isRefinanceTransaction(transactionType: string | null | undefine
   return (transactionType?.toLowerCase().trim() ?? '') === 'refinance';
 }
 
+/**
+ * The canonical normalized value. Exported so a SQL pre-filter can compare
+ * against the same string this function does, rather than restating 'purchase'
+ * as a second, drifting definition:
+ *   lower(trim(transaction_type)) = PURCHASE_TRANSACTION_VALUE
+ */
+export const PURCHASE_TRANSACTION_VALUE = 'purchase';
+
 export function isPurchaseTransaction(transactionType: string | null | undefined): boolean {
-  return (transactionType?.toLowerCase().trim() ?? '') === 'purchase';
+  return (transactionType?.toLowerCase().trim() ?? '') === PURCHASE_TRANSACTION_VALUE;
 }
 
 export function formatOrderAddress(property: OrderAddressParts | null | undefined): string {

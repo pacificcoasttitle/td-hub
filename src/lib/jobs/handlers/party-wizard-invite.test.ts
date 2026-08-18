@@ -50,6 +50,12 @@ vi.mock('@/lib/domain/settings/service', () => ({
 vi.mock('@/lib/domain/notifications/dispatch', () => ({
   insertNotificationLog: (...a: unknown[]) => insertLogMock(...a),
 }));
+vi.mock('@/lib/domain/orders/order-format', async (importOriginal) => {
+  // Use the REAL formatter and predicate — they are the shared definitions
+  // under test here, not collaborators to stub out.
+  return await importOriginal<typeof import('@/lib/domain/orders/order-format')>();
+});
+
 vi.mock('@/lib/domain/parties/party-wizard-service', () => ({
   findLiveLink: (...a: unknown[]) => findLiveLinkMock(...a),
   mintLinkForOrder: (...a: unknown[]) => mintLinkMock(...a),
@@ -102,12 +108,12 @@ describe('party wizard invite', () => {
   });
 
   /**
-   * Pilot bound. At 30 days the first run clears a 27-day backlog in one
-   * morning (93 emails measured against production); at 7 it sends 11. Widen
-   * only once real sends are confirmed to land and get forwarded.
+   * Bounded by the transaction-type filter now, not by an arbitrary window.
+   * At 30 days WITH refis excluded the first run is ~16 emails; the 7-day
+   * narrowing only existed to avoid the ~93 that refis were inflating.
    */
-  it('ships with a narrow pilot window, not the full 30 days', () => {
-    expect(PARTY_INVITE_MAX_AGE_DAYS).toBe(7);
+  it('runs the full 30-day window', () => {
+    expect(PARTY_INVITE_MAX_AGE_DAYS).toBe(30);
     expect(PARTY_INVITE_MAX_AGE_DAYS).toBeGreaterThan(PARTY_INVITE_DELAY_DAYS);
   });
 
@@ -115,6 +121,40 @@ describe('party wizard invite', () => {
     for (const dead of ['completed', 'closed', 'canceled', 'duplicate', 'hold']) {
       expect(PARTY_INVITE_STATUSES).not.toContain(dead);
     }
+  });
+
+  describe('purchase only', () => {
+    it('skips a refinance instead of emailing about a listing agent that should not exist', async () => {
+      candidatesMock.mockResolvedValue([candidate({ transactionType: 'Refinance' })]);
+      const r = await handlePartyWizardInvite();
+      expect(r.skippedNonPurchase).toBe(1);
+      expect(r.sent).toBe(0);
+      expect(sendEmailMock).not.toHaveBeenCalled();
+      expect(mintLinkMock).not.toHaveBeenCalled();
+    });
+
+    it.each([['Equity'], ['Other'], [null]])('skips transaction type %s', async (tx) => {
+      candidatesMock.mockResolvedValue([candidate({ transactionType: tx })]);
+      const r = await handlePartyWizardInvite();
+      expect(r.skippedNonPurchase).toBe(1);
+      expect(r.sent).toBe(0);
+    });
+
+    it('accepts a purchase regardless of casing or padding', async () => {
+      candidatesMock.mockResolvedValue([candidate({ transactionType: '  PURCHASE  ' })]);
+      const r = await handlePartyWizardInvite();
+      expect(r.skippedNonPurchase).toBe(0);
+      expect(r.sent).toBe(1);
+    });
+
+    it('checks the type BEFORE spending an escrow-officer lookup or a link', async () => {
+      candidatesMock.mockResolvedValue([candidate({ transactionType: 'Refinance', escrowOfficerId: null })]);
+      const r = await handlePartyWizardInvite();
+      // Counted as non-purchase, NOT as unreachable — the reason we skipped it
+      // is that we should never have asked, not that we could not reach anyone.
+      expect(r.skippedNonPurchase).toBe(1);
+      expect(r.unreachable.noEscrowOfficer).toBe(0);
+    });
   });
 
   it('sends to a reachable escrow officer', async () => {
@@ -180,7 +220,7 @@ describe('party wizard invite', () => {
       findLiveLinkMock.mockImplementation(async (orderId: number) => (orderId === 4 ? { id: 9 } : null));
 
       const r = await handlePartyWizardInvite();
-      const accounted = r.sent + r.failed + r.skippedExistingLink
+      const accounted = r.sent + r.failed + r.skippedExistingLink + r.skippedNonPurchase
         + r.unreachable.noEscrowOfficer + r.unreachable.escrowOfficerNoEmail;
       expect(accounted).toBe(r.scanned);
     });
@@ -209,6 +249,26 @@ describe('party wizard invite', () => {
     expect(r.failed).toBe(1);
     expect(r.unreachable.noEscrowOfficer).toBe(0);
     expect(insertLogMock).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }));
+  });
+
+  it('shows the composed address, not a street-only full_address', async () => {
+    candidatesMock.mockResolvedValue([candidate({
+      fullAddress: '1332 W WILLOW AVE',
+      address: '1332 W Willow Ave', city: 'Ridgecrest', state: 'CA', zip: '93555',
+    })]);
+    await handlePartyWizardInvite();
+    const html = sendEmailMock.mock.calls[0][0].html as string;
+    expect(html).toContain('1332 W Willow Ave, Ridgecrest, CA 93555');
+    expect(html).not.toContain('1332 W WILLOW AVE');
+  });
+
+  it('falls back to full_address when the component fields are empty', async () => {
+    candidatesMock.mockResolvedValue([candidate({
+      fullAddress: '1332 W WILLOW AVE',
+      address: null, city: null, state: null, zip: null,
+    })]);
+    await handlePartyWizardInvite();
+    expect(sendEmailMock.mock.calls[0][0].html as string).toContain('1332 W WILLOW AVE');
   });
 
   it('logs the send so the same order is not emailed again tomorrow', async () => {

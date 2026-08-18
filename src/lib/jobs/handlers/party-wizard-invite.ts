@@ -10,6 +10,9 @@ import {
 import { findLiveLink, mintLinkForOrder } from '@/lib/domain/parties/party-wizard-service';
 import type { PartyRole } from '@/lib/domain/parties/party-wizard-fields';
 import { ACTIVE_ORDER_STATUSES, statusSqlList } from '@/lib/domain/orders/status-map';
+import {
+  formatOrderAddress, isPurchaseTransaction, PURCHASE_TRANSACTION_VALUE,
+} from '@/lib/domain/orders/order-format';
 
 // ─── Party wizard invite ─────────────────────────────────────────────────────
 //
@@ -24,19 +27,24 @@ import { ACTIVE_ORDER_STATUSES, statusSqlList } from '@/lib/domain/orders/status
 //
 // The counters are the deliverable as much as the emails are.
 
+/** formatOrderAddress returns this when it has nothing to show. */
+const EMPTY_ADDRESS = '—';
+
 export const PARTY_INVITE_DELAY_DAYS = 3;
 
 /**
- * Upper bound on order age. Deliberately narrow for the pilot.
+ * Upper bound on order age.
  *
- * At 30 days the first run would clear a 27-day backlog in one morning — ~93
- * emails, from an untested template, to the exact escrow officers whose
- * VOLUNTARY forwarding the whole feature depends on. If the copy reads wrong
- * we would rather learn it at five emails than ninety-three.
+ * Briefly narrowed to 7 to keep the first run small, because at 30 days it
+ * would have sent ~93 emails in one morning. Excluding refinances removes most
+ * of that volume, so the window is back to 30 and the pilot is bounded by the
+ * transaction-type filter instead — a correct reason to skip an order rather
+ * than an arbitrary one.
  *
- * Widen to 30 once the first sends are confirmed to land and get forwarded.
+ * The upper bound still matters: without it the first run would email every
+ * historical order with a missing agent.
  */
-export const PARTY_INVITE_MAX_AGE_DAYS = 7;
+export const PARTY_INVITE_MAX_AGE_DAYS = 30;
 export const PARTY_INVITE_BATCH = 100;
 export const PARTY_INVITE_ROLE: PartyRole = 'listing_agent';
 
@@ -66,6 +74,8 @@ export interface PartyInviteResult {
   sent: number;
   failed: number;
   skippedExistingLink: number;
+  /** Non-purchase orders that reached the loop. Should stay 0 — see below. */
+  skippedNonPurchase: number;
   unreachable: PartyInviteUnreachable;
   /** Share of candidates we could actually reach. The number to watch. */
   reachablePct: number;
@@ -115,6 +125,17 @@ async function loadCandidates(limit: number): Promise<CandidateRow[]> {
     .leftJoin(contacts, eq(contacts.id, orders.escrowOfficerId))
     .where(and(
       sql`${orders.operationalStatus} in (${sql.raw(statusSqlList(PARTY_INVITE_STATUSES))})`,
+      // PURCHASE ONLY. A refinance has no listing agent because there is no
+      // sale — a missing one is correct, not a gap. Refis are 0.7% agent-
+      // populated against 44.3% for purchases, so without this filter most of
+      // the first run would ask escrow officers to chase someone who should
+      // not exist.
+      //
+      // Filtered in SQL rather than in the loop because refis never get a
+      // notification_logs row, so they would be re-scanned forever and
+      // permanently occupy batch slots that new purchases need. Compares
+      // against the same constant isPurchaseTransaction uses.
+      sql`lower(trim(${orders.transactionType}::text)) = ${PURCHASE_TRANSACTION_VALUE}`,
       sql`${orders.openedAt} <= NOW() - INTERVAL '${sql.raw(String(PARTY_INVITE_DELAY_DAYS))} days'`,
       sql`${orders.openedAt} >= NOW() - INTERVAL '${sql.raw(String(PARTY_INVITE_MAX_AGE_DAYS))} days'`,
       // No listing agent with anything usable on it.
@@ -135,19 +156,23 @@ async function loadCandidates(limit: number): Promise<CandidateRow[]> {
   return rows as CandidateRow[];
 }
 
+/**
+ * Address for the email. Uses the shared formatter, which composes from the
+ * component fields and falls back to full_address only when they yield nothing
+ * — the right precedence here, because full_address is often street-only while
+ * the parts carry the city and zip an agent needs to identify the property.
+ * Returns null rather than the formatter's placeholder.
+ */
 function composeAddress(row: CandidateRow): string | null {
-  if (row.fullAddress?.trim()) return row.fullAddress.trim();
-  const parts = [row.address, [row.city, row.state].filter(Boolean).join(', '), row.zip]
-    .map((p) => p?.trim())
-    .filter((p): p is string => Boolean(p));
-  return parts.length ? parts.join(', ') : null;
+  const formatted = formatOrderAddress(row);
+  return formatted === EMPTY_ADDRESS ? null : formatted;
 }
 
 export async function handlePartyWizardInvite(): Promise<PartyInviteResult> {
   const shutOff = await getSetting(PARTY_INVITE_SHUT_OFF_SETTING);
   if (shutOff === 'true') {
     return {
-      scanned: 0, sent: 0, failed: 0, skippedExistingLink: 0,
+      scanned: 0, sent: 0, failed: 0, skippedExistingLink: 0, skippedNonPurchase: 0,
       unreachable: { noEscrowOfficer: 0, escrowOfficerNoEmail: 0 },
       reachablePct: 0, shutOff: true,
     };
@@ -160,11 +185,20 @@ export async function handlePartyWizardInvite(): Promise<PartyInviteResult> {
     sent: 0,
     failed: 0,
     skippedExistingLink: 0,
+    skippedNonPurchase: 0,
     unreachable: { noEscrowOfficer: 0, escrowOfficerNoEmail: 0 },
     reachablePct: 0,
   };
 
   for (const row of candidates) {
+    // Authoritative check. The SQL pre-filter should make this unreachable; if
+    // it ever fires, the SQL and the shared predicate have drifted apart and
+    // the counter says so rather than an email going out.
+    if (!isPurchaseTransaction(row.transactionType)) {
+      result.skippedNonPurchase++;
+      continue;
+    }
+
     // Count what we cannot reach, by reason, BEFORE doing any work — an
     // unreachable order must never look like a silent success.
     if (!row.escrowOfficerId) {
@@ -236,7 +270,7 @@ export async function handlePartyWizardInvite(): Promise<PartyInviteResult> {
 
   console.log(
     `[party-wizard-invite] scanned=${result.scanned} sent=${result.sent} failed=${result.failed} `
-    + `skipped_existing=${result.skippedExistingLink} `
+    + `skipped_existing=${result.skippedExistingLink} skipped_non_purchase=${result.skippedNonPurchase} `
     + `unreachable_no_officer=${result.unreachable.noEscrowOfficer} `
     + `unreachable_no_email=${result.unreachable.escrowOfficerNoEmail} `
     + `reachable=${result.reachablePct}%`,

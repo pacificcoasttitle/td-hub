@@ -12,6 +12,7 @@ import {
   type ListingAgentSubmission, type PartyColumns, type PartyRole, type RoleFormDefinition,
 } from './party-wizard-fields';
 import { buildPartyNote } from './party-note';
+import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 
 // ─── Party wizard service ────────────────────────────────────────────────────
 //
@@ -128,15 +129,21 @@ export async function resolvePartyWizardLink(token: string): Promise<ResolveResu
   };
 }
 
+/**
+ * Wizard page address. Same shared formatter the invite email uses, so the
+ * agent sees exactly the address the escrow officer was shown. Composes from
+ * the component fields and falls back to full_address only when they yield
+ * nothing — full_address is frequently street-only.
+ */
 function composeAddress(row: {
   address: string | null; street: string | null;
   city: string | null; state: string | null; zip: string | null;
 }): string | null {
-  if (row.address?.trim()) return row.address.trim();
-  const parts = [row.street, [row.city, row.state].filter(Boolean).join(', '), row.zip]
-    .map((p) => p?.trim())
-    .filter((p): p is string => Boolean(p));
-  return parts.length ? parts.join(', ') : null;
+  const formatted = formatOrderAddress({
+    fullAddress: row.address, address: row.street,
+    city: row.city, state: row.state, zip: row.zip,
+  });
+  return formatted === '—' ? null : formatted;
 }
 
 /** Latest submission for this order+role, so a reopened link is pre-filled. */

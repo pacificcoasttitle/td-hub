@@ -196,7 +196,7 @@ export async function submitPartyWizard(
 
   const { link } = resolved;
 
-  const limited = await isRateLimited(link.linkId);
+  const limited = await isRateLimited(link.linkId, link.role);
   if (limited) return { ok: false, reason: 'rate_limited' };
 
   const schema = getSubmissionSchema(link.role);
@@ -264,13 +264,26 @@ export async function submitPartyWizard(
   return { ok: true, submissionId: submission.id, noteStatus };
 }
 
-async function isRateLimited(linkId: number): Promise<boolean> {
+/**
+ * Count SUBMISSION EVENTS, not rows.
+ *
+ * One submit can write two rows against the same link — the agent, plus the
+ * seller they named. Counting rows made the cap of 5 mean two-and-a-bit real
+ * submissions for any agent who filled in the seller, so an agent correcting a
+ * typo twice got locked out.
+ *
+ * Filtering to the link's OWN role counts exactly one row per submit: the
+ * secondary seller row is written under role='seller', which a listing_agent
+ * link never matches.
+ */
+async function isRateLimited(linkId: number, role: PartyRole): Promise<boolean> {
   const since = new Date(Date.now() - SUBMISSION_RATE_WINDOW_MS);
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(partySubmissions)
     .where(and(
       eq(partySubmissions.sourceLinkId, linkId),
+      eq(partySubmissions.role, role),
       sql`${partySubmissions.submittedAt} > ${since}`,
     ));
   return (row?.n ?? 0) >= SUBMISSION_RATE_LIMIT;
@@ -381,8 +394,11 @@ export interface MintedLink {
 }
 
 /**
- * Mint a link for an order+role, reusing a live one if it exists so a repeated
- * job run does not hand out a second URL for the same request.
+ * Mint a NEW link for an order+role. Always inserts — it does not check for or
+ * reuse an existing link.
+ *
+ * Callers that must not hand out a second URL for the same request are
+ * responsible for calling findLiveLink first; the invite job does exactly that.
  */
 export async function mintLinkForOrder(
   orderId: number,

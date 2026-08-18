@@ -28,6 +28,21 @@ export const PARTY_INVITE_MAX_AGE_DAYS = 30;
 export const PARTY_INVITE_BATCH = 100;
 export const PARTY_INVITE_ROLE: PartyRole = 'listing_agent';
 
+/**
+ * Statuses worth chasing an agent for.
+ *
+ * NOT just 'open' — that value is nearly unused (2 rows in production); the
+ * live working state is 'in_process' (903 of the 944 orders in this job's
+ * window). Scoping to 'open' made the job scan nothing while reporting a clean
+ * all-zero result, which is the worst kind of broken.
+ *
+ * Deliberately narrower than the ('open','in_process','completed') convention
+ * the enrichment jobs use: those backfill data and are harmless on a finished
+ * file, whereas this one emails a person asking them to chase someone. On a
+ * completed order that is a false alarm.
+ */
+export const PARTY_INVITE_STATUSES = ['open', 'in_process'] as const;
+
 /** Runtime kill switch. DB-backed so stopping it needs no redeploy. */
 export const PARTY_INVITE_SHUT_OFF_SETTING = 'party_wizard_invite_shut_off';
 
@@ -90,7 +105,7 @@ async function loadCandidates(limit: number): Promise<CandidateRow[]> {
     .leftJoin(orderProperties, eq(orderProperties.orderId, orders.id))
     .leftJoin(contacts, eq(contacts.id, orders.escrowOfficerId))
     .where(and(
-      eq(orders.operationalStatus, 'open'),
+      sql`${orders.operationalStatus} in ('open', 'in_process')`,
       sql`${orders.openedAt} <= NOW() - INTERVAL '${sql.raw(String(PARTY_INVITE_DELAY_DAYS))} days'`,
       sql`${orders.openedAt} >= NOW() - INTERVAL '${sql.raw(String(PARTY_INVITE_MAX_AGE_DAYS))} days'`,
       // No listing agent with anything usable on it.

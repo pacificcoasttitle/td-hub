@@ -56,7 +56,8 @@ vi.mock('@/lib/domain/parties/party-wizard-service', () => ({
 }));
 
 import {
-  handlePartyWizardInvite, PARTY_INVITE_DELAY_DAYS, PARTY_INVITE_SHUT_OFF_SETTING,
+  handlePartyWizardInvite, PARTY_INVITE_DELAY_DAYS, PARTY_INVITE_STATUSES,
+  PARTY_INVITE_SHUT_OFF_SETTING,
 } from './party-wizard-invite';
 
 function candidate(over: Record<string, unknown> = {}) {
@@ -86,6 +87,24 @@ beforeEach(() => {
 describe('party wizard invite', () => {
   it('fires 3 days after the order opens', () => {
     expect(PARTY_INVITE_DELAY_DAYS).toBe(3);
+  });
+
+  /**
+   * Regression guard. The first cut scoped to operational_status = 'open',
+   * which is 2 rows in production against 903 'in_process' in this job's own
+   * window — so it scanned nothing and reported a clean all-zero result. Every
+   * test here mocks the database, so none of them could catch it; this asserts
+   * the status list directly instead.
+   */
+  it('targets in_process, not just open — the near-unused status', () => {
+    expect(PARTY_INVITE_STATUSES).toContain('in_process');
+    expect(PARTY_INVITE_STATUSES).toContain('open');
+  });
+
+  it('does not chase agents on finished or abandoned files', () => {
+    for (const dead of ['completed', 'closed', 'canceled', 'duplicate', 'hold']) {
+      expect(PARTY_INVITE_STATUSES).not.toContain(dead);
+    }
   });
 
   it('sends to a reachable escrow officer', async () => {

@@ -1,5 +1,6 @@
 export * from './contacts';
 export * from './orders';
+export * from './parties';
 export * from './documents';
 export * from './document-requests';
 export * from './integrations';

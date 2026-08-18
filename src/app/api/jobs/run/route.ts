@@ -27,6 +27,7 @@ import { handleSyncAllContacts, handleSyncContactType } from '@/lib/jobs/handler
 import { handleJobsWatchdog } from '@/lib/jobs/handlers/jobs-watchdog';
 import { handleOpsDailyReport } from '@/lib/jobs/handlers/ops-daily-report';
 import { handleRetrySoftProDocumentAttach } from '@/lib/jobs/handlers/retry-softpro-document-attach';
+import { handlePartyWizardInvite } from '@/lib/jobs/handlers/party-wizard-invite';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 
 function formatTodayForImport(): string {
@@ -111,6 +112,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
   },
   'notifications.process_outbox': () =>
     processOutboxEvents(),
+  'party_wizard.invite': () =>
+    handlePartyWizardInvite(),
   'jobs.watchdog': () =>
     handleJobsWatchdog(),
   'ops.daily_report': () =>

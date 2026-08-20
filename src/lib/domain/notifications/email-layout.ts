@@ -1,13 +1,15 @@
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? 'https://hub.pctitle.com').replace(/\/+$/, '');
 const PCT_WEBSITE_URL = 'https://www.pct.com';
 
-/** Brand navy — main header, hero, and primary UI. */
+/** Brand navy — accents and footer. */
 export const PCT_NAVY = '#10213A';
 /** Deep navy used for body text accents and the footer bar. */
 export const PCT_DEEP = '#1B2A4A';
-/** Main logo header background (redesign used #10213A; PCT brand navy preferred). */
+/** Coastline hero tile — matches login/email redesign. */
+export const COASTLINE_HEADER = '#1B2249';
+/** @deprecated Prefer COASTLINE_HEADER for the email hero. */
 export const HEADER_BG = PCT_NAVY;
-export const HERO_BG = PCT_NAVY;
+export const HERO_BG = COASTLINE_HEADER;
 export const PCT_ORANGE = '#F26B2B';
 export const ORANGE_SOFT = '#FF8A4C';
 export const ORANGE_TINT = '#FFF0E8';
@@ -65,7 +67,7 @@ u + .body .pct-orange { background-image: linear-gradient(#00000000,#00000000) !
 @media (prefers-color-scheme: dark) {
   .pct-page { background-color: ${BG_LIGHT} !important; }
   .pct-card { background-color: ${CARD_BG} !important; }
-  .pct-navy { background-color: ${HEADER_BG} !important; }
+  .pct-navy { background-color: ${COASTLINE_HEADER} !important; }
   .pct-deep { background-color: ${PCT_DEEP} !important; }
   .pct-orange { background-color: ${PCT_ORANGE} !important; }
   .pct-orange-tint { background-color: ${ORANGE_TINT} !important; }
@@ -87,7 +89,7 @@ u + .body .pct-orange { background-image: linear-gradient(#00000000,#00000000) !
 [data-ogsc] .pct-card,
 [data-ogsb] .pct-card { background-color: ${CARD_BG} !important; }
 [data-ogsc] .pct-navy,
-[data-ogsb] .pct-navy { background-color: ${HEADER_BG} !important; }
+[data-ogsb] .pct-navy { background-color: ${COASTLINE_HEADER} !important; }
 [data-ogsc] .pct-deep,
 [data-ogsb] .pct-deep { background-color: ${PCT_DEEP} !important; }
 [data-ogsc] .pct-orange,
@@ -183,7 +185,7 @@ function trackerContext(tracker: TransactionTracker): string {
 }
 
 function brandHeaderAndHero(badge: string, hero: EmailHero, tracker?: TransactionTracker): string {
-  return `<tr><td class="pct-navy pct-text-on-navy" bgcolor="#1B2249" style="background-color:#1B2249;background-image:radial-gradient(circle at 80% 34%,rgba(242,107,43,.34),transparent 34%),linear-gradient(180deg,#2C3564 0%,#15193A 100%);">
+  return `<tr><td class="pct-navy pct-text-on-navy" bgcolor="${COASTLINE_HEADER}" style="background-color:${COASTLINE_HEADER};background-image:radial-gradient(circle at 80% 34%,rgba(242,107,43,.34),transparent 34%),linear-gradient(180deg,#2C3564 0%,#15193A 100%);">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
 <tr><td style="padding:24px 34px 20px;color:#ffffff;font-size:13px;font-weight:bold;letter-spacing:.1px;">PACIFIC COAST TITLE COMPANY</td><td align="right" style="padding:24px 34px 20px;color:#9EA7C2;font-size:10px;font-weight:bold;letter-spacing:1.45px;text-transform:uppercase;">Transaction Desk Hub</td></tr>
 <tr><td colspan="2" class="pct-orange" height="2" bgcolor="${PCT_ORANGE}" style="height:2px;background:${PCT_ORANGE};font-size:1px;line-height:1px;">&nbsp;</td></tr>
@@ -202,8 +204,8 @@ function brandFooter(): string {
 }
 
 /**
- * Full redesign shell: logo header → hero → body → footer.
- * Main header uses HEADER_BG (#1B2A4A). Brand colors are locked for dark mode.
+ * Coastline email shell: brand header → hero (+ optional tracker) → body → footer.
+ * Hero uses COASTLINE_HEADER (#1B2249). Brand colors are locked for dark mode.
  */
 export function emailShell(opts: {
   title: string;

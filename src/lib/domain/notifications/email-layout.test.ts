@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  HEADER_BG,
+  COASTLINE_HEADER,
   PCT_DARK_LOGO_PATH,
   PCT_LIGHT_LOGO_URL,
   PCT_LOGO_URL,
@@ -63,7 +63,7 @@ describe('emailLayout / emailShell redesign', () => {
     expect(html).toContain('prefers-color-scheme: dark');
     expect(html).toContain('data-ogsc');
     expect(html).toContain('class="pct-navy pct-text-on-navy"');
-    expect(html).toContain(`background-color: ${HEADER_BG} !important`);
+    expect(html).toContain(`background-color: ${COASTLINE_HEADER} !important`);
     expect(html).toContain(`background-color: ${PCT_ORANGE} !important`);
   });
 

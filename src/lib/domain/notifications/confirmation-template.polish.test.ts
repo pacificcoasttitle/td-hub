@@ -5,7 +5,7 @@ import {
   orderConfirmationTemplate,
 } from './confirmation-template';
 import { parseTaxResultData } from './tax-result-data';
-import { HEADER_BG, PCT_ORANGE } from './email-layout';
+import { COASTLINE_HEADER, PCT_ORANGE } from './email-layout';
 
 const TAX = parseTaxResultData({
   TaxReport: {
@@ -85,7 +85,7 @@ describe('orderConfirmationTemplate polish + redesign', () => {
     expect(html).not.toContain('Generate Fees');
     expect(html).not.toContain('Generate CPL');
     expect(html).not.toContain('View Order in Portal');
-    expect(html).toContain(`background:${HEADER_BG}`);
+    expect(html).toContain(`background-color:${COASTLINE_HEADER}`);
     expect(html).toContain(`background:${PCT_ORANGE}`);
     expect(html).toContain('Sales price');
     expect(html).toContain('$500,000');

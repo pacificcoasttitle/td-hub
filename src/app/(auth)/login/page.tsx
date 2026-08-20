@@ -71,7 +71,7 @@ export default function LoginPage() {
       <header className="relative z-20 flex items-center justify-between px-6 py-6 sm:px-10">
         <div className="flex items-center">
           <Image
-            src="/logo2-dark.png"
+            src="/logo2.png"
             alt="Pacific Coast Title"
             width={200}
             height={40}

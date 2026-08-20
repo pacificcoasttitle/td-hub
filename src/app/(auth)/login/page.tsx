@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter } from 'next/navigation';
@@ -69,7 +70,14 @@ export default function LoginPage() {
 
       <header className="relative z-20 flex items-center justify-between px-6 py-6 sm:px-10">
         <div className="flex items-center gap-2.5">
-          <span className="h-6 w-6 rounded-[7px] bg-gradient-to-br from-[#F26B2B] to-[#F59E5B]" />
+          <Image
+            src="/logo2.png"
+            alt="Pacific Coast Title"
+            width={28}
+            height={28}
+            className="h-7 w-7 rounded-full"
+            priority
+          />
           <span className="text-sm font-bold tracking-tight text-white">
             Pacific Coast Title
           </span>
@@ -102,7 +110,7 @@ export default function LoginPage() {
             {[
               { n: '45+', l: 'Years' },
               { n: '100K+', l: 'Families' },
-              { n: '12', l: 'Counties' },
+              { n: 'All', l: 'Counties in California' },
             ].map((s, i, arr) => (
               <div
                 key={s.l}

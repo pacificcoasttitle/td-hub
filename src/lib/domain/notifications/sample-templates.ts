@@ -73,7 +73,7 @@ const confirmationData: OrderConfirmationData = {
     taxRate: '1.337557',
     issueDate: '10/15/2025',
     landValue: '$621,437.00',
-    improvementValue: '$453,906.00',
+    improvementsValue: '$453,906.00',
     firstInstallment: { amount: '$7,191.67', dueDate: '12/10/2025', status: 'PAID', number: '1st', paymentDate: '12/9/2025', penalty: '$0.00', amountPaid: '$7,191.67', taxYear: '2025' },
     secondInstallment: { amount: '$7,191.66', dueDate: '4/10/2026', status: 'PAID', number: '2nd', paymentDate: '4/10/2026', penalty: '$0.00', amountPaid: '$7,191.66', taxYear: '2025' },
   },

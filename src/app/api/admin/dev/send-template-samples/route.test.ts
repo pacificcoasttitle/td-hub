@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getSessionMock, sendEmailMock } = vi.hoisted(() => ({
+const { getSessionMock, sendEmailMock, buildAllSampleEmailsMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   sendEmailMock: vi.fn(),
+  buildAllSampleEmailsMock: vi.fn(),
 }));
 
 vi.mock('@/lib/security/auth', () => ({
@@ -13,31 +14,40 @@ vi.mock('@/lib/integrations/sendgrid/client', () => ({
   sendEmail: sendEmailMock,
 }));
 
-vi.mock('@/lib/domain/notifications/templates', () => ({
-  orderConfirmationTemplate: () => ({ subject: 'Open Order Confirmation - 20018881-OCT', html: '<p>confirmation</p>' }),
-  orderClosedTemplate: () => ({ subject: 'Your Order 20018881-OCT has been closed', html: '<p>closed</p>' }),
-  milestoneRecordingTemplate: () => ({
-    subject: 'Recording confirmed for 20018881-OCT at 5792 Adobe Rd, Twentynine Palms, CA',
-    html: '<p>recording</p>',
-  }),
-  milestoneDisbursementTemplate: () => ({ subject: 'Disbursement completed for 20018881-OCT', html: '<p>disbursement</p>' }),
-  documentReceivedTemplate: () => ({ subject: 'New prelim document for Order 20018881-OCT', html: '<p>document</p>' }),
-}));
-
-vi.mock('@/lib/domain/notifications/prelim-delivery-send', () => ({
-  prelimDeliverySampleTemplate: () => ({
-    subject: 'Preliminary Title Report — 5792 Adobe Rd, Twentynine Palms, CA — File 20018881-OCT',
-    html: '<p>prelim</p>',
-    text: 'prelim',
-  }),
+vi.mock('@/lib/domain/notifications/sample-templates', () => ({
+  buildAllSampleEmails: buildAllSampleEmailsMock,
 }));
 
 import { POST } from './route';
+
+const SAMPLE_KEYS = [
+  'order_confirmation',
+  'order_closed',
+  'milestone_recording',
+  'milestone_disbursement',
+  'document_received_prelim',
+  'document_received_policy',
+  'prelim_delivery',
+  'party_wizard_invite',
+  'user_invite',
+  'ops_daily_report',
+] as const;
 
 describe('POST /api/admin/dev/send-template-samples', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getSessionMock.mockResolvedValue({ id: 'admin-1', role: 'admin' });
+    buildAllSampleEmailsMock.mockReturnValue(
+      SAMPLE_KEYS.map((key) => ({
+        key,
+        label: key,
+        subject: `Subject for ${key}`,
+        html: `<p>${key}</p>`,
+        text: key.includes('prelim') || key.includes('party') || key.includes('ops')
+          ? `text-${key}`
+          : undefined,
+      })),
+    );
     sendEmailMock.mockImplementation(async ({ subject }: { subject: string }) => ({
       success: true,
       data: { messageId: `msg-${subject.replace(/\W+/g, '-').toLowerCase()}` },
@@ -49,26 +59,18 @@ describe('POST /api/admin/dev/send-template-samples', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(sendEmailMock).toHaveBeenCalledTimes(6);
-    expect(sendEmailMock.mock.calls.map(([params]) => params.to)).toEqual([
-      'ghernandez@pct.com',
-      'ghernandez@pct.com',
-      'ghernandez@pct.com',
-      'ghernandez@pct.com',
-      'ghernandez@pct.com',
-      'ghernandez@pct.com',
-    ]);
-    expect(sendEmailMock.mock.calls.map(([params]) => params.subject)).toEqual([
-      '[SAMPLE] Open Order Confirmation - 20018881-OCT',
-      '[SAMPLE] Your Order 20018881-OCT has been closed',
-      '[SAMPLE] Recording confirmed for 20018881-OCT at 5792 Adobe Rd, Twentynine Palms, CA',
-      '[SAMPLE] Disbursement completed for 20018881-OCT',
-      '[SAMPLE] New prelim document for Order 20018881-OCT',
-      '[SAMPLE] Preliminary Title Report — 5792 Adobe Rd, Twentynine Palms, CA — File 20018881-OCT',
-    ]);
+    expect(buildAllSampleEmailsMock).toHaveBeenCalledOnce();
+    expect(sendEmailMock).toHaveBeenCalledTimes(10);
+    expect(sendEmailMock.mock.calls.map(([params]) => params.to)).toEqual(
+      Array(10).fill('ghernandez@pct.com'),
+    );
+    expect(sendEmailMock.mock.calls.map(([params]) => params.subject)).toEqual(
+      SAMPLE_KEYS.map((key) => `[SAMPLE] Subject for ${key}`),
+    );
     expect(body.success).toBe(true);
-    expect(body.count).toBe(6);
-    expect(body.sent).toHaveLength(6);
+    expect(body.count).toBe(10);
+    expect(body.sent).toHaveLength(10);
+    expect(body.sent.map((item: { key: string }) => item.key)).toEqual([...SAMPLE_KEYS]);
     expect(body.sent.every((item: { messageId?: string }) => item.messageId?.startsWith('msg-'))).toBe(true);
   });
 

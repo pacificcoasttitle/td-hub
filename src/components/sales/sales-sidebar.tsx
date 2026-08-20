@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, BarChart3, TrendingUp, Users, DollarSign,
+  LayoutDashboard, BarChart3, TrendingUp, Users,
   Briefcase, Trophy, Contact, LogOut, Menu, X,
 } from 'lucide-react';
 import { handleSignOut } from '@/lib/security/sign-out';
@@ -20,7 +20,6 @@ const BASE_ITEMS: NavItem[] = [
   { label: 'Production History', href: '/sales/production-history', icon: <BarChart3 className={ICON_CLS} /> },
   { label: 'Trends',             href: '/sales/trends',             icon: <TrendingUp className={ICON_CLS} /> },
   { label: 'Summary',            href: '/sales/summary',            icon: <Users className={ICON_CLS} /> },
-  { label: 'Commission',         href: '/sales/commission',         icon: <DollarSign className={ICON_CLS} /> },
 ];
 
 const RANKING: NavItem = { label: 'Ranking', href: '/sales/ranking', icon: <Trophy className={ICON_CLS} /> };

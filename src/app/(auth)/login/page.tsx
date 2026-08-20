@@ -69,18 +69,15 @@ export default function LoginPage() {
       <TdWaves />
 
       <header className="relative z-20 flex items-center justify-between px-6 py-6 sm:px-10">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center">
           <Image
-            src="/logo2.png"
+            src="/logo2-dark.png"
             alt="Pacific Coast Title"
-            width={28}
-            height={28}
-            className="h-7 w-7 rounded-full"
+            width={200}
+            height={40}
+            className="h-9 w-auto"
             priority
           />
-          <span className="text-sm font-bold tracking-tight text-white">
-            Pacific Coast Title
-          </span>
         </div>
         <p className="hidden text-[13px] text-white/60 sm:block">
           Need to open a file?{' '}

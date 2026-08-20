@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter } from 'next/navigation';
 import { TdWaves } from '@/components/brand/td-waves';
@@ -79,15 +78,6 @@ export default function LoginPage() {
             priority
           />
         </div>
-        <p className="hidden text-[13px] text-white/60 sm:block">
-          Need to open a file?{' '}
-          <Link
-            href="/client/orders/new"
-            className="font-semibold text-white transition-colors hover:text-[#F26B2B]"
-          >
-            Open an order →
-          </Link>
-        </p>
       </header>
 
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-84px)] w-full max-w-[1240px] flex-col items-center justify-center gap-12 px-6 pb-14 sm:px-10 lg:flex-row lg:items-center lg:justify-between lg:gap-16">

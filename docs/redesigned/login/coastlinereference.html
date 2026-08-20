@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TD Hub — Coastline (visual reference)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#12172E;font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;position:relative;overflow-x:hidden}
+.bg{position:absolute;inset:0;pointer-events:none}
+.bg svg{position:absolute;inset:0;width:100%;height:100%}
+.g1{position:absolute;inset:0;background:radial-gradient(120% 90% at 78% 15%,rgba(242,107,43,.20),transparent 55%)}
+.g2{position:absolute;inset:0;background:linear-gradient(180deg,rgba(18,23,46,.18) 0%,rgba(18,23,46,.30) 45%,rgba(18,23,46,.72) 100%)}
+header{position:relative;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:24px 40px}
+.lg{display:flex;align-items:center;gap:10px;color:#fff;font-weight:700;font-size:14px;letter-spacing:-.01em}
+.lg i{width:24px;height:24px;border-radius:7px;background:linear-gradient(135deg,#F26B2B,#F59E5B);display:block}
+header p{margin:0;font-size:13px;color:rgba(255,255,255,.6)}
+header a{color:#fff;font-weight:600;text-decoration:none}
+.body{position:relative;z-index:10;max-width:1240px;margin:0 auto;min-height:calc(100vh - 84px);display:flex;align-items:center;
+  justify-content:space-between;gap:64px;padding:0 40px 56px}
+.copy{max-width:440px;color:#fff}
+.eye{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#F26B2B;margin:0 0 16px}
+h1{font-family:Fraunces,Georgia,serif;font-size:46px;line-height:1.05;font-weight:600;letter-spacing:-.02em;margin:0}
+.copy>p.lede{margin:16px 0 0;max-width:38ch;font-size:15px;line-height:1.65;color:rgba(255,255,255,.65)}
+dl{display:flex;border-top:1px solid rgba(255,255,255,.15);padding-top:20px;margin:32px 0 0}
+dl>div{padding-right:36px;margin-right:36px;border-right:1px solid rgba(255,255,255,.10)}
+dl>div:last-child{border-right:0;margin-right:0;padding-right:0}
+dd{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em;color:#fff}
+dl p{margin:2px 0 0;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.5)}
+.card{width:380px;flex:none;border-radius:18px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.09);
+  padding:32px;backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);box-shadow:0 30px 70px -30px rgba(0,0,0,.6)}
+.card h2{margin:0;font-size:19px;font-weight:600;letter-spacing:-.01em;color:#fff}
+.card .s{margin:6px 0 24px;font-size:13px;color:rgba(255,255,255,.55)}
+label.f{display:block;font-size:11.5px;font-weight:500;color:rgba(255,255,255,.7);margin-bottom:6px}
+input.t{width:100%;height:48px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.10);
+  padding:0 14px;font-size:14px;color:#fff;font-family:inherit;outline:none}
+input.t::placeholder{color:rgba(255,255,255,.4)}
+input.t:focus{border-color:#fff;background:rgba(255,255,255,.16);box-shadow:0 0 0 2px rgba(255,255,255,.25)}
+.row{margin-bottom:16px}
+.pw{position:relative}
+.pw button{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:0;color:rgba(255,255,255,.5);cursor:pointer;padding:6px;line-height:0}
+.cta{width:100%;height:48px;border:0;border-radius:10px;background:#F26B2B;color:#fff;font-size:14.5px;font-weight:600;
+  font-family:inherit;cursor:pointer;box-shadow:0 10px 26px -10px rgba(242,107,43,.85)}
+.cta:hover{background:#E05A1A}
+.meta{display:flex;justify-content:space-between;align-items:center;margin-top:16px;font-size:12.5px;color:rgba(255,255,255,.55)}
+.meta label{display:flex;align-items:center;gap:8px;cursor:pointer}
+.meta input{accent-color:#F26B2B;width:14px;height:14px}
+.meta a{color:rgba(255,255,255,.85);text-decoration:none}
+@media(max-width:900px){.body{flex-direction:column;justify-content:center;gap:40px;padding:32px 24px 48px}.card{width:100%;max-width:400px}h1{font-size:38px}header{padding:20px 24px}header p{display:none}}
+</style></head>
+<body>
+<div class="bg">
+  <svg viewBox="0 0 1200 640" preserveAspectRatio="none">
+    <defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2C3564"/><stop offset="100%" stop-color="#15193A"/></linearGradient>
+      <linearGradient id="r1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4B5187"/><stop offset="100%" stop-color="#2B3160"/></linearGradient>
+      <linearGradient id="r2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2F3563"/><stop offset="100%" stop-color="#1D2249"/></linearGradient>
+      <linearGradient id="r3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1A1F42"/><stop offset="100%" stop-color="#10142C"/></linearGradient>
+      <radialGradient id="glow"><stop offset="0%" stop-color="#F26B2B" stop-opacity=".55"/><stop offset="100%" stop-color="#F26B2B" stop-opacity="0"/></radialGradient>
+    </defs>
+    <rect width="1200" height="640" fill="url(#sky)"/>
+    <circle cx="890" cy="270" r="200" fill="url(#glow)"/>
+    <path d="M0,390 C160,330 300,380 430,355 C580,326 700,390 830,368 C960,346 1090,384 1200,362 L1200,640 L0,640 Z" fill="url(#r1)"/>
+    <path d="M0,460 C170,412 320,456 470,436 C630,414 760,470 900,448 C1010,431 1120,462 1200,446 L1200,640 L0,640 Z" fill="url(#r2)"/>
+    <path d="M0,538 C180,500 330,540 500,522 C680,503 820,546 980,530 C1080,520 1150,538 1200,530 L1200,640 L0,640 Z" fill="url(#r3)"/>
+  </svg>
+  <div class="g1"></div><div class="g2"></div>
+</div>
+
+<header>
+  <div class="lg"><i></i>Pacific Coast Title</div>
+  <p>Not a client yet? <a href="#">Open an order →</a></p>
+</header>
+
+<div class="body">
+  <div class="copy">
+    <p class="eye">Transaction Desk Hub</p>
+    <h1>Close with confidence.</h1>
+    <p class="lede">Every order, prelim, and settlement statement for your desk — in one place, from the county recorder to the closing table.</p>
+    <dl>
+      <div><dd>45+</dd><p>Years</p></div>
+      <div><dd>100K+</dd><p>Families</p></div>
+      <div><dd>12</dd><p>Counties</p></div>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Sign in</h2>
+    <p class="s">Use your Pacific Coast Title account.</p>
+    <div class="row"><label class="f" for="e">Email address</label><input class="t" id="e" type="email" placeholder="you@pct.com"></div>
+    <div class="row"><label class="f" for="p">Password</label>
+      <div class="pw"><input class="t" id="p" type="password" style="padding-right:46px">
+        <button type="button" aria-label="Show password"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+      </div>
+    </div>
+    <button class="cta">Sign In</button>
+    <div class="meta">
+      <label><input type="checkbox" checked>Keep me signed in</label>
+      <a href="#">Forgot?</a>
+    </div>
+  </div>
+</div>
+</body></html>

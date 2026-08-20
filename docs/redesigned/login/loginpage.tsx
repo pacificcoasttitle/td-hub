@@ -1,71 +1,45 @@
-'use client';
+'use client'
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { createBrowserClient } from '@supabase/ssr';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react'
+import Link from 'next/link'
 
 /* ------------------------------------------------------------------
    TD Hub — Login  (Concept 03: "Coastline")
-   Markup/styling from docs/redesigned/login; auth logic preserved.
+   Drop-in replacement for app/login/page.tsx
+
+   PRESERVE YOUR EXISTING AUTH LOGIC. The only thing this file changes
+   is markup + styling. The section marked [AUTH] is a placeholder —
+   paste your current submit handler in its place.
 ------------------------------------------------------------------- */
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPw, setShowPw] = useState(false);
-  const [remember, setRemember] = useState(true);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const router = useRouter();
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [remember, setRemember] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  );
-
-  async function resolveRedirect(): Promise<string> {
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
     try {
-      const r = await fetch('/api/auth/session');
-      if (r.ok) {
-        const { role } = await r.json();
-        if (role === 'client') return '/client/dashboard';
-        if (role === 'open_order_team') return '/hub';
-        if (role === 'escrow_assistant') return '/hub';
-        if (role === 'title_production') return '/title-production';
-        if (role === 'sales_rep') return '/sales/dashboard';
-        if (role === 'sales_manager') return '/sales/dashboard';
-      }
-    } catch { /* fall through */ }
-    return '/dashboard';
-  }
-
-  // [AUTH] — existing sign-in flow (unchanged)
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-      return;
+      // [AUTH] ---- keep your existing sign-in call here ----
+      // await signIn({ email, password, remember })
+      // router.push('/dashboard')
+    } catch (err) {
+      setError('Invalid email or password.')
+    } finally {
+      setLoading(false)
     }
-
-    const dest = await resolveRedirect();
-    router.push(dest);
-    router.refresh();
   }
 
   return (
     <main className="relative min-h-screen w-full overflow-hidden bg-[#12172E]">
       <CoastlineBackdrop />
 
+      {/* ---------- top bar ---------- */}
       <header className="relative z-20 flex items-center justify-between px-6 py-6 sm:px-10">
         <div className="flex items-center gap-2.5">
           <span className="h-6 w-6 rounded-[7px] bg-gradient-to-br from-[#F26B2B] to-[#F59E5B]" />
@@ -74,9 +48,9 @@ export default function LoginPage() {
           </span>
         </div>
         <p className="hidden text-[13px] text-white/60 sm:block">
-          Need to open a file?{' '}
+          Not a client yet?{' '}
           <Link
-            href="/client/orders/new"
+            href="/open-order"
             className="font-semibold text-white transition-colors hover:text-[#F26B2B]"
           >
             Open an order →
@@ -84,7 +58,9 @@ export default function LoginPage() {
         </p>
       </header>
 
+      {/* ---------- body ---------- */}
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-84px)] w-full max-w-[1240px] flex-col items-center justify-center gap-12 px-6 pb-14 sm:px-10 lg:flex-row lg:items-center lg:justify-between lg:gap-16">
+        {/* left: brand copy */}
         <div className="w-full max-w-[440px] text-white">
           <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#F26B2B]">
             Transaction Desk Hub
@@ -123,6 +99,7 @@ export default function LoginPage() {
           </dl>
         </div>
 
+        {/* right: sign-in card */}
         <div className="w-full max-w-[380px] rounded-[18px] border border-white/[0.16] bg-white/[0.09] p-8 shadow-[0_30px_70px_-30px_rgba(0,0,0,0.6)] backdrop-blur-xl">
           <h2 className="text-[19px] font-semibold tracking-[-0.01em] text-white">
             Sign in
@@ -140,7 +117,7 @@ export default function LoginPage() {
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label
                 htmlFor="email"
@@ -170,7 +147,7 @@ export default function LoginPage() {
               <div className="relative">
                 <input
                   id="password"
-                  type={showPw ? 'text' : 'password'}
+                  type={showPassword ? 'text' : 'password'}
                   required
                   autoComplete="current-password"
                   value={password}
@@ -179,11 +156,11 @@ export default function LoginPage() {
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPw((v) => !v)}
-                  aria-label={showPw ? 'Hide password' : 'Show password'}
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1.5 text-white/50 transition-colors hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
                 >
-                  <EyeIcon off={showPw} />
+                  <EyeIcon off={showPassword} />
                 </button>
               </div>
             </div>
@@ -191,14 +168,8 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-[10px] bg-[#F26B2B] text-[14.5px] font-semibold text-white shadow-[0_10px_26px_-10px_rgba(242,107,43,0.85)] transition-colors hover:bg-[#E05A1A] focus:outline-none focus:ring-2 focus:ring-[#F26B2B]/50 focus:ring-offset-2 focus:ring-offset-[#12172E] disabled:opacity-60"
+              className="flex h-12 w-full items-center justify-center rounded-[10px] bg-[#F26B2B] text-[14.5px] font-semibold text-white shadow-[0_10px_26px_-10px_rgba(242,107,43,0.85)] transition-colors hover:bg-[#E05A1A] focus:outline-none focus:ring-2 focus:ring-[#F26B2B]/50 focus:ring-offset-2 focus:ring-offset-[#12172E] disabled:opacity-60"
             >
-              {loading && (
-                <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden>
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-              )}
               {loading ? 'Signing in…' : 'Sign In'}
             </button>
           </form>
@@ -213,20 +184,24 @@ export default function LoginPage() {
               />
               Keep me signed in
             </label>
-            {/* No /forgot-password route yet — same no-op affordance as before. */}
-            <button
-              type="button"
-              className="text-white/85 transition-colors hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40 rounded"
+            <Link
+              href="/forgot-password"
+              className="text-white/85 transition-colors hover:text-white"
             >
               Forgot?
-            </button>
+            </Link>
           </div>
         </div>
       </div>
     </main>
-  );
+  )
 }
 
+/* ------------------------------------------------------------------
+   Backdrop — layered SVG horizon + warm glow + vignette.
+   Swap <CoastlineSvg /> for a real photo later:
+   <Image src="/coast.jpg" alt="" fill priority className="object-cover" />
+------------------------------------------------------------------- */
 function CoastlineBackdrop() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0">
@@ -273,10 +248,11 @@ function CoastlineBackdrop() {
         />
       </svg>
 
+      {/* warm key light + darkening vignette for text contrast */}
       <div className="absolute inset-0 bg-[radial-gradient(120%_90%_at_78%_15%,rgba(242,107,43,0.20),transparent_55%)]" />
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(18,23,46,0.18)_0%,rgba(18,23,46,0.30)_45%,rgba(18,23,46,0.72)_100%)]" />
     </div>
-  );
+  )
 }
 
 function EyeIcon({ off }: { off: boolean }) {
@@ -295,5 +271,5 @@ function EyeIcon({ off }: { off: boolean }) {
       <circle cx="12" cy="12" r="3" />
       {off && <path d="m3 3 18 18" />}
     </svg>
-  );
+  )
 }

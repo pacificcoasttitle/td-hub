@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { orderConfirmationTemplate } from './confirmation-template';
 import { parseTaxResultData } from './tax-result-data';
-import { HEADER_BG } from './email-layout';
 
 const SAMPLE = {
   fileNumber: '20019999-TEST',
@@ -45,11 +44,12 @@ describe('orderConfirmationTemplate redesign match (presentational)', () => {
     const { html, subject } = orderConfirmationTemplate(SAMPLE);
 
     expect(subject).toBe('Open Order Confirmation - 20019999-TEST');
-    expect(html).toContain(`background:${HEADER_BG}`);
+    expect(html).toContain('linear-gradient(180deg,#2C3564 0%,#15193A 100%)');
     expect(html).toContain('Order confirmation');
     expect(html).toContain('ORDER OPENED SUCCESSFULLY');
     expect(html).toContain('Your title order is open.');
-    expect(html).toContain('https://www.pct.com/logo2.png');
+    expect(html).toContain('PACIFIC COAST TITLE COMPANY');
+    expect(html).toContain('Order opened');
     expect(html).toContain('pct.com');
     expect(html).toContain('Pacific Coast Title Company');
   });

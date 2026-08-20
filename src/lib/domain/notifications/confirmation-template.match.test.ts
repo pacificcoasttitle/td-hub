@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { orderConfirmationTemplate } from './confirmation-template';
 import { parseTaxResultData } from './tax-result-data';
-import { HEADER_BG } from './email-layout';
 
 const REDESIGN = readFileSync(
   join(process.cwd(), 'docs/redesigned/order_confirmation.html'),
@@ -40,7 +39,7 @@ function markers(html: string): string[] {
     'Escrow details',
     'Pacific Coast Title Company',
     'pct.com',
-    'https://www.pct.com/logo2.png',
+    'PACIFIC COAST TITLE COMPANY',
   ];
   return needles.filter((n) => html.includes(n));
 }
@@ -75,7 +74,9 @@ describe('confirmation template matches PCT redesign', () => {
     for (const m of expected) {
       expect(html, `missing marker: ${m}`).toContain(m);
     }
-    expect(html).toContain(`background:${HEADER_BG}`);
+    expect(html).toContain('linear-gradient(180deg,#2C3564 0%,#15193A 100%)');
+    expect(html).toContain('Order opened');
+    expect(html).toContain('Prelim delivered');
     expect(html).toContain('Title officer');
     expect(html).toContain('Eddie LasMarias');
   });

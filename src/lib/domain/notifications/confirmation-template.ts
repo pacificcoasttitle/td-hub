@@ -269,6 +269,7 @@ ${heading('Escrow details')}${fieldTable([{ label: 'Name', valueHtml: esc(displa
         headline: 'Your title order is open.',
         subcopy: 'We have opened the order and prepared the initial property information.',
       },
+      tracker: { stage: 1, fileNumber: fn, address },
       bodyHtml,
     }),
   };

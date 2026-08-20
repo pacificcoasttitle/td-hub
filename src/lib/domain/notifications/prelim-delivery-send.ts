@@ -213,6 +213,7 @@ ${fieldTable(details.map(([label, value]) => ({ label, valueHtml: esc(value) }))
       headline: 'Your preliminary report is ready.',
       subcopy: 'Review the report and contact your title team with questions.',
     },
+    tracker: { stage: 2, fileNumber: context.fileNumber, address: context.propertyAddress },
     bodyHtml: body,
   });
 

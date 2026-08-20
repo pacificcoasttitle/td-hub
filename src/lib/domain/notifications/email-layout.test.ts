@@ -71,16 +71,17 @@ describe('emailLayout / emailShell redesign', () => {
   it('emailLayout wraps content in the redesign shell', () => {
     const html = emailLayout('Order Confirmation', '<p>Body</p>');
     expect(html).toContain('Order Confirmation');
-    expect(html).toContain(`background:${HEADER_BG}`);
-    expect(html).toContain(PCT_LOGO_URL);
+    expect(html).toContain('linear-gradient(180deg,#2C3564 0%,#15193A 100%)');
+    expect(html).toContain('PACIFIC COAST TITLE COMPANY');
   });
 
   it('order-confirmation uses the PCT redesign shell', () => {
     const rendered = orderConfirmationTemplate(confirmationFixture);
-    expect(rendered.html).toContain(`background:${HEADER_BG}`);
+    expect(rendered.html).toContain('linear-gradient(180deg,#2C3564 0%,#15193A 100%)');
     expect(rendered.html).toContain('Order confirmation');
     expect(rendered.html).toContain('Your title order is open.');
-    expect(rendered.html).toContain(PCT_LOGO_URL);
+    expect(rendered.html).toContain('Order opened');
+    expect(rendered.html).toContain('Wire disbursed');
     expect(rendered.html).not.toContain('logo2-light.png');
   });
 

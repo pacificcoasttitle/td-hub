@@ -7,7 +7,6 @@ import {
   type DocumentEmailData,
   type OrderEmailData,
 } from './templates';
-import { HEADER_BG } from './email-layout';
 
 const orderData: OrderEmailData = {
   fileNumber: '20018881-OCT',
@@ -23,8 +22,9 @@ const documentData: DocumentEmailData = {
 function expectRedesignShell(html: string) {
   expect(html).toContain('<!doctype html>');
   expect(html).toContain('Pacific Coast Title');
-  expect(html).toContain(`background:${HEADER_BG}`);
-  expect(html).toContain('border-radius:18px');
+  expect(html).toContain('linear-gradient(180deg,#2C3564 0%,#15193A 100%)');
+  expect(html).toContain('border-radius:20px');
+  expect(html).toContain('Transaction Desk Hub');
   expect(html).toContain('pct.com');
 }
 
@@ -41,7 +41,8 @@ describe('notification templates', () => {
     const rendered = milestoneRecordingTemplate(orderData);
     expect(rendered.subject).toBe('Recording confirmed for 20018881-OCT at 5792 Adobe Rd, Twentynine Palms, CA');
     expectRedesignShell(rendered.html);
-    expect(rendered.html).toContain('Recording confirmed.');
+    expect(rendered.html).toContain('Your transaction has reached the recorder.');
+    expect(rendered.html).toContain('Wire disbursed');
     expect(rendered.html).toContain('View Order');
   });
 

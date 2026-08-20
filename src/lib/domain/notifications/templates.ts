@@ -59,6 +59,7 @@ export function orderClosedTemplate(data: OrderEmailData): EmailTemplate {
         headline: 'Your order is closed.',
         subcopy: 'The transaction has reached its final milestone.',
       },
+      tracker: { stage: 4, fileNumber: data.fileNumber, address: data.address },
       bodyHtml: orderBody(
         '<p style="margin:0 0 22px;">All parties have been notified. Final documents and the completed order record are available in TD Hub.</p>',
         data,
@@ -78,10 +79,11 @@ export function milestoneRecordingTemplate(data: OrderEmailData): EmailTemplate 
       preheader: 'The recording confirmation has been received for this order.',
       hero: {
         icon: '✓',
-        eyebrow: 'Milestone reached',
-        headline: 'Recording confirmed.',
-        subcopy: 'The recording confirmation has been received for this order.',
+        eyebrow: 'Recording confirmation',
+        headline: 'Your transaction has reached the recorder.',
+        subcopy: 'Recording is confirmed. The final milestone is disbursement.',
       },
+      tracker: { stage: 3, fileNumber: data.fileNumber, address: data.address },
       bodyHtml: orderBody(
         '<p style="margin:0 0 22px;">The order is progressing and the recording milestone is now reflected in TD Hub.</p>',
         data,
@@ -105,6 +107,7 @@ export function milestoneDisbursementTemplate(data: OrderEmailData): EmailTempla
         headline: 'Funds have been disbursed.',
         subcopy: 'Disbursement is complete for this order.',
       },
+      tracker: { stage: 4, fileNumber: data.fileNumber, address: data.address },
       bodyHtml: orderBody(
         '<p style="margin:0 0 22px;">Please verify receipt as appropriate and review the transaction details in TD Hub.</p>',
         data,
@@ -170,6 +173,9 @@ export function documentReceivedTemplate(data: DocumentEmailData): EmailTemplate
         headline: copy.headline,
         subcopy: copy.subcopy,
       },
+      tracker: data.category.trim().toLowerCase() === 'prelim'
+        ? { stage: 2, fileNumber: data.fileNumber, address: data.address }
+        : undefined,
       bodyHtml: orderBody(
         `<p style="margin:0 0 22px;">${esc(copy.intro)}</p>`,
         data,

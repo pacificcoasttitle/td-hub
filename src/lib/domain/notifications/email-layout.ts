@@ -36,6 +36,12 @@ export interface EmailHero {
   subcopy: string;
 }
 
+export interface TransactionTracker {
+  stage: 1 | 2 | 3 | 4;
+  fileNumber: string;
+  address?: string | null;
+}
+
 export interface FieldRow {
   label: string;
   /** Already-escaped or trusted HTML (e.g. mailto links). */
@@ -141,18 +147,52 @@ export function calloutBar(html: string): string {
   return `<table role="presentation" class="pct-orange-tint" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:24px 0 0;background:${ORANGE_TINT};"><tr><td class="pct-orange" width="7" style="width:7px;background:${PCT_ORANGE};font-size:1px;line-height:1px;">&nbsp;</td><td class="pct-text-primary" style="padding:17px 19px;color:${TEXT_PRIMARY};font-size:14px;line-height:1.55;">${html}</td></tr></table>`;
 }
 
-function brandHeaderAndHero(badge: string, hero: EmailHero): string {
-  return `<tr><td class="pct-navy pct-text-on-navy" bgcolor="${HEADER_BG}" style="background-color:${HEADER_BG};background:${HEADER_BG};padding:30px 34px 28px;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
-<td valign="middle"><img src="${PCT_LOGO_URL}" width="190" alt="Pacific Coast Title" style="display:block;width:190px;max-width:100%;height:auto;border:0;"></td>
-<td align="right" valign="middle"><span class="pct-orange" style="display:inline-block;background-color:${PCT_ORANGE};background:${PCT_ORANGE};color:#ffffff;font-size:10px;line-height:1;font-weight:bold;letter-spacing:1.2px;padding:9px 12px;border-radius:999px;text-transform:uppercase;">${esc(badge)}</span></td>
-</tr></table></td></tr>
-<tr><td class="pct-orange" height="2" bgcolor="${PCT_ORANGE}" style="height:2px;background-color:${PCT_ORANGE};background:${PCT_ORANGE};font-size:1px;line-height:1px;">&nbsp;</td></tr>
-<tr><td class="pct-navy pct-text-on-navy" bgcolor="${HEADER_BG}" style="background-color:${HEADER_BG};background:${HEADER_BG};padding:28px 34px 32px;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
-<td width="74" valign="top" style="padding-top:4px;"><div class="pct-orange" style="width:56px;height:56px;border-radius:50%;background-color:${PCT_ORANGE};background:${PCT_ORANGE};color:#ffffff;font-size:24px;line-height:56px;text-align:center;font-weight:bold;">${esc(hero.icon)}</div></td>
-<td valign="top"><p class="pct-text-eyebrow" style="margin:0 0 8px;color:${ORANGE_SOFT};font-size:11px;line-height:1.2;font-weight:bold;letter-spacing:1.4px;text-transform:uppercase;">${esc(hero.eyebrow)}</p><h1 style="margin:0;color:#ffffff;font-size:30px;line-height:1.16;font-weight:bold;">${esc(hero.headline)}</h1><p class="pct-text-subcopy" style="margin:12px 0 0;color:#D8DEE8;font-size:15px;line-height:1.55;">${esc(hero.subcopy)}</p></td>
-</tr></table></td></tr>`;
+function trackerRail(tracker: TransactionTracker): string {
+  const labels = ['Order opened', 'Prelim delivered', 'Recording', 'Wire disbursed'];
+  const nodes = labels.map((label, index) => {
+    const step = index + 1;
+    const completed = step < tracker.stage;
+    const active = step === tracker.stage;
+    const circle = completed
+      ? `background:${PCT_ORANGE};color:#ffffff;box-shadow:none;">&#10003;`
+      : active
+        ? `background:#ffffff;color:${PCT_ORANGE};box-shadow:0 0 0 6px rgba(242,107,43,.26);">${step}`
+        : `background:rgba(255,255,255,.12);color:rgba(255,255,255,.54);box-shadow:none;">${step}`;
+    const color = completed ? '#ffffff' : active ? ORANGE_SOFT : 'rgba(255,255,255,.45)';
+    const align = index === 0 ? 'left' : index === labels.length - 1 ? 'right' : 'center';
+    return { step, label, circle, color, align };
+  });
+  const line = (completed: boolean) => `<td valign="middle" style="padding:0 5px;"><div style="height:3px;background:${completed ? PCT_ORANGE : 'rgba(255,255,255,.18)'};font-size:0;line-height:0;">&nbsp;</div></td>`;
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:26px;"><tr>
+${nodes.map((node, index) => `${index ? line(index < tracker.stage) : ''}<td width="${node.step === tracker.stage ? 30 : 24}" valign="middle"><div style="width:${node.step === tracker.stage ? 30 : 24}px;height:${node.step === tracker.stage ? 30 : 24}px;line-height:${node.step === tracker.stage ? 30 : 24}px;text-align:center;border-radius:50%;font-size:${node.step === tracker.stage ? 13 : 12}px;font-weight:900;${node.circle}</div></td>`).join('')}
+</tr><tr>
+${nodes.map((node, index) => `<td${index < nodes.length - 1 ? ' colspan="2"' : ''} width="25%" style="padding-top:9px;color:${node.color};font-size:9px;font-weight:${node.step === tracker.stage ? 900 : 800};letter-spacing:.45px;text-transform:uppercase;text-align:${node.align};white-space:nowrap;">${esc(node.label)}</td>`).join('')}
+</tr></table>`;
+}
+
+function trackerContext(tracker: TransactionTracker): string {
+  const address = tracker.address?.trim();
+  if (!address) {
+    return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;background:#283052;border:1px solid rgba(255,255,255,.16);border-radius:14px;"><tr><td style="padding:15px 18px;"><div style="color:#9EA7C2;font-size:9px;font-weight:bold;letter-spacing:1.25px;text-transform:uppercase;">File number</div><div style="color:#ffffff;font-size:13px;font-weight:bold;margin-top:4px;">${esc(tracker.fileNumber)}</div></td></tr></table>`;
+  }
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;background:#283052;border:1px solid rgba(255,255,255,.16);border-radius:14px;"><tr>
+<td style="padding:15px 18px;"><div style="color:#9EA7C2;font-size:9px;font-weight:bold;letter-spacing:1.25px;text-transform:uppercase;">Property</div><div style="color:#ffffff;font-size:13px;font-weight:bold;margin-top:4px;">${esc(address)}</div></td>
+<td width="1" style="background:rgba(255,255,255,.12);font-size:0;">&nbsp;</td>
+<td width="155" style="padding:15px 18px;"><div style="color:#9EA7C2;font-size:9px;font-weight:bold;letter-spacing:1.25px;text-transform:uppercase;">File number</div><div style="color:#ffffff;font-size:13px;font-weight:bold;margin-top:4px;">${esc(tracker.fileNumber)}</div></td>
+</tr></table>`;
+}
+
+function brandHeaderAndHero(badge: string, hero: EmailHero, tracker?: TransactionTracker): string {
+  return `<tr><td class="pct-navy pct-text-on-navy" bgcolor="#1B2249" style="background-color:#1B2249;background-image:radial-gradient(circle at 80% 34%,rgba(242,107,43,.34),transparent 34%),linear-gradient(180deg,#2C3564 0%,#15193A 100%);">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+<tr><td style="padding:24px 34px 20px;color:#ffffff;font-size:13px;font-weight:bold;letter-spacing:.1px;">PACIFIC COAST TITLE COMPANY</td><td align="right" style="padding:24px 34px 20px;color:#9EA7C2;font-size:10px;font-weight:bold;letter-spacing:1.45px;text-transform:uppercase;">Transaction Desk Hub</td></tr>
+<tr><td colspan="2" class="pct-orange" height="2" bgcolor="${PCT_ORANGE}" style="height:2px;background:${PCT_ORANGE};font-size:1px;line-height:1px;">&nbsp;</td></tr>
+<tr><td colspan="2" style="padding:34px 34px ${tracker ? 30 : 34}px;">
+<p class="pct-text-eyebrow" style="margin:0 0 11px;color:${ORANGE_SOFT};font-size:10px;line-height:1.2;font-weight:bold;letter-spacing:1.8px;text-transform:uppercase;">${esc(badge || hero.eyebrow)}</p>
+<h1 style="margin:0;max-width:520px;color:#ffffff;font-size:34px;line-height:1.08;font-weight:bold;letter-spacing:-.8px;">${esc(hero.headline)}</h1>
+<p class="pct-text-subcopy" style="margin:12px 0 0;max-width:500px;color:#D8DEE8;font-size:14px;line-height:1.55;">${esc(hero.subcopy)}</p>
+${tracker ? trackerContext(tracker) + trackerRail(tracker) : ''}
+</td></tr></table></td></tr>`;
 }
 
 function brandFooter(): string {
@@ -170,6 +210,7 @@ export function emailShell(opts: {
   badge: string;
   preheader?: string;
   hero: EmailHero;
+  tracker?: TransactionTracker;
   bodyHtml: string;
 }): string {
   const preheader = opts.preheader
@@ -184,8 +225,8 @@ ${brandColorLockStyles()}
 ${preheader}
 <table role="presentation" class="pct-page" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="${BG_LIGHT}" style="width:100%;background-color:${BG_LIGHT};background:${BG_LIGHT};padding:28px 12px;">
 <tr><td align="center">
-<table role="presentation" class="pct-card" width="640" cellspacing="0" cellpadding="0" border="0" bgcolor="${CARD_BG}" style="width:100%;max-width:640px;background-color:${CARD_BG};background:${CARD_BG};border-radius:18px;overflow:hidden;box-shadow:0 8px 30px rgba(16,33,58,.10);">
-${brandHeaderAndHero(opts.badge, opts.hero)}
+<table role="presentation" class="pct-card" width="640" cellspacing="0" cellpadding="0" border="0" bgcolor="${CARD_BG}" style="width:100%;max-width:640px;background-color:${CARD_BG};background:${CARD_BG};border-radius:20px;overflow:hidden;box-shadow:0 18px 50px rgba(16,33,58,.14);">
+${brandHeaderAndHero(opts.badge, opts.hero, opts.tracker)}
 <tr><td class="pct-text-body" style="padding:32px 34px 36px;color:${TEXT_BODY};font-size:15px;line-height:1.65;background-color:${CARD_BG};background:${CARD_BG};">${opts.bodyHtml}</td></tr>
 ${brandFooter()}
 </table></td></tr></table></body></html>`;

@@ -90,14 +90,23 @@ export function SourceBadge({ source }: { source: string }) {
 export function SectionCard({
   title, action, children, className,
 }: {
-  title: string; action?: { label: string; href: string }; children: React.ReactNode; className?: string;
+  title: string;
+  action?: { label: string; href: string; className?: string };
+  children: React.ReactNode;
+  className?: string;
 }) {
   return (
     <div className={`bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden h-full flex flex-col ${className ?? ''}`}>
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
         <h2 className="text-sm font-semibold text-[#1A1A2E]">{title}</h2>
         {action && (
-          <Link href={action.href} className="text-sm font-medium text-[#C5A55A] hover:text-[#b3923e] transition-colors">
+          <Link
+            href={action.href}
+            className={
+              action.className
+              ?? 'text-sm font-medium text-[#C5A55A] hover:text-[#b3923e] transition-colors'
+            }
+          >
             {action.label}
           </Link>
         )}

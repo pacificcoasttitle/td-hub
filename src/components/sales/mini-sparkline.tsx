@@ -5,6 +5,7 @@ interface Props {
   color: string;
   width?: number;
   height?: number;
+  strokeWidth?: number;
   /** Describes the trend for screen readers — the shape alone is not accessible. */
   ariaLabel: string;
 }
@@ -13,7 +14,14 @@ interface Props {
  * Six-point trend line with a dot on the latest value. Renders nothing below
  * two points: one point is not a trend, and a flat stub would imply one.
  */
-export function MiniSparkline({ values, color, width = 86, height = 22, ariaLabel }: Props) {
+export function MiniSparkline({
+  values,
+  color,
+  width = 86,
+  height = 22,
+  strokeWidth = 2,
+  ariaLabel,
+}: Props) {
   if (!values || values.length < 2) return null;
 
   const max = Math.max(...values);
@@ -38,7 +46,7 @@ export function MiniSparkline({ values, color, width = 86, height = 22, ariaLabe
         points={points}
         fill="none"
         stroke={color}
-        strokeWidth={2}
+        strokeWidth={strokeWidth}
         strokeLinejoin="round"
         strokeLinecap="round"
         opacity={0.85}

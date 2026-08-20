@@ -17,10 +17,10 @@ export function DeltaChip({ delta }: { delta: Delta | null }) {
     <span
       title={basis}
       aria-label={`${up ? 'Up' : 'Down'} ${magnitude} percent. ${basis}`}
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[11px] font-semibold tracking-[0.2px] ${
+      className={`inline-flex items-center gap-1 rounded-full border px-[9px] py-1 text-[10.5px] font-bold tracking-[0.2px] ${
         up
-          ? 'bg-[#34C77B]/[0.14] text-[#4ADE80]'
-          : 'bg-[#FF6B6B]/[0.14] text-[#FF8080]'
+          ? 'border-[#34C77B]/[0.22] bg-[#34C77B]/[0.14] text-[#7FE3B5]'
+          : 'border-[#FF7878]/[0.22] bg-[#FF7878]/[0.14] text-[#FF9E9E]'
       }`}
     >
       <span aria-hidden="true">{up ? '▲' : '▼'}</span>

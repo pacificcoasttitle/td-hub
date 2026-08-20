@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatCurrency } from '@/components/admin/dashboards/shared';
+import { LitCard } from '@/components/brand/lit-card';
 import type { BranchCode, SalesDashboardStats } from './types';
 import { ProductionCountsBox } from './production-counts-box';
 import { DeltaChip } from './delta-chip';
@@ -28,6 +29,9 @@ interface Props {
   repId?: number | null;
 }
 
+const LIGHT_CARD =
+  'rounded-[18px] border border-[#10213A]/[0.07] bg-white shadow-[0_14px_40px_-24px_rgba(16,33,58,0.45)]';
+
 export function DashboardKpi({ loading, stats, onOpenClosings, role, repId = null }: Props) {
   // Trends back the delta chips and the six-month sparkline. Fetched here
   // rather than folded into the dashboard payload so a trends outage degrades
@@ -49,10 +53,10 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role, repId = nul
     return (
       <div className="mb-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div className="bg-[#1B2A4A]/80 rounded-xl p-6 h-[200px] animate-pulse" />
-          <div className="bg-[#1B2A4A]/80 rounded-xl p-6 h-[200px] animate-pulse" />
+          <div className="rounded-[18px] bg-[#1B2A4A]/80 h-[200px] animate-pulse" />
+          <div className="rounded-[18px] bg-[#1B2A4A]/80 h-[200px] animate-pulse" />
         </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-4 h-[100px] animate-pulse" />
+        <div className={`${LIGHT_CARD} p-4 h-[100px] animate-pulse`} />
       </div>
     );
   }
@@ -89,13 +93,14 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role, repId = nul
   return (
     <div className="mb-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <button
+        <LitCard
+          as="button"
           type="button"
           onClick={onOpenClosings}
-          className="bg-[#1B2A4A] rounded-xl px-6 py-[22px] cursor-pointer hover:bg-[#233358] transition-colors relative overflow-hidden text-left w-full"
+          className="cursor-pointer text-left w-full transition-[filter] hover:brightness-[1.04]"
         >
           <div className="flex items-start justify-between gap-3">
-            <p className="text-[11px] font-semibold text-[#93A4C4] uppercase tracking-[1.2px]">
+            <p className="text-[9.5px] font-extrabold uppercase tracking-[1.6px] text-white/50">
               PRODUCTION (MTD)
             </p>
             {(deltas.mom || deltas.yoy) && (
@@ -106,20 +111,20 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role, repId = nul
             )}
           </div>
 
-          <p className="text-[40px] font-bold text-white leading-tight tracking-[-1px] mt-1.5">
+          <p className="mt-1.5 font-serif text-[46px] font-bold leading-none tracking-[-0.035em] text-white tabular-nums">
             {formatCurrency(production ? production.total : 0)}
           </p>
 
           {!production && (
-            <p className="text-[11px] text-white/50 mt-2">Production data unavailable</p>
+            <p className="mt-2 text-[11px] text-white/50">Production data unavailable</p>
           )}
 
           {/* Projection is the forward-looking element (no goal exists to pace against). */}
           {hasMrMtd && projected && (
-            <p className="text-[13px] text-[#7DE2B0] font-semibold mt-2">
+            <p className="mt-2 text-[13px] font-semibold text-[#7FE3B5]">
               On pace to finish ~{formatCurrency(projected.revenue)}
               {typeof projected.workingDaysLeft === 'number' && (
-                <span className="text-[11px] font-normal text-[#8FA0BF]">
+                <span className="text-[11px] font-normal text-white/45">
                   {' '}· {projected.workingDaysLeft} working {projected.workingDaysLeft === 1 ? 'day' : 'days'} left
                 </span>
               )}
@@ -127,25 +132,28 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role, repId = nul
           )}
 
           {production && (splitColumns.length > 0 || revenueSeries) && (
-            <div className="mt-4 pt-3.5 border-t border-white/10 flex items-center gap-6 flex-wrap">
+            <div className="mt-4 flex flex-wrap items-center gap-6 border-t border-white/10 pt-3.5">
               {splitColumns.map((col) => (
                 <div key={col.label}>
-                  <p className="text-[11px] text-[#8FA0BF] mb-0.5">{col.label}</p>
-                  <p className="text-[19px] font-bold text-white leading-none">
+                  <p className="mb-0.5 text-[10.5px] font-semibold tracking-[0.4px] text-white/45">
+                    {col.label}
+                  </p>
+                  <p className="text-[21px] font-extrabold leading-none tracking-[-0.5px] text-white">
                     {formatCurrency(col.value)}
                     {col.share !== null && (
-                      <span className="text-[11px] font-medium text-[#8FA0BF]"> {col.share}%</span>
+                      <span className="text-[11px] font-medium text-white/45"> {col.share}%</span>
                     )}
                   </p>
                 </div>
               ))}
               {revenueSeries && (
                 <div className="ml-auto text-right">
-                  <p className="text-[10px] text-[#7B8CAB] tracking-[0.4px]">6-MO TREND</p>
+                  <p className="text-[10px] tracking-[0.4px] text-white/45">6-MO TREND</p>
                   <div className="mt-0.5 flex justify-end">
                     <MiniSparkline
                       values={revenueSeries}
-                      color="#FF8C4A"
+                      color="#F59E5B"
+                      strokeWidth={2.2}
                       ariaLabel={`Production revenue trend over the last ${revenueSeries.length} months`}
                     />
                   </div>
@@ -154,18 +162,18 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role, repId = nul
             </div>
           )}
 
-          <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between gap-3 flex-wrap">
-            <p className="text-sm text-white/50">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3">
+            <p className="text-[12.5px] leading-[1.7] text-white/[0.66]">
               {production && (
                 <>
                   <span>Breakdown: Purchase </span>
-                  <span className="text-sm font-semibold text-[#F26B2B]">{formatCurrency(production.byDealType.purchase)}</span>
+                  <span className="font-bold text-[#FFA76B]">{formatCurrency(production.byDealType.purchase)}</span>
                   <span> · Refi </span>
-                  <span className="text-sm font-semibold text-[#F26B2B]">{formatCurrency(production.byDealType.refinance)}</span>
+                  <span className="font-bold text-[#FFA76B]">{formatCurrency(production.byDealType.refinance)}</span>
                   {production.byDealType.other > 0 && (
                     <>
                       <span> · Other </span>
-                      <span className="text-sm font-semibold text-[#F26B2B]">{formatCurrency(production.byDealType.other)}</span>
+                      <span className="font-bold text-[#FFA76B]">{formatCurrency(production.byDealType.other)}</span>
                     </>
                   )}
                   {hasMrMtd && projected && <span> · </span>}
@@ -174,15 +182,15 @@ export function DashboardKpi({ loading, stats, onOpenClosings, role, repId = nul
               {hasMrMtd && projected && (
                 <>
                   <span>Projected: </span>
-                  <span className="text-sm font-semibold text-[#F26B2B]">{formatCurrency(projected.revenue)}</span>
+                  <span className="font-bold text-[#FFA76B]">{formatCurrency(projected.revenue)}</span>
                 </>
               )}
             </p>
-            <span className="text-sm text-white/50 hover:text-white/80 transition-colors shrink-0">
+            <span className="shrink-0 text-sm font-bold text-[#FFA76B] transition-colors hover:text-white">
               View closed files →
             </span>
           </div>
-        </button>
+        </LitCard>
 
         <ProductionCountsBox
           openings={openings}
@@ -227,7 +235,7 @@ function ProductionByBranchSection({
     || productionByBranch.available === false;
 
   return (
-    <div className={`bg-white border border-gray-200 rounded-xl p-4 ${unavailable ? 'opacity-70' : ''}`}>
+    <div className={`${LIGHT_CARD} p-4 ${unavailable ? 'opacity-70' : ''}`}>
       <div className="flex items-baseline justify-between gap-3 flex-wrap">
         <p className="text-[11px] text-gray-500 uppercase tracking-wide">
           Production by Branch (MTD)

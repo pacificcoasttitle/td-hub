@@ -1,6 +1,7 @@
 'use client';
 
 import type { SalesDashboardStats } from './types';
+import { LitCard } from '@/components/brand/lit-card';
 import { MiniSparkline } from './mini-sparkline';
 
 interface Props {
@@ -84,10 +85,12 @@ export function ProductionCountsBox({
 
   if (!hasData) {
     return (
-      <div className="bg-[#1B2A4A] rounded-xl p-6 flex flex-col items-center justify-center text-center min-h-[200px]">
-        <p className="text-[42px] font-semibold text-white/30 leading-none">—</p>
-        <p className="text-sm text-white/50 mt-1">Production data unavailable</p>
-      </div>
+      <LitCard className="min-h-[200px]">
+        <div className="flex min-h-[156px] flex-col items-center justify-center text-center">
+          <p className="font-serif text-[42px] font-semibold leading-none text-white/30">—</p>
+          <p className="mt-1 text-sm text-white/50">Production data unavailable</p>
+        </div>
+      </LitCard>
     );
   }
 
@@ -116,23 +119,23 @@ export function ProductionCountsBox({
     : null;
 
   return (
-    <div className="bg-[#1B2A4A] rounded-xl px-6 py-[22px]">
+    <LitCard>
       <div className="flex items-start justify-between gap-3">
-        <p className="text-[11px] font-semibold text-[#93A4C4] uppercase tracking-[1.2px]">
+        <p className="text-[9.5px] font-extrabold uppercase tracking-[1.6px] text-white/50">
           PIPELINE (MTD)
         </p>
         {pullThrough !== null && (
           <p
-            className="text-[11px] text-[#93A4C4] shrink-0"
+            className="shrink-0 text-[11px] text-white/45"
             title={`Managers Report closing ratio: ${closingRatio!.closed.toLocaleString()} closed of ${closingRatio!.total.toLocaleString()} created`}
           >
             Pull-through{' '}
-            <span className="text-[13px] font-bold text-[#7DE2B0]">{pullThrough}%</span>
+            <span className="text-[13px] font-bold text-[#7FE3B5]">{pullThrough}%</span>
           </p>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-[18px] mt-2">
+      <div className="mt-2 grid grid-cols-2 gap-[18px]">
         <Hero
           label="OPENED"
           total={openTotal}
@@ -151,13 +154,13 @@ export function ProductionCountsBox({
       </div>
 
       {(showProjected || openMismatch || closedMismatch) && (
-        <div className="mt-3 pt-3 border-t border-white/10 space-y-1">
+        <div className="mt-3 space-y-1 border-t border-white/10 pt-3">
           {showProjected && (
-            <p className="text-sm text-white/50">
+            <p className="text-[12.5px] leading-[1.7] text-white/[0.66]">
               {projectedOpens !== null && (
                 <>
                   Proj. opened:{' '}
-                  <span className="text-sm font-semibold text-[#F26B2B]">
+                  <span className="font-bold text-[#FFA76B]">
                     {projectedOpens.toLocaleString()}
                   </span>
                 </>
@@ -168,7 +171,7 @@ export function ProductionCountsBox({
               {projectedClosings !== null && (
                 <>
                   Proj. closed:{' '}
-                  <span className="text-sm font-semibold text-[#F26B2B]">
+                  <span className="font-bold text-[#FFA76B]">
                     {projectedClosings.toLocaleString()}
                   </span>
                 </>
@@ -187,7 +190,7 @@ export function ProductionCountsBox({
           )}
         </div>
       )}
-    </div>
+    </LitCard>
   );
 }
 
@@ -211,19 +214,19 @@ function Hero({
       {hasData ? (
         <>
           <div className="flex items-baseline gap-2">
-            <span className="text-[36px] font-bold text-[#F26B2B] leading-none tabular-nums">
+            <span className="font-serif text-[38px] font-bold leading-none tracking-[-0.026em] text-[#F59E5B] tabular-nums">
               {total.toLocaleString()}
             </span>
-            <span className="text-xs font-semibold text-white/60 uppercase tracking-[0.5px]">
+            <span className="text-xs font-semibold uppercase tracking-[0.5px] text-white/60">
               {label}
             </span>
             {series && (
               /* Secondary context — dropped on narrow screens rather than
                  squeezing the count it sits beside. */
-              <span className="ml-auto shrink-0 hidden sm:inline-block">
+              <span className="ml-auto hidden shrink-0 sm:inline-block">
                 <MiniSparkline
                   values={series}
-                  color="#8FA0BF"
+                  color="rgba(255,255,255,0.5)"
                   width={66}
                   height={20}
                   ariaLabel={`${label.toLowerCase()} trend over the last ${series.length} months`}
@@ -232,30 +235,34 @@ function Hero({
             )}
           </div>
           {lines.length > 0 && (
-            <div className="flex gap-5 mt-3 flex-wrap">
-              {lines.map((line) => {
-                // Escrow is real data but an order of magnitude smaller —
-                // dimmed so it doesn't compete visually with purchase.
-                const dim = line.label === 'Escrow';
-                return (
-                  <div key={line.label} className={dim ? 'opacity-50' : undefined}>
-                    <p className="text-[10px] text-white/50">{line.label}</p>
-                    <p className={`text-base text-white tabular-nums ${dim ? 'font-semibold' : 'font-bold'}`}>
-                      {line.value.toLocaleString()}
-                    </p>
-                  </div>
-                );
-              })}
+            <div className="mt-3 rounded-[14px] border border-white/[0.16] bg-white/[0.09] px-[18px] py-[15px]">
+              <div className="flex flex-wrap gap-5">
+                {lines.map((line) => {
+                  // Escrow is real data but an order of magnitude smaller —
+                  // dimmed so it doesn't compete visually with purchase.
+                  const dim = line.label === 'Escrow';
+                  return (
+                    <div key={line.label} className={dim ? 'opacity-50' : undefined}>
+                      <p className="text-[10.5px] font-semibold tracking-[0.4px] text-white/45">
+                        {line.label}
+                      </p>
+                      <p className={`tabular-nums text-white ${dim ? 'text-base font-semibold' : 'text-[21px] font-extrabold tracking-[-0.5px]'}`}>
+                        {line.value.toLocaleString()}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </>
       ) : (
         <>
           <div className="flex items-baseline gap-2">
-            <span className="text-[36px] font-bold text-white/30 leading-none">—</span>
-            <span className="text-xs font-semibold text-white/60 uppercase tracking-[0.5px]">{label}</span>
+            <span className="font-serif text-[38px] font-bold leading-none text-white/30">—</span>
+            <span className="text-xs font-semibold uppercase tracking-[0.5px] text-white/60">{label}</span>
           </div>
-          <p className="text-xs text-white/50 mt-2">No data</p>
+          <p className="mt-2 text-xs text-white/50">No data</p>
         </>
       )}
     </div>

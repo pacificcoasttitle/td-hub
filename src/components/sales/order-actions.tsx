@@ -22,7 +22,9 @@ interface Props {
 const primaryBtn =
   'text-[11px] px-2 py-1 rounded transition-colors whitespace-nowrap';
 const secondaryBtn =
-  'text-[11px] px-2 py-1 rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors whitespace-nowrap';
+  'text-[11px] px-2 py-1 rounded border border-[#DFE3EA] bg-white text-gray-700 hover:bg-gray-50 transition-colors whitespace-nowrap';
+const reviewPrelimBtn =
+  `${primaryBtn} bg-[#F26B2B] text-white shadow-[0_10px_22px_-12px_rgba(242,107,43,0.9)] hover:bg-[#E05A1A]`;
 
 export function OrderActions({ order, onAction, tessaPrelimEnabled = false }: Props) {
   const hasPrelim = !!order.hasPrelim;
@@ -35,7 +37,7 @@ export function OrderActions({ order, onAction, tessaPrelimEnabled = false }: Pr
             type="button"
             title="Review Prelim"
             onClick={() => onAction('review_prelim', order)}
-            className={`${primaryBtn} bg-green-600 text-white hover:bg-green-700`}
+            className={reviewPrelimBtn}
           >
             Review Prelim
           </button>

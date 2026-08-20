@@ -96,7 +96,7 @@ export function DashboardContent({ displayName, role }: Props) {
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">
+          <h1 className="font-serif text-[30px] font-semibold tracking-[-0.02em] text-[#10213A]">
             Welcome, {displayName.split(' ')[0]}
           </h1>
           <p className="text-sm text-gray-500">{MONTH_LABEL}</p>
@@ -124,7 +124,15 @@ export function DashboardContent({ displayName, role }: Props) {
         repId={repId}
       />
 
-      <SectionCard title="Recent Orders" action={{ label: 'View all orders →', href: '/sales/orders' }}>
+      <SectionCard
+        title="Recent Orders"
+        className="rounded-[18px] border border-[#10213A]/[0.07] bg-white shadow-[0_14px_40px_-24px_rgba(16,33,58,0.45)]"
+        action={{
+          label: 'View all orders →',
+          href: '/sales/orders',
+          className: 'text-sm font-medium text-[#C2551A] hover:text-[#A34716] transition-colors',
+        }}
+      >
         <div className="overflow-x-auto">
           <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
             <colgroup>
@@ -158,7 +166,7 @@ export function DashboardContent({ displayName, role }: Props) {
                         <td className="px-5 py-3 font-medium text-blue-600 whitespace-nowrap border-r border-gray-100">{o.fileNumber}</td>
                         <td className="px-4 py-3 text-gray-900 truncate max-w-[180px] border-r border-gray-100" title={addr}>{addr}</td>
                         <td className="px-5 py-3 whitespace-nowrap border-r border-gray-100">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium border ${status.color}`}>
+                          <span className="inline-flex rounded-full border border-[#FBE0BF] bg-[#FFF4E4] px-2 py-0.5 text-xs font-medium text-[#B4621F]">
                             {status.label}
                           </span>
                         </td>

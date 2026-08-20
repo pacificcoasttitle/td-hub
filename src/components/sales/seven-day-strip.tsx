@@ -20,6 +20,9 @@ interface Props {
 
 const BAR_BOX = 46;
 
+const LIGHT_CARD =
+  'rounded-[18px] border border-[#10213A]/[0.07] bg-white shadow-[0_14px_40px_-24px_rgba(16,33,58,0.45)]';
+
 function fmtYesterdayLabel(days: DayBucket[] | undefined): string {
   const latest = days?.find((d) => d.isLatest);
   if (!latest) return 'YESTERDAY';
@@ -56,7 +59,7 @@ export function SevenDayStrip({ repId, yesterday }: Props) {
   const avg = data?.monthDailyAvg ?? null;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl px-4 py-[22px]">
+    <div className={`${LIGHT_CARD} px-4 py-[22px]`}>
       <div className="flex items-start gap-0 flex-wrap">
         {/* Yesterday — unchanged source, plus the daily-average comparison */}
         <div className="min-w-[210px]">
@@ -107,16 +110,20 @@ export function SevenDayStrip({ repId, yesterday }: Props) {
                 : 3;
               return (
                 <div key={d.date} className="flex flex-col items-center gap-1.5 w-[44px]">
-                  <span className={`text-[11px] font-bold tabular-nums ${d.isLatest ? 'text-[#F26B2B]' : 'text-[#3D4B66]'}`}>
+                  <span className={`text-[11px] font-bold tabular-nums ${d.isLatest ? 'text-[#C2551A]' : 'text-[#3D4B66]'}`}>
                     {d.closings > 0 ? d.closings : '–'}
                   </span>
                   <span className="h-[46px] flex items-end" aria-hidden="true">
                     <span
-                      className={`w-[22px] rounded ${d.isLatest ? 'bg-[#F26B2B]' : 'bg-[#C8D2E2]'}`}
+                      className={`w-[22px] rounded ${
+                        d.closings > 0
+                          ? 'bg-gradient-to-b from-[#F59E5B] to-[#F26B2B]'
+                          : 'bg-[#E5E7EB]'
+                      }`}
                       style={{ height: `${height}px` }}
                     />
                   </span>
-                  <span className={`text-[10px] ${d.isLatest ? 'text-[#1B2A4A] font-bold' : 'text-[#93A0B5] font-medium'}`}>
+                  <span className={`text-[10px] ${d.isLatest ? 'text-[#C2551A] font-bold' : 'text-[#93A0B5] font-medium'}`}>
                     {d.isLatest ? 'Yest.' : d.dow}
                   </span>
                 </div>

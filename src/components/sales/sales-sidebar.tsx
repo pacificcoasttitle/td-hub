@@ -55,10 +55,10 @@ export function SalesSidebar({ role, userName }: Props) {
   const linkCls = (href: string) => {
     const active = pathname === href;
     return [
-      'flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors rounded-r-md',
+      'mx-2.5 flex items-center gap-3 rounded-[10px] px-3.5 py-2.5 text-sm font-medium transition-colors',
       active
-        ? 'border-l-[3px] border-[#F26B2B] bg-white/5 text-white'
-        : 'border-l-[3px] border-transparent text-white/70 hover:bg-white/5 hover:text-white',
+        ? 'bg-gradient-to-r from-[#F26B2B]/[0.22] to-white/[0.05] text-white shadow-[inset_2px_0_0_#F26B2B]'
+        : 'text-white/[0.68] hover:bg-white/[0.07] hover:text-white',
     ].join(' ');
   };
 

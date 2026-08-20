@@ -1,13 +1,16 @@
-// Renders the plain-English daily summary. Design rule: the answer is in the
-// first two lines and the reader may stop there.
-
 import type { DailySummary } from './daily-summary';
-
-const NAVY = '#1B2A4A';
-const MUTED = '#6B7280';
-const GREEN = '#16A34A';
-const AMBER = '#B45309';
-const BORDER = '#E5E7EB';
+import {
+  HEADER_BG,
+  HERO_BG,
+  ORANGE_TINT,
+  PCT_DEEP,
+  PCT_ORANGE,
+  TEXT_BODY,
+  TEXT_PRIMARY,
+  ctaButton,
+  emailShell,
+  esc,
+} from '@/lib/domain/notifications/email-layout';
 
 /** Verdict first, so it reads from a phone notification. */
 export function buildSubject(summary: DailySummary): string {
@@ -50,67 +53,86 @@ function numberLines(summary: DailySummary): string[] {
   return lines;
 }
 
-/** One sentence standing in for the old per-job and per-vendor tables. */
 function plumbingLine(summary: DailySummary): string | null {
   if (!summary.complete) return null;
   const hadJobTrouble = summary.attention.some((a) =>
     a.includes('background work failed') || a.includes('unreliable'));
   if (hadJobTrouble) return null;
-  return 'Everything else — syncs, document fetches and the email queue — ran on schedule.';
+  return 'Everything else—syncs, document fetches, and the email queue—ran on schedule.';
+}
+
+function heroCopy(summary: DailySummary): { icon: string; headline: string; subcopy: string } {
+  const n = summary.attention.length;
+  if (n === 0) {
+    return {
+      icon: '✓',
+      headline: 'All clear.',
+      subcopy: `${summary.dayLabel} · Your daily TD Hub operations brief.`,
+    };
+  }
+  const word = n === 1 ? 'One item needs' : n === 2 ? 'Two items need' : `${n} items need`;
+  return {
+    icon: String(n),
+    headline: `${word} attention.`,
+    subcopy: `${summary.dayLabel} · Your daily TD Hub operations brief.`,
+  };
+}
+
+function metricCard(value: string, label: string, bg: string, color: string, muted: string, pad: string): string {
+  return `<td width="50%" style="${pad}"><div style="background:${bg};padding:18px;border-radius:12px;color:${color};"><div style="font-size:26px;font-weight:bold;">${esc(value)}</div><div style="color:${muted};font-size:12px;">${esc(label)}</div></div></td>`;
 }
 
 export function renderDailySummaryHtml(summary: DailySummary, dashboardUrl: string): string {
-  const clean = summary.attention.length === 0;
-  const accent = clean ? GREEN : AMBER;
+  const hero = heroCopy(summary);
+  const n = summary.numbers;
 
-  const attentionHtml = clean ? '' : `
-    <section style="margin-top:24px;">
-      <h2 style="margin:0 0 12px;font-size:15px;color:${NAVY};">Needs attention</h2>
-      ${summary.attention.map((item, i) => `
-        <div style="margin-bottom:12px;padding:12px 14px;background:#FFFBEB;border-left:4px solid ${AMBER};border-radius:4px;">
-          <p style="margin:0;font-size:14px;line-height:1.5;color:#111827;"><strong>${i + 1}.</strong> ${escapeHtml(item)}</p>
-        </div>`).join('')}
-    </section>`;
+  const attentionHtml = summary.attention.length === 0
+    ? ''
+    : `<p style="margin:0 0 10px;color:${TEXT_PRIMARY};font-size:12px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;">Needs attention</p>
+${summary.attention.map((item, i) => {
+    const num = String(i + 1).padStart(2, '0');
+    return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:${ORANGE_TINT};border-radius:12px;margin:0 0 10px;"><tr><td width="54" style="padding:16px 0 16px 18px;color:${PCT_ORANGE};font-size:26px;font-weight:bold;">${num}</td><td style="padding:16px 18px;color:${TEXT_PRIMARY};font-size:14px;line-height:1.5;">${esc(item)}</td></tr></table>`;
+  }).join('')}`;
 
-  const numbers = numberLines(summary);
-  const numbersHtml = numbers.length === 0 ? '' : `
-    <section style="margin-top:24px;">
-      <h2 style="margin:0 0 10px;font-size:15px;color:${NAVY};">Yesterday in numbers</h2>
-      ${numbers.map((line) => `<p style="margin:0 0 7px;font-size:14px;color:#111827;">${boldToHtml(line)}</p>`).join('')}
-    </section>`;
+  const ordersTotal =
+    (n.ordersFromSoftPro ?? 0) + (n.ordersCreatedHere ?? 0);
+  const ordersLabel = n.ordersFromSoftPro !== null || n.ordersCreatedHere !== null
+    ? String(ordersTotal || (n.ordersFromSoftPro ?? n.ordersCreatedHere ?? 0))
+    : '—';
+
+  const metrics = `<p style="margin:28px 0 12px;color:${TEXT_PRIMARY};font-size:12px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;">Yesterday in numbers</p>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
+${metricCard(ordersLabel, 'Orders received / opened', PCT_DEEP, '#ffffff', '#D8DEE8', 'padding:0 6px 12px 0;')}
+${metricCard(n.prelimsDelivered == null ? '—' : String(n.prelimsDelivered), 'Title reports received', HERO_BG, '#ffffff', '#D8DEE8', 'padding:0 0 12px 6px;')}
+</tr><tr>
+${metricCard(n.cplsGenerated == null ? '—' : String(n.cplsGenerated), 'CPL documents generated', '#F3F4F6', TEXT_PRIMARY, TEXT_BODY, 'padding:0 6px 0 0;')}
+${metricCard(n.emailsSent == null ? '—' : String(n.emailsSent), 'Emails sent / delivered', ORANGE_TINT, TEXT_PRIMARY, TEXT_BODY, 'padding:0 0 0 6px;')}
+</tr></table>`;
 
   const plumbing = plumbingLine(summary);
   const plumbingHtml = plumbing
-    ? `<p style="margin:14px 0 0;font-size:13px;color:${MUTED};">${escapeHtml(plumbing)}</p>`
+    ? `<p style="margin:22px 0;color:${TEXT_BODY};font-size:13px;line-height:1.55;">${esc(plumbing)}</p>`
     : '';
 
   const footnote = summary.complete ? '' : `
-    <p style="margin:16px 0 0;font-size:12px;color:${MUTED};">
-      Some parts of this report could not be read (${escapeHtml(summary.unavailable.join(', '))}), so a few numbers may be missing.
-    </p>`;
+<p style="margin:16px 0 0;font-size:12px;color:${TEXT_BODY};">
+Some parts of this report could not be read (${esc(summary.unavailable.join(', '))}), so a few numbers may be missing.
+</p>`;
 
-  return `<!doctype html>
-<html>
-<body style="margin:0;background:#F3F4F6;font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#111827;">
-  <div style="max-width:600px;margin:0 auto;background:#FFFFFF;">
-    <div style="padding:28px 28px 4px;">
-      <div style="font-size:22px;font-weight:700;color:${accent};">
-        ${clean ? '&#10003;' : '&#9888;'} ${escapeHtml(buildHeadline(summary))}
-      </div>
-      <p style="margin:6px 0 0;font-size:13px;color:${MUTED};">${escapeHtml(summary.dayLabel)}</p>
-    </div>
-    <div style="padding:0 28px 28px;">
-      ${attentionHtml}
-      ${numbersHtml}
-      ${plumbingHtml}
-      ${footnote}
-      <div style="margin-top:26px;padding-top:16px;border-top:1px solid ${BORDER};">
-        <a href="${escapeAttr(dashboardUrl)}" style="color:${NAVY};font-size:13px;font-weight:600;text-decoration:none;">See full detail on the operations dashboard &rarr;</a>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
+  const body = `${attentionHtml}${metrics}${plumbingHtml}${footnote}${ctaButton('Open Operations Dashboard', dashboardUrl, HEADER_BG)}`;
+
+  return emailShell({
+    title: buildSubject(summary),
+    badge: 'Operations',
+    preheader: `${summary.dayLabel} · Your daily TD Hub operations brief.`,
+    hero: {
+      icon: hero.icon,
+      eyebrow: 'Daily operations brief',
+      headline: hero.headline,
+      subcopy: hero.subcopy,
+    },
+    bodyHtml: body,
+  });
 }
 
 export function renderDailySummaryText(summary: DailySummary, dashboardUrl: string): string {
@@ -141,20 +163,4 @@ export function renderDailySummaryText(summary: DailySummary, dashboardUrl: stri
 
   lines.push(`See full detail on the operations dashboard: ${dashboardUrl}`);
   return lines.join('\n');
-}
-
-function boldToHtml(text: string): string {
-  return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function escapeAttr(value: string): string {
-  return escapeHtml(value).replace(/'/g, '&#39;');
 }

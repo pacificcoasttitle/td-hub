@@ -1,0 +1,14 @@
+Hi Jamie,
+
+We do not have listing agent details on file 20018881-OCT yet.
+
+File number: 20018881-OCT
+Property: 5792 Adobe Rd, Twentynine Palms, CA
+Transaction: Purchase
+
+FORWARD THIS TO THE LISTING AGENT:
+https://td-hub.vercel.app/party/sample-listing-agent-token
+
+The link expires in 60 days. Submissions are posted to the order notes.
+
+Pacific Coast Title Company

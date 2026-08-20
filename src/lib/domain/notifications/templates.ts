@@ -1,15 +1,13 @@
 import {
-  BG_LIGHT,
-  BORDER_SOFT,
-  PCT_NAVY,
-  PCT_ORANGE,
-  button,
-  detailsRow,
-  emailLayout,
+  APP_BASE_URL,
+  TEXT_PRIMARY,
+  calloutBar,
+  ctaButton,
+  emailShell,
   esc,
+  fieldTable,
+  sectionLabel,
 } from './email-layout';
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hub.pctitle.com';
 
 export interface OrderEmailData {
   fileNumber: string;
@@ -26,104 +24,157 @@ interface EmailTemplate {
   html: string;
 }
 
-function orderDetailRow(label: string, value: string): string {
-  return detailsRow(label, value);
+function orderFields(data: OrderEmailData) {
+  const rows = [
+    { label: 'File number', valueHtml: esc(data.fileNumber) },
+  ];
+  if (data.address?.trim()) {
+    rows.push({ label: 'Property', valueHtml: esc(data.address.trim()) });
+  }
+  if (data.closingDate?.trim()) {
+    rows.push({ label: 'Date', valueHtml: esc(data.closingDate.trim()) });
+  }
+  return fieldTable(rows);
 }
 
-function orderDetailsTable(data: OrderEmailData): string {
-  let rows = orderDetailRow('File Number', data.fileNumber);
-  if (data.address) rows += orderDetailRow('Property', data.address);
-  if (data.closingDate) rows += orderDetailRow('Date', data.closingDate);
-
-  return `
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:${BG_LIGHT};border-radius:6px;margin:16px 0 24px;border:1px solid ${BORDER_SOFT};">
-      ${rows}
-    </table>`;
+function orderBody(intro: string, data: OrderEmailData, ctaLabel: string): string {
+  return `${intro}
+${sectionLabel('Order details')}
+${orderFields(data)}
+${calloutBar('Open TD Hub for the latest documents, status, and order activity.')}
+<div style="height:22px;line-height:22px;">&nbsp;</div>${ctaButton(ctaLabel, `${APP_BASE_URL}/orders`)}`;
 }
-
-function portalButton(text: string): string {
-  return `
-    <table cellpadding="0" cellspacing="0" style="margin:24px 0;">
-      <tr>
-        ${button(text, `${APP_URL}/orders`)}
-      </tr>
-    </table>`;
-}
-
-// ─── Templates ──────────────────────────────────────────────────────────────
 
 export function orderClosedTemplate(data: OrderEmailData): EmailTemplate {
-  const body = `
-    <h2 style="color:${PCT_NAVY};margin:0 0 8px;font-size:22px;">Order Closed</h2>
-    <p style="margin:0 0 16px;">
-      The following order has been <span style="color:${PCT_ORANGE};font-weight:600;">closed</span>.
-    </p>
-    ${orderDetailsTable(data)}
-    <p>All parties have been notified. Please review the final documents in the portal.</p>
-    ${portalButton('View Order Details')}
-  `;
-
+  const subject = `Your Order ${data.fileNumber} has been closed`;
   return {
-    subject: `Your Order ${data.fileNumber} has been closed`,
-    html: emailLayout('Order Closed', body),
+    subject,
+    html: emailShell({
+      title: subject,
+      badge: 'Order closed',
+      preheader: 'The transaction has reached its final milestone.',
+      hero: {
+        icon: '✓',
+        eyebrow: 'Transaction complete',
+        headline: 'Your order is closed.',
+        subcopy: 'The transaction has reached its final milestone.',
+      },
+      bodyHtml: orderBody(
+        '<p style="margin:0 0 22px;">All parties have been notified. Final documents and the completed order record are available in TD Hub.</p>',
+        data,
+        'View Order Details',
+      ),
+    }),
   };
 }
 
 export function milestoneRecordingTemplate(data: OrderEmailData): EmailTemplate {
-  const body = `
-    <h2 style="color:${PCT_NAVY};margin:0 0 8px;font-size:22px;">Recording Confirmed</h2>
-    <p style="margin:0 0 16px;">
-      Recording has been <span style="color:${PCT_ORANGE};font-weight:600;">confirmed</span> for this order.
-    </p>
-    ${orderDetailsTable(data)}
-    <p>The recording confirmation has been received and the order is progressing.</p>
-    ${portalButton('View Order')}
-  `;
-
+  const subject = `Recording confirmed for ${data.fileNumber}${data.address ? ` at ${data.address}` : ''}`;
   return {
-    subject: `Recording confirmed for ${data.fileNumber}${data.address ? ` at ${data.address}` : ''}`,
-    html: emailLayout('Recording', body),
+    subject,
+    html: emailShell({
+      title: subject,
+      badge: 'Recording',
+      preheader: 'The recording confirmation has been received for this order.',
+      hero: {
+        icon: '✓',
+        eyebrow: 'Milestone reached',
+        headline: 'Recording confirmed.',
+        subcopy: 'The recording confirmation has been received for this order.',
+      },
+      bodyHtml: orderBody(
+        '<p style="margin:0 0 22px;">The order is progressing and the recording milestone is now reflected in TD Hub.</p>',
+        data,
+        'View Order',
+      ),
+    }),
   };
 }
 
 export function milestoneDisbursementTemplate(data: OrderEmailData): EmailTemplate {
-  const body = `
-    <h2 style="color:${PCT_NAVY};margin:0 0 8px;font-size:22px;">Disbursement Completed</h2>
-    <p style="margin:0 0 16px;">
-      Disbursement has been <span style="color:${PCT_ORANGE};font-weight:600;">completed</span> for this order.
-    </p>
-    ${orderDetailsTable(data)}
-    <p>Funds have been disbursed. Please verify receipt and review details in the portal.</p>
-    ${portalButton('View Order')}
-  `;
-
+  const subject = `Disbursement completed for ${data.fileNumber}`;
   return {
-    subject: `Disbursement completed for ${data.fileNumber}`,
-    html: emailLayout('Disbursement', body),
+    subject,
+    html: emailShell({
+      title: subject,
+      badge: 'Disbursement',
+      preheader: 'Disbursement is complete for this order.',
+      hero: {
+        icon: '$',
+        eyebrow: 'Milestone reached',
+        headline: 'Funds have been disbursed.',
+        subcopy: 'Disbursement is complete for this order.',
+      },
+      bodyHtml: orderBody(
+        '<p style="margin:0 0 22px;">Please verify receipt as appropriate and review the transaction details in TD Hub.</p>',
+        data,
+        'View Order',
+      ),
+    }),
   };
 }
 
-// ─── Order Confirmation (extracted to confirmation-template.ts) ─────────────
 export { orderConfirmationTemplate } from './confirmation-template';
 export type { FullConfirmationData as OrderConfirmationData } from './confirmation-template';
 
-// ─── Document Received ──────────────────────────────────────────────────────
+function documentCopy(category: string): {
+  badge: string;
+  headline: string;
+  subcopy: string;
+  intro: string;
+  icon: string;
+} {
+  const normalized = category.trim().toLowerCase();
+  if (normalized === 'prelim') {
+    return {
+      badge: 'Document',
+      icon: 'P',
+      headline: 'A new prelim is ready.',
+      subcopy: 'The preliminary title document has been added to this order.',
+      intro: 'You can review and download the new prelim from TD Hub.',
+    };
+  }
+  if (normalized === 'policy' || normalized === 'supplement') {
+    return {
+      badge: 'Document',
+      icon: 'P',
+      headline: 'A new policy is ready.',
+      subcopy: 'The policy document has been added to this order.',
+      intro: 'You can review and download the new policy from TD Hub.',
+    };
+  }
+  const label = category.charAt(0).toUpperCase() + category.slice(1);
+  return {
+    badge: 'Document',
+    icon: 'P',
+    headline: `A new ${label.toLowerCase()} is ready.`,
+    subcopy: `A new ${label.toLowerCase()} document has been added to this order.`,
+    intro: 'You can view and download the document from TD Hub.',
+  };
+}
 
 export function documentReceivedTemplate(data: DocumentEmailData): EmailTemplate {
   const categoryLabel = data.category.charAt(0).toUpperCase() + data.category.slice(1);
-
-  const body = `
-    <h2 style="color:${PCT_NAVY};margin:0 0 8px;font-size:22px;">New Document Available</h2>
-    <p style="margin:0 0 16px;">
-      A new <span style="color:${PCT_ORANGE};font-weight:600;">${esc(categoryLabel)}</span> document has been added to this order.
-    </p>
-    ${orderDetailsTable(data)}
-    <p>You can view and download the document from the portal.</p>
-    ${portalButton('View Documents')}
-  `;
+  const copy = documentCopy(data.category);
+  const subject = `New ${categoryLabel.toLowerCase()} document for Order ${data.fileNumber}`;
 
   return {
-    subject: `New ${categoryLabel.toLowerCase()} document for Order ${data.fileNumber}`,
-    html: emailLayout('Document', body),
+    subject,
+    html: emailShell({
+      title: subject,
+      badge: copy.badge,
+      preheader: copy.subcopy,
+      hero: {
+        icon: copy.icon,
+        eyebrow: 'Document available',
+        headline: copy.headline,
+        subcopy: copy.subcopy,
+      },
+      bodyHtml: orderBody(
+        `<p style="margin:0 0 22px;">${esc(copy.intro)}</p>`,
+        data,
+        'View Documents',
+      ),
+    }),
   };
 }

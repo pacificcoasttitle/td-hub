@@ -113,6 +113,7 @@ export async function handleOrderConfirmation(
 
   const { subject, html } = orderConfirmationTemplate({
     fileNumber: order.fileNumber,
+    openedAt: order.dates.openedAtIso,
     address: addressOrNull,
     transactionType: order.transactionType,
     productType: order.productType,
@@ -219,11 +220,12 @@ async function loadOpener(createdBy: string | null): Promise<ConfirmationParty |
   const [p] = await db.select({
     name: profiles.displayName, email: profiles.email,
     cPhone: contacts.phone, cCompany: contacts.companyName,
+    cAddress: contacts.address1, cCity: contacts.city, cZip: contacts.zip,
   }).from(profiles)
     .leftJoin(contacts, eq(profiles.contactId, contacts.id))
     .where(eq(profiles.id, createdBy)).limit(1);
   if (!p) return null;
-  return { name: p.name, email: p.email, phone: p.cPhone, company: p.cCompany };
+  return { name: p.name, email: p.email, phone: p.cPhone, company: p.cCompany, address: p.cAddress, city: p.cCity, zip: p.cZip };
 }
 
 async function loadRecipientEmails(

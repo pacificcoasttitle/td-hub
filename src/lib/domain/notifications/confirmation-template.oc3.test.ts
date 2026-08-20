@@ -19,7 +19,7 @@ const LEGACY_TAX = parseTaxResultData({
 });
 
 describe('orderConfirmationTemplate OC-3', () => {
-  it('renders property tax from parseTaxResultData (legacy parity values)', () => {
+  it('renders installment tax amounts from parseTaxResultData', () => {
     const { html } = orderConfirmationTemplate({
       fileNumber: '20019999-TEST',
       hasDocuments: true,
@@ -29,14 +29,11 @@ describe('orderConfirmationTemplate OC-3', () => {
       property: { address: '123 Main', city: 'Glendale', zip: '91203', apn: '1', county: 'Los Angeles' },
     });
 
-    expect(html).toContain('Property tax summary');
-    expect(html).toContain('250000');
-    expect(html).toContain('180000');
+    expect(html).toContain('1ST INSTALLMENT');
     expect(html).toContain('2412.50');
-    expect(html).toContain('2025-12-10');
+    expect(html).toContain('Dec 10, 2025');
     expect(html).toContain('Paid');
-    expect(html).toContain('Legal &amp; Vesting');
-    expect(html).toContain('Tax Roll');
+    expect(html).toContain('ORDER OPENED SUCCESSFULLY');
   });
 
   it('kills the "documents coming shortly" placeholder', () => {
@@ -50,10 +47,10 @@ describe('orderConfirmationTemplate OC-3', () => {
 
     expect(html).not.toContain('Documents are being generated and will be available shortly');
     expect(html).not.toContain('coming shortly');
-    expect(html).toContain('Property tax summary');
+    expect(html).toContain('1ST INSTALLMENT');
   });
 
-  it('omits doc pills when no docs exist (silent skip)', () => {
+  it('omits installment cards when no tax data exists', () => {
     const { html } = orderConfirmationTemplate({
       fileNumber: '20019999-TEST',
       hasDocuments: false,
@@ -61,8 +58,7 @@ describe('orderConfirmationTemplate OC-3', () => {
       isTitlePointActive: true,
     });
 
-    expect(html).not.toContain('Initial documents');
-    expect(html).not.toContain('Legal &amp; Vesting');
+    expect(html).not.toContain('1ST INSTALLMENT');
     expect(html).not.toContain('coming shortly');
   });
 });

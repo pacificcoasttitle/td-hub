@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from '@/lib/security/supabase-admin';
 import { db } from '@/lib/db/client';
 import { profiles } from '@/lib/db/schema';
 import { sendEmail } from '@/lib/integrations/sendgrid/client';
+import { buildInviteHtml, buildInviteSubject } from '@/lib/domain/notifications/invite-email';
 
 const ALLOWED_ROLES = ['super_admin', 'admin'];
 
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest) {
 
     sendEmail({
       to: email,
-      subject: "You've been invited to PCT Transaction Desk",
+      subject: buildInviteSubject(),
       html: buildInviteHtml(displayName, role, magicLink, appUrl),
     }).catch(() => {});
 
@@ -82,24 +83,4 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-}
-
-function buildInviteHtml(name: string, role: string, magicLink: string | null, appUrl: string): string {
-  const linkHtml = magicLink
-    ? `<p style="margin:24px 0;"><a href="${magicLink}" style="display:inline-block;padding:12px 24px;background:#1B2A4A;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Accept Invitation</a></p>`
-    : `<p>Visit <a href="${appUrl}">${appUrl}</a> to sign in.</p>`;
-
-  return `
-    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a2e;">
-      <div style="border-bottom:3px solid #1B2A4A;padding-bottom:12px;margin-bottom:20px;">
-        <h2 style="margin:0;color:#1B2A4A;">Pacific Coast Title Company</h2>
-        <p style="margin:4px 0 0;color:#6b7280;font-size:13px;">Transaction Desk</p>
-      </div>
-      <p>Hi ${name},</p>
-      <p>You've been invited to PCT Transaction Desk as a <strong>${role.replace(/_/g, ' ')}</strong>.</p>
-      ${linkHtml}
-      <p style="font-size:13px;color:#6b7280;">If you didn't expect this invitation, you can safely ignore this email.</p>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;" />
-      <p style="font-size:11px;color:#9ca3af;">Pacific Coast Title Company — TD Hub</p>
-    </div>`;
 }

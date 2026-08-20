@@ -1,0 +1,19 @@
+2 things need your attention.
+Wednesday, August 19
+
+NEEDS ATTENTION
+
+1. 2 SoftPro sync jobs failed overnight and need a look.
+
+2. Prelim auto-delivery skipped 1 order pending title-officer review.
+
+YESTERDAY IN NUMBERS
+
+Orders — 12 came in from SoftPro, 3 opened here
+Title reports — 8 received, 5 summarised by TESSA
+CPL documents — 15 generated
+Emails — 40 sent, all delivered
+
+Everything else—syncs, document fetches, and the email queue—ran on schedule.
+
+See full detail on the operations dashboard: https://td-hub.vercel.app/admin/ops

@@ -5,6 +5,7 @@ import {
   orderConfirmationTemplate,
 } from './confirmation-template';
 import { parseTaxResultData } from './tax-result-data';
+import { HEADER_BG, PCT_ORANGE } from './email-layout';
 
 const TAX = parseTaxResultData({
   TaxReport: {
@@ -75,25 +76,21 @@ describe('orderConfirmationTemplate polish + redesign', () => {
       loanAmount: '$0',
     });
 
-    expect(html).toContain('ORDER CONFIRMATION');
+    expect(html).toContain('Order confirmation');
     expect(html).toContain('Title officer');
     expect(html).toContain('Terry Title');
-    expect(html).toContain('terry.to@pct.com');
-    expect(html).toContain('(626) 555-0100');
-    expect(html).toContain('Quick actions');
-    expect(html).toContain('Generate Fees');
-    expect(html).toContain('Generate CPL');
-    expect(html).toContain('View Order in Portal');
-    expect(html).toContain('background:#10213A');
-    expect(html).toContain('background:#0E5A63');
-    expect(html).toContain('background:#F26B2B');
+    expect(html).toContain('Property details');
+    expect(html).toContain('Transaction details');
+    expect(html).toContain('Escrow details');
+    expect(html).not.toContain('Generate Fees');
+    expect(html).not.toContain('Generate CPL');
+    expect(html).not.toContain('View Order in Portal');
+    expect(html).toContain(`background:${HEADER_BG}`);
+    expect(html).toContain(`background:${PCT_ORANGE}`);
     expect(html).toContain('Sales price');
     expect(html).toContain('$500,000');
     expect(html).not.toMatch(/Sales price[\s\S]{0,80}\$0/);
     expect(html).not.toContain('Loan amount');
-    // Doc pills are labels, not links
-    expect(html).toContain('background:#DCEFF0');
-    expect(html).not.toMatch(/href="[^"]*"[^>]*>Legal/);
   });
 
   it('Refinance: shows Loan amount, hides Sales price even if provided', () => {
@@ -108,7 +105,7 @@ describe('orderConfirmationTemplate polish + redesign', () => {
     expect(html).toContain('Loan amount');
     expect(html).toContain('$425,000');
     expect(html).not.toContain('Sales price');
-    expect(html).toContain('Quick actions');
+    expect(html).toContain('Transaction details');
   });
 
   it('never renders Sales price: 0 on purchase with zero amount', () => {
@@ -119,7 +116,6 @@ describe('orderConfirmationTemplate polish + redesign', () => {
       loanAmount: null,
     });
 
-    expect(html).not.toMatch(/Sales price[^]*\$0/);
-    expect(html).not.toContain('Sales price');
+    expect(html).not.toMatch(/Sales price[\s\S]{0,80}\$0/);
   });
 });

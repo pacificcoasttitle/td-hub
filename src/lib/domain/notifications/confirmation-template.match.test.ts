@@ -3,9 +3,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { orderConfirmationTemplate } from './confirmation-template';
 import { parseTaxResultData } from './tax-result-data';
+import { HEADER_BG } from './email-layout';
 
 const REDESIGN = readFileSync(
-  join(process.cwd(), 'docs/PCT_Open_Order_Confirmation_Redesign.html'),
+  join(process.cwd(), 'docs/redesigned/order_confirmation.html'),
   'utf8',
 );
 
@@ -26,25 +27,20 @@ const TAX = parseTaxResultData({
 
 function markers(html: string): string[] {
   const needles = [
-    'background:#10213A',
-    'ORDER CONFIRMATION',
-    'background:#FAF7F1',
+    'Order confirmation',
     'ORDER OPENED SUCCESSFULLY',
-    'Your title order is open',
-    'View Order in Portal',
-    'Order snapshot',
-    'background:#DCEFF0',
-    'Property tax summary',
+    'Your title order is open.',
+    'Your order details are below',
+    'Property details',
+    'Property tax details',
     '1ST INSTALLMENT',
     '2ND INSTALLMENT',
-    'Seller / owner',
-    'Quick actions',
-    'background:#0E5A63',
-    'Generate Fees',
-    'Generate Proposed',
-    'Generate CPL',
+    'Seller / owner details',
+    'Transaction details',
+    'Escrow details',
     'Pacific Coast Title Company',
     'pct.com',
+    'https://www.pct.com/logo2.png',
   ];
   return needles.filter((n) => html.includes(n));
 }
@@ -52,7 +48,7 @@ function markers(html: string): string[] {
 describe('confirmation template matches PCT redesign', () => {
   it('includes every structural marker from the redesign HTML', () => {
     const expected = markers(REDESIGN);
-    expect(expected.length).toBeGreaterThan(15);
+    expect(expected.length).toBeGreaterThan(12);
 
     const { html } = orderConfirmationTemplate({
       fileNumber: '20020430-GLT',
@@ -79,11 +75,12 @@ describe('confirmation template matches PCT redesign', () => {
     for (const m of expected) {
       expect(html, `missing marker: ${m}`).toContain(m);
     }
+    expect(html).toContain(`background:${HEADER_BG}`);
     expect(html).toContain('Title officer');
     expect(html).toContain('Eddie LasMarias');
   });
 
-  it('renders — for null land/improvement values without breaking the 2x2 grid', () => {
+  it('renders installment cards when tax data is present', () => {
     const { html } = orderConfirmationTemplate({
       fileNumber: 'X',
       hasDocuments: false,
@@ -91,22 +88,8 @@ describe('confirmation template matches PCT redesign', () => {
       isTitlePointActive: true,
       taxData: TAX,
     });
-    expect(html).toContain('Land value');
-    expect(html).toContain('Improvement value');
-    expect(html).toMatch(/Land value[\s\S]{0,120}—/);
-    expect(html).toMatch(/Improvement value[\s\S]{0,120}—/);
-  });
-
-  it('omits absent doc pills and never links pills', () => {
-    const { html } = orderConfirmationTemplate({
-      fileNumber: 'X',
-      hasDocuments: true,
-      attachedDocLabels: ['Tax Roll'],
-      isTitlePointActive: true,
-    });
-    expect(html).toContain('Tax Roll');
-    expect(html).not.toContain('Legal &amp; Vesting');
-    expect(html).not.toContain('Recent Grant Deed');
-    expect(html).not.toMatch(/href="[^"]+"[^>]*>Tax Roll</);
+    expect(html).toContain('1ST INSTALLMENT');
+    expect(html).toContain('2ND INSTALLMENT');
+    expect(html).toContain('1000');
   });
 });

@@ -6,14 +6,14 @@ import { sendEmail, type SendGridAttachment } from '@/lib/integrations/sendgrid/
 import { applyVisibility, getOrderReadModel } from '@/lib/domain/orders/read-model';
 import { checkPrelimPdf, type PrelimContentAssessment } from './prelim-content-check';
 import {
-  BORDER_SOFT,
+  ORANGE_SOFT,
   ORANGE_TINT,
-  PCT_NAVY,
+  PCT_DEEP,
   PCT_ORANGE,
   TEXT_PRIMARY,
-  detailsRow,
-  emailLayout,
+  emailShell,
   esc,
+  fieldTable,
 } from './email-layout';
 import {
   resolvePrelimRecipients,
@@ -191,36 +191,30 @@ function buildEmailContent(params: {
     guidance,
   ].filter(Boolean).join('\n');
 
-  const detailRows = details.map(([label, value]) => detailsRow(label, value)).join('');
-
-  // Outlook's Word engine ignores border-radius on a <div> and renders
-  // display:inline-block as a flat box, so the pill is a one-cell table with the
-  // background on the <td> — the same shape as the button() helper.
-  //
-  // The anchor wraps the WHOLE label (glyph, filename and size) and is
-  // display:block, so the entire chip is the click target rather than a few
-  // words of it.
-  const pillInner = `<span style="color:${PCT_ORANGE};font-size:15px;margin-right:8px;">▣</span>${esc(attachmentLabel)}`;
-  const pillCellStyle = `background:#FFFFFF;border:1px solid ${BORDER_SOFT};border-radius:999px;padding:9px 14px;`;
+  const attachmentInner = `<span style="color:${PCT_ORANGE};">PDF</span>&nbsp;&nbsp; ${esc(attachmentLabel)}`;
   const attachmentPill = attachment.downloadUrl
-    ? `<table cellpadding="0" cellspacing="0" style="margin:0 0 20px;"><tr>
-      <td style="${pillCellStyle}">
-        <a href="${esc(attachment.downloadUrl)}" target="_blank" style="color:${TEXT_PRIMARY};text-decoration:none;font-size:13px;font-weight:700;display:block;">${pillInner}</a>
-      </td>
-    </tr></table>`
-    : `<table cellpadding="0" cellspacing="0" style="margin:0 0 20px;"><tr>
-      <td style="${pillCellStyle}color:${TEXT_PRIMARY};font-size:13px;font-weight:700;">${pillInner}</td>
-    </tr></table>`;
+    ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 24px;"><tr><td style="background:${ORANGE_TINT};border-radius:10px;"><a href="${esc(attachment.downloadUrl)}" style="display:block;padding:13px 16px;color:${TEXT_PRIMARY};font-size:13px;font-weight:bold;text-decoration:none;">${attachmentInner}</a></td></tr></table>`
+    : `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 24px;"><tr><td style="background:${ORANGE_TINT};border-radius:10px;padding:13px 16px;color:${TEXT_PRIMARY};font-size:13px;font-weight:bold;">${attachmentInner}</td></tr></table>`;
 
   const body = `${testBlock?.html ?? ''}
-    <p style="margin:0 0 10px;font-size:16px;font-weight:700;color:${PCT_NAVY};">Hello,</p>
-    <p style="margin:0 0 18px;font-size:15px;color:${TEXT_PRIMARY};line-height:1.6;">${esc(intro)} <b>${esc(review)}</b></p>
-    ${attachmentPill}
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border-radius:10px;margin:0 0 20px;border:1px solid ${BORDER_SOFT};">${detailRows}</table>
-    <div style="background:${ORANGE_TINT};border-left:3px solid ${PCT_ORANGE};padding:14px 16px;margin:0 0 4px;">
-      <p style="margin:0;font-size:14px;color:${TEXT_PRIMARY};line-height:1.6;"><strong>Questions about this prelim?</strong> Contact the title unit — reply to this email or call the number below.</p>
-    </div>`;
-  const html = emailLayout('Preliminary Title Report', body);
+<p style="margin:0 0 18px;">Hello,</p>
+<p style="margin:0 0 22px;">${esc(intro)} <strong style="color:${TEXT_PRIMARY};">${esc(review)}</strong></p>
+${attachmentPill}
+${fieldTable(details.map(([label, value]) => ({ label, valueHtml: esc(value) })))}
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:24px 0 0;background:${PCT_DEEP};border-radius:12px;"><tr><td style="padding:18px 20px;color:#ffffff;font-size:14px;line-height:1.55;"><strong style="color:${ORANGE_SOFT};">Questions about the prelim?</strong><br>Reply to this email or contact the title unit shown above.</td></tr></table>`;
+
+  const html = emailShell({
+    title: subject,
+    badge: 'Preliminary report',
+    preheader: 'Review the report and contact your title team with questions.',
+    hero: {
+      icon: 'P',
+      eyebrow: 'Document delivery',
+      headline: 'Your preliminary report is ready.',
+      subcopy: 'Review the report and contact your title team with questions.',
+    },
+    bodyHtml: body,
+  });
 
   return { html, text, subject };
 }

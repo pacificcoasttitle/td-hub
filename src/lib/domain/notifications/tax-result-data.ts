@@ -19,6 +19,7 @@ export function parseTaxResultData(resultData: unknown): ConfirmationTaxData | n
     regionCode: asString(report, 'RegionCode', 'regionCode'),
     floodZone: asString(report, 'FloodZone', 'floodZone'),
     zoningCode: asString(report, 'ZoningCode', 'zoningCode'),
+    taxabilityCode: asString(report, 'TaxabilityCode', 'taxabilityCode'),
     taxRate: asString(report, 'TaxRate', 'taxRate'),
     issueDate: asString(report, 'IssueDate', 'issueDate'),
     landValue: asString(report, 'LandValue', 'landValue', 'LandValuation', 'landValuation'),
@@ -63,8 +64,13 @@ function normalizeInstallment(raw: Record<string, unknown> | null): TaxInstallme
   const balance = asString(raw, 'balance', 'Balance');
   const dueDate = asString(raw, 'dueDate', 'DueDate', 'due_date');
   const status = asString(raw, 'status', 'Status');
-  if (!amount && !balance && !dueDate && !status) return null;
-  return { amount, balance, dueDate, status };
+  const number = asString(raw, 'number', 'Number');
+  const paymentDate = asString(raw, 'paymentDate', 'PaymentDate');
+  const penalty = asString(raw, 'penalty', 'Penalty');
+  const amountPaid = asString(raw, 'amountPaid', 'AmountPaid');
+  const taxYear = asString(raw, 'taxYear', 'TaxYear');
+  if (!amount && !balance && !dueDate && !status && !paymentDate && !amountPaid) return null;
+  return { amount, balance, dueDate, status, number, paymentDate, penalty, amountPaid, taxYear };
 }
 
 function pickInstallment(

@@ -59,7 +59,7 @@ describe('party wizard invite email', () => {
   });
 
   it('makes clear PCT is not emailing the party directly', () => {
-    expect(buildPartyWizardEmail(base)).toContain('the forward is yours to make');
+    expect(buildPartyWizardEmail(base)).toContain('the forward remains yours to make');
   });
 
   describe('extends to more roles without a redesign', () => {
@@ -81,7 +81,7 @@ describe('party wizard invite email', () => {
 
     it('pluralises the copy and the subject', () => {
       expect(buildPartyWizardSubject(two)).toContain('listing agent and buyer agent');
-      expect(buildPartyWizardEmail(two)).toContain('the links below');
+      expect(buildPartyWizardEmail(two)).toContain('secure links below');
     });
   });
 

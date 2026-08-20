@@ -226,7 +226,7 @@ describe('sendPrelimDeliveryEmail', () => {
     expect(emailParams.html.indexOf('TEST — would have gone to:')).toBeLessThan(emailParams.html.indexOf('Hello,'));
     expect(emailParams.html).toContain('TO: Escrow Officer &lt;eo@example.com&gt;');
     expect(emailParams.html).toContain('CC: Title Rep &lt;title@example.com&gt;');
-    expect(emailParams.html).toContain('The Preliminary Title Report for the property below is attached. <b>Please review it carefully.</b>');
+    expect(emailParams.html).toContain('The Preliminary Title Report for the property below is attached. <strong style="color:#1B2A4A;">Please review it carefully.</strong>');
     // The pill shows the REAL document filename now, not a hardcoded label —
     // that mismatch is what hid the Aug 11 wrong-document delivery.
     expect(emailParams.html).toContain('prelim-report.pdf · 15 B');
@@ -234,18 +234,12 @@ describe('sendPrelimDeliveryEmail', () => {
     // Presigned, because recipients are EXTERNAL and the authenticated download
     // route would 401 them. 604800s = 7 days = the SigV4 maximum.
     expect(getSignedUrl).toHaveBeenCalledWith('prelim/prelim-report.pdf', 604800);
-    // The WHOLE chip is the click target: the anchor opens before the glyph and
-    // closes after the size, with nothing between it and the label.
-    expect(emailParams.html).toContain(
-      '<a href="https://s3.example.com/prelim.pdf?X-Amz-Signature=abc&amp;X-Amz-Expires=604800"'
-      + ' target="_blank" style="color:#1B2A4A;text-decoration:none;font-size:13px;font-weight:700;display:block;">'
-      + '<span style="color:#F26B2B;font-size:15px;margin-right:8px;">▣</span>prelim-report.pdf · 15 B</a>',
-    );
-    // Outlook-safe: background on a <td>, not a bare <div> with inline-block.
-    expect(emailParams.html).not.toContain('display:inline-block;border:1px solid');
+    expect(emailParams.html).toContain('href="https://s3.example.com/prelim.pdf?X-Amz-Signature=abc&amp;X-Amz-Expires=604800"');
+    expect(emailParams.html).toContain('<span style="color:#F26B2B;">PDF</span>');
+    expect(emailParams.html).toContain('prelim-report.pdf · 15 B');
     expect(emailParams.html).toContain('Property');
     expect(emailParams.html).toContain('123 Main St, Downey, CA 90241');
-    expect(emailParams.html).toContain('Questions about this prelim?');
+    expect(emailParams.html).toContain('Questions about the prelim?');
     expect(emailParams.text).toContain('CC: Assistant <assistant@example.com> (Assistant via officer_cc_defaults)');
     expect(emailParams.text).toContain('Hello,');
     expect(emailParams.text).toContain('The Preliminary Title Report for the property below is attached.');
@@ -310,7 +304,7 @@ describe('sendPrelimDeliveryEmail', () => {
     const emailParams = sendEmail.mock.calls[0]?.[0];
     expect(emailParams.html).not.toContain('TEST — would have gone to:');
     expect(emailParams.html).toContain('prelim-report.pdf · 15 B');
-    expect(emailParams.html).toContain('background:#FFF4EE;border-left:3px solid #F26B2B');
+    expect(emailParams.html).toContain('Questions about the prelim?');
     expect(emailParams.text).not.toContain('TEST — would have gone to:');
     expect(emailParams.to).not.toBe('safe-test@example.com');
     expect(result).toMatchObject({

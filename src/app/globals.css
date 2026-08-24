@@ -8,6 +8,12 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  /* The two brand hexes, which are repeated as arbitrary values in ~200 places.
+     New components use bg-brand-navy / text-brand-orange; existing arbitrary
+     values are left alone rather than swept in an unrelated change. */
+  --color-brand-navy: #1B2A4A;
+  --color-brand-orange: #F26B2B;
+  --color-brand-orange-hover: #E05A1A;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-serif: var(--font-fraunces), Georgia, "Times New Roman", serif;
 }

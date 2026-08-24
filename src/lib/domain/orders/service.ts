@@ -3,6 +3,8 @@ import { orders, orderProperties, orderParties, orderStatusHistory, contacts, co
 import { eq, desc, sql, ilike, or, and, inArray, SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { contactName, projectListRow, type ListRow } from './list-row';
+import { SYNC_FAILURE_WINDOW_DAYS } from './hub-queues';
+import type { SyncStatus } from './hub-list-row';
 
 const salesRepContact = alias(contacts, 'sales_rep');
 const titleOfficerContact = alias(contacts, 'title_officer');
@@ -157,7 +159,10 @@ export async function getOrders(
   ]);
 
   const orderIds = orderRows.map((r) => r.orders.id);
-  const docMap = await batchDocumentStatus(orderIds);
+  const [docMap, syncMap] = await Promise.all([
+    batchDocumentStatus(orderIds),
+    batchSyncStatus(orderIds),
+  ]);
 
   const total = Number(countResult[0]?.count ?? 0);
 
@@ -189,6 +194,7 @@ export async function getOrders(
       titleCompanyName: row.title_company?.name ?? null,
       underwriterName: row.underwriter_company?.name ?? null,
       openedBy: row.opened_by?.name ?? null,
+      syncStatus: syncMap.get(row.orders.id) ?? 'synced',
     },
   }));
 
@@ -204,6 +210,45 @@ export async function getOrders(
 function emptyDocuments(): OrderDocuments {
   const full = { exists: false, count: 0, latestId: null, latestCreatedAt: null };
   return { cpl: { ...full }, prelim: { ...full }, proposedInsured: { ...full }, legalVesting: { exists: false }, tax: { exists: false }, grantDeed: { exists: false } };
+}
+
+// ─── Sync status ─────────────────────────────────────────────────────────────
+//
+// There is no sync_status column on orders. softpro_last_synced_at is non-null
+// on all 7,300 rows, so it cannot distinguish a healthy order from a broken
+// one. The vendor call log is the only place a failure is actually recorded.
+//
+// "Failed" means: a SoftPro or TitlePoint call scoped to this order failed
+// inside the window and nothing has succeeded for it since. Measured on
+// production, that is 68 orders — a number small enough to act on.
+//
+// 'pending' is in the union because the spec's data contract names it and the
+// UI handles it, but nothing in the current data produces it. It will mean
+// something once syncs are queued rather than fired inline; until then no row
+// is ever labelled with it.
+async function batchSyncStatus(orderIds: number[]): Promise<Map<number, SyncStatus>> {
+  const map = new Map<number, SyncStatus>();
+  if (orderIds.length === 0) return map;
+
+  const cutoff = sql.raw(`now() - interval '${SYNC_FAILURE_WINDOW_DAYS} days'`);
+  const rows = await db.execute<{ order_id: number }>(sql`
+    select distinct f.order_id
+    from vendor_api_logs f
+    where f.order_id in (${sql.join(orderIds.map((id) => sql`${id}`), sql`, `)})
+      and f.vendor in ('softpro', 'titlepoint')
+      and f.success = false
+      and f.created_at > ${cutoff}
+      and not exists (
+        select 1 from vendor_api_logs s
+        where s.order_id = f.order_id
+          and s.vendor in ('softpro', 'titlepoint')
+          and s.success = true
+          and s.created_at > f.created_at
+      )
+  `);
+
+  for (const r of rows) map.set(Number(r.order_id), 'failed');
+  return map;
 }
 
 const DOC_CATS = ['cpl', 'prelim', 'proposed_insured', 'legal_vesting', 'tax', 'grant_deed'] as const;

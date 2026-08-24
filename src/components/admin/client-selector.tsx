@@ -16,6 +16,10 @@ export interface ClientContact {
   companyTitleOfficerId?: number | null;
   companyLoanUnderwriter?: string | null;
   companySalesUnderwriter?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
 }
 
 interface ClientSelectorProps {
@@ -35,6 +39,17 @@ function isEscrowClient(c: ClientContact): boolean {
 
 function isEscrowRestricted(orderType?: string): boolean {
   return ESCROW_RESTRICTED_ORDERS.includes((orderType ?? '').toLowerCase().trim());
+}
+
+/** Street + city for picker display. Empty string when nothing useful — never an em-dash. */
+export function formatClientPickerAddress(
+  client: Pick<ClientContact, 'address' | 'city'> | null | undefined,
+): string {
+  if (!client) return '';
+  const street = client.address?.trim() || '';
+  const city = client.city?.trim() || '';
+  if (street && city) return `${street}, ${city}`;
+  return street || city;
 }
 
 export function ClientSelector({ selected, onSelect, onClear, orderType }: ClientSelectorProps) {
@@ -90,6 +105,7 @@ export function ClientSelector({ selected, onSelect, onClear, orderType }: Clien
   }, []);
 
   if (selected) {
+    const selectedAddress = formatClientPickerAddress(selected);
     return (
       <div className="bg-[#1B2A4A]/5 border border-[#1B2A4A]/15 rounded-lg px-4 py-3">
         <div className="flex items-center justify-between gap-4">
@@ -108,6 +124,9 @@ export function ClientSelector({ selected, onSelect, onClear, orderType }: Clien
                   .filter(Boolean)
                   .join(' · ')}
               </p>
+              {selectedAddress ? (
+                <p className="text-xs text-[#6B7280] truncate mt-0.5">{selectedAddress}</p>
+              ) : null}
             </div>
           </div>
           <button
@@ -159,6 +178,7 @@ export function ClientSelector({ selected, onSelect, onClear, orderType }: Clien
           ) : results.length > 0 ? (
             results.map((c) => {
               const disabled = restricted && isEscrowClient(c);
+              const addressLine = formatClientPickerAddress(c);
               return (
                 <button
                   key={c.id}
@@ -181,6 +201,9 @@ export function ClientSelector({ selected, onSelect, onClear, orderType }: Clien
                           ? `Not available for ${orderType} orders`
                           : [c.email, c.phone, c.companyName && c.fullName ? c.companyName : null].filter(Boolean).join(' · ')}
                       </p>
+                      {!disabled && addressLine ? (
+                        <p className="text-xs text-[#6B7280] truncate mt-0.5">{addressLine}</p>
+                      ) : null}
                     </div>
                     {c.role && (
                       <span className={`flex-shrink-0 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded ${disabled ? 'bg-red-50 text-red-400' : 'bg-gray-100 text-[#6B7280]'}`}>

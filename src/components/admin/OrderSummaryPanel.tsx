@@ -23,10 +23,14 @@ function hasContact(c: { name: string; company: string }): boolean {
 export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
   const hasClient = !!s.client;
   const hasProperty = !!(s.street || s.apn || s.county);
+  const isPurchase = s.txType === 'Purchase';
   const isBorrowerFlow = s.txType === 'Refinance' || s.txType === 'Equity';
-  const primaryPartyName = personName(isBorrowerFlow ? s.borrower : s.sellerPrimary);
-  const secondaryPartyName = personName(isBorrowerFlow ? s.secBorrower : s.sellerSecondary);
-  const hasPrimaryParty = !!primaryPartyName;
+  const sellerName = personName(s.sellerPrimary);
+  const sellerSecondaryName = personName(s.sellerSecondary);
+  const buyerBorrowerName = personName(s.borrower);
+  const buyerBorrowerSecondaryName = personName(s.secBorrower);
+  const hasSeller = isPurchase && !!sellerName;
+  const hasBuyerBorrower = !!(isPurchase || isBorrowerFlow) && !!buyerBorrowerName;
   const salesRepName = s.formOpts?.salesReps?.find((r) => r.value === s.salesRep)?.label ?? s.salesRep;
   const titleOfficerName = s.formOpts?.titleOfficers?.find((o) => o.value === s.titleOfficer)?.label ?? s.titleOfficer;
   const hasTx = !!(
@@ -80,8 +84,8 @@ export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
           )}
         </Section>
 
-        {/* Property + Seller/Borrower (grouped) */}
-        <Section filled={hasProperty || hasPrimaryParty} label="Property" placeholder="Property details will appear here">
+        {/* Property + Seller / Buyer|Borrower */}
+        <Section filled={hasProperty || hasSeller || hasBuyerBorrower} label="Property" placeholder="Property details will appear here">
           {hasProperty && (
             <>
               <Field label="Address" value={[s.street, s.city, s.state, s.zip].filter(Boolean).join(', ')} />
@@ -90,18 +94,37 @@ export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
               {s.propType && <Field label="Type" value={s.propType} />}
             </>
           )}
-          {hasPrimaryParty && (
+          {hasSeller && (
             <div className={hasProperty ? 'border-t border-gray-100 pt-2 mt-2' : ''}>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">{isBorrowerFlow ? 'Borrower' : 'Seller / Owner'}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Seller / Owner</span>
               <Field
-                label={(isBorrowerFlow ? s.borrowerIsOrg : s.sellerIsOrg) ? 'Organization' : 'Name'}
-                value={primaryPartyName}
+                label={s.sellerIsOrg ? 'Organization' : 'Name'}
+                value={sellerName}
               />
-              {secondaryPartyName && <Field label="Secondary" value={secondaryPartyName} />}
-              {(isBorrowerFlow ? s.borrowerIsOrg : s.sellerIsOrg) && (isBorrowerFlow ? s.borrowerOrgType : s.sellerOrgType) && (
+              {sellerSecondaryName && <Field label="Secondary" value={sellerSecondaryName} />}
+              {s.sellerIsOrg && s.sellerOrgType && (
                 <div className="mt-1">
                   <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
-                    {isBorrowerFlow ? s.borrowerOrgType : s.sellerOrgType}
+                    {s.sellerOrgType}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+          {hasBuyerBorrower && (
+            <div className={(hasProperty || hasSeller) ? 'border-t border-gray-100 pt-2 mt-2' : ''}>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                {isPurchase ? 'Buyer' : 'Borrower'}
+              </span>
+              <Field
+                label={s.borrowerIsOrg ? 'Organization' : 'Name'}
+                value={buyerBorrowerName}
+              />
+              {buyerBorrowerSecondaryName && <Field label="Secondary" value={buyerBorrowerSecondaryName} />}
+              {s.borrowerIsOrg && s.borrowerOrgType && (
+                <div className="mt-1">
+                  <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
+                    {s.borrowerOrgType}
                   </span>
                 </div>
               )}

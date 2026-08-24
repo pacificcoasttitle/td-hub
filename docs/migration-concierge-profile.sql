@@ -92,6 +92,14 @@ CREATE TABLE IF NOT EXISTS concierge_profiles (
   -- would have been worse still: the sample truncates it to the bare host
   -- (34 chars), so a varchar sized off it would have silently cut real URLs.
   comp_map_url              text,
+  -- The rendered map image is SNAPSHOTTED, not just linked. The URL points at
+  -- SiteX's own renderer and is very likely time- or session-bound, so a report
+  -- regenerated in three years would render a broken map — which fails exactly
+  -- the test this whole schema exists to pass. A few hundred KB against a
+  -- document we are already storing. The plat map arrives inline as base64 and
+  -- is stored either way; this makes the two maps consistent.
+  comp_map_storage_key      varchar(500),
+  comp_map_sha256           char(64),
 
   -- ── normalized subject (queryable; raw remains the source of truth) ───────
   subject_apn               varchar(50),
@@ -280,21 +288,11 @@ CREATE INDEX IF NOT EXISTS concierge_transfers_profile_idx
 --    WHERE table_name='concierge_profiles' AND column_name='comp_map_url';
 --   -- expect 'text' (NOT character varying)
 --
+--   SELECT column_name FROM information_schema.columns
+--    WHERE table_name='concierge_profiles' AND column_name LIKE 'comp_map%';
+--   -- expect 3 rows (url, storage_key, sha256)
+--
 --   SELECT count(*) FROM concierge_profiles;   -- expect 0
-
-
--- ── OPTIONAL, DECIDE BEFORE APPLYING ────────────────────────────────────────
--- Storing the comps-map URL alone makes the report regenerable ONLY while that
--- URL still resolves. It points at SiteX's own renderer and is very likely
--- time- or session-bound, so a report regenerated in six months could come back
--- with a broken map. The plat map does not have this problem because its image
--- arrives inline and we store the bytes.
---
--- If snapshotting the rendered map image is wanted, uncomment these two. If the
--- map is considered re-fetchable at render time, leave them out.
---
---   ALTER TABLE concierge_profiles ADD COLUMN comp_map_storage_key varchar(500);
---   ALTER TABLE concierge_profiles ADD COLUMN comp_map_sha256      char(64);
 
 
 -- ── ROLLBACK ────────────────────────────────────────────────────────────────

@@ -111,7 +111,17 @@ export function normalizeSubject(feed: Raw): NormalizedSubject {
     useDescription: str(ch.UseCodeDescription),
     primaryOwner: str(p.PrimaryOwnerName),
     siteAddress: str(p.SiteAddress),
-    siteCityState: str(p.SiteAddressCityState),
+    // NOT SiteAddressCityState — that field already contains the street line
+    // ("10523 STONYBROOK AVE, SOUTH GATE, CA 90280"), so pairing it with
+    // siteAddress printed the address twice on the cover. Build the locality
+    // line from the discrete fields instead.
+    siteCityState: (() => {
+      const city = str(p.SiteCity);
+      const state = str(p.SiteState);
+      const zip = str(p.SiteZip);
+      const line = [city, [state, zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+      return line || str(p.SiteAddressCityState);
+    })(),
     legalDescription: str(legal.LegalBriefDescription),
     beds: int(ch.Bedrooms),
     baths: num(ch.Baths),

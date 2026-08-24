@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { SECTION, SH, FL, IN, SEL, EC, type PartyContact } from './types';
+import { partyHasInput } from '@/lib/domain/orders/party-contact';
+import { ContactFields } from './contact-fields';
+import { SECTION, SH, FL, IN, SEL, EC } from './types';
 import type { QuickEntryState } from './use-quick-entry';
 
 // ─── Visibility Logic (exported for other sections to consume) ──────────────
@@ -38,7 +40,7 @@ export function partyVisibility(ct: string | null | undefined, ot: string, tt: s
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function hasData(c: PartyContact): boolean { return !!(c.name || c.company); }
+function hasData(c: Parameters<typeof partyHasInput>[0]): boolean { return partyHasInput(c); }
 
 function dedup(opts: { value: string; label: string }[]) {
   const seen = new Set<string>();
@@ -47,24 +49,6 @@ function dedup(opts: { value: string; label: string }[]) {
 
 type ShowState = Record<'buyerAgent' | 'listingAgent' | 'lender' | 'mortgageBroker' | 'escrowCompany' | 'escrowOfficer', boolean>;
 type PK = keyof ShowState;
-
-// ─── Reusable Contact Fields ────────────────────────────────────────────────
-
-function ContactFields({ c, set, companyFirst }: { c: PartyContact; set: (v: PartyContact) => void; companyFirst?: boolean }) {
-  const f1 = companyFirst ? 'company' : 'name';
-  const f2 = companyFirst ? 'name' : 'company';
-  return (
-    <>
-      <div className="mb-3"><label className={FL}>{companyFirst ? 'Company Name' : 'Name'}</label><input className={IN} value={c[f1]} onChange={e => set({ ...c, [f1]: e.target.value })} /></div>
-      {companyFirst && <div className="mb-3"><label className={FL}>Contact Name</label><input className={IN} value={c.name} onChange={e => set({ ...c, name: e.target.value })} /></div>}
-      <div className="grid grid-cols-2 gap-4 mb-3">
-        <div><label className={FL}>Email</label><input className={IN} type="email" value={c.email} onChange={e => set({ ...c, email: e.target.value })} /></div>
-        <div><label className={FL}>Phone</label><input className={IN} type="tel" value={c.phone} onChange={e => set({ ...c, phone: e.target.value })} /></div>
-      </div>
-      {!companyFirst && <div className="mb-3"><label className={FL}>Company</label><input className={IN} value={c[f2]} onChange={e => set({ ...c, [f2]: e.target.value })} /></div>}
-    </>
-  );
-}
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
@@ -78,12 +62,10 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
     buyerAgent: hasData(s.buyerAgent),
     listingAgent: hasData(s.listingAgent),
     lender: hasData(s.lender),
-    mortgageBroker: false,
+    mortgageBroker: hasData(s.mortgageBroker),
     escrowCompany: hasData(s.escrow),
     escrowOfficer: !!s.escrowOfficer,
   }));
-
-  const [broker, setBroker] = useState<PartyContact>({ ...EC });
 
   const prevRef = useRef({ ct, ot, tt });
   useEffect(() => {
@@ -96,7 +78,7 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
     if (pv.buyerAgent && !nv.buyerAgent) s.setBuyerAgent({ ...EC });
     if (pv.listingAgent && !nv.listingAgent) s.setListingAgent({ ...EC });
     if (pv.lender && !nv.lender) s.setLender({ ...EC });
-    if (pv.mortgageBroker && !nv.mortgageBroker) setBroker({ ...EC });
+    if (pv.mortgageBroker && !nv.mortgageBroker) s.setMortgageBroker({ ...EC });
     if (pv.escrowCompany && !nv.escrowCompany) s.setEscrow({ ...EC });
     if (pv.escrowOfficer && !nv.escrowOfficer) s.setEscrowOfficer('');
 
@@ -117,7 +99,7 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
         buyerAgent: () => s.setBuyerAgent({ ...EC }),
         listingAgent: () => s.setListingAgent({ ...EC }),
         lender: () => s.setLender({ ...EC }),
-        mortgageBroker: () => setBroker({ ...EC }),
+        mortgageBroker: () => s.setMortgageBroker({ ...EC }),
         escrowCompany: () => s.setEscrow({ ...EC }),
         escrowOfficer: () => s.setEscrowOfficer(''),
       };
@@ -146,27 +128,27 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
 
       {/* Buyer's Agent */}
       <Expand open={show.buyerAgent && vis.buyerAgent}>
-        <ContactFields c={s.buyerAgent} set={s.setBuyerAgent} />
+        <ContactFields c={s.buyerAgent} set={s.setBuyerAgent} searchRole="buyer_agent" label="Buyer's Agent" />
       </Expand>
 
       {/* Listing Agent */}
       <Expand open={show.listingAgent && vis.listingAgent}>
-        <ContactFields c={s.listingAgent} set={s.setListingAgent} />
+        <ContactFields c={s.listingAgent} set={s.setListingAgent} searchRole="listing_agent" label="Listing Agent" />
       </Expand>
 
       {/* Lender */}
       <Expand open={show.lender && vis.lender}>
-        <ContactFields c={s.lender} set={s.setLender} companyFirst />
+        <ContactFields c={s.lender} set={s.setLender} companyFirst searchRole="lender" label="Lender" />
       </Expand>
 
-      {/* Mortgage Broker (local state — Builder gap: add to hook + submission) */}
+      {/* Mortgage Broker */}
       <Expand open={show.mortgageBroker && vis.mortgageBroker}>
-        <ContactFields c={broker} set={setBroker} />
+        <ContactFields c={s.mortgageBroker} set={s.setMortgageBroker} searchRole="mortgage_broker" label="Mortgage Broker" />
       </Expand>
 
       {/* Escrow Company (external — Title Only / Sub Escrow) */}
       <Expand open={show.escrowCompany && vis.escrowCompany}>
-        <ContactFields c={s.escrow} set={s.setEscrow} companyFirst />
+        <ContactFields c={s.escrow} set={s.setEscrow} companyFirst searchRole="escrow" label="Escrow Company" />
       </Expand>
 
       {/* Escrow Officer (internal PCT — Title & Escrow / Escrow Only) */}
@@ -216,9 +198,10 @@ function Chk({ label, checked, onChange }: { label: string; checked: boolean; on
 }
 
 function Expand({ open, children }: { open: boolean; children: React.ReactNode }) {
+  if (!open) return null;
   return (
-    <div className={`transition-all duration-200 ease-in-out overflow-hidden ${open ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
-      <div className="pl-6 border-l-2 border-gray-200 mt-2 mb-4">{children}</div>
+    <div className="pl-6 border-l-2 border-gray-200 mt-2 mb-4 relative z-10">
+      {children}
     </div>
   );
 }

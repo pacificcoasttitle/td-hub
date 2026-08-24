@@ -1,5 +1,6 @@
 'use client';
 
+import { partyHasInput } from '@/lib/domain/orders/party-contact';
 import type { QuickEntryState } from '@/components/admin/quick-entry/use-quick-entry';
 
 /* ── Helpers ────────────────────────────────────────────────────────────────── */
@@ -14,8 +15,8 @@ function fmtCurrency(raw: string): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n);
 }
 
-function hasContact(c: { name: string; company: string }): boolean {
-  return !!(c.name || c.company);
+function hasContact(c: Parameters<typeof partyHasInput>[0]): boolean {
+  return partyHasInput(c);
 }
 
 /* ── Component ─────────────────────────────────────────────────────────────── */
@@ -189,6 +190,7 @@ function buildParties(s: QuickEntryState): { role: string; name: string }[] {
   if (hasContact(s.buyerAgent)) out.push({ role: 'Buyer Agent', name: s.buyerAgent.name || s.buyerAgent.company });
   if (hasContact(s.listingAgent)) out.push({ role: 'Listing Agent', name: s.listingAgent.name || s.listingAgent.company });
   if (hasContact(s.lender)) out.push({ role: 'Lender', name: s.lender.name || s.lender.company });
+  if (hasContact(s.mortgageBroker)) out.push({ role: 'Mortgage Broker', name: s.mortgageBroker.name || s.mortgageBroker.company });
   if (hasContact(s.escrow)) out.push({ role: 'Escrow', name: s.escrow.name || s.escrow.company });
   return out;
 }

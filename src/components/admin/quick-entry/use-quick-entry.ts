@@ -6,6 +6,7 @@ import type { ParsedAddress } from '@/components/ui/address-autocomplete';
 import type { SiteXPropertyResult } from '@/components/shared/property-confirm-modal';
 import { buildPreInitAddressKey, usePreInitOnSiteX } from '@/lib/orders/use-pre-init-on-sitex';
 import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
+import { firstPartySubmitBlocker, toCreateOrderContact } from '@/lib/domain/orders/party-contact';
 import { EP, EC, type Person, type FormOptions } from './types';
 
 function deriveUW(product: string): string {
@@ -58,6 +59,7 @@ export function useQuickEntry() {
   const [buyerAgent, setBuyerAgent] = useState({ ...EC });
   const [listingAgent, setListingAgent] = useState({ ...EC });
   const [lender, setLender] = useState({ ...EC });
+  const [mortgageBroker, setMortgageBroker] = useState({ ...EC });
   const [escrow, setEscrow] = useState({ ...EC });
   const [escrowOfficer, setEscrowOfficer] = useState('');
   const [deliverableEmails, setDeliverableEmails] = useState<string[]>([]);
@@ -275,15 +277,21 @@ export function useQuickEntry() {
   // ─── Submit ──────────────────────────────────────────────────────────────
 
   async function handleSubmit() {
-    setSubmitting(true);
     setResult(null);
+    const partyBlock = firstPartySubmitBlocker({
+      buyerAgent, listingAgent, lender, mortgageBroker, escrowCompany: escrow,
+    });
+    if (partyBlock) {
+      setResult({ type: 'error', message: partyBlock });
+      return;
+    }
+
+    setSubmitting(true);
     try {
       const num = (s: string) => {
         const n = parseFloat(s.replace(/[^0-9.]/g, ''));
         return isNaN(n) ? 0 : n;
       };
-
-      const hasContact = (c: { name: string; company: string }) => !!(c.name || c.company);
 
       const payload = {
         orderType: orderType || 'Title only',
@@ -317,10 +325,11 @@ export function useQuickEntry() {
           underwriterCode: underwriter || undefined,
         },
         contacts: {
-          buyerAgent: hasContact(buyerAgent) ? { name: buyerAgent.name, email: buyerAgent.email || undefined, phone: buyerAgent.phone || undefined, companyName: buyerAgent.company || undefined } : undefined,
-          listingAgent: hasContact(listingAgent) ? { name: listingAgent.name, email: listingAgent.email || undefined, phone: listingAgent.phone || undefined, companyName: listingAgent.company || undefined } : undefined,
-          lender: hasContact(lender) ? { name: lender.name, email: lender.email || undefined, phone: lender.phone || undefined, companyName: lender.company || undefined } : undefined,
-          escrowCompany: hasContact(escrow) ? { name: escrow.name, email: escrow.email || undefined, phone: escrow.phone || undefined, companyName: escrow.company || undefined } : undefined,
+          buyerAgent: toCreateOrderContact(buyerAgent),
+          listingAgent: toCreateOrderContact(listingAgent),
+          lender: toCreateOrderContact(lender),
+          mortgageBroker: toCreateOrderContact(mortgageBroker),
+          escrowCompany: toCreateOrderContact(escrow),
         },
         deliverableEmails: deliverableEmails.filter(Boolean),
         clientType: client?.contactType ?? undefined,
@@ -364,7 +373,7 @@ export function useQuickEntry() {
     hasSecBorrower, setHasSecBorrower,
     borrowerIsOrg, setBorrowerIsOrg, borrowerOrgType, setBorrowerOrgType,
     buyerAgent, setBuyerAgent, listingAgent, setListingAgent,
-    lender, setLender, escrow, setEscrow,
+    lender, setLender, mortgageBroker, setMortgageBroker, escrow, setEscrow,
     escrowOfficer, setEscrowOfficer,
     deliverableEmails, setDeliverableEmails,
     formOpts, submitting, result, setResult,

@@ -1,5 +1,12 @@
 export interface Person { firstName: string; middleName: string; lastName: string; }
-export interface PartyContact { name: string; email: string; phone: string; company: string; }
+export interface PartyContact {
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  companyLookupCode?: string;
+  clientLookupCode?: string;
+}
 export interface FormOption { value: string; label: string; }
 
 export interface Underwriter { code: string; name: string }
@@ -14,7 +21,10 @@ export interface FormOptions {
 }
 
 export const EP: Person = { firstName: '', middleName: '', lastName: '' };
-export const EC: PartyContact = { name: '', email: '', phone: '', company: '' };
+export const EC: PartyContact = {
+  name: '', email: '', phone: '', company: '',
+  companyLookupCode: '', clientLookupCode: '',
+};
 
 export const ORG_TYPES = ['LLC', 'Corporation', 'Partnership', 'Trust', 'Other'];
 export const TX_TYPES = ['', 'Purchase', 'Refinance', 'Equity', 'Other'];

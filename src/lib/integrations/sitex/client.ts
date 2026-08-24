@@ -2,7 +2,7 @@ import { vendorSuccess, vendorError } from '../types';
 import type { VendorResult } from '../types';
 import type { SiteXPropertyData, SiteXSearchResponse, PropertyLookupParams, ApnLookupParams } from './types';
 import { VENDOR, TIMEOUT_MS, getConfig, getAccessToken, logRequest } from './auth';
-import { truncateZip, mapProfile, emptyResult, MOCK_PROPERTY } from './parsers';
+import { truncateZip, mapProfile, emptyResult } from './parsers';
 import type { PropertySearchResult } from './parsers';
 
 function inferMatchCode(raw: SiteXSearchResponse): string {
@@ -89,8 +89,13 @@ export async function propertySearch(
   const config = getConfig();
 
   if (!config) {
-    await logRequest({ operation: 'property_search_mock', requestId, startedAt, success: true, requestMeta: { ...params, mock: true } });
-    return vendorSuccess<PropertySearchResult>({ match: 'single', property: MOCK_PROPERTY, locations: [] }, { requestId, durationMs: 0 });
+    // FAIL CLOSED. This used to return MOCK_PROPERTY as vendorSuccess with
+    // matchCode 'S' — fabricated owner names, a real-looking APN and address —
+    // indistinguishable from a genuine single match. A misconfigured deploy
+    // produced confident data about a house that was not the subject. An
+    // unconfigured vendor is an error, never a result.
+    await logRequest({ operation: 'property_search', requestId, startedAt, success: false, errorCategory: 'NOT_CONFIGURED', requestMeta: { ...params } });
+    return vendorError<PropertySearchResult>(VENDOR, 'NOT_CONFIGURED', 'SiteX is not configured (SITEX_BASE_URL missing).', { retryable: false, requestId, durationMs: 0 });
   }
 
   const zip5 = truncateZip(params.zip);
@@ -153,8 +158,13 @@ export async function propertyLookup(
   const config = getConfig();
 
   if (!config) {
-    await logRequest({ operation: 'property_lookup_mock', requestId, startedAt, success: true, requestMeta: { ...params, mock: true } });
-    return vendorSuccess(MOCK_PROPERTY, { requestId, durationMs: 0 });
+    // FAIL CLOSED. This used to return MOCK_PROPERTY as vendorSuccess with
+    // matchCode 'S' — fabricated owner names, a real-looking APN and address —
+    // indistinguishable from a genuine single match. A misconfigured deploy
+    // produced confident data about a house that was not the subject. An
+    // unconfigured vendor is an error, never a result.
+    await logRequest({ operation: 'property_lookup', requestId, startedAt, success: false, errorCategory: 'NOT_CONFIGURED', requestMeta: { ...params } });
+    return vendorError<SiteXPropertyData>(VENDOR, 'NOT_CONFIGURED', 'SiteX is not configured (SITEX_BASE_URL missing).', { retryable: false, requestId, durationMs: 0 });
   }
 
   const zip5 = truncateZip(params.zip);
@@ -215,8 +225,13 @@ export async function apnLookup(
   const config = getConfig();
 
   if (!config) {
-    await logRequest({ operation: 'apn_lookup_mock', requestId, startedAt, success: true, requestMeta: { ...params, mock: true } });
-    return vendorSuccess(MOCK_PROPERTY, { requestId, durationMs: 0 });
+    await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: false, errorCategory: 'NOT_CONFIGURED', requestMeta: { ...params } });
+    // FAIL CLOSED. This used to return MOCK_PROPERTY as vendorSuccess with
+    // matchCode 'S' — fabricated owner names, a real-looking APN and address —
+    // indistinguishable from a genuine single match. A misconfigured deploy
+    // produced confident data about a house that was not the subject. An
+    // unconfigured vendor is an error, never a result.
+    return vendorError<SiteXPropertyData>(VENDOR, 'NOT_CONFIGURED', 'SiteX is not configured (SITEX_BASE_URL missing).', { retryable: false, requestId, durationMs: 0 });
   }
 
   const searchUrl = new URL(`${config.baseUrl}/realestatedata/search`);

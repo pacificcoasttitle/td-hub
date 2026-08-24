@@ -90,19 +90,19 @@ function OwnerFields({ s }: { s: QuickEntryState }) {
   const isRefiLike = s.txType === 'Refinance' || s.txType === 'Equity';
   if (!isPurchase && !isRefiLike) return null;
 
-  const siteXActive = isPurchase ? s.sellerSiteX : s.borrowerSiteX;
-  const inputHighlight = siteXActive ? 'bg-green-50' : '';
+  const partyLabel = isPurchase ? 'Buyer' : 'Borrower';
+  const partyLabelLower = isPurchase ? 'buyer' : 'borrower';
 
   return (
-    <div className="border-t border-gray-200 pt-4 mt-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-3">
-        {isPurchase ? 'Seller / Owner (from property records)' : 'Borrower (from property records)'}
-      </p>
+    <div className="border-t border-gray-200 pt-4 mt-4 space-y-5">
+      {isPurchase && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-3">
+            Seller / Owner (from property records)
+          </p>
 
-      {siteXActive && AUTOFILL_BADGE}
+          {s.sellerSiteX && AUTOFILL_BADGE}
 
-      {isPurchase ? (
-        <>
           <div className="flex items-center gap-3 mb-3">
             <label className="flex items-center gap-2 text-xs text-[#6B7280]">
               <input type="checkbox" checked={s.sellerIsOrg} onChange={(e) => s.setSellerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4" /> Organization
@@ -114,7 +114,7 @@ function OwnerFields({ s }: { s: QuickEntryState }) {
               </select>
             )}
           </div>
-          <PersonFields person={s.sellerPrimary} onChange={s.setSellerPrimary} label="Primary seller" highlight={inputHighlight} />
+          <PersonFields person={s.sellerPrimary} onChange={s.setSellerPrimary} label="Primary seller" highlight={s.sellerSiteX ? 'bg-green-50' : ''} />
           {!s.hasSecondarySeller ? (
             <button type="button" onClick={() => s.setHasSecondarySeller(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary seller</button>
           ) : (
@@ -123,35 +123,54 @@ function OwnerFields({ s }: { s: QuickEntryState }) {
                 <span className="text-xs text-[#6B7280]">Secondary seller</span>
                 <button type="button" onClick={() => { s.setHasSecondarySeller(false); s.setSellerSecondary({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button>
               </div>
-              <PersonFields person={s.sellerSecondary} onChange={s.setSellerSecondary} label="" highlight={inputHighlight} />
+              <PersonFields person={s.sellerSecondary} onChange={s.setSellerSecondary} label="" highlight={s.sellerSiteX ? 'bg-green-50' : ''} />
             </>
           )}
-        </>
-      ) : (
-        <>
-          <PersonFields person={s.borrower} onChange={s.setBorrower} label="Primary borrower" highlight={inputHighlight} />
-          {!s.hasSecBorrower ? (
-            <button type="button" onClick={() => s.setHasSecBorrower(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary borrower</button>
-          ) : (
-            <>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-[#6B7280]">Secondary borrower</span>
-                <button type="button" onClick={() => { s.setHasSecBorrower(false); s.setSecBorrower({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button>
-              </div>
-              <PersonFields person={s.secBorrower} onChange={s.setSecBorrower} label="" highlight={inputHighlight} />
-            </>
-          )}
-          <label className="flex items-center gap-2 text-xs text-[#6B7280] mt-2">
-            <input type="checkbox" checked={s.borrowerIsOrg} onChange={(e) => s.setBorrowerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4" /> Borrower is an organization
-          </label>
-          {s.borrowerIsOrg && (
-            <select value={s.borrowerOrgType} onChange={(e) => s.setBorrowerOrgType(e.target.value)} className="mt-2 h-9 px-2 border border-gray-200 rounded-lg text-xs">
-              <option value="">Type…</option>
-              {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          )}
-        </>
+        </div>
       )}
+
+      <div className={isPurchase ? 'border-t border-gray-100 pt-4' : undefined}>
+        <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-3">
+          {isPurchase ? 'Buyer' : 'Borrower (from property records)'}
+        </p>
+
+        {!isPurchase && s.borrowerSiteX && AUTOFILL_BADGE}
+
+        <PersonFields
+          person={s.borrower}
+          onChange={s.setBorrower}
+          label={`Primary ${partyLabelLower}`}
+          highlight={!isPurchase && s.borrowerSiteX ? 'bg-green-50' : ''}
+        />
+        {!s.hasSecBorrower ? (
+          <button type="button" onClick={() => s.setHasSecBorrower(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">
+            + Add secondary {partyLabelLower}
+          </button>
+        ) : (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-[#6B7280]">Secondary {partyLabelLower}</span>
+              <button type="button" onClick={() => { s.setHasSecBorrower(false); s.setSecBorrower({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button>
+            </div>
+            <PersonFields
+              person={s.secBorrower}
+              onChange={s.setSecBorrower}
+              label=""
+              highlight={!isPurchase && s.borrowerSiteX ? 'bg-green-50' : ''}
+            />
+          </>
+        )}
+        <label className="flex items-center gap-2 text-xs text-[#6B7280] mt-2">
+          <input type="checkbox" checked={s.borrowerIsOrg} onChange={(e) => s.setBorrowerIsOrg(e.target.checked)} className="rounded border-gray-300 text-[#F26B2B] h-4 w-4" />
+          {partyLabel} is an organization
+        </label>
+        {s.borrowerIsOrg && (
+          <select value={s.borrowerOrgType} onChange={(e) => s.setBorrowerOrgType(e.target.value)} className="mt-2 h-9 px-2 border border-gray-200 rounded-lg text-xs">
+            <option value="">Type…</option>
+            {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
+      </div>
     </div>
   );
 }

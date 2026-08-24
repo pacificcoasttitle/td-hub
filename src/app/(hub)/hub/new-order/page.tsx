@@ -49,12 +49,6 @@ export default function HubNewOrderPage() {
               onClear={() => s.setClient(null)}
               orderType={s.orderType}
             />
-            {s.client && (
-              <div className="mt-3 px-4 py-3 bg-[#F26B2B]/10 border border-[#F26B2B]/20 rounded-lg">
-                <p className="text-sm font-medium text-[#1A1A2E]">Opening on behalf of: {s.client.fullName ?? s.client.companyName ?? 'Client'}</p>
-                <p className="text-xs text-[#6B7280]">{[s.client.email, s.client.phone].filter(Boolean).join(' · ')}</p>
-              </div>
-            )}
           </div>
 
           <PropertySection s={s} />

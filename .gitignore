@@ -49,3 +49,7 @@ next-env.d.ts
 
 # audit run logs
 scripts/audit/*.log
+
+# market-report SiteX capability dumps (large, regenerable)
+sitex-probe.json
+sitex-countyinfo.json

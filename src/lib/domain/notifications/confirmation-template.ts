@@ -11,12 +11,15 @@ import {
   detailsRow as row,
 } from './email-layout';
 import {
+  formatOrderAddress,
   isMeaningfulMoney,
   isPurchaseTransaction,
   isRefinanceTransaction,
 } from '@/lib/domain/orders/order-format';
 
 const DASH = '—';
+/** Soft cap so the file number survives client truncation (~60–78 chars). */
+const CONFIRMATION_SUBJECT_MAX = 70;
 
 export interface ConfirmationParty {
   name: string | null;
@@ -135,6 +138,39 @@ function propertyAddress(data: FullConfirmationData): string {
   if (!data.property) return DASH;
   const composed = [data.property.address, data.property.city, data.property.zip].filter(Boolean).join(', ');
   return composed || DASH;
+}
+
+/**
+ * Confirmation subject: `{file} · {street, city} · Confirmation`.
+ * Street+city only (via formatOrderAddress — no state/ZIP). Falls back to the
+ * legacy subject when address is missing. Truncates the address (never the
+ * file number) if the whole subject would exceed ~70 characters.
+ */
+export function buildOrderConfirmationSubject(
+  fileNumber: string,
+  property?: FullConfirmationData['property'] | null,
+): string {
+  const fn = fileNumber.trim();
+  const legacy = `Open Order Confirmation - ${fn}`;
+  if (!fn) return legacy;
+
+  // Intentionally omit state/ZIP so the file number survives inbox truncation.
+  const streetCity = formatOrderAddress({
+    address: property?.address ?? null,
+    city: property?.city ?? null,
+  });
+  if (!streetCity || streetCity === DASH) return legacy;
+
+  const prefix = `${fn} · `;
+  const suffix = ' · Confirmation';
+  const budget = CONFIRMATION_SUBJECT_MAX - prefix.length - suffix.length;
+  let addressPart = streetCity;
+  if (budget > 0 && addressPart.length > budget) {
+    const cut = Math.max(1, budget - 1);
+    addressPart = `${addressPart.slice(0, cut).trimEnd()}…`;
+  }
+
+  return `${prefix}${addressPart}${suffix}`;
 }
 
 function openedByHtml(opener: ConfirmationParty | null | undefined): string {
@@ -256,7 +292,7 @@ ${heading('Seller / owner details')}${fieldTable([{ label: 'Primary owner', valu
 ${heading('Transaction details')}${fieldTable(transactionRows)}
 ${heading('Escrow details')}${fieldTable([{ label: 'Name', valueHtml: esc(display(escrow?.name)) }, { label: 'Email address', valueHtml: mail(escrow?.email) }, { label: 'Telephone', valueHtml: tel(escrow?.phone) }, { label: 'Company', valueHtml: esc(display(escrow?.company)) }])}`;
 
-  const subject = `Open Order Confirmation - ${fn}`;
+  const subject = buildOrderConfirmationSubject(fn, data.property);
   return {
     subject,
     html: emailShell({

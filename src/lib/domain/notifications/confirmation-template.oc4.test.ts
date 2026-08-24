@@ -43,7 +43,7 @@ describe('orderConfirmationTemplate redesign match (presentational)', () => {
   it('matches PCT redesign shell (navy header, hero, footer)', () => {
     const { html, subject } = orderConfirmationTemplate(SAMPLE);
 
-    expect(subject).toBe('Open Order Confirmation - 20019999-TEST');
+    expect(subject).toBe('20019999-TEST · 123 Main St, Glendale · Confirmation');
     expect(html).toContain('linear-gradient(180deg,#2C3564 0%,#15193A 100%)');
     expect(html).toContain('Order confirmation');
     expect(html).toContain('ORDER OPENED SUCCESSFULLY');

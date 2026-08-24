@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  Document, Page, Text, View, Image, StyleSheet, Svg, Rect, Line, Text as SvgText,
+  Document, Page, Text, View, Image, StyleSheet, Font, Svg, Rect, Line, Text as SvgText,
 } from '@react-pdf/renderer';
 import type { CompFilterResult, CompCriteria } from '../comp-filter';
 import type { MarketMetrics } from '../metrics';
@@ -24,6 +24,16 @@ import type { NormalizedSubject, NormalizedTax, NormalizedTransfer } from '../no
 
 export const TEMPLATE_VERSION = 'v1';
 
+/**
+ * Disable hyphenation document-wide.
+ *
+ * react-pdf hyphenates by default, which turned "LOS ANGELES" into "LOS ANGE-
+ * LES" in a cover tile. On a property report the values are proper nouns,
+ * addresses and identifiers — a hyphen inserted mid-word reads as part of the
+ * data. Returning the word unsplit makes it wrap or shrink instead.
+ */
+Font.registerHyphenationCallback((word) => [word]);
+
 const NAVY = '#1B2A4A';
 const ORANGE = '#F26B2B';
 const MUTED = '#526174';
@@ -39,10 +49,14 @@ const s = StyleSheet.create({
   h1: { fontSize: 17, fontFamily: 'Helvetica-Bold', marginTop: 16 },
   sub: { fontSize: 9, color: MUTED, marginTop: 3 },
   section: { fontSize: 7.5, letterSpacing: 1.2, color: ORANGE, fontFamily: 'Helvetica-Bold', marginTop: 16, marginBottom: 6 },
-  tiles: { flexDirection: 'row', gap: 7 },
-  tile: { flex: 1, borderWidth: 1, borderColor: BORDER, borderRadius: 5, padding: 8, backgroundColor: TINT },
+  tiles: { flexDirection: 'row' },
+  // marginRight on every tile, not `gap`: react-pdf's layout engine does not
+  // honour flex gap, which is why the price range ran into median SF.
+  tile: { flex: 1, borderWidth: 1, borderColor: BORDER, borderRadius: 5, padding: 7, backgroundColor: TINT, marginRight: 6 },
+  tileLast: { marginRight: 0 },
   tileLabel: { fontSize: 6, color: MUTED, letterSpacing: 0.6, fontFamily: 'Helvetica-Bold' },
-  tileValue: { fontSize: 12, fontFamily: 'Helvetica-Bold', marginTop: 3 },
+  tileValue: { fontSize: 10.5, fontFamily: 'Helvetica-Bold', marginTop: 3 },
+  tileValueSm: { fontSize: 8.5, fontFamily: 'Helvetica-Bold', marginTop: 3 },
   row: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER, paddingVertical: 3.5 },
   th: { fontSize: 6, color: MUTED, fontFamily: 'Helvetica-Bold', letterSpacing: 0.5 },
   td: { fontSize: 7.5 },
@@ -55,8 +69,31 @@ const s = StyleSheet.create({
   gapBox: { borderWidth: 1, borderColor: BORDER, borderRadius: 5, padding: 12, backgroundColor: TINT, marginTop: 4 },
 });
 
+// Exported as a group so the formatting rules are unit-testable. Each of these
+// exists because the first cut got it wrong in a way only visible on the page.
+export const fmt = { money: (n: number | null | undefined) => money(n), year: (n: number | null | undefined) => year(n), sqft: (n: number | null | undefined) => sqft(n), miles: (n: number | null | undefined) => miles(n), moneyShort: (n: number | null | undefined) => moneyShort(n), numf: (n: number | null | undefined, sfx?: string) => numf(n, sfx) };
+
 const money = (n: number | null | undefined) => (typeof n === 'number' && n > 0 ? '$' + Math.round(n).toLocaleString('en-US') : GAP);
 const numf = (n: number | null | undefined, suffix = '') => (typeof n === 'number' && Number.isFinite(n) ? n.toLocaleString('en-US') + suffix : GAP);
+/**
+ * Years are labels, not quantities — 1948, never "1,948". Deliberately a
+ * separate formatter from numf so a year can never pick up a thousands
+ * separator by being passed to the same helper as square feet and dollars.
+ */
+const year = (n: number | null | undefined) => (typeof n === 'number' && Number.isFinite(n) ? String(Math.round(n)) : GAP);
+/** Compact money for tight tiles: $835k rather than $835,000. */
+const moneyShort = (n: number | null | undefined) => {
+  if (typeof n !== 'number' || n <= 0) return GAP;
+  if (n >= 1_000_000) return '$' + (n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1) + 'M';
+  if (n >= 1_000) return '$' + Math.round(n / 1000) + 'k';
+  return '$' + Math.round(n);
+};
+/** Square feet, one format everywhere: "6,625 sf". */
+const sqft = (n: number | null | undefined) => (typeof n === 'number' && Number.isFinite(n) ? Math.round(n).toLocaleString('en-US') + ' sf' : GAP);
+const miles = (n: number | null | undefined) => {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return GAP;
+  return `${n} ${n === 1 ? 'mile' : 'miles'}`;
+};
 const txt = (v: string | null | undefined) => (v && v.trim() ? v : GAP);
 const dt = (iso: string | null | undefined) => {
   if (!iso) return GAP;
@@ -169,9 +206,13 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         <Text style={s.section}>AT A GLANCE</Text>
         <View style={s.tiles}>
           {[['APN', txt(subject.apn)], ['COUNTY', txt(subject.county)],
-            ['BUILDING', numf(subject.buildingArea, ' sf')], ['YEAR BUILT', numf(subject.yearBuilt)],
-            ['COMPARABLES', String(filter.counts.shown)]].map(([l, v]) => (
-              <View key={l} style={s.tile}><Text style={s.tileLabel}>{l}</Text><Text style={s.tileValue}>{v}</Text></View>
+            ['BUILDING', sqft(subject.buildingArea)], ['YEAR BUILT', year(subject.yearBuilt)],
+            ['COMPARABLES', String(filter.counts.shown)]].map(([l, v], i, a) => (
+              <View key={l} style={[s.tile, i === a.length - 1 ? s.tileLast : {}]}>
+                <Text style={s.tileLabel}>{l}</Text>
+                {/* Long values (county names, APNs) drop a size rather than hyphenate. */}
+                <Text style={v.length > 12 ? s.tileValueSm : s.tileValue}>{v}</Text>
+              </View>
           ))}
         </View>
       </Shell>
@@ -182,9 +223,10 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         <KV k="Use" v={txt(subject.useDescription)} />
         <KV k="Bedrooms" v={numf(subject.beds)} />
         <KV k="Bathrooms" v={numf(subject.baths)} />
-        <KV k="Building area" v={numf(subject.buildingArea, ' sf')} />
-        <KV k="Lot size" v={txt(subject.lotSizeLabel) !== GAP ? txt(subject.lotSizeLabel) : numf(subject.lotSize, ' sf')} />
-        <KV k="Year built" v={numf(subject.yearBuilt)} />
+        <KV k="Building area" v={sqft(subject.buildingArea)} />
+        {/* SiteX sends "6625 SF" as a label; normalise to the same shape as building area. */}
+        <KV k="Lot size" v={sqft(subject.lotSize)} />
+        <KV k="Year built" v={year(subject.yearBuilt)} />
         <Text style={s.section}>LAST RECORDED SALE</Text>
         {subject.lastSaleDate || subject.lastSalePrice ? (
           <>
@@ -208,7 +250,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         <KV k="FIPS" v={txt(subject.fips)} />
         <KV k="Brief description" v={txt(subject.legalDescription)} />
         <Text style={s.section}>ASSESSMENT & TAX</Text>
-        <KV k="Tax year" v={numf(tax.year)} />
+        <KV k="Tax year" v={year(tax.year)} />
         <KV k="Assessed value" v={money(tax.assessedValue)} />
         <KV k="Land value" v={money(tax.landValue)} />
         <KV k="Improvement value" v={money(tax.improvementValue)} />
@@ -249,10 +291,12 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         <View style={s.tiles}>
           {[['MEDIAN SALE', money(metrics.medianSalePrice)],
             ['MEDIAN $/SF', metrics.medianPricePerSqft === null ? GAP : '$' + metrics.medianPricePerSqft.toFixed(0)],
-            ['PRICE RANGE', metrics.priceRangeMin === null ? GAP : `${money(metrics.priceRangeMin)}–${money(metrics.priceRangeMax)}`],
+            ['PRICE RANGE', metrics.priceRangeMin === null ? GAP : `${moneyShort(metrics.priceRangeMin)}–${moneyShort(metrics.priceRangeMax)}`],
             ['MEDIAN SF', numf(metrics.medianBuildingArea)],
-            ['MEDIAN YEAR', numf(metrics.medianYearBuilt)]].map(([l, v]) => (
-              <View key={l} style={s.tile}><Text style={s.tileLabel}>{l}</Text><Text style={s.tileValue}>{v}</Text></View>
+            ['MEDIAN YEAR', year(metrics.medianYearBuilt)]].map(([l, v], i, a) => (
+              <View key={l} style={[s.tile, i === a.length - 1 ? s.tileLast : {}]}>
+                <Text style={s.tileLabel}>{l}</Text><Text style={s.tileValue}>{v}</Text>
+              </View>
           ))}
         </View>
         <Text style={s.section}>SELECTED COMPARABLE SALE PRICES</Text>
@@ -291,7 +335,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
                   <Text style={[s.td, { flex: 0.9 }]}>{numf(c.buildingArea)}</Text>
                   <Text style={[s.td, { flex: 0.5 }]}>{numf(c.bedrooms)}</Text>
                   <Text style={[s.td, { flex: 0.5 }]}>{numf(c.baths)}</Text>
-                  <Text style={[s.td, { flex: 0.7 }]}>{numf(c.yearBuilt)}</Text>
+                  <Text style={[s.td, { flex: 0.7 }]}>{year(c.yearBuilt)}</Text>
                   <Text style={[s.td, { flex: 0.7 }]}>{c.proximityMiles === null ? GAP : c.proximityMiles.toFixed(2)}</Text>
                 </View>
               );
@@ -332,7 +376,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         <KV k="Living area tolerance" v={criteria.livingAreaPct === null ? 'Not applied' : `± ${criteria.livingAreaPct}%`} />
         <KV k="Bedrooms" v={criteria.bedDelta === null ? 'Not applied' : `± ${criteria.bedDelta}`} />
         <KV k="Bathrooms" v={criteria.bathDelta === null ? 'Not applied' : `± ${criteria.bathDelta}`} />
-        <KV k="Search radius" v={criteria.radiusMiles === null ? 'Not applied' : `${criteria.radiusMiles} mile${criteria.radiusMiles === 1 ? '' : 's'}`} />
+        <KV k="Search radius" v={criteria.radiusMiles === null ? 'Not applied' : miles(criteria.radiusMiles)} />
         <KV k="Sales within" v={criteria.months === null ? 'Not applied' : `${criteria.months} months`} />
         <KV k="Maximum shown" v={String(criteria.maxComps)} />
 
@@ -347,7 +391,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         )}
         {metrics.furthestSelectedMiles !== null && (
           <Text style={[s.note, { marginTop: 6 }]}>
-            {`The furthest selected comparable is ${metrics.furthestSelectedMiles.toFixed(2)} miles from the subject. The search radius applied was ${criteria.radiusMiles ?? GAP} mile(s).`}
+            {`The furthest selected comparable is ${metrics.furthestSelectedMiles.toFixed(2)} miles from the subject. The search radius applied was ${miles(criteria.radiusMiles)}.`}
           </Text>
         )}
 

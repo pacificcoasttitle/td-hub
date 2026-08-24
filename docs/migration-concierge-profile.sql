@@ -68,6 +68,21 @@ CREATE TABLE IF NOT EXISTS concierge_profiles (
   raw_sha256                char(64),
   raw_bytes                 integer,
 
+  -- ── plat map (the reason we chose feed 100001 over 100002) ────────────────
+  -- NOT a URL. SiteX returns PlatMap as an OBJECT:
+  --   {"FileName":"<guid>.tif","Content":"<base64>","Status":"Available"}
+  -- so there is nothing to link to — the image arrives inline and we decode and
+  -- store it ourselves. Promoted to columns because the plat map is a page in
+  -- the document; re-deriving it from the raw payload on every render is cheap
+  -- now and irritating later.
+  --
+  -- Status can be other than 'Available', so the document must be able to
+  -- render the absence rather than assume an image exists.
+  platmap_filename          varchar(200),
+  platmap_status            varchar(30),
+  platmap_storage_key       varchar(500),
+  platmap_sha256            char(64),
+
   -- ── normalized subject (queryable; raw remains the source of truth) ───────
   subject_apn               varchar(50),
   subject_fips              varchar(10),
@@ -246,6 +261,10 @@ CREATE INDEX IF NOT EXISTS concierge_transfers_profile_idx
 --    WHERE conname LIKE 'concierge_%';
 --   -- expect 6 (status, generated_has_pdf, failed_has_reason, counts_sane,
 --   --           exclusion_shape, + PK/FK names vary)
+--
+--   SELECT column_name FROM information_schema.columns
+--    WHERE table_name='concierge_profiles' AND column_name LIKE 'platmap%';
+--   -- expect 4 rows
 --
 --   SELECT count(*) FROM concierge_profiles;   -- expect 0
 

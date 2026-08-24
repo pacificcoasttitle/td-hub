@@ -344,21 +344,36 @@ export function OrdersSplitView({
       if (inInput || modal || batchState) return;
       if (e.altKey) return;
 
+      // Tab, Enter and the arrows have real default behaviour: they traverse
+      // focus and activate controls. The spec assigns Tab to Next incomplete
+      // and Enter to the primary document, which is right while you are working
+      // the list — and an accessibility regression if it also applies when
+      // someone has tabbed into the toolbar. So those four are claimed only
+      // when focus is in the list or nowhere. The single-letter shortcuts have
+      // no default to steal and stay global.
+      const active = document.activeElement;
+      const inList = !active
+        || active === document.body
+        || active === listRef.current
+        || (listRef.current?.contains(active) ?? false);
+
       if ((e.metaKey || e.ctrlKey) && e.key === '/') {
         e.preventDefault(); searchRef.current?.focus(); return;
       }
       if (e.metaKey || e.ctrlKey) return;
 
       switch (e.key) {
-        case 'j': case 'ArrowDown': e.preventDefault(); move(1); return;
-        case 'k': case 'ArrowUp': e.preventDefault(); move(-1); return;
+        case 'j': e.preventDefault(); move(1); return;
+        case 'k': e.preventDefault(); move(-1); return;
         case '/': e.preventDefault(); filterRef.current?.focus(); return;
-        case 'Tab': e.preventDefault(); jumpNextIncomplete(); return;
         case 'c': e.preventDefault(); fireAction('cpl'); return;
         case 'i': e.preventDefault(); fireAction('proposed'); return;
         case 'p': e.preventDefault(); fireAction('prelim'); return;
         case 'n': e.preventDefault(); if (selected) setModal('notes'); return;
-        case 'Enter': e.preventDefault(); openPrimaryDocument(); return;
+        case 'ArrowDown': if (inList) { e.preventDefault(); move(1); } return;
+        case 'ArrowUp': if (inList) { e.preventDefault(); move(-1); } return;
+        case 'Tab': if (inList) { e.preventDefault(); jumpNextIncomplete(); } return;
+        case 'Enter': if (inList) { e.preventDefault(); openPrimaryDocument(); } return;
       }
 
       if (/^[1-6]$/.test(e.key)) {

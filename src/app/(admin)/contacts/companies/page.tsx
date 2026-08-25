@@ -23,7 +23,6 @@ interface Company {
   titleOfficerId: number | null;
   loanUnderwriter: string | null;
   salesUnderwriter: string | null;
-  deliverableEmails: string[] | null;
 }
 
 type SortField = 'name' | 'companyType' | 'city' | 'createdAt';

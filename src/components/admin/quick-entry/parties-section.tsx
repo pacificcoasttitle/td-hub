@@ -184,21 +184,9 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
         </div>
       </Expand>
 
-      {/* Deliverable Emails — always visible */}
-      <div className="border-t border-gray-100 pt-4">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Deliverable Emails</p>
-          {s.deliverableEmails.length < 5 && (
-            <button onClick={() => s.setDeliverableEmails([...s.deliverableEmails, ''])} className="text-xs font-medium text-[#F26B2B] hover:text-[#E05A1A] min-h-[36px]">+ Add</button>
-          )}
-        </div>
-        {s.deliverableEmails.map((em, i) => (
-          <div key={i} className="flex gap-2 mb-2">
-            <input className={IN} type="email" value={em} onChange={e => { const arr = [...s.deliverableEmails]; arr[i] = e.target.value; s.setDeliverableEmails(arr); }} placeholder="email@example.com" />
-            <button onClick={() => s.setDeliverableEmails(s.deliverableEmails.filter((_, j) => j !== i))} className="text-red-500 px-2 min-h-[36px]">×</button>
-          </div>
-        ))}
-      </div>
+      {/* Deliverable Emails removed — the addresses were never persisted, never sent
+          to SoftPro, and read by no recipient resolver. See
+          docs/tickets/DELIVERABLE_EMAILS.md for the design when it is built. */}
     </div>
   );
 }

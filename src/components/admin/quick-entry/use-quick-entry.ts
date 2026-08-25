@@ -60,7 +60,6 @@ export function useQuickEntry() {
   const [lender, setLender] = useState({ ...EC });
   const [escrow, setEscrow] = useState({ ...EC });
   const [escrowOfficer, setEscrowOfficer] = useState('');
-  const [deliverableEmails, setDeliverableEmails] = useState<string[]>([]);
 
   const [formOpts, setFormOpts] = useState<FormOptions | null>(null);
 
@@ -322,7 +321,6 @@ export function useQuickEntry() {
           lender: hasContact(lender) ? { name: lender.name, email: lender.email || undefined, phone: lender.phone || undefined, companyName: lender.company || undefined } : undefined,
           escrowCompany: hasContact(escrow) ? { name: escrow.name, email: escrow.email || undefined, phone: escrow.phone || undefined, companyName: escrow.company || undefined } : undefined,
         },
-        deliverableEmails: deliverableEmails.filter(Boolean),
         clientType: client?.contactType ?? undefined,
         onBehalfOfContactId: client?.id || undefined,
         titlePointSessionId: preInit.sessionId || undefined,
@@ -366,7 +364,6 @@ export function useQuickEntry() {
     buyerAgent, setBuyerAgent, listingAgent, setListingAgent,
     lender, setLender, escrow, setEscrow,
     escrowOfficer, setEscrowOfficer,
-    deliverableEmails, setDeliverableEmails,
     formOpts, submitting, result, setResult,
     repAutoFilled, toAutoFilled, clientCompanyName,
     preInitPhase: preInit.phase,

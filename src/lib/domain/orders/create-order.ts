@@ -69,7 +69,6 @@ export const createOrderInputSchema = z.object({
     listingAgent: contactSchema.optional(),
     mortgageBroker: contactSchema.optional(),
   }).optional(),
-  deliverableEmails: z.array(z.string().email()).optional(),
   clientType: z.string().optional(),
   onBehalfOfContactId: z.number().int().positive().optional(),
   titlePointSessionId: z.string().optional(),

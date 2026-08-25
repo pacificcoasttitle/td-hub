@@ -40,7 +40,6 @@ export default function ClientNewOrderPage() {
     showLender: false, lender: { ...EMPTY_PARTY },
     showEscrow: false, escrow: { ...EMPTY_PARTY },
     showEscrowOfficer: false, escrowOfficer: '',
-    deliverableEmails: [],
   });
   const [, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -166,7 +165,6 @@ export default function ClientNewOrderPage() {
           seller,
           transaction,
           parties,
-          deliverableEmails: parties.deliverableEmails,
           titlePointSessionId: preInit.sessionId || undefined,
           siteXSnapshot: preInit.siteXSnapshot || undefined,
         }),

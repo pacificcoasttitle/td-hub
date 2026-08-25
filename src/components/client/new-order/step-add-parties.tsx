@@ -59,12 +59,6 @@ export function StepAddParties({ data, onChange, orderTypeValue, clientType, tra
     onChange({ ...data, [key]: { ...data[key], [field]: value } });
   }
 
-  function addEmail() {
-    if (data.deliverableEmails.length < 5) onChange({ ...data, deliverableEmails: [...data.deliverableEmails, ''] });
-  }
-  function updateEmail(i: number, v: string) { const arr = [...data.deliverableEmails]; arr[i] = v; onChange({ ...data, deliverableEmails: arr }); }
-  function removeEmail(i: number) { onChange({ ...data, deliverableEmails: data.deliverableEmails.filter((_, j) => j !== i) }); }
-
   return (
     <div className="p-5 sm:p-6">
       <SH title="Add Parties" sub="Add agents, lender, and escrow contacts to this order." />
@@ -127,28 +121,9 @@ export function StepAddParties({ data, onChange, orderTypeValue, clientType, tra
           </ToggleSection>
         )}
 
-        <div className="border-t border-gray-100 pt-5">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Deliverable Emails</p>
-              <p className="text-xs text-[#9CA3AF] mt-0.5">Additional recipients for order notifications</p>
-            </div>
-            {data.deliverableEmails.length < 5 && (
-              <button onClick={addEmail} className="text-sm font-medium text-[#F26B2B] hover:text-[#E05A1A] min-h-[44px] flex items-center gap-1">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                Add
-              </button>
-            )}
-          </div>
-          {data.deliverableEmails.map((email, i) => (
-            <div key={i} className="flex gap-2 mb-2">
-              <input className={IN} type="email" value={email} onChange={(e) => updateEmail(i, e.target.value)} placeholder="email@example.com" />
-              <button onClick={() => removeEmail(i)} className="text-red-500 hover:text-red-700 px-2 min-h-[44px]">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-          ))}
-        </div>
+        {/* "Deliverable Emails" removed — it promised additional notification
+            recipients and no sending path ever read the addresses. See
+            docs/tickets/DELIVERABLE_EMAILS.md. */}
       </div>
 
       <Nav onPrev={onPrev} onNext={onNext} />

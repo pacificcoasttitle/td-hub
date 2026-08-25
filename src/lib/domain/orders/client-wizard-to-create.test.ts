@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isCreateOrderShaped, normalizeClientCreateBody } from './client-wizard-to-create';
+import { createOrderInputSchema } from './create-order';
 
 const wizardBody = {
   clientDetails: { clientType: 'escrow_company', emailNotifications: true },
@@ -44,7 +45,6 @@ const wizardBody = {
     showAgents: false,
     showLender: false,
     showEscrow: false,
-    deliverableEmails: ['ops@example.com'],
   },
   titlePointSessionId: 'tp_api_id_999',
   siteXSnapshot: {
@@ -77,6 +77,21 @@ describe('normalizeClientCreateBody (OC-1 client path)', () => {
     const normalized = normalizeClientCreateBody(hubShaped);
     expect(normalized.titlePointSessionId).toBe('tp_api_id_1');
     expect(normalized.siteXSnapshot).toEqual(hubShaped.siteXSnapshot);
+  });
+
+  // A cached browser bundle can still post deliverableEmails after this ships.
+  // It must not reappear in the create input: the form no longer collects it and
+  // nothing reads it, so carrying it forward would only re-create the illusion
+  // that those addresses get mail. See docs/tickets/DELIVERABLE_EMAILS.md.
+  it('drops deliverableEmails posted by a stale client bundle', () => {
+    const stale = {
+      ...wizardBody,
+      deliverableEmails: ['ops@example.com'],
+      parties: { ...wizardBody.parties, deliverableEmails: ['ops@example.com'] },
+    };
+    const normalized = normalizeClientCreateBody(stale) as Record<string, unknown>;
+    expect(normalized.deliverableEmails).toBeUndefined();
+    expect(createOrderInputSchema.parse(normalized)).not.toHaveProperty('deliverableEmails');
   });
 
   it('omits session/snapshot when absent (no-match grace — ungated submit)', () => {

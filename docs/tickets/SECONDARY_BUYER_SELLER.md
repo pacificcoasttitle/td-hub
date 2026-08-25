@@ -1,11 +1,16 @@
 # The second buyer and the second seller are not recorded
 
-Ticket. Not implemented.
+Ticket. Approved as scoped — not implemented.
 
-**Every party-coverage number we have quoted is computed from half the people on
-the transaction.** Co-buyers and co-sellers exist on the form, are validated, and
-are sent to SoftPro — and the local order record has no row for them. "This order
-has a buyer" has never meant "this order has its buyers."
+**The same insert writes `order_properties.secondary_owner` and exactly one
+seller party row.** The record contradicts itself the moment it is created: the
+property row says two people are on title, the party rows say one. A batch job
+quietly repairs it days later, which is why nobody noticed.
+
+The consequence: **every party-coverage number we have quoted is computed from
+half the people on the transaction.** Co-buyers and co-sellers exist on the form,
+are validated, and are sent to SoftPro — and the local order record has no row
+for them. "This order has a buyer" has never meant "this order has its buyers."
 
 ## What the create path writes
 

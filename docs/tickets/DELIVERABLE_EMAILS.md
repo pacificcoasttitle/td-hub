@@ -1,9 +1,16 @@
 # `deliverableEmails`: what the operator asks for, and who actually gets the email
 
-Investigation only. Nothing in this document is implemented.
+**Status: the field is removed from both forms** (`fix/remove-deliverable-emails-field`).
+The feature is not built. This document holds the investigation and the approved
+design for when it is.
 
-The open-order form and the client wizard both collect up to five "deliverable
-emails". Nothing reads them. This document answers the question that has to come
+The field was removed rather than left in place because it accepted a delivery
+instruction and discarded it, which is worse than not offering one — the operator
+believes they have handled delivery. Removal took minutes; the real
+implementation needs a schema change and the four decisions below.
+
+The open-order form and the client wizard each collected up to five "deliverable
+emails". Nothing read them. This document answers the question that had to come
 first: **if the operator's five addresses are discarded, who has been receiving
 our confirmations and documents instead?**
 
@@ -15,6 +22,8 @@ at order-open time.
 
 ## The field itself
 
+All references below are to the state before removal, so the trail is recoverable.
+
 | | |
 | --- | --- |
 | Schema | `createOrderInputSchema.deliverableEmails: z.array(z.string().email()).optional()` — `create-order.ts:72` |
@@ -25,14 +34,9 @@ at order-open time.
 | Sent to SoftPro | **no** — absent from `buildSoftProPayload` |
 | Read by any recipient resolver | **no** |
 
-The addresses are validated, displayed back to the operator on the review step,
+The addresses were validated, displayed back to the operator on the review step,
 submitted, and then discarded in memory. There is no record of what anyone ever
 typed, so the size of the loss is not measurable — which is itself the finding.
-
-Separately: `companies.deliverableEmails` appears on a UI type at
-`app/(admin)/contacts/companies/page.tsx:26`, but the `companies` table has no
-such column. The field is always `undefined`. It is not a second, working
-implementation of this feature.
 
 ## What each resolver actually uses
 
@@ -168,19 +172,38 @@ The mechanics are small. The product questions are not, so nothing here is built
    also closes the auto-delivery gap and would be the natural place to finally
    read `officer_cc_defaults`.
 
-Open questions, in the order they need answering:
+### Decisions — recorded, 25 Aug 2026
 
-- **TO or CC?** "Deliverable emails" reads like a delivery instruction, which
-  argues TO. Treating them as CC is safer and quieter. This changes what the
-  recipient sees in the header and cannot be inferred from the code.
-- **Which emails?** Confirmation only, or every document that goes out on the
-  order for its lifetime? The label implies the latter and the form gives no way
-  to scope it.
-- **Editable after open?** Today the list would be frozen at create. Order detail
-  has no UI for it.
-- **Do the existing 7,342 orders get anything?** There is no history to backfill
-  from — the addresses were never stored.
+| Question | Decision |
+| --- | --- |
+| TO or CC? | **CC.** The responsible party stays in TO; requested addresses are copies. |
+| Which emails? | **Every document for the life of the order**, not the confirmation alone. That is what an operator means when they type it at open. |
+| Editable after open? | **Yes.** People get added mid-transaction; a list frozen at open is wrong within a week. Needs a UI on order detail, not just the create form. |
+| Existing orders? | **Nothing to do.** The addresses were never stored, so there is nothing to migrate and no way to identify who was affected. |
 
-Until these are answered, the honest interim fix is to stop implying a promise we
-do not keep: either remove the field from both forms or label it as not yet
-active. Silently accepting a delivery instruction is worse than not offering one.
+"Every document for the life of the order" is the decision with the most weight
+in it. It rules out a create-only field and makes the storage choice for us: an
+`order_deliverable_emails` table rather than an array column, because an editable
+list wants provenance — who added the address and when — and every send path has
+to read the current list rather than a snapshot taken at open.
+
+## The same defect class, elsewhere
+
+Three more places where the system accepts or declares recipient intent and
+nothing reads it. Worth listing together, because the pattern is what to look for
+next, not the individual field.
+
+- **`officer_cc_defaults.cc_email`.** A built table for standing CC addresses per
+  escrow officer. No sending code queries it. `prelim-delivery-send.ts:242`
+  mentions it in a sample template only. This is the second place standing CC
+  instructions quietly go nowhere, and it should be wired in the same change as
+  the per-order list, since both land in the prelim CC.
+- **The `buyer_agent` confirmation recipient.** `buildConfirmationRecipients`
+  offers four TO candidates and one of them is dead code: `order_parties` has
+  **zero rows with role `buyer_agent`, ever**. The only writer of that role is the
+  hub create path, so the branch has never resolved for anyone. Either buyer
+  agents are being filed under another role or they are not captured at all —
+  either way, do not count it as a working recipient.
+- **`companies.deliverableEmails`.** Declared on the companies page type with no
+  column behind it, so it was always `undefined`. Removed alongside the form
+  field.

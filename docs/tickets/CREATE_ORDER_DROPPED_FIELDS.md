@@ -90,8 +90,68 @@ minting. The wizard's coverage cannot exceed the fill rate of this column, so th
 4.7% purchase figure is an input problem, not a resolver problem — do not
 re-investigate `party-wizard-service.ts` or the invite job looking for it.
 
-Persisting the id at create (this branch) fixes it going forward. Historical
-orders stay unreachable until something backfills the column.
+Persisting the id at create (this branch) fixes it going forward.
+
+### The backfill is not the lever — dry run, 25 Aug 2026
+
+The scoped backfill exists: `POST /api/admin/backfill/escrow-officers` (May 2026),
+which reads `GetOrderDetails.EscrowOfficer` per order and matches the name against
+`contacts.is_escrow_officer` rows. Eligibility is defined by
+`escrow-officer-expectation.ts`: order type `Title & Escrow` or `Escrow only`,
+status open / in_process / completed, `escrow_officer_id` IS NULL. It ran once —
+285 assigned, 0 unmatched.
+
+Dry run against today's data:
+
+| | |
+| --- | --- |
+| Eligible under the scoped definition | **13** |
+| `Title & Escrow` orders with an officer | 529 of 541 (97.8%) |
+| `Escrow only` orders with an officer | 14 of 15 |
+| Orders missing an officer, all types | 2,931 |
+| …of which `Title only` | **2,849** |
+
+The backfill is already drained. The 2,849 remaining NULLs are `Title only`
+orders, which the scope excludes **correctly** — on a Title-only file escrow is
+external and there is no PCT escrow officer to find.
+
+And the wizard's blocked candidates are exactly those orders:
+
+| Order type | Candidates | Blocked | Reachable |
+| --- | --- | --- | --- |
+| `Title only` | 93 | 93 | 0 |
+| `Title & Escrow` | 22 | 0 | **22 (100%)** |
+| `Trustee Sale Guarantee` | 3 | 3 | 0 |
+
+So the backfill cannot move wizard coverage at all: every order it is scoped to
+reach already has an officer, and every order the wizard is missing is out of its
+scope by design. Running it today would resolve 13 orders and change coverage by
+nothing.
+
+### What would actually move it
+
+The blocked orders are not missing an escrow contact — they are missing the
+*column the invite job reads*. Of 96 blocked candidates, 90 have an
+`escrow_company` party row, 90 of those have an email, and 89 are already linked
+to a `contacts` row.
+
+The prelim resolver already handles this exact case with a two-step fallback
+(`prelim-recipient-resolution.ts:133–162`): escrow officer FK first, then the
+`escrow_company` party. The invite job has only the first step.
+
+Applying the same fallback to the invite job, measured:
+
+| | |
+| --- | --- |
+| Candidates | 116 |
+| Reachable today (officer FK only) | 22 (19%) |
+| Recovered via the `escrow_company` party | **88** |
+| Reachable with the fallback | **110 (94.8%)** |
+| Genuinely unreachable | 6 |
+
+That is a resolver change in one file, not a backfill. It should be measured
+again after it ships, since forwarding by an external escrow company is a
+different behavioural bet than forwarding by a PCT officer.
 
 The three blocked rows all need the same thing: a contact id for a party, which
 only exists once the operator picks from a typeahead rather than typing free

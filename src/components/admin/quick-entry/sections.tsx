@@ -95,6 +95,17 @@ function OwnerFields({ s }: { s: QuickEntryState }) {
 
   return (
     <div className="border-t border-gray-200 pt-4 mt-4 space-y-5">
+      {s.ownerWarnings.length > 0 && (
+        <div
+          data-testid="owner-warnings"
+          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 mb-3"
+        >
+          {s.ownerWarnings.map((w) => (
+            <p key={w} className="text-xs text-amber-800 leading-snug">{w}</p>
+          ))}
+        </div>
+      )}
+
       {isPurchase && (
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-3">

@@ -118,26 +118,43 @@ describe('multi-owner strings', () => {
 
 // ─── Commas ─────────────────────────────────────────────────────────────────
 
-describe('comma handling matches legacy exactly', () => {
-  it('strips only the FIRST comma, per owner', () => {
-    // .replace(',', '') with a string argument removes one occurrence.
+// The comma is a delimiter SiteX put there, and it is the ONLY thing that says
+// whether a segment states its own surname. Legacy stripped it and flipped
+// everything positionally; that is the deliberate departure.
+describe('the comma decides whether a segment states its own surname', () => {
+  it('splits at the FIRST comma — later ones stay in the given names', () => {
     const r = parseSiteXOwners('TIEU, DANIEL, QUI');
-    expect(r.primary?.lastName).toBe('Tieu');
-    expect(`${r.primary?.firstName} ${r.primary?.middleName}`).toContain(',');
+    expect(fml(r.primary)).toBe('Daniel, / Qui / Tieu');
   });
 
-  it('strips the first comma of each owner separately after the split', () => {
+  it('reads each owner\'s own comma separately after the split', () => {
     const r = parseSiteXOwners('TIEU, DANIEL & TIEU, KHANH');
-    expect(r.primary?.lastName).toBe('Tieu');
-    expect(r.secondary?.lastName).toBe('Tieu');
+    expect(fml(r.primary)).toBe('Daniel /  / Tieu');
+    expect(fml(r.secondary)).toBe('Khanh /  / Tieu');
   });
 
-  it('handles the real production string that broke', () => {
+  // PINNED BY VALUE. This is the production string, and the second owner is the
+  // whole point — a not-null assertion is what let it ship wrong.
+  it('the real production string: surname stated once, carried to both owners', () => {
     // Sent to SoftPro on 2026-08-24 as DANIEL / "QUI & KHANH TRINH" / "TIEU,"
     const r = parseSiteXOwners('TIEU, DANIEL QUI & KHANH TRINH');
-    expect(r.primary?.lastName).toBe('Tieu');
-    expect(r.primary?.middleName).not.toContain('&');
-    expect(r.secondary).not.toBeNull();
+    expect(fml(r.primary)).toBe('Daniel / Qui / Tieu');
+    expect(fml(r.secondary)).toBe('Khanh / Trinh / Tieu');
+    // Not "Trinh / / Khanh", which is what the positional flip produced.
+    expect(r.secondary!.lastName).toBe('Tieu');
+    expect(r.secondary!.firstName).not.toBe('Trinh');
+  });
+
+  it('says so when a surname was carried over rather than stated', () => {
+    const r = parseSiteXOwners('TIEU, DANIEL QUI & KHANH TRINH');
+    expect(r.warnings.some((w) => w.includes('states no surname of its own'))).toBe(true);
+  });
+
+  it('carries nothing over when the first owner stated no surname either', () => {
+    // No comma, so both segments are positional and there is nothing to inherit.
+    const r = parseSiteXOwners('TIEU DANIEL QUI & KHANH TRINH');
+    expect(fml(r.secondary)).toBe('Trinh /  / Khanh');
+    expect(r.warnings.some((w) => w.includes('states no surname of its own'))).toBe(false);
   });
 });
 

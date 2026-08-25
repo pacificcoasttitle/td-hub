@@ -19,15 +19,78 @@ describe('the two names production actually got wrong', () => {
     expect(primary!.lastName).not.toBe('T');
   });
 
-  it('the Westminster borrower: two owners were transmitted as one', () => {
+  // PINNED BY VALUE, both owners. The previous version of this test asserted
+  // `expect(r.secondary).not.toBeNull()`, which is why the second owner stayed
+  // wrong through a green suite: it came out "Trinh Khanh" — surname dropped,
+  // given names flipped — and a not-null check cannot see that.
+  it('the Westminster borrower: one surname, stated once, belongs to both owners', () => {
     // SENT:  first "DANIEL", middle "QUI & KHANH TRINH", last "TIEU,"
     //        — an ampersand inside a middle name, and a comma inside a surname.
     const r = parseSiteXOwners('TIEU, DANIEL QUI & KHANH TRINH');
-    expect(r.primary!.lastName).toBe('Tieu');
-    expect(r.primary!.firstName).toBe('Daniel');
-    expect(r.primary!.middleName).not.toContain('&');
-    expect(r.primary!.lastName).not.toContain(',');
-    expect(r.secondary).not.toBeNull();
+    expect(r.primary).toEqual({ firstName: 'Daniel', middleName: 'Qui', lastName: 'Tieu' });
+    expect(r.secondary).toEqual({ firstName: 'Khanh', middleName: 'Trinh', lastName: 'Tieu' });
+  });
+
+  // Same shape, and worse: the flip promoted a middle initial to a first name
+  // and sent a given name to SoftPro as the surname.
+  it('a middle initial is never promoted to a first name', () => {
+    const r = parseSiteXOwners('AJAYI, HOSEA J & VERONICA F');
+    expect(r.primary).toEqual({ firstName: 'Hosea', middleName: 'J', lastName: 'Ajayi' });
+    expect(r.secondary).toEqual({ firstName: 'Veronica', middleName: 'F', lastName: 'Ajayi' });
+  });
+
+  // A lone given name after the ampersand is a first name with an inherited
+  // surname, not a surname with no first name.
+  it('a single given name on the second owner inherits rather than becoming a surname', () => {
+    const r = parseSiteXOwners('AGNE, WILFREDO & CZARINA');
+    expect(r.primary).toEqual({ firstName: 'Wilfredo', middleName: '', lastName: 'Agne' });
+    expect(r.secondary).toEqual({ firstName: 'Czarina', middleName: '', lastName: 'Agne' });
+    expect(r.warnings.some((w) => w.includes('single word'))).toBe(false);
+  });
+
+  // The comma also fixes the PRIMARY whenever the surname is more than one
+  // token. Positionally this used to read first "Veyra", last "De".
+  it('a multi-word surname before the comma survives intact', () => {
+    const r = parseSiteXOwners('DE VEYRA, TED T & JOSEPHINE F');
+    expect(r.primary).toEqual({ firstName: 'Ted', middleName: 'T', lastName: 'De Veyra' });
+    expect(r.secondary).toEqual({ firstName: 'Josephine', middleName: 'F', lastName: 'De Veyra' });
+  });
+
+  it('a multi-word surname on a single owner survives intact', () => {
+    expect(parseSiteXOwners('VAN DER BERG, ANNA MARIE').primary)
+      .toEqual({ firstName: 'Anna', middleName: 'Marie', lastName: 'Van Der Berg' });
+  });
+
+  // The shape the earlier test used: surname repeated on BOTH owners and no
+  // comma anywhere. Positional, so it must stay exactly as it was.
+  it('a surname repeated on both owners still parses positionally', () => {
+    const r = parseSiteXOwners('TIEU DANIEL QUI & TIEU KHANH TRINH');
+    expect(r.primary).toEqual({ firstName: 'Daniel', middleName: 'Qui', lastName: 'Tieu' });
+    expect(r.secondary).toEqual({ firstName: 'Khanh', middleName: 'Trinh', lastName: 'Tieu' });
+  });
+
+  // Each owner may state its own surname. Not present in production today
+  // (0 of 5,380 rows), but it falls out of the per-segment rule for free.
+  it('each owner may state its own surname', () => {
+    const r = parseSiteXOwners('TIEU, DANIEL & TRAN, KHANH');
+    expect(r.primary).toEqual({ firstName: 'Daniel', middleName: '', lastName: 'Tieu' });
+    expect(r.secondary).toEqual({ firstName: 'Khanh', middleName: '', lastName: 'Tran' });
+  });
+
+  // Only the second owner states one — the first stays positional.
+  it('a comma on the second owner only does not change the first', () => {
+    const r = parseSiteXOwners('TIEU DANIEL & TRAN, KHANH');
+    expect(r.primary).toEqual({ firstName: 'Daniel', middleName: '', lastName: 'Tieu' });
+    expect(r.secondary).toEqual({ firstName: 'Khanh', middleName: '', lastName: 'Tran' });
+  });
+
+  // Entity names truncated to 40 characters carry a trailing comma. That comma
+  // delimits nothing, so it must NOT be read as a surname marker. These stay
+  // broken on purpose — see docs/tickets/SITEX_ENTITY_OWNER_NAMES.md.
+  it('a trailing comma on a truncated entity name is not a surname delimiter', () => {
+    const r = parseSiteXOwners('B & A GROUP INC,');
+    expect(r.primary).toEqual({ firstName: '', middleName: '', lastName: 'B' });
+    expect(r.secondary).toEqual({ firstName: 'Group', middleName: 'Inc', lastName: 'A' });
   });
 
   it('the Redlands borrower was already correct and stays correct', () => {

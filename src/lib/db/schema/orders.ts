@@ -67,6 +67,14 @@ export const orders = pgTable('orders', {
   salesPrice: decimal('sales_price', { precision: 12, scale: 2 }),
   loanAmount: decimal('loan_amount', { precision: 12, scale: 2 }),
 
+  /**
+   * Operator-entered at open and sent to SoftPro as LoanNumber / EscrowNumber.
+   * Persisted here rather than read back, because the confirmation email is
+   * queued from the create path and fires before any SoftPro sync runs.
+   */
+  loanNumber: varchar('loan_number', { length: 100 }),
+  escrowNumber: varchar('escrow_number', { length: 100 }),
+
   marketingSource: varchar('marketing_source', { length: 200 }),
   softproLastSyncedAt: timestamp('softpro_last_synced_at'),
   lastPrelimFetchAt: timestamp('last_prelim_fetch_at'),

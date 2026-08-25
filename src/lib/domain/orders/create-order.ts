@@ -181,7 +181,7 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
 
   const fileNumber = spResult.data.orderNumber;
 
-  const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county, fips }, userId, underwriterId);
+  const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county, fips }, resolved, userId, underwriterId);
 
   if (input.titlePointSessionId) {
     try {
@@ -228,6 +228,7 @@ async function createLocalRecords(
   fileNumber: string,
   sitex: SiteXPropertyData | null,
   enriched: { apn: string; legal: string; county: string; fips: string | null },
+  resolved: ResolvedContacts,
   userId?: string,
   underwriterId?: number | null,
 ): Promise<{ orderId: number }> {
@@ -239,6 +240,11 @@ async function createLocalRecords(
     productType: input.transaction.product,
     orderType: input.orderType,
     salesPrice: String(input.transaction.salesAmount) || null,
+    // 0 means "not entered" on this form, and writing 0.00 would render as a
+    // real amount downstream. Absent stays absent.
+    loanAmount: input.transaction.loanAmount > 0 ? String(input.transaction.loanAmount) : null,
+    loanNumber: input.transaction.loanNumber || null,
+    escrowNumber: input.transaction.escrowNumber || null,
     openedAt: new Date(),
     source: 'manual_entry',
     isImported: false,
@@ -247,6 +253,13 @@ async function createLocalRecords(
     underwriterId: underwriterId ?? null,
     // Form "client" (on behalf of) — confirmation resolver reads this as the primary TO.
     clientContactId: input.onBehalfOfContactId ?? null,
+    // Assignment FKs come from the SAME resolved rows the SoftPro payload was
+    // built from, so the id is known to exist and the send cannot disagree with
+    // the record. Previously only process-detail (the SoftPro read-back) ever
+    // wrote these, and the confirmation email sends before that runs.
+    salesRepId: resolved.salesRep?.id ?? null,
+    titleOfficerId: resolved.titleOfficer?.id ?? null,
+    escrowOfficerId: resolved.escrowOfficer?.id ?? null,
   }).returning({ id: orders.id });
 
   const orderId = newOrder!.id;

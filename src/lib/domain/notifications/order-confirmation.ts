@@ -1,7 +1,7 @@
 import { db } from '@/lib/db/client';
 import {
-  orders, orderParties, contacts,
-  profiles, documents, titlePointData, vendorApiLogs,
+  orders, orderParties, contacts, companies,
+  documents, titlePointData, vendorApiLogs,
   notificationLogs,
 } from '@/lib/db/schema';
 import { eq, and, inArray, desc } from 'drizzle-orm';
@@ -67,10 +67,7 @@ export async function handleOrderConfirmation(
     return { name: p.cFullName ?? p.externalName, email: p.cEmail ?? p.externalEmail, phone: p.cPhone ?? p.externalPhone, company: p.cCompany ?? p.externalCompany };
   };
 
-  const createdById = order.assignments.createdBy?.id != null
-    ? String(order.assignments.createdBy.id)
-    : null;
-  const opener = await loadOpener(createdById);
+  const { client: opener, loanNumber, escrowNumber } = await loadClientAndOrderNumbers(orderId);
   const recipientEmails = await loadRecipientEmails(orderId, {
     escrowOfficerId: order.escrowOfficerId,
     listingAgentId: order.listingAgentId,
@@ -119,6 +116,8 @@ export async function handleOrderConfirmation(
     productType: order.productType,
     salesPrice,
     loanAmount,
+    loanNumber,
+    escrowNumber,
     opener,
     titleOfficer,
     property: {
@@ -215,17 +214,65 @@ export async function handleOrderConfirmation(
   }
 }
 
-async function loadOpener(createdBy: string | null): Promise<ConfirmationParty | null> {
-  if (!createdBy) return null;
-  const [p] = await db.select({
-    name: profiles.displayName, email: profiles.email,
-    cPhone: contacts.phone, cCompany: contacts.companyName,
-    cAddress: contacts.address1, cCity: contacts.city, cZip: contacts.zip,
-  }).from(profiles)
-    .leftJoin(contacts, eq(profiles.contactId, contacts.id))
-    .where(eq(profiles.id, createdBy)).limit(1);
-  if (!p) return null;
-  return { name: p.name, email: p.email, phone: p.cPhone, company: p.cCompany, address: p.cAddress, city: p.cCity, zip: p.cZip };
+/**
+ * The order-summary block on the confirmation describes the CLIENT the order was
+ * opened for. Company, Address, City and ZIP sit under it, and those only make
+ * sense as the client's — "Atlas Escrow, 3731 Wilshire Boulevard", not a PCT
+ * desk.
+ *
+ * It used to read the staff profile that clicked the button, joined to contacts
+ * through profiles.contact_id. Most staff profiles carry no contact row, so the
+ * join produced nulls and five rows rendered as em dashes while the client's
+ * real details sat on orders.client_contact_id — the same row the SoftPro
+ * payload built ClientLookupCode and CompanyLookupCode from.
+ *
+ * Company resolves through companies.lookup_code the way the payload does: a
+ * client contact frequently has company_name NULL and carries only flookup_code.
+ *
+ * Loan and escrow number come from the same row because they live on orders and
+ * are read nowhere else — the template declared both fields and was never
+ * passed either.
+ */
+async function loadClientAndOrderNumbers(orderId: number): Promise<{
+  client: ConfirmationParty | null;
+  loanNumber: string | null;
+  escrowNumber: string | null;
+}> {
+  const [row] = await db.select({
+    loanNumber: orders.loanNumber,
+    escrowNumber: orders.escrowNumber,
+    contactId: contacts.id,
+    fullName: contacts.fullName,
+    firstName: contacts.firstName,
+    lastName: contacts.lastName,
+    email: contacts.email,
+    phone: contacts.phone,
+    companyName: contacts.companyName,
+    address: contacts.address1,
+    city: contacts.city,
+    zip: contacts.zip,
+    joinedCompanyName: companies.name,
+  }).from(orders)
+    .leftJoin(contacts, eq(orders.clientContactId, contacts.id))
+    .leftJoin(companies, eq(contacts.flookupCode, companies.lookupCode))
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (!row) return { client: null, loanNumber: null, escrowNumber: null };
+
+  const client = row.contactId == null ? null : {
+    name: row.fullName?.trim()
+      || [row.firstName, row.lastName].filter(Boolean).join(' ').trim()
+      || null,
+    email: row.email,
+    phone: row.phone,
+    company: row.companyName?.trim() || row.joinedCompanyName || null,
+    address: row.address,
+    city: row.city,
+    zip: row.zip,
+  };
+
+  return { client, loanNumber: row.loanNumber, escrowNumber: row.escrowNumber };
 }
 
 async function loadRecipientEmails(

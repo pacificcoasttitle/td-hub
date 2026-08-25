@@ -267,6 +267,7 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
     { label: 'Title officer', valueHtml: esc(titleOfficerName(titleOfficer, data.assignments?.titleOfficer)) },
     { label: 'Product', valueHtml: esc(display(data.productType)) },
     { label: 'Loan number', valueHtml: esc(display(data.loanNumber)) },
+    { label: 'Escrow number', valueHtml: esc(display(data.escrowNumber)) },
   ];
   if (money) transactionRows.push({ label: money.label, valueHtml: esc(money.value) });
   const escrow = data.parties?.escrow;

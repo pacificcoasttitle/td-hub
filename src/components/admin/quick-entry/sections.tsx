@@ -2,6 +2,9 @@
 
 import { AddressAutocomplete } from '@/components/ui/address-autocomplete';
 import { SECTION, SH, FL, IN, SEL, ORG_TYPES, TX_TYPES, EP } from './types';
+import {
+  borrowerNoun, borrowerSectionLabel, showsSellerFields,
+} from '@/lib/domain/orders/names/owner-routing';
 import { PersonFields } from './person-fields';
 import type { QuickEntryState } from './use-quick-entry';
 
@@ -86,12 +89,13 @@ const AUTOFILL_BADGE = (
 );
 
 function OwnerFields({ s }: { s: QuickEntryState }) {
-  const isPurchase = s.txType === 'Purchase';
-  const isRefiLike = s.txType === 'Refinance' || s.txType === 'Equity';
-  if (!isPurchase && !isRefiLike) return null;
-
-  const partyLabel = isPurchase ? 'Buyer' : 'Borrower';
-  const partyLabelLower = isPurchase ? 'buyer' : 'borrower';
+  // Visibility comes from the same module as the routing. There is no
+  // transaction type for which the borrower fields are hidden — on anything but
+  // a Purchase that is where the SiteX owner names land, and a hidden field
+  // sends a legal name nobody has read.
+  const isPurchase = showsSellerFields(s.txType);
+  const partyLabel = borrowerNoun(s.txType) === 'buyer' ? 'Buyer' : 'Borrower';
+  const partyLabelLower = borrowerNoun(s.txType);
 
   return (
     <div className="border-t border-gray-200 pt-4 mt-4 space-y-5">
@@ -142,7 +146,7 @@ function OwnerFields({ s }: { s: QuickEntryState }) {
 
       <div className={isPurchase ? 'border-t border-gray-100 pt-4' : undefined}>
         <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-3">
-          {isPurchase ? 'Buyer' : 'Borrower (from property records)'}
+          {borrowerSectionLabel(s.txType)}
         </p>
 
         {!isPurchase && s.borrowerSiteX && AUTOFILL_BADGE}

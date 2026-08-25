@@ -9,6 +9,7 @@ import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
 import { EP, EC, type Person, type FormOptions } from './types';
 import { parseSiteXOwners } from '@/lib/domain/orders/names/sitex-owner-names';
 import { legacyToTitleCase } from '@/lib/domain/orders/names/title-case';
+import { ownerTarget } from '@/lib/domain/orders/names/owner-routing';
 
 function deriveUW(product: string): string {
   return product.toLowerCase().trim() === 'full alta' ? 'CW' : 'WC';
@@ -160,7 +161,7 @@ export function useQuickEntry() {
     setOwnerWarnings(owners.warnings);
     if (!owners.primary) return;
 
-    if (txType === 'Purchase') {
+    if (ownerTarget(txType) === 'seller') {
       setSellerPrimary(owners.primary); setSellerSiteX(true);
       if (owners.secondary) { setSellerSecondary(owners.secondary); setHasSecondarySeller(true); }
     } else {

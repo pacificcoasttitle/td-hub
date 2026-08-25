@@ -18,6 +18,7 @@ vi.mock('@/lib/db/schema', () => ({
   orderProperties: { orderId: 'op.order_id', fullAddress: 'op.full', address: 'op.addr', city: 'op.city', state: 'op.state', zip: 'op.zip' },
   orderParties: { orderId: 'p.order_id', role: 'p.role' },
   contacts: { id: 'c.id', fullName: 'c.full_name', email: 'c.email' },
+  jobs: { id: 'j.id' },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -26,6 +27,8 @@ vi.mock('drizzle-orm', () => ({
   isNull: (a: unknown) => a,
   sql: Object.assign((...a: unknown[]) => a, { raw: (s: string) => s }),
 }));
+
+const jobUpdates: Array<Record<string, unknown>> = [];
 
 vi.mock('@/lib/db/client', () => ({
   db: {
@@ -37,6 +40,12 @@ vi.mock('@/lib/db/client', () => ({
           }),
         }),
       }),
+    }),
+    update: () => ({
+      set: (values: Record<string, unknown>) => {
+        jobUpdates.push(values);
+        return { where: async () => undefined };
+      },
     }),
   },
 }));
@@ -57,7 +66,7 @@ vi.mock('@/lib/domain/parties/party-wizard-service', () => ({
 
 import {
   handlePartyWizardInvite, PARTY_INVITE_DELAY_DAYS, PARTY_INVITE_MAX_AGE_DAYS,
-  PARTY_INVITE_STATUSES, PARTY_INVITE_SHUT_OFF_SETTING,
+  PARTY_INVITE_STATUSES, PARTY_INVITE_ENABLED_SETTING,
 } from './party-wizard-invite';
 
 function candidate(over: Record<string, unknown> = {}) {
@@ -77,7 +86,9 @@ function candidate(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getSettingMock.mockResolvedValue('false');
+  jobUpdates.length = 0;
+  // Sending is opt-in, so every test that expects a send has to turn it on.
+  getSettingMock.mockResolvedValue('true');
   findLiveLinkMock.mockResolvedValue(null);
   mintLinkMock.mockResolvedValue({ linkId: 1, url: 'https://hub.pctitle.com/party-wizard/tok' });
   sendEmailMock.mockResolvedValue({ success: true });
@@ -222,21 +233,172 @@ describe('party wizard invite', () => {
     }));
   });
 
-  it('does nothing at all when the kill switch is on', async () => {
-    getSettingMock.mockResolvedValue('true');
-    candidatesMock.mockResolvedValue([candidate()]);
-    const r = await handlePartyWizardInvite();
-    expect(r.shutOff).toBe(true);
-    expect(r.sent).toBe(0);
-    expect(sendEmailMock).not.toHaveBeenCalled();
-    expect(getSettingMock).toHaveBeenCalledWith(PARTY_INVITE_SHUT_OFF_SETTING);
-  });
-
   it('one bad order does not abort the rest of the batch', async () => {
     candidatesMock.mockResolvedValue([candidate({ orderId: 1 }), candidate({ orderId: 2 })]);
     sendEmailMock.mockRejectedValueOnce(new Error('network'));
     const r = await handlePartyWizardInvite();
     expect(r.failed).toBe(1);
     expect(r.sent).toBe(1);
+  });
+});
+
+// ─── Off unless someone said yes ─────────────────────────────────────────────
+//
+// This was a shut-off flag defaulting to false: a running job with a brake. A
+// fresh environment, a wiped settings row or a restored backup resumed emailing
+// people outside PCT with nobody deciding to. The absence of a row now means
+// silence.
+
+describe('sending is opt-in, not opt-out', () => {
+  it('refuses to send when the switch has never been set', async () => {
+    getSettingMock.mockResolvedValue(null);
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.refused).toBe(true);
+    expect(r.enabled).toBe(false);
+    expect(r.sent).toBe(0);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(mintLinkMock).not.toHaveBeenCalled();
+    // Refusing must not even look at the candidate list.
+    expect(candidatesMock).not.toHaveBeenCalled();
+    expect(getSettingMock).toHaveBeenCalledWith(PARTY_INVITE_ENABLED_SETTING);
+  });
+
+  it('refuses on an explicit false, not just on a missing row', async () => {
+    getSettingMock.mockResolvedValue('false');
+    const r = await handlePartyWizardInvite();
+    expect(r.refused).toBe(true);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('treats anything other than the exact string "true" as off', async () => {
+    for (const value of ['TRUE', '1', 'yes', 'on', '']) {
+      vi.clearAllMocks();
+      getSettingMock.mockResolvedValue(value);
+      const r = await handlePartyWizardInvite();
+      expect(r.refused, `value ${JSON.stringify(value)} must not enable sending`).toBe(true);
+    }
+  });
+
+  /**
+   * A refusal has to leave a trace. Without it the run ends `completed` with no
+   * reason, which reads exactly like a run that found nothing to do — the
+   * failure mode that let this sit unnoticed in the first place.
+   */
+  it('records the refusal on its own job row', async () => {
+    getSettingMock.mockResolvedValue('false');
+    await handlePartyWizardInvite({ __jobId: 77 });
+
+    expect(jobUpdates).toHaveLength(1);
+    const payload = jobUpdates[0]!.payload as { partyWizardInvite: { refused: boolean; enabled: boolean } };
+    expect(payload.partyWizardInvite.refused).toBe(true);
+    expect(payload.partyWizardInvite.enabled).toBe(false);
+  });
+
+  it('sends normally once someone has enabled it', async () => {
+    getSettingMock.mockResolvedValue('true');
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.refused).toBeUndefined();
+    expect(r.enabled).toBe(true);
+    expect(r.sent).toBe(1);
+  });
+});
+
+// ─── Dry run ─────────────────────────────────────────────────────────────────
+
+describe('dry run reports instead of sending', () => {
+  it('writes nothing and sends nothing', async () => {
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.dryRun).toBe(true);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(mintLinkMock).not.toHaveBeenCalled();
+    expect(insertLogMock).not.toHaveBeenCalled();
+    expect(r.sent).toBe(0);
+  });
+
+  /**
+   * The whole point is to read the recipient list BEFORE turning sending on, so
+   * the switch must not gate the preview.
+   */
+  it('runs while sending is switched off', async () => {
+    getSettingMock.mockResolvedValue('false');
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.refused).toBeUndefined();
+    expect(r.enabled).toBe(false);
+    expect(r.report).toHaveLength(1);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('reports the resolved recipient address, not a count', async () => {
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report![0]).toMatchObject({
+      fileNumber: '20020625-OCT',
+      recipientEmail: 'officer@example.com',
+      recipientName: 'Liliana Arias',
+      recipientRole: 'escrow_officer',
+      outcome: 'would_send',
+      linkRoles: ['listing_agent'],
+      linkAction: 'would_mint',
+    });
+    expect(r.report![0]!.subject).toBeTruthy();
+  });
+
+  it('reports every candidate, including the ones it could not reach', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1 }),
+      candidate({ orderId: 2, escrowOfficerId: null, escrowOfficerEmail: null }),
+      candidate({ orderId: 3, escrowOfficerEmail: null }),
+      candidate({ orderId: 4 }),
+    ]);
+    findLiveLinkMock.mockImplementation(async (orderId: number) => (orderId === 4 ? { id: 9 } : null));
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report).toHaveLength(4);
+    expect(r.report!.map(row => row.outcome)).toEqual([
+      'would_send', 'no_escrow_officer', 'officer_no_email', 'skipped_existing_link',
+    ]);
+    expect(r.scanned).toBe(4);
+  });
+
+  it('says why it cannot show link URLs rather than leaving them blank', async () => {
+    candidatesMock.mockResolvedValue([candidate()]);
+    const r = await handlePartyWizardInvite({ dryRun: true });
+    expect(r.reportNote).toMatch(/minting a link is a write/i);
+  });
+
+  /**
+   * Found by this test: an unusable opened_at threw out of the report builder and
+   * took the whole dry run with it. One unreadable order must cost the operator
+   * that row, not the other ninety-nine.
+   */
+  it('reports an order with an unusable date instead of aborting the run', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, openedAt: new Date('nonsense') }),
+      candidate({ orderId: 2 }),
+    ]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report).toHaveLength(2);
+    expect(r.report![0]).toMatchObject({ orderId: 1, openedAt: null, ageDays: null });
+    expect(r.report![1]).toMatchObject({ orderId: 2, outcome: 'would_send' });
+    // Either the template rendered or it said why — never a silent blank.
+    const first = r.report![0]!;
+    expect(first.subject !== null || first.templateError !== undefined).toBe(true);
   });
 });

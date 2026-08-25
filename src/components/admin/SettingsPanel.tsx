@@ -19,6 +19,7 @@ const DANGEROUS_KEYS: Record<string, string> = {
   titlepoint_shut_off: 'Are you sure? This will disable all TitlePoint document generation for new orders.',
   maintenance_mode: 'Are you sure? This will show a maintenance message to all non-admin users.',
   tessa_prelim_enabled: 'Are you sure? Turning this ON exposes AI-generated prelim interpretation to all users (sales reps) and resumes new AI analysis (LLM cost). Turning it OFF hides the feature and stops new analysis. Existing stored analyses are not affected.',
+  party_wizard_invite_enabled: 'Are you sure? Turning this ON sends real emails to escrow officers and external escrow companies on the next cron run — people outside PCT. Run the dry run on the Operations page first and read the recipient list. Turning it OFF stops new invites; links already sent keep working.',
 };
 
 /* ── Panel ─────────────────────────────────────────────────────────────────── */

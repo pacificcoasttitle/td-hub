@@ -8,6 +8,7 @@ import { OpsHeadline } from '@/components/admin/ops/ops-headline';
 import { CronStatus } from '@/components/admin/ops/cron-status';
 import { TessaStatus } from '@/components/admin/ops/tessa-status';
 import { NotificationStatus } from '@/components/admin/ops/notification-status';
+import { PartyInviteDryRun } from '@/components/admin/ops/party-invite-dry-run';
 import { SyncStatus } from '@/components/admin/ops/sync-status';
 import { VendorLogsTab } from '@/components/admin/vendor-logs-tab';
 import { WebhooksTab } from '@/components/admin/webhooks-tab';
@@ -143,6 +144,7 @@ export default function OperationsPage() {
           <CronStatus month={month} year={year} />
           <TessaStatus month={month} year={year} />
           <NotificationStatus month={month} year={year} />
+          <PartyInviteDryRun />
           <SyncStatus month={month} year={year} />
         </div>
       )}

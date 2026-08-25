@@ -56,11 +56,42 @@ These are pure omissions in the insert. No schema change, no product decision.
 | `contacts.*.clientLookupCode` | `order_parties.contact_id` | party lookup codes | blocked — same |
 | `transaction.branchCode` | `orders.branch_id` | `LookUpCodeTitleOffice` | not taken — see below |
 
-`escrow_officer_id` is worth calling out on its own. The form collects an escrow
-officer, resolves it to a contact, sends it to SoftPro, and then discards the id.
-`escrow_officer_id` is NULL on **2,465 of 4,068 active orders**, and it is the
-column the party wizard needs to reach a purchase order. The wizard's 4.7%
-coverage has an upstream cause, and this is part of it.
+### `escrow_officer_id` is the party wizard's coverage ceiling
+
+This one explains a number we have already investigated once, so it is written
+out in full here to stop anyone investigating it a second time.
+
+The form collects an escrow officer, resolves it to a contact, sends it to
+SoftPro, and then discards the id. `escrow_officer_id` is NULL on **2,465 of
+4,068 active orders**.
+
+The party wizard invite has exactly one recipient, and it is that column:
+
+```
+src/lib/jobs/handlers/party-wizard-invite.ts
+  loadCandidates()  leftJoin(contacts, eq(contacts.id, orders.escrowOfficerId))
+  handlePartyWizardInvite()  if (!row.escrowOfficerId) { unreachable.noEscrowOfficer++; continue; }
+```
+
+Re-measured against the job's own candidate window (active, opened 3–7 days ago,
+no listing agent, no prior invite):
+
+| | |
+| --- | --- |
+| Candidates | 119 |
+| Unreachable — `escrow_officer_id` is NULL | **97** |
+| Unreachable — officer exists but has no email | **0** |
+| Reachable | 22 (18.5%) |
+
+**The resolver is not the problem.** Every unreachable order is unreachable for
+one reason, and it is a NULL FK on a value the operator already typed. Zero are
+blocked by a missing contact email, a bad join, a status filter, or the link
+minting. The wizard's coverage cannot exceed the fill rate of this column, so the
+4.7% purchase figure is an input problem, not a resolver problem — do not
+re-investigate `party-wizard-service.ts` or the invite job looking for it.
+
+Persisting the id at create (this branch) fixes it going forward. Historical
+orders stay unreachable until something backfills the column.
 
 The three blocked rows all need the same thing: a contact id for a party, which
 only exists once the operator picks from a typeahead rather than typing free
@@ -90,7 +121,8 @@ this change.
 The secondary buyer and seller are the largest gap in this group. A second
 borrower is sent to SoftPro and the local order has no idea one exists, which
 means the confirmation email's "Secondary owner" row and every party-coverage
-count are computed from half the people on the transaction.
+count are computed from half the people on the transaction. Ticketed with the
+measurements in `SECONDARY_BUYER_SELLER.md`.
 
 ## Dropped: goes nowhere at all, not even to SoftPro
 
@@ -102,7 +134,8 @@ count are computed from half the people on the transaction.
 
 `deliverableEmails` is the one to look at next. It is not a silent drop of a
 value the operator might not miss — it is a delivery instruction that is accepted
-and discarded, and the operator has no way to tell.
+and discarded, and the operator has no way to tell. What the recipient resolvers
+use instead is mapped in `DELIVERABLE_EMAILS.md`.
 
 ## Fixed in this branch
 

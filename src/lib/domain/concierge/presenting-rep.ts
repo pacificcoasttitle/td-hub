@@ -15,10 +15,18 @@ import { contacts, orders } from '@/lib/db/schema';
 // sidesteps the fact that none of the nine open_order_team users has a contact
 // record to draw a phone number from.
 //
-// THE FALLBACK IS FIRST-CLASS, NOT AN EDGE CASE. orders.sales_rep_id only began
-// persisting on 2026-08-26, so it is NULL on everything opened before this
-// week — for historical orders "no rep on the order" is the common path, and an
-// explicit choice is required rather than a blank line on a client document.
+// THE FALLBACK IS FIRST-CLASS, BUT IT IS THE MINORITY PATH. An earlier version
+// of this comment claimed sales_rep_id only began persisting on 2026-08-26 and
+// was therefore NULL on all historical orders. Measured, that is wrong: 7,018
+// of the 7,266 orders opened before this week carry one, and the earliest dates
+// to 2025-03-05. Coverage is 7,159 of 7,414 overall — 96.6%.
+//
+// So the fallback fires for roughly 250 orders, not for most of them. It stays
+// first-class anyway: a client-facing document must never go out with a blank
+// where the presenting rep belongs, and 250 orders is far too many to treat as
+// an edge case. The difference matters only for what we expect to SEE — an
+// operator hitting the chooser should be unusual, and if it stops being
+// unusual, something upstream has broken.
 
 export interface PresentingRep {
   name: string;

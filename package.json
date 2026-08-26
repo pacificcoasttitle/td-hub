@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json",
     "db:generate": "drizzle-kit generate",

@@ -54,21 +54,6 @@ export function emptyResult(matchCode: 'M' | 'N'): SiteXPropertyData {
   };
 }
 
-export const MOCK_PROPERTY: SiteXPropertyData = {
-  matchCode: 'S',
-  apn: '8321-027-034',
-  legalDescription: 'LOT 34, TRACT 12345, PER MAP REC IN BK 100 PG 50',
-  county: 'Los Angeles',
-  fips: '06037',
-  propertyType: 'Single Family Residence',
-  primaryOwner: 'Joel S Cruz Pablo',
-  secondaryOwner: 'Maria Sebastian',
-  fullAddress: '123 Main St, Glendale, CA 91203',
-  city: 'Glendale', state: 'CA', zip: '91203', unitNumber: null,
-  beds: 3, baths: 2, sqft: 1850, lotSize: 6500,
-  yearBuilt: 1975, assessedValue: 485000,
-  lastSaleDate: '2020-06-15', lastSalePrice: 625000,
-};
 
 export interface PropertySearchResult {
   match: 'single' | 'multi' | 'none';

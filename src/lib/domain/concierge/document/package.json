@@ -1,0 +1,4 @@
+{
+  "//": "DO NOT DELETE. Scopes this directory to ESM. @react-pdf/renderer v4 is ESM-only (@react-pdf/hyphenate declares an \"import\" condition with no \"require\"), while the rest of src/ resolves as CJS because the root package.json sets no \"type\". Without this file, importing the document from any node script fails with ERR_PACKAGE_PATH_NOT_EXPORTED. next build is green with it.",
+  "type": "module"
+}

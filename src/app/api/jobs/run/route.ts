@@ -56,7 +56,13 @@ const TITLEPOINT_DRAIN_JOB_NAMES = new Set(['titlepoint.drain']);
  * return values — `jobs.payload` holds only the input. The drift detector writes
  * its counts back onto its own row so the ops panel can trend them.
  */
-const NEEDS_JOB_ID = new Set(['softpro.verify_sync', 'softpro.lookback_sync']);
+const NEEDS_JOB_ID = new Set([
+  'softpro.verify_sync',
+  'softpro.lookback_sync',
+  // Needs its row to record a REFUSAL. A run that declined to send otherwise
+  // looks exactly like a run that found nothing to do.
+  'party_wizard.invite',
+]);
 
 const JOB_HANDLERS: Record<string, JobHandler> = {
   'softpro.sync_recent_orders': (payload) =>
@@ -112,8 +118,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
   },
   'notifications.process_outbox': () =>
     processOutboxEvents(),
-  'party_wizard.invite': () =>
-    handlePartyWizardInvite(),
+  'party_wizard.invite': (payload) =>
+    handlePartyWizardInvite(payload),
   'jobs.watchdog': () =>
     handleJobsWatchdog(),
   'ops.daily_report': () =>

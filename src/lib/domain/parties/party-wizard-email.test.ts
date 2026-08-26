@@ -62,6 +62,46 @@ describe('party wizard invite email', () => {
     expect(buildPartyWizardEmail(base)).toContain('the forward remains yours to make');
   });
 
+  // ─── Copy the operator approved ───────────────────────────────────────────
+  //
+  // Reviewed against real output for file 20021227-OCT. Both defects below were
+  // visible only once a full body was read, which is why the dry run keeps one.
+
+  describe('the approved copy', () => {
+    /**
+     * The two bodies worded the same ask differently — "the listing agent details
+     * for this file" in HTML, "listing agent details on file X" in text. Whoever
+     * approved one had not read the other.
+     */
+    it('words the ask identically in HTML and plain text', () => {
+      const ask = 'We do not have the listing agent details for this file, so we cannot '
+        + 'contact them directly. Please forward the secure link below.';
+      expect(buildPartyWizardEmail(base)).toContain(ask);
+      expect(buildPartyWizardText(base)).toContain(ask);
+    });
+
+    /**
+     * The email said what to do and gave no reason to do it today. This states
+     * the consequence, and claims only what is true: the job invites once per
+     * file and never follows up.
+     */
+    it('says what happens if the link is not forwarded, in both bodies', () => {
+      const consequence = 'This is the only reminder we send for this file. Until the listing '
+        + 'agent details are on the order we have no way to contact them ourselves, so anything '
+        + 'they need keeps coming back to you.';
+      expect(buildPartyWizardEmail(base)).toContain(consequence);
+      expect(buildPartyWizardText(base)).toContain(consequence);
+    });
+
+    it('promises no date it cannot keep — there is no closing date on the record', () => {
+      for (const body of [buildPartyWizardEmail(base), buildPartyWizardText(base)]) {
+        expect(body).not.toMatch(/business days/i);
+        expect(body).not.toMatch(/within \d+ (hours|days)/i);
+        expect(body).not.toMatch(/by (Monday|Tuesday|Wednesday|Thursday|Friday)/i);
+      }
+    });
+  });
+
   describe('extends to more roles without a redesign', () => {
     const two = {
       ...base,

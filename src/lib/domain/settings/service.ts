@@ -85,9 +85,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     defaultValue: 'false',
   },
   {
-    key: 'party_wizard_invite_shut_off',
-    label: 'Party Wizard Invite Shut Off',
-    description: 'When enabled, the party-collection invite job stops emailing escrow officers on its next run. Links already sent keep working; only new invites stop. Takes effect without a deploy.',
+    key: 'party_wizard_invite_enabled',
+    label: 'Party Wizard Invite Sending',
+    description: 'Master switch for the party-collection invite job. OFF by default and OFF on any fresh environment or reset row: the job refuses to send and records the refusal rather than resuming on its own. Turning it ON starts emailing escrow officers on the next cron run (Mon–Fri 16:00 UTC). Links already sent keep working regardless. Use the dry run on the Operations page to see exactly who would be emailed before turning this on.',
     category: 'Notifications',
     type: 'boolean',
     defaultValue: 'false',

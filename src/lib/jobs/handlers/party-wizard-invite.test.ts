@@ -18,6 +18,7 @@ vi.mock('@/lib/db/schema', () => ({
   orderProperties: { orderId: 'op.order_id', fullAddress: 'op.full', address: 'op.addr', city: 'op.city', state: 'op.state', zip: 'op.zip' },
   orderParties: { orderId: 'p.order_id', role: 'p.role' },
   contacts: { id: 'c.id', fullName: 'c.full_name', email: 'c.email' },
+  jobs: { id: 'j.id' },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -27,8 +28,13 @@ vi.mock('drizzle-orm', () => ({
   sql: Object.assign((...a: unknown[]) => a, { raw: (s: string) => s }),
 }));
 
+const jobUpdates: Array<Record<string, unknown>> = [];
+
+const executeMock = vi.fn();
+
 vi.mock('@/lib/db/client', () => ({
   db: {
+    execute: (...a: unknown[]) => executeMock(...a),
     select: () => ({
       from: () => ({
         leftJoin: () => ({
@@ -37,6 +43,12 @@ vi.mock('@/lib/db/client', () => ({
           }),
         }),
       }),
+    }),
+    update: () => ({
+      set: (values: Record<string, unknown>) => {
+        jobUpdates.push(values);
+        return { where: async () => undefined };
+      },
     }),
   },
 }));
@@ -57,11 +69,11 @@ vi.mock('@/lib/domain/parties/party-wizard-service', () => ({
 
 import {
   handlePartyWizardInvite, PARTY_INVITE_DELAY_DAYS, PARTY_INVITE_MAX_AGE_DAYS,
-  PARTY_INVITE_STATUSES, PARTY_INVITE_SHUT_OFF_SETTING,
+  PARTY_INVITE_STATUSES, PARTY_INVITE_ENABLED_SETTING, PARTY_INVITE_MAX_PER_RECIPIENT,
 } from './party-wizard-invite';
 
 function candidate(over: Record<string, unknown> = {}) {
-  return {
+  const row = {
     orderId: 1,
     fileNumber: '20020625-OCT',
     openedAt: new Date('2026-08-15T00:00:00Z'),
@@ -73,11 +85,20 @@ function candidate(over: Record<string, unknown> = {}) {
     escrowOfficerEmail: 'officer@example.com',
     ...over,
   };
+  // Distinct address per order unless a test pins one. Asks are deduped by
+  // property, so fixtures sharing one address would collapse into a single send
+  // and quietly change what the surrounding test is measuring.
+  if (!('fullAddress' in over)) row.fullAddress = `${row.orderId} Main St, Irvine, CA`;
+  return row;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getSettingMock.mockResolvedValue('false');
+  jobUpdates.length = 0;
+  // Sending is opt-in, so every test that expects a send has to turn it on.
+  getSettingMock.mockResolvedValue('true');
+  // No property has been invited before, unless a test says otherwise.
+  executeMock.mockResolvedValue([]);
   findLiveLinkMock.mockResolvedValue(null);
   mintLinkMock.mockResolvedValue({ linkId: 1, url: 'https://hub.pctitle.com/party-wizard/tok' });
   sendEmailMock.mockResolvedValue({ success: true });
@@ -181,6 +202,7 @@ describe('party wizard invite', () => {
 
       const r = await handlePartyWizardInvite();
       const accounted = r.sent + r.failed + r.skippedExistingLink
+        + r.skippedDuplicateProperty + r.skippedRecipientCap
         + r.unreachable.noEscrowOfficer + r.unreachable.escrowOfficerNoEmail;
       expect(accounted).toBe(r.scanned);
     });
@@ -222,21 +244,411 @@ describe('party wizard invite', () => {
     }));
   });
 
-  it('does nothing at all when the kill switch is on', async () => {
-    getSettingMock.mockResolvedValue('true');
-    candidatesMock.mockResolvedValue([candidate()]);
-    const r = await handlePartyWizardInvite();
-    expect(r.shutOff).toBe(true);
-    expect(r.sent).toBe(0);
-    expect(sendEmailMock).not.toHaveBeenCalled();
-    expect(getSettingMock).toHaveBeenCalledWith(PARTY_INVITE_SHUT_OFF_SETTING);
-  });
-
   it('one bad order does not abort the rest of the batch', async () => {
     candidatesMock.mockResolvedValue([candidate({ orderId: 1 }), candidate({ orderId: 2 })]);
     sendEmailMock.mockRejectedValueOnce(new Error('network'));
     const r = await handlePartyWizardInvite();
     expect(r.failed).toBe(1);
     expect(r.sent).toBe(1);
+  });
+});
+
+// ─── One ask per property ────────────────────────────────────────────────────
+//
+// Production sent 20021227-OCT and -PRV in one run: both 8613 Bonita Rd, same
+// escrow officer, same listing agent. Two files is a SoftPro distinction; from an
+// inbox it is the same ask twice.
+
+describe('one ask per property, not per file', () => {
+  const bonita = { fullAddress: '8613 BONITA RD' };
+
+  it('asks once when two files share a property', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fileNumber: '20021227-OCT', ...bonita }),
+      candidate({ orderId: 2, fileNumber: '20021227-PRV', ...bonita }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(1);
+    expect(r.skippedDuplicateProperty).toBe(1);
+    expect(sendEmailMock).toHaveBeenCalledOnce();
+    expect(mintLinkMock).toHaveBeenCalledOnce();
+  });
+
+  it('names the file that carries the ask, so the skip is explainable', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fileNumber: '20021227-OCT', ...bonita }),
+      candidate({ orderId: 2, fileNumber: '20021227-PRV', ...bonita }),
+    ]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report![0]).toMatchObject({ fileNumber: '20021227-OCT', outcome: 'would_send' });
+    expect(r.report![1]).toMatchObject({
+      fileNumber: '20021227-PRV',
+      outcome: 'skipped_duplicate_property',
+      duplicateOf: '20021227-OCT',
+    });
+  });
+
+  it('picks the same file every run — lowest order id, not database order', async () => {
+    const rows = [
+      candidate({ orderId: 9, fileNumber: 'LATER', ...bonita }),
+      candidate({ orderId: 4, fileNumber: 'EARLIER', ...bonita }),
+    ];
+    candidatesMock.mockResolvedValue(rows);
+    const first = await handlePartyWizardInvite({ dryRun: true });
+
+    candidatesMock.mockResolvedValue([...rows].reverse());
+    const second = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(first.sampleEmail!.fileNumber).toBe('EARLIER');
+    expect(second.sampleEmail!.fileNumber).toBe('EARLIER');
+  });
+
+  it('does not ask again when an earlier run already asked for that property', async () => {
+    executeMock.mockResolvedValue([
+      { full_address: '8613 Bonita Rd', address: null, city: null, state: null, zip: null },
+    ]);
+    candidatesMock.mockResolvedValue([candidate({ orderId: 1, ...bonita })]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(0);
+    expect(r.skippedDuplicateProperty).toBe(1);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('matches addresses across punctuation and case, which production varies', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fullAddress: '127 Avenida De La Paz,, San Clemente, CA, 92672' }),
+      candidate({ orderId: 2, fullAddress: '127 AVENIDA DE LA PAZ, SAN CLEMENTE CA 92672' }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(1);
+    expect(r.skippedDuplicateProperty).toBe(1);
+  });
+
+  it('treats adjacent properties as separate asks — they are different files AND different homes', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fullAddress: '127 Avenida De La Paz, San Clemente, CA' }),
+      candidate({ orderId: 2, fullAddress: '129 Avenida De La Paz, San Clemente, CA' }),
+    ]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report!.every(row => row.outcome === 'would_send')).toBe(true);
+  });
+
+  /**
+   * Two orders with no address are not evidence of the same property. Grouping
+   * them would suppress a real ask, which is worse than one redundant email.
+   */
+  it('never groups orders that have no address', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fullAddress: null }),
+      candidate({ orderId: 2, fullAddress: null }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(2);
+    expect(r.skippedDuplicateProperty).toBe(0);
+  });
+
+  it('keeps sending when the invite history cannot be read', async () => {
+    executeMock.mockRejectedValue(new Error('pg down'));
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(1);
+  });
+});
+
+// ─── Per-recipient cap ───────────────────────────────────────────────────────
+//
+// One officer received 12 of 21 invites in a single run, four of them adjacent
+// files. Someone who thinks the system is malfunctioning does not forward the
+// link, which is the only thing this job is for.
+
+describe('caps how many emails one person gets per run', () => {
+  function forOneOfficer(count: number) {
+    return Array.from({ length: count }, (_, i) => candidate({
+      orderId: i + 1,
+      fileNumber: `FILE-${i + 1}`,
+      escrowOfficerEmail: 'cquintanar@example.com',
+    }));
+  }
+
+  it('sends at most two to the same recipient', async () => {
+    candidatesMock.mockResolvedValue(forOneOfficer(12));
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(PARTY_INVITE_MAX_PER_RECIPIENT);
+    expect(r.sent).toBe(2);
+    expect(r.skippedRecipientCap).toBe(10);
+    expect(sendEmailMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('holds the rest rather than dropping them', async () => {
+    candidatesMock.mockResolvedValue(forOneOfficer(5));
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    const held = r.report!.filter(row => row.outcome === 'skipped_recipient_cap');
+    expect(held).toHaveLength(3);
+    // Held rows mint nothing and log nothing, so they are candidates again
+    // tomorrow. That is what makes this a rate limit and not a silent drop.
+    expect(mintLinkMock).not.toHaveBeenCalled();
+    expect(insertLogMock).not.toHaveBeenCalled();
+  });
+
+  it('counts per recipient, not per run — a second officer is unaffected', async () => {
+    candidatesMock.mockResolvedValue([
+      ...forOneOfficer(3),
+      candidate({ orderId: 10, escrowOfficerEmail: 'other@example.com' }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(3);
+    expect(r.skippedRecipientCap).toBe(1);
+    const recipients = sendEmailMock.mock.calls.map(c => (c[0] as { to: string }).to);
+    expect(recipients).toContain('other@example.com');
+  });
+
+  /**
+   * A duplicate is not an ask, so it must not consume a slot — otherwise the cap
+   * would suppress a real ask in order to spare a redundant one.
+   */
+  it('does not spend a slot on a duplicate property', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fileNumber: 'A-OCT', fullAddress: '8613 BONITA RD' }),
+      candidate({ orderId: 2, fileNumber: 'A-PRV', fullAddress: '8613 BONITA RD' }),
+      candidate({ orderId: 3, fileNumber: 'B', fullAddress: '52 CARROLL DR' }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(2);
+    expect(r.skippedDuplicateProperty).toBe(1);
+    expect(r.skippedRecipientCap).toBe(0);
+  });
+});
+
+// ─── Off unless someone said yes ─────────────────────────────────────────────
+//
+// This was a shut-off flag defaulting to false: a running job with a brake. A
+// fresh environment, a wiped settings row or a restored backup resumed emailing
+// people outside PCT with nobody deciding to. The absence of a row now means
+// silence.
+
+describe('sending is opt-in, not opt-out', () => {
+  it('refuses to send when the switch has never been set', async () => {
+    getSettingMock.mockResolvedValue(null);
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.refused).toBe(true);
+    expect(r.enabled).toBe(false);
+    expect(r.sent).toBe(0);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(mintLinkMock).not.toHaveBeenCalled();
+    // Refusing must not even look at the candidate list.
+    expect(candidatesMock).not.toHaveBeenCalled();
+    expect(getSettingMock).toHaveBeenCalledWith(PARTY_INVITE_ENABLED_SETTING);
+  });
+
+  it('refuses on an explicit false, not just on a missing row', async () => {
+    getSettingMock.mockResolvedValue('false');
+    const r = await handlePartyWizardInvite();
+    expect(r.refused).toBe(true);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('treats anything other than the exact string "true" as off', async () => {
+    for (const value of ['TRUE', '1', 'yes', 'on', '']) {
+      vi.clearAllMocks();
+      getSettingMock.mockResolvedValue(value);
+      const r = await handlePartyWizardInvite();
+      expect(r.refused, `value ${JSON.stringify(value)} must not enable sending`).toBe(true);
+    }
+  });
+
+  /**
+   * A refusal has to leave a trace. Without it the run ends `completed` with no
+   * reason, which reads exactly like a run that found nothing to do — the
+   * failure mode that let this sit unnoticed in the first place.
+   */
+  it('records the refusal on its own job row', async () => {
+    getSettingMock.mockResolvedValue('false');
+    await handlePartyWizardInvite({ __jobId: 77 });
+
+    expect(jobUpdates).toHaveLength(1);
+    const payload = jobUpdates[0]!.payload as { partyWizardInvite: { refused: boolean; enabled: boolean } };
+    expect(payload.partyWizardInvite.refused).toBe(true);
+    expect(payload.partyWizardInvite.enabled).toBe(false);
+  });
+
+  it('sends normally once someone has enabled it', async () => {
+    getSettingMock.mockResolvedValue('true');
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.refused).toBeUndefined();
+    expect(r.enabled).toBe(true);
+    expect(r.sent).toBe(1);
+  });
+});
+
+// ─── Dry run ─────────────────────────────────────────────────────────────────
+
+describe('dry run reports instead of sending', () => {
+  it('writes nothing and sends nothing', async () => {
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.dryRun).toBe(true);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(mintLinkMock).not.toHaveBeenCalled();
+    expect(insertLogMock).not.toHaveBeenCalled();
+    expect(r.sent).toBe(0);
+  });
+
+  /**
+   * The whole point is to read the recipient list BEFORE turning sending on, so
+   * the switch must not gate the preview.
+   */
+  it('runs while sending is switched off', async () => {
+    getSettingMock.mockResolvedValue('false');
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.refused).toBeUndefined();
+    expect(r.enabled).toBe(false);
+    expect(r.report).toHaveLength(1);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('reports the resolved recipient address, not a count', async () => {
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report![0]).toMatchObject({
+      fileNumber: '20020625-OCT',
+      recipientEmail: 'officer@example.com',
+      recipientName: 'Liliana Arias',
+      recipientRole: 'escrow_officer',
+      outcome: 'would_send',
+      linkRoles: ['listing_agent'],
+      linkAction: 'would_mint',
+    });
+    expect(r.report![0]!.subject).toBeTruthy();
+  });
+
+  it('reports every candidate, including the ones it could not reach', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1 }),
+      candidate({ orderId: 2, escrowOfficerId: null, escrowOfficerEmail: null }),
+      candidate({ orderId: 3, escrowOfficerEmail: null }),
+      candidate({ orderId: 4 }),
+    ]);
+    findLiveLinkMock.mockImplementation(async (orderId: number) => (orderId === 4 ? { id: 9 } : null));
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report).toHaveLength(4);
+    expect(r.report!.map(row => row.outcome)).toEqual([
+      'would_send', 'no_escrow_officer', 'officer_no_email', 'skipped_existing_link',
+    ]);
+    expect(r.scanned).toBe(4);
+  });
+
+  /**
+   * Copy gets approved from this. Rendering the templates and throwing the bodies
+   * away meant approving a draft rather than the output a real order produces.
+   */
+  it('keeps ONE fully rendered body, not just subjects', async () => {
+    candidatesMock.mockResolvedValue([candidate({ orderId: 1 }), candidate({ orderId: 2 })]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.sampleEmail).toBeDefined();
+    const sample = r.sampleEmail!;
+    // A real order, a real recipient, the real subject line.
+    expect(sample.orderId).toBe(1);
+    expect(sample.fileNumber).toBe('20020625-OCT');
+    expect(sample.to).toBe('officer@example.com');
+    expect(sample.subject).toBe(r.report![0]!.subject);
+    // Whole bodies, not fragments.
+    expect(sample.html).toContain('<html');
+    expect(sample.html).toContain('20020625-OCT');
+    expect(sample.text).toContain('20020625-OCT');
+    // Only the link is stand-in, and it says so.
+    expect(sample.html).toContain(sample.linkPlaceholder);
+    expect(sample.linkPlaceholder).toContain('DRY-RUN-NO-LINK-MINTED');
+  });
+
+  it('keeps exactly one body however many orders it scans', async () => {
+    candidatesMock.mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => candidate({ orderId: i + 1 })),
+    );
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report).toHaveLength(5);
+    expect(r.sampleEmail!.orderId).toBe(1);
+  });
+
+  it('has no body to show when nothing would send', async () => {
+    candidatesMock.mockResolvedValue([candidate({ escrowOfficerId: null })]);
+    const r = await handlePartyWizardInvite({ dryRun: true });
+    expect(r.sampleEmail).toBeUndefined();
+  });
+
+  it('keeps the rendered body out of the job payload', async () => {
+    candidatesMock.mockResolvedValue([candidate()]);
+    await handlePartyWizardInvite({ dryRun: true, __jobId: 12 });
+    const payload = jobUpdates[0]!.payload as { partyWizardInvite: Record<string, unknown> };
+    expect(payload.partyWizardInvite.sampleEmail).toBeUndefined();
+    expect(payload.partyWizardInvite.report).toBeUndefined();
+    expect(payload.partyWizardInvite.scanned).toBe(1);
+  });
+
+  it('says why it cannot show link URLs rather than leaving them blank', async () => {
+    candidatesMock.mockResolvedValue([candidate()]);
+    const r = await handlePartyWizardInvite({ dryRun: true });
+    expect(r.reportNote).toMatch(/minting a link is a write/i);
+  });
+
+  /**
+   * Found by this test: an unusable opened_at threw out of the report builder and
+   * took the whole dry run with it. One unreadable order must cost the operator
+   * that row, not the other ninety-nine.
+   */
+  it('reports an order with an unusable date instead of aborting the run', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, openedAt: new Date('nonsense') }),
+      candidate({ orderId: 2 }),
+    ]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report).toHaveLength(2);
+    expect(r.report![0]).toMatchObject({ orderId: 1, openedAt: null, ageDays: null });
+    expect(r.report![1]).toMatchObject({ orderId: 2, outcome: 'would_send' });
+    // Either the template rendered or it said why — never a silent blank.
+    const first = r.report![0]!;
+    expect(first.subject !== null || first.templateError !== undefined).toBe(true);
   });
 });

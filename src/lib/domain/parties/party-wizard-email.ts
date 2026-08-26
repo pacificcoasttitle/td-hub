@@ -25,9 +25,39 @@ export interface PartyWizardEmailInput {
   roleLinks: RoleLinkBlock[];
 }
 
+function missingRoles(input: PartyWizardEmailInput): string {
+  return input.roleLinks.map((r) => roleLabel(r.role).toLowerCase()).join(' and ');
+}
+
 export function buildPartyWizardSubject(input: PartyWizardEmailInput): string {
-  const roles = input.roleLinks.map((r) => roleLabel(r.role).toLowerCase()).join(' and ');
-  return `Missing ${roles} details — file ${input.fileNumber}`;
+  return `Missing ${missingRoles(input)} details — file ${input.fileNumber}`;
+}
+
+// ─── Shared sentences ────────────────────────────────────────────────────────
+//
+// The HTML and the plain text used to word the same ask differently ("the
+// listing agent details for this file" vs "listing agent details on file X").
+// Both bodies now read from one source, so approving the copy approves what both
+// recipients see.
+
+function askSentence(input: PartyWizardEmailInput): string {
+  const plural = input.roleLinks.length > 1;
+  return `We do not have the ${missingRoles(input)} details for this file, so we cannot contact `
+    + `them directly. Please forward the secure link${plural ? 's' : ''} below.`;
+}
+
+/**
+ * Why it is worth doing now rather than later.
+ *
+ * Deliberately claims only what is true: the job sends one invite per file and
+ * never follows up, and an order with no agent contact leaves the officer as the
+ * only route to them. There is no estimated closing date on the record to quote
+ * and no service-level promise to invent, so neither appears here.
+ */
+function consequenceSentence(input: PartyWizardEmailInput): string {
+  return `This is the only reminder we send for this file. Until the ${missingRoles(input)} details `
+    + `are on the order we have no way to contact them ourselves, so anything they need keeps `
+    + `coming back to you.`;
 }
 
 function roleBlock(block: RoleLinkBlock): string {
@@ -45,7 +75,7 @@ export function buildPartyWizardEmail(input: PartyWizardEmailInput): string {
     ? `Hi ${esc(input.escrowOfficerName.trim().split(' ')[0])},`
     : 'Hi,';
 
-  const missing = input.roleLinks.map((r) => roleLabel(r.role).toLowerCase()).join(' and ');
+  const missing = missingRoles(input);
   const plural = input.roleLinks.length > 1;
   const partyWord = plural ? 'parties' : 'party';
 
@@ -69,10 +99,11 @@ export function buildPartyWizardEmail(input: PartyWizardEmailInput): string {
   });
 
   const body = `<p style="margin:0 0 18px;color:${TEXT_PRIMARY};">${greeting}</p>
-<p style="margin:0 0 22px;">We do not have the ${esc(missing)} details for this file, so we cannot contact them directly. Please forward the secure link${plural ? 's' : ''} below.</p>
+<p style="margin:0 0 22px;">${esc(askSentence(input))}</p>
 ${fieldTable(detailRows)}
 ${input.roleLinks.map(roleBlock).join('')}
-<p style="margin:22px 0 0;font-size:13px;line-height:1.6;">Submitted details are recorded against the file and posted to the order notes. TD Hub will not contact the ${partyWord}—the forward remains yours to make.</p>`;
+<p style="margin:22px 0 0;color:${TEXT_PRIMARY};font-size:14px;line-height:1.6;font-weight:bold;">${esc(consequenceSentence(input))}</p>
+<p style="margin:14px 0 0;font-size:13px;line-height:1.6;">Submitted details are recorded against the file and posted to the order notes. TD Hub will not contact the ${partyWord}—the forward remains yours to make.</p>`;
 
   const subject = buildPartyWizardSubject(input);
   return emailShell({
@@ -93,7 +124,7 @@ export function buildPartyWizardText(input: PartyWizardEmailInput): string {
   const lines: string[] = [
     input.escrowOfficerName?.trim() ? `Hi ${input.escrowOfficerName.trim().split(' ')[0]},` : 'Hi,',
     '',
-    `We do not have ${input.roleLinks.map((r) => roleLabel(r.role).toLowerCase()).join(' and ')} details on file ${input.fileNumber} yet.`,
+    askSentence(input),
     '',
     `File number: ${input.fileNumber}`,
   ];
@@ -108,6 +139,8 @@ export function buildPartyWizardText(input: PartyWizardEmailInput): string {
     lines.push('');
   }
 
+  lines.push(consequenceSentence(input));
+  lines.push('');
   lines.push('The link expires in 60 days. Submissions are posted to the order notes.');
   lines.push('', 'Pacific Coast Title Company');
   return lines.join('\n');

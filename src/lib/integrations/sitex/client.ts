@@ -3,6 +3,7 @@ import type { VendorResult } from '../types';
 import type { SiteXPropertyData, SiteXSearchResponse, PropertyLookupParams, ApnLookupParams } from './types';
 import { VENDOR, TIMEOUT_MS, getConfig, getAccessToken, logRequest } from './auth';
 import { truncateZip, mapProfile, emptyResult } from './parsers';
+import { deriveOwnerKind } from './owner-kind';
 import type { PropertySearchResult } from './parsers';
 
 function inferMatchCode(raw: SiteXSearchResponse): string {
@@ -133,7 +134,7 @@ export async function propertySearch(
 
     let result: PropertySearchResult;
     if (matchCode === 'S' && raw.Feed?.PropertyProfile) {
-      result = { match: 'single', property: { matchCode: 'S' as const, ...mapProfile(raw.Feed.PropertyProfile) }, locations: [] };
+      result = { match: 'single', property: { matchCode: 'S' as const, ...mapProfile(raw.Feed.PropertyProfile, deriveOwnerKind(raw)) }, locations: [] };
     } else if (matchCode === 'M' && raw.Locations) {
       result = { match: 'multi', property: null, locations: raw.Locations.map((loc) => ({ address: loc.Address ?? '', city: loc.City ?? '', state: loc.State ?? '', zip: loc.Zip ?? '', apn: loc.APN ?? '' })) };
     } else {
@@ -203,7 +204,7 @@ export async function propertyLookup(
     const raw = (await response.json()) as SiteXSearchResponse;
     const matchCode = inferMatchCode(raw);
     let result: SiteXPropertyData;
-    if (matchCode === 'S' && raw.Feed?.PropertyProfile) { result = { matchCode: 'S', ...mapProfile(raw.Feed.PropertyProfile) }; }
+    if (matchCode === 'S' && raw.Feed?.PropertyProfile) { result = { matchCode: 'S', ...mapProfile(raw.Feed.PropertyProfile, deriveOwnerKind(raw)) }; }
     else if (matchCode === 'M') { result = emptyResult('M'); }
     else { result = emptyResult('N'); }
 
@@ -266,7 +267,7 @@ export async function apnLookup(
     const raw = (await response.json()) as SiteXSearchResponse;
     const matchCode = inferMatchCode(raw);
     let result: SiteXPropertyData;
-    if (matchCode === 'S' && raw.Feed?.PropertyProfile) { result = { matchCode: 'S', ...mapProfile(raw.Feed.PropertyProfile) }; }
+    if (matchCode === 'S' && raw.Feed?.PropertyProfile) { result = { matchCode: 'S', ...mapProfile(raw.Feed.PropertyProfile, deriveOwnerKind(raw)) }; }
     else if (matchCode === 'M') { result = emptyResult('M'); }
     else { result = emptyResult('N'); }
 

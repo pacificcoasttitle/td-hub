@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 
+import type { OwnerKind } from '@/lib/domain/orders/names/sitex-owner-names';
+
 export interface SiteXPropertyResult {
   apn: string | null;
   county: string | null;
@@ -9,6 +11,14 @@ export interface SiteXPropertyResult {
   propertyType: string | null;
   primaryOwner: string | null;
   secondaryOwner: string | null;
+  /**
+   * Whether SiteX's own current-owner deed says the owner is a person or an
+   * organization. Already on the wire — /api/property/search returns the whole
+   * property object — and declared here so the caller can pass it to
+   * parseSiteXOwners as the definitive discriminator instead of falling back to
+   * the entity-marker list.
+   */
+  ownerKind?: OwnerKind;
   fullAddress: string | null;
   city: string | null;
   state: string | null;

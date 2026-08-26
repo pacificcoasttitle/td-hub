@@ -5,6 +5,8 @@
 
 // ─── Normalized Result ──────────────────────────────────────────────────────
 
+import type { OwnerKind } from '@/lib/domain/orders/names/sitex-owner-names';
+
 export interface SiteXPropertyData {
   matchCode: 'S' | 'M' | 'N';
   apn: string | null;
@@ -14,6 +16,20 @@ export interface SiteXPropertyData {
   propertyType: string | null;
   primaryOwner: string | null;
   secondaryOwner: string | null;
+  /**
+   * Whether the current owner is a person or an organization, per SiteX's own
+   * current-owner deed. 'unknown' when no such deed came back — a normal
+   * outcome, not a failure.
+   *
+   * OPTIONAL on purpose. A SiteXPropertyData can also be rebuilt from a
+   * client-supplied siteXSnapshot on the create path, which carries no
+   * TransferHistory and therefore cannot know this. Absent and 'unknown' mean
+   * the same thing to every consumer, so callers read it as
+   * `ownerKind ?? 'unknown'` rather than being forced to invent a value.
+   */
+  ownerKind?: OwnerKind;
+  /** Corroboration only: LC, CO, HW, SM... See owner-kind.ts for why it is not the discriminator. */
+  ownerEntityCode?: string | null;
   fullAddress: string | null;
   city: string | null;
   state: string | null;
@@ -37,6 +53,14 @@ export interface SiteXSearchResponse {
   MatchCode: string;
   Feed?: {
     PropertyProfile?: SiteXRawPropertyProfile;
+    /**
+     * Deed / mortgage / foreclosure history. Discarded until now, and the only
+     * place SiteX says whether the current owner is a person or an
+     * organization — see integrations/sitex/owner-kind.ts. Left as unknown
+     * because the shape is deep, optional at every level, and only one
+     * consumer reads it.
+     */
+    TransferHistory?: unknown;
   };
   Locations?: SiteXRawLocation[];
 }

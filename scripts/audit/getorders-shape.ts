@@ -4,7 +4,7 @@ import { getOrders } from '../../src/lib/integrations/softpro/client';
 const day = new Date().toISOString().slice(0,10);
 const prev = new Date(Date.now()-86400000).toISOString().slice(0,10);
 const r = await getOrders({ dateFrom: prev, dateTo: day });
-const list = (r.success && Array.isArray(r.data) ? r.data : []) as Record<string,unknown>[];
+const list = (r.success && Array.isArray(r.data) ? r.data : []) as unknown as Record<string,unknown>[];
 console.log(`success=${r.success} records=${list.length}`);
 console.log('KEYS on record[0]:', Object.keys(list[0] ?? {}).join(', '));
 console.log('\nfirst 3 records verbatim:');

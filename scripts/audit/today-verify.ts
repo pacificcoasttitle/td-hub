@@ -71,7 +71,7 @@ function verdict(r: Row): V {
   const day = new Date().toISOString().slice(0, 10);
   const prevDay = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
   const listRes = await getOrders({ dateFrom: prevDay, dateTo: day });
-  const list = (listRes.success && Array.isArray(listRes.data) ? listRes.data : []) as Array<Record<string, unknown>>;
+  const list = (listRes.success && Array.isArray(listRes.data) ? listRes.data : []) as unknown as Array<Record<string, unknown>>;
   console.log(`GetOrders ${prevDay}..${day}: success=${listRes.success} records=${list.length}\n`);
 
   const created: Array<{ logId: number; orderNumber: string; sent: Record<string, unknown> }> = [];

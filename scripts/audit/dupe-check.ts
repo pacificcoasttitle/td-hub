@@ -16,7 +16,7 @@ const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 (async () => {
   const list = await getOrders({ dateFrom: prev, dateTo: day });
-  const orders = (list.success && Array.isArray(list.data) ? list.data : []) as Record<string, string>[];
+  const orders = (list.success && Array.isArray(list.data) ? list.data : []) as unknown as Record<string, string>[];
 
   // Method A — the two successful creates returned 20021376 and 20021378. If a
   // failed attempt had also created an order it would hold a later number in

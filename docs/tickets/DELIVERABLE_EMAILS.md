@@ -1,0 +1,209 @@
+# `deliverableEmails`: what the operator asks for, and who actually gets the email
+
+**Status: the field is removed from both forms** (`fix/remove-deliverable-emails-field`).
+The feature is not built. This document holds the investigation and the approved
+design for when it is.
+
+The field was removed rather than left in place because it accepted a delivery
+instruction and discarded it, which is worse than not offering one — the operator
+believes they have handled delivery. Removal took minutes; the real
+implementation needs a schema change and the four decisions below.
+
+The open-order form and the client wizard each collected up to five "deliverable
+emails". Nothing read them. This document answers the question that had to come
+first: **if the operator's five addresses are discarded, who has been receiving
+our confirmations and documents instead?**
+
+Short answer: one address, plus `openorders@pct.com`. Every outbound email in the
+system resolves its recipients from order FKs and party rows, and there is no
+code path anywhere — not in the confirmation, not in prelim delivery, not in the
+generic outbox — where an operator-supplied address can enter the recipient list
+at order-open time.
+
+## The field itself
+
+All references below are to the state before removal, so the trail is recoverable.
+
+| | |
+| --- | --- |
+| Schema | `createOrderInputSchema.deliverableEmails: z.array(z.string().email()).optional()` — `create-order.ts:72` |
+| Hub UI | `components/admin/quick-entry/parties-section.tsx:191–198` — add/remove, capped at 5 |
+| Client wizard UI | `components/client/new-order/step-add-parties.tsx:63–143`, echoed on review at `step-review.tsx:142` |
+| Carried to input | `client-wizard-to-create.ts:97–165`, `use-quick-entry.ts:325` |
+| Written to the database | **nowhere** — `createLocalRecords` never references it, and no column exists |
+| Sent to SoftPro | **no** — absent from `buildSoftProPayload` |
+| Read by any recipient resolver | **no** |
+
+The addresses were validated, displayed back to the operator on the review step,
+submitted, and then discarded in memory. There is no record of what anyone ever
+typed, so the size of the loss is not measurable — which is itself the finding.
+
+## What each resolver actually uses
+
+### 1. Order confirmation — `buildConfirmationRecipients`
+
+`src/lib/domain/notifications/confirmation-recipients.ts`, fed by
+`loadRecipientEmails` in `order-confirmation.ts:278–317`.
+
+**TO**, deduped, in this order:
+
+| Candidate | Source |
+| --- | --- |
+| Client | `orders.client_contact_id` → `contacts.email` |
+| Escrow officer | `orders.escrow_officer_id` → `contacts.email` |
+| Listing agent | `orders.listing_agent_id` → `contacts.email` (the **FK**, not the party row) |
+| Buyer agent | `order_parties` role `buyer_agent` → `contacts.email` ?? `external_email` |
+
+**CC**, deduped and minus anything already in TO:
+
+| Candidate | Source |
+| --- | --- |
+| Sales rep | `orders.sales_rep_id` → `contacts.email` |
+| `openorders@pct.com` | hardcoded constant, always present |
+| Extras | `process.env.PCT_INTERNAL_CC_EMAILS`, comma-separated |
+
+If TO ends up empty, `openorders@pct.com` is promoted out of CC into TO so a
+confirmation can never have zero recipients. A missing client email does not
+block the send; it sets `orders.email_status = 'sent_no_client'` and logs.
+
+Fill rates on the 4,055 active orders, i.e. how often each candidate can resolve
+at all:
+
+| Candidate column | Populated |
+| --- | --- |
+| `sales_rep_id` | 3,952 (97%) |
+| `client_contact_id` | 3,469 (86%) |
+| `escrow_officer_id` | 1,596 (39%) |
+| `listing_agent_id` | 607 (15%) |
+| `order_parties` role `buyer_agent` | **0 rows exist in the entire table** |
+
+The buyer-agent TO candidate has never resolved for anyone. The only writer of
+that role is the hub create path, and the confirmation reads the FK rather than
+the party row for the listing agent, so a listing agent captured on the form does
+not become a recipient until an enrichment job populates the FK.
+
+### What our team has actually received
+
+Every confirmation ever logged — 6 orders, 14 `notification_logs` rows, all
+`status = 'sent'`:
+
+| File | TO | CC |
+| --- | --- | --- |
+| 20021378-GLT | `escrow@firstpriorityescrow.com` | `openorders@pct.com` |
+| 20021376-OCT | `grace.yu@atlasescrow.us` | `openorders@pct.com` |
+| 20020404-GLT | `gerardoh@gmail.com` | `openorders@pct.com` |
+| 20020403-GLT | `gerardoh@gmail.com` | `openorders@pct.com` |
+| 20015757-GLT | `gerardoh@gmail.com` | `openorders@pct.com`, `ghernandez@pct.com` |
+| 20015183-GLT | `teamrose@powerhouseescrow.com` | `openorders@pct.com`, `kgreen@pct.com` |
+
+Every one of them: **exactly one TO address**, which is the client contact, and
+`openorders@pct.com` in CC. Maximum TO count across the whole table is 1.
+
+The two orders opened on 24 Aug have no sales rep in CC, and the two from July do.
+That is Cause B of the confirmation bug from the other side — `sales_rep_id` was
+only ever written by the SoftPro read-back, which runs after the confirmation has
+already sent, so the newest hub orders lost the one CC recipient they had.
+
+### 2. Prelim / document delivery — `resolvePrelimRecipients`
+
+`src/lib/domain/notifications/prelim-recipient-resolution.ts:106–219`.
+
+**TO** is a single address, resolved in strict order:
+
+1. `orders.escrow_officer_id` → `contacts.email`
+2. otherwise `order_parties` role `escrow_company` → `external_email` ?? joined `contacts.email`
+3. otherwise **blocked**, `blockReason: 'No valid primary prelim recipient resolved'`
+
+**CC**: sales rep from `orders.sales_rep_id`, plus ad-hoc addresses passed in.
+
+This is the one place an operator can add a recipient today, and only on a manual
+send: the deliver-prelim modal collects CC addresses client-side and posts them,
+and `deliver-prelim/route.ts:85–87` deliberately ignores the posted TO and
+re-resolves it server-side. Auto-delivery calls `resolvePrelimRecipients(orderId)`
+with no ad-hoc argument, so an automatic prelim goes to the escrow officer and the
+sales rep and no one else.
+
+`officer_cc_defaults` (`cc_email`) exists as a table and is read by no sending
+code — a second, already-built place where standing CC instructions go nowhere.
+
+### 3. Generic outbox notifications — `resolveRecipients`
+
+`src/lib/domain/notifications/recipients.ts`, used by `handleGenericDispatch` for
+document-ready, milestone and order-closed events. Recipients come from
+`notification_types.recipient_roles` (officer FKs on `orders`, or `order_parties`
+roles) plus `notification_types.internal_cc`. One separate email per recipient.
+
+Configuration lives in the database, not in code, so the live role lists for each
+slug are not knowable from the repository.
+
+### 4. Party wizard invite
+
+`src/lib/jobs/handlers/party-wizard-invite.ts:174` — TO is `contacts.email` for
+`orders.escrow_officer_id`, no CC, no alternative. See
+`CREATE_ORDER_DROPPED_FIELDS.md` for why that reaches 18.5% of candidates.
+
+### 5. Everything else
+
+`ops-daily-report.ts` uses `OPS_REPORT_RECIPIENT` (default `ghernandez@pct.com`);
+`invite-user/route.ts` uses the invited address; the dev sample sender is
+hardcoded. The direct-send handlers in `notifications/service.ts:195–243` are
+marked deprecated and are not on the live outbox path — worth knowing before
+anyone "fixes" recipients there and sees no change in production.
+
+## The divergence, stated plainly
+
+The operator is offered a field labelled as delivery instructions. What actually
+determines delivery is four foreign keys and a hardcoded internal address. The
+two have never been connected. Where the FKs are empty — 61% of active orders
+have no escrow officer, 85% have no listing agent FK — the confirmation
+narrows to the client contact alone, and prelim delivery is blocked outright.
+
+## Proposal — not implemented, needs decisions
+
+The mechanics are small. The product questions are not, so nothing here is built.
+
+1. **Persist the addresses.** A `text[]` column on `orders`, or an
+   `order_deliverable_emails` table if we want per-address provenance and an
+   audit trail of who added one and when.
+2. **Confirmation.** Add them as a candidate list in
+   `buildConfirmationRecipients`. Existing dedupe and the `openorders@pct.com`
+   guarantee already cover the rest.
+3. **Prelim.** Load them in `resolvePrelimRecipients` and merge into CC, which
+   also closes the auto-delivery gap and would be the natural place to finally
+   read `officer_cc_defaults`.
+
+### Decisions — recorded, 25 Aug 2026
+
+| Question | Decision |
+| --- | --- |
+| TO or CC? | **CC.** The responsible party stays in TO; requested addresses are copies. |
+| Which emails? | **Every document for the life of the order**, not the confirmation alone. That is what an operator means when they type it at open. |
+| Editable after open? | **Yes.** People get added mid-transaction; a list frozen at open is wrong within a week. Needs a UI on order detail, not just the create form. |
+| Existing orders? | **Nothing to do.** The addresses were never stored, so there is nothing to migrate and no way to identify who was affected. |
+
+"Every document for the life of the order" is the decision with the most weight
+in it. It rules out a create-only field and makes the storage choice for us: an
+`order_deliverable_emails` table rather than an array column, because an editable
+list wants provenance — who added the address and when — and every send path has
+to read the current list rather than a snapshot taken at open.
+
+## The same defect class, elsewhere
+
+Three more places where the system accepts or declares recipient intent and
+nothing reads it. Worth listing together, because the pattern is what to look for
+next, not the individual field.
+
+- **`officer_cc_defaults.cc_email`.** A built table for standing CC addresses per
+  escrow officer. No sending code queries it. `prelim-delivery-send.ts:242`
+  mentions it in a sample template only. This is the second place standing CC
+  instructions quietly go nowhere, and it should be wired in the same change as
+  the per-order list, since both land in the prelim CC.
+- **The `buyer_agent` confirmation recipient.** `buildConfirmationRecipients`
+  offers four TO candidates and one of them is dead code: `order_parties` has
+  **zero rows with role `buyer_agent`, ever**. The only writer of that role is the
+  hub create path, so the branch has never resolved for anyone. Either buyer
+  agents are being filed under another role or they are not captured at all —
+  either way, do not count it as a working recipient.
+- **`companies.deliverableEmails`.** Declared on the companies page type with no
+  column behind it, so it was always `undefined`. Removed alongside the form
+  field.

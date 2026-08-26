@@ -1,5 +1,6 @@
 import { nameTitleCase } from './title-case';
 import { splitFullName, type PersonName } from './split-full-name';
+import { entityMarker } from './entity-markers';
 
 // ─── SiteX owner names — custom.js:920-941 ──────────────────────────────────
 //
@@ -24,11 +25,60 @@ import { splitFullName, type PersonName } from './split-full-name';
 // "TIEU, DANIEL QUI & KHANH TRINH" — one surname, stated once — came out with a
 // second owner called "Trinh Khanh".
 
+/**
+ * What SiteX's own records say the owner IS, when we can tell.
+ *
+ * 'entity'  the current-owner deed party has no FirstAndMiddleName key.
+ *           Structural, from the vendor, not a guess.
+ * 'person'  the same party HAS one.
+ * 'unknown' no current-owner deed came back, so the question is unanswered.
+ */
+export type OwnerKind = 'entity' | 'person' | 'unknown';
+
+/** Which branch a parse actually took. Recorded so coverage is a query. */
+export type ParseBranch =
+  | 'entity-deed'      // deed said entity — passed through whole
+  | 'entity-marker'    // no deed, but the string carries an entity marker — abstained
+  | 'person-deed'      // deed said person — parsed
+  | 'person-parsed'    // no deed, no marker — parsed, exactly as before
+  | 'empty';
+
 export interface SiteXOwners {
   primary: PersonName | null;
   secondary: PersonName | null;
   /** Things a human should see rather than have silently decided for them. */
   warnings: string[];
+  /**
+   * True when the owner is an organization and the string was left intact.
+   * lastName holds the whole legal name; firstName and middleName are empty.
+   */
+  isEntity: boolean;
+  /** For instrumentation. See ParseBranch. */
+  branch: ParseBranch;
+}
+
+/**
+ * An organization is not a name to be split, flipped or cased. "5558 RIVERTON
+ * LLC" is the party's name exactly as recorded, and SoftPro stores it in the
+ * same field a person's name goes in — verified against 12 synced orders, where
+ * buyer.Company.PrimaryBorrower was null in every LLC/CORP/trust case.
+ *
+ * So: whole string into lastName, nothing invented, no title-casing. Casing a
+ * legal entity turns "1501 Reeves Holdings, LLC" into "... Llc".
+ */
+function entityOwner(raw: string, branch: ParseBranch, warnings: string[], marker?: string): SiteXOwners {
+  warnings.push(
+    marker
+      ? `"${raw}" looks like an organization (matched "${marker}") and SiteX returned no current-owner deed to confirm it. Left exactly as received rather than split into a person — check it before sending.`
+      : `"${raw}" is an organization per SiteX's current-owner deed. Left exactly as received.`,
+  );
+  return {
+    primary: { firstName: '', middleName: '', lastName: raw },
+    secondary: null,
+    warnings,
+    isEntity: true,
+    branch,
+  };
 }
 
 /**
@@ -174,10 +224,30 @@ function resolveOwner(seg: OwnerSegment, inheritable: string | null): ResolvedOw
 export function parseSiteXOwners(
   primaryOwnerName: string | null | undefined,
   secondaryOwnerName?: string | null,
+  ownerKind: OwnerKind = 'unknown',
 ): SiteXOwners {
   const warnings: string[] = [];
   const rawPrimary = (primaryOwnerName ?? '').trim();
-  if (!rawPrimary) return { primary: null, secondary: null, warnings };
+  if (!rawPrimary) {
+    return { primary: null, secondary: null, warnings, isEntity: false, branch: 'empty' };
+  }
+
+  // ── The three-way rule ───────────────────────────────────────────────────
+  //
+  // 1. The deed said entity. Definitive; nothing else is consulted.
+  if (ownerKind === 'entity') return entityOwner(rawPrimary, 'entity-deed', warnings);
+
+  // 2. No deed, and the string carries an entity marker. ABSTAIN. The marker
+  //    list may only ever reach this branch — it can suppress a transformation
+  //    and can never choose one, so a wrong match costs a warning rather than a
+  //    fabricated person.
+  if (ownerKind === 'unknown') {
+    const marker = entityMarker(rawPrimary);
+    if (marker.matched) return entityOwner(rawPrimary, 'entity-marker', warnings, marker.token);
+  }
+
+  // 3. Everything else parses exactly as it did before. "SANCHEZ SERGIO T"
+  //    must keep working; that case is not being traded for safety on another.
 
   // 1. Multi-owner split comes FIRST, before any other transformation, so the
   //    delimiter is still where SiteX put it.
@@ -216,5 +286,11 @@ export function parseSiteXOwners(
     );
   }
 
-  return { primary: primary.name, secondary: secondary?.name ?? null, warnings };
+  return {
+    primary: primary.name,
+    secondary: secondary?.name ?? null,
+    warnings,
+    isEntity: false,
+    branch: ownerKind === 'person' ? 'person-deed' : 'person-parsed',
+  };
 }

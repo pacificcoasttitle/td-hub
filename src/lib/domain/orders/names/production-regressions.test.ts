@@ -84,13 +84,18 @@ describe('the two names production actually got wrong', () => {
     expect(r.secondary).toEqual({ firstName: 'Khanh', middleName: '', lastName: 'Tran' });
   });
 
-  // Entity names truncated to 40 characters carry a trailing comma. That comma
-  // delimits nothing, so it must NOT be read as a surname marker. These stay
-  // broken on purpose — see docs/tickets/SITEX_ENTITY_OWNER_NAMES.md.
-  it('a trailing comma on a truncated entity name is not a surname delimiter', () => {
+  // This case USED to pin the broken behaviour deliberately — two people named
+  // "B" and "A Group Inc" — with a comment saying it stayed that way until the
+  // entity ticket was taken. It has been taken, so the expectation moves to the
+  // fixed value rather than the test being deleted or relaxed.
+  it('a truncated entity name is left whole, not split into two people', () => {
     const r = parseSiteXOwners('B & A GROUP INC,');
-    expect(r.primary).toEqual({ firstName: '', middleName: '', lastName: 'B' });
-    expect(r.secondary).toEqual({ firstName: 'Group', middleName: 'Inc', lastName: 'A' });
+    expect(r.isEntity).toBe(true);
+    expect(r.branch).toBe('entity-marker');
+    expect(r.primary).toEqual({ firstName: '', middleName: '', lastName: 'B & A GROUP INC,' });
+    expect(r.secondary).toBeNull();
+    // The ampersand split no longer fires, so there is no second "owner".
+    expect(r.warnings.some((w) => w.includes('organization'))).toBe(true);
   });
 
   it('the Redlands borrower was already correct and stays correct', () => {

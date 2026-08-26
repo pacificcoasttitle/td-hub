@@ -8,13 +8,15 @@ item 7 remain open.**
 
 Owner: unassigned
 Opened: 2026-08-25
+Last added to: 2026-08-26 (items 6 and 7)
 Source: surfaced incidentally during the SoftPro order-create investigation
-(`spike/softpro-write-audit`, `fix/softpro-create-parity`)
+(`spike/softpro-write-audit`, `fix/softpro-create-parity`) and the concierge
+operator UI preview run (`feat/concierge-operator-ui`)
 
 ## Why this file exists
 
-Five distinct exposures surfaced over two days, each one interrupting a different
-piece of bug-hunting. Handled one at a time as they appear, they derail the work
+Nine distinct exposures surfaced over three days, each one interrupting a
+different piece of bug-hunting. Handled one at a time as they appear, they derail the work
 and none of them get finished. They are collected here so they can be owned,
 prioritised and closed as their own stream, separately from the order-open fixes.
 
@@ -555,42 +557,125 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
   GRANT ALL ON TABLES TO anon, authenticated;
 ```
 
+## 8. Preview shares Production's database and live vendor credentials
+
+**Severity: high. Verified first-hand on 2026-08-26.**
+
+`vercel env ls` shows a single value of each of these scoped to
+`Production, Preview, Development`:
+
+| Variable | Scope |
+|---|---|
+| `DATABASE_URL` | Production, Preview, Development |
+| `SUPABASE_SERVICE_ROLE_KEY` | Production, Preview, Development |
+| `SITEX_CLIENT_ID` / `SITEX_CLIENT_SECRET` / `SITEX_BASE_URL` | Production, Preview, Development |
+
+There is no separate Preview database and no sandbox vendor tenant. The
+consequences follow directly:
+
+- **Any preview deployment writes production data.** Every branch anyone
+  pushes gets a deployment with the production service-role key. A migration
+  test, a seeded fixture, or a destructive query on a feature branch lands in
+  the real database.
+- **Any preview deployment can spend real money.** SiteX bills per successful
+  `/search`. A preview running a loop against the vendor is charged against the
+  production account, and — see the concierge notes — the vendor's own
+  `/credits` endpoint returns `2147483647`, a sentinel, so there is no balance
+  to watch it against. Our own metering is the only signal.
+- **Preview deployments are long-lived and numerous.** They are not torn down
+  with the branch.
+
+Vercel deployment protection limits who can *reach* a preview URL. It does not
+limit what the preview's server-side code does once it runs, which is where
+both consequences live.
+
+**Mitigation applied to one feature, which is not a fix.** The concierge
+feature flag `CONCIERGE_PROFILE_ENABLED` was scoped to a single branch's
+previews rather than to Preview as a whole, specifically so that arming a
+billable action on one branch could not arm it everywhere. That is a
+workaround for this item, not a resolution of it — it protects one flag, and
+every other code path in every preview still holds production credentials.
+
+The real fix is a separate Preview database and a separate vendor tenant (or,
+failing a vendor sandbox, a Preview-scoped credential with its own spend cap).
+Until then, treat every preview deployment as production access.
+
+---
+
+## 9. A user account password pasted into a session transcript
+
+**Severity: medium. Verified first-hand on 2026-08-26.**
+
+A TD Hub account's email and password were sent to an AI session in chat, to
+let the assistant sign in to a protected preview deployment. The assistant
+declined to enter it — entering credentials into a login form is refused
+regardless of who supplies them — but the refusal does not un-expose the
+value, which is now in the transcript in full.
+
+The account holder is rotating it. The value is not repeated here.
+
+**This is item 4's failure with the roles reversed** — there, the assistant
+printed a secret; here, a secret was handed to the assistant. Both put a live
+credential into a transcript, and the fix is the same in both directions:
+credentials never transit the session. Where an agent genuinely needs an
+authenticated session, the human authenticates in their own browser and the
+agent drives the already-authenticated tab, which is what happened here after
+the refusal.
+
+**Standing note for anyone reading this file:** if an agent asks you for a
+password, or if handing one over looks like the fastest way past a blocker,
+that is this item repeating. Sign in yourself.
+
 ---
 
 ## Pattern
 
-Three of these five are the same failure: a secret written somewhere convenient
-and then forgotten — a file beside the repo, an env file read aloud, a commit.
-The other two are the same failure at the infrastructure layer: a service that
-trusts its network position instead of its callers.
+Nine items, and they fall into four kinds. The kind matters more than the
+count, because each kind fails for a different reason and needs a different
+owner.
 
-Neither is a people problem, and neither gets fixed by being careful next time.
-They get fixed by there being one place secrets live, and by the adapter
-authenticating its callers. Both of those are projects, which is the argument
-for this file having a single owner rather than being absorbed into whatever
-bug is being worked that day.
+**A secret written somewhere convenient and then forgotten.** Items 3, 4, 5
+and 9 — a file beside the repo, an env file read aloud, a commit, a password
+pasted into a chat. Two of the four involved an AI session transcript, in
+opposite directions: item 4 the assistant printing a secret, item 9 a secret
+being handed to the assistant.
 
-Item 6 is a third kind, and it sharpens that argument. It is not a secret left
-somewhere or a service trusting its network — it is a control that **was**
-applied, correctly, to 37 tables, and then did not stay applied. Five tables
-added afterwards missed it because the control is a hand-maintained list. So the
-fix that closes item 6 tonight (five `ALTER TABLE`s) is not the fix that keeps
-it closed, and nobody working a bug will own the second one. That is the owner
-problem: items 1 through 5 need someone to start them, and item 6 needs someone
-to still be watching in a month.
+**A service that trusts its network position instead of its callers.**
+Items 1 and 2.
 
-The follow-up bore that out twice over. The five `ALTER TABLE`s landed the same
-night; the guard that keeps them closed was still in an unmerged PR. And the
-grants turn out to have the same shape one layer down — four
+**A control that WAS applied correctly and then did not stay applied.**
+Items 6 and 7. RLS covered 37 tables; five added later missed it because the
+control is a hand-maintained list. The `ALTER TABLE`s that close item 6 are not
+what keeps it closed, and the grants have the same shape one layer down — four
 `ALTER DEFAULT PRIVILEGES` entries re-granting `anon` on every new table, so
-even a complete revoke of the 42 expires at the next `CREATE TABLE`. Twice now,
-the durable half of the fix has been the half that has no owner.
+even a complete revoke expires at the next `CREATE TABLE`.
+
+**A secret deliberately shared into an environment that should not hold it.**
+Item 8, and it is the one that will never announce itself. Nothing was
+mishandled to create it; Preview is working exactly as configured. It will not
+surface as an incident that reminds anyone it exists — it will surface as a
+corrupted production row or a vendor bill.
+
+### The owner problem, which is the reason this file exists
+
+Items 1 through 5 need someone to **start** them. Items 6 and 7 need someone to
+**still be watching in a month**. Item 8 needs someone with the authority to
+provision a second database and a second vendor tenant, which is neither.
+
+The follow-up bore that out twice over: the five `ALTER TABLE`s landed the same
+night, while the guard that keeps them closed was still in an unmerged PR.
+Twice now, the durable half of the fix has been the half with no owner.
+
+None of these is a people problem, and none is fixed by being careful next
+time. They are fixed by there being one place secrets live, by the adapter
+authenticating its callers, by controls that enumerate rather than list, and by
+non-production environments holding non-production credentials.
 
 ---
 
 ## Explicitly out of scope for this document
 
-- No remediation attempted on items 1–5. Item 6's step 1 was applied
+- No remediation attempted on items 1–5, 8 or 9. Item 6's step 1 was applied
   (migration `0038`) and step 4 was applied (migration `0039`); step 2 and
   item 7 remain open.
 - No secret values recorded, including in file paths where the path itself

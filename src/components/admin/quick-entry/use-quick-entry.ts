@@ -158,7 +158,11 @@ export function useQuickEntry() {
    * and overwrite that field.
    */
   function fillOwners(p: SiteXPropertyResult) {
-    const owners = parseSiteXOwners(p.primaryOwner, p.secondaryOwner);
+    // ownerKind comes from SiteX's own current-owner deed — FirstAndMiddleName
+    // absent means an organization. When the deed is missing it arrives
+    // undefined, and the parser falls back to its entity-marker list, which may
+    // only ever abstain. See integrations/sitex/owner-kind.ts.
+    const owners = parseSiteXOwners(p.primaryOwner, p.secondaryOwner, p.ownerKind ?? 'unknown');
     setOwnerWarnings(owners.warnings);
     if (!owners.primary) return;
 

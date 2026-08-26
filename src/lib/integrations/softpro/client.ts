@@ -91,12 +91,50 @@ async function logRequest(params: {
   }
 }
 
+/**
+ * GetAttachedDocuments is the only read whose body we keep. The prelim parser
+ * accepts bare URL strings and drops everything else, so an empty response and
+ * a shape we can't read are indistinguishable from the log — which is why
+ * 410 Title & Escrow orders with no prelim could not be explained. `keys`
+ * exposes FolderName if the vendor sends it.
+ */
+export function describeAttachedDocuments(data: unknown): Record<string, unknown> {
+  if (!Array.isArray(data)) {
+    return { dataType: data === null ? 'null' : typeof data, itemCount: 0 };
+  }
+
+  const keys = new Set<string>();
+  const itemTypes = new Set<string>();
+  for (const item of data) {
+    if (item !== null && typeof item === 'object') {
+      itemTypes.add('object');
+      for (const k of Object.keys(item as Record<string, unknown>)) keys.add(k);
+    } else {
+      itemTypes.add(item === null ? 'null' : typeof item);
+    }
+  }
+
+  return {
+    dataType: 'array',
+    itemCount: data.length,
+    itemTypes: Array.from(itemTypes),
+    keys: Array.from(keys),
+    // What extractUrls in fetch-prelims would actually keep.
+    urlCount: data.filter((i) => typeof i === 'string' && i.startsWith('http')).length,
+    sample: data.slice(0, 3).map((i) => JSON.stringify(i)?.slice(0, 300) ?? String(i)),
+  };
+}
+
 function buildSuccessResponseMeta<T>(operation: string, raw: SoftProResponse<T>): Record<string, unknown> {
   const meta: Record<string, unknown> = {
     status: raw.Status,
     bodyStatus: raw.Status,
     message: raw.Message,
   };
+
+  if (operation === 'get_attached_documents') {
+    meta.attached = describeAttachedDocuments(raw.data);
+  }
 
   if (operation === 'get_order_details' && Array.isArray(raw.data)) {
     const escrowOfficerValues = raw.data

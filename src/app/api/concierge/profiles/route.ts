@@ -4,6 +4,7 @@ import { getSession } from '@/lib/security/auth';
 import { denyConciergeGeneration, denialMessage } from '@/lib/domain/concierge/access';
 import { generateConciergeProfile } from '@/lib/domain/concierge/generate';
 import { getProfileForOrder, getSpendSnapshot } from '@/lib/domain/concierge/profiles';
+import { resolvePresentingRep } from '@/lib/domain/concierge/presenting-rep';
 
 export const dynamic = 'force-dynamic';
 // A SiteX call plus a PDF render. Well inside Vercel's ceiling, but not the default.
@@ -18,12 +19,10 @@ const bodySchema = z.object({
   preparedForName: z.string().min(1, 'A prepared-for name is required.'),
   preparedForCompany: z.string().optional().nullable(),
   preparedForEmail: z.string().email().optional().nullable(),
-  presentingRep: z.object({
-    name: z.string().min(1, 'A presenting representative is required.'),
-    email: z.string().email().optional().nullable(),
-    phone: z.string().optional().nullable(),
-    title: z.string().optional().nullable(),
-  }),
+  // NOT the rep's details — only which contact to use. The name, email and
+  // phone printed on a client-facing document are resolved server-side from
+  // the order, never accepted from the browser.
+  presentingRepContactId: z.number().int().positive().optional().nullable(),
 });
 
 /**
@@ -60,7 +59,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const result = await generateConciergeProfile({ ...parsed.data, createdBy: session.email });
+  const rep = await resolvePresentingRep(parsed.data.orderId ?? null, parsed.data.presentingRepContactId);
+  if (!rep.ok) {
+    return NextResponse.json({ error: rep.message, reason: rep.reason }, { status: 400 });
+  }
+
+  const result = await generateConciergeProfile({
+    ...parsed.data, presentingRep: rep.rep, createdBy: session.email,
+  });
   const spend = await getSpendSnapshot();
 
   if (!result.ok) {

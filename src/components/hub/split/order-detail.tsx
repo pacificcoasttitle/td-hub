@@ -5,25 +5,39 @@ import {
   type HubListOrder,
 } from '@/lib/domain/orders/hub-list-row';
 import { statusBadge } from '@/lib/domain/orders/status-format';
+import { DocumentsPanel, type DocState } from './documents-panel';
+import type { ProfileSummary } from '@/lib/domain/concierge/profiles';
 
 // ─── Read-only detail pane ───────────────────────────────────────────────────
 //
-// Phase 1 scope: sticky header, the two conditional banners, and the Order
-// field grid. Documents, Contacts and Notes are phases 3 and 4 and are absent
-// rather than stubbed — an empty panel outline promises data that is not there.
+// Header, the two conditional banners, the Documents panel and the Order field
+// grid. Contacts and Notes remain absent rather than stubbed — an empty panel
+// outline promises data that is not there.
 //
 // Everything here is rendered from the list row. There is no per-order fetch,
 // which is what makes j/k feel instant: the pane cannot lag the selection
 // because it is the selection.
 
-export function OrderDetail({
-  order, busy, onResync, onRetryTitlePoint,
-}: {
+export interface OrderDetailProps {
   order: HubListOrder | null;
   busy: 'resync' | 'retry_tp' | null;
   onResync: (o: HubListOrder) => void;
   onRetryTitlePoint: (o: HubListOrder) => void;
-}) {
+  documents?: { cpl?: DocState; prelim?: DocState; proposedInsured?: DocState };
+  profile: ProfileSummary | null;
+  profileLoading: boolean;
+  profileBusy: boolean;
+  canGenerateProfile: boolean;
+  profileFeatureOn: boolean;
+  onGenerateProfile: () => void;
+  onAdjustProfile: () => void;
+  onRetryProfileRender: () => void;
+  onGenerateDocument: (kind: 'cpl' | 'proposed' | 'prelim') => void;
+}
+
+export function OrderDetail({
+  order, busy, onResync, onRetryTitlePoint, ...d
+}: OrderDetailProps) {
   if (!order) {
     return (
       <div className="flex-1 min-w-0 bg-[#FAFAFB] flex items-center justify-center">
@@ -107,6 +121,19 @@ export function OrderDetail({
             </div>
           </Banner>
         )}
+
+        <DocumentsPanel
+          documents={d.documents}
+          profile={d.profile}
+          profileLoading={d.profileLoading}
+          canGenerateProfile={d.canGenerateProfile}
+          profileFeatureOn={d.profileFeatureOn}
+          busyProfile={d.profileBusy}
+          onGenerateProfile={d.onGenerateProfile}
+          onAdjustProfile={d.onAdjustProfile}
+          onRetryProfileRender={d.onRetryProfileRender}
+          onGenerate={d.onGenerateDocument}
+        />
 
         <Panel label="Order">
           <div className="grid grid-cols-4 gap-y-[10px] gap-x-[22px]">

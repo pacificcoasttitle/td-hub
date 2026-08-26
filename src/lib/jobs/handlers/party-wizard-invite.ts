@@ -41,6 +41,27 @@ export const PARTY_INVITE_BATCH = 100;
 export const PARTY_INVITE_ROLE: PartyRole = 'listing_agent';
 
 /**
+ * Hard ceiling on emails to one person per run. Permanent, not a pilot setting.
+ *
+ * Measured against production: a single run put 12 of 21 invites in one escrow
+ * officer's inbox, four of them consecutive file numbers on adjacent properties.
+ * That reads as a malfunction, and someone who thinks the system is broken does
+ * not forward the link — which costs exactly the outcome the job exists for.
+ *
+ * Orders over the cap are not dropped. They stay eligible and go out on the next
+ * run, so the queue drains at this rate instead of arriving at once. A
+ * per-recipient digest is the eventual answer; the cap holds until then.
+ */
+export const PARTY_INVITE_MAX_PER_RECIPIENT = 2;
+
+/**
+ * How far back a prior invite still suppresses a second ask for the same
+ * property. Matches the link lifetime — while the first link is usable, asking
+ * again for the same property is asking twice.
+ */
+export const PARTY_INVITE_PROPERTY_LOOKBACK_DAYS = 60;
+
+/**
  * Statuses worth chasing an agent for: live work only.
  *
  * ACTIVE rather than ENRICHABLE — the enrichment jobs include 'completed'
@@ -75,6 +96,8 @@ export interface PartyInviteUnreachable {
 export type PartyInviteOutcome =
   | 'would_send'
   | 'skipped_existing_link'
+  | 'skipped_duplicate_property'
+  | 'skipped_recipient_cap'
   | 'no_escrow_officer'
   | 'officer_no_email';
 
@@ -91,6 +114,11 @@ export interface PartyInviteReportRow {
   recipientName: string | null;
   recipientRole: 'escrow_officer';
   outcome: PartyInviteOutcome;
+  /**
+   * The file that owns the single ask for this property, when this row was
+   * skipped as a duplicate. Null when the earlier ask was on a previous run.
+   */
+  duplicateOf?: string | null;
   /** Roles the invite would carry a link for. */
   linkRoles: PartyRole[];
   linkAction: 'would_mint' | 'live_link_exists' | 'none';
@@ -116,6 +144,10 @@ export interface PartyInviteResult {
   sent: number;
   failed: number;
   skippedExistingLink: number;
+  /** Another file on the same property already carries the ask. */
+  skippedDuplicateProperty: number;
+  /** Held back by the per-recipient cap. Eligible again next run. */
+  skippedRecipientCap: number;
   unreachable: PartyInviteUnreachable;
   /** Share of candidates we could actually reach. The number to watch. */
   reachablePct: number;
@@ -243,6 +275,7 @@ export async function handlePartyWizardInvite(
     );
     const refusal: PartyInviteResult = {
       scanned: 0, sent: 0, failed: 0, skippedExistingLink: 0,
+      skippedDuplicateProperty: 0, skippedRecipientCap: 0,
       unreachable: { noEscrowOfficer: 0, escrowOfficerNoEmail: 0 },
       reachablePct: 0, enabled: false, dryRun: false, refused: true,
     };
@@ -257,6 +290,8 @@ export async function handlePartyWizardInvite(
     sent: 0,
     failed: 0,
     skippedExistingLink: 0,
+    skippedDuplicateProperty: 0,
+    skippedRecipientCap: 0,
     unreachable: { noEscrowOfficer: 0, escrowOfficerNoEmail: 0 },
     reachablePct: 0,
     enabled,
@@ -264,38 +299,64 @@ export async function handlePartyWizardInvite(
   };
 
   if (dryRun) {
-    result.report = [];
     result.reportNote = REPORT_NOTE;
   }
+
+  // ── Pass 1: who can we reach, and who is already covered ──
+  const outcomes = new Map<number, { outcome: PartyInviteOutcome; linkAction: LinkAction; duplicateOf?: string | null }>();
+  const reachableRows: Sendable[] = [];
 
   for (const row of candidates) {
     // Count what we cannot reach, by reason, BEFORE doing any work — an
     // unreachable order must never look like a silent success.
     if (!row.escrowOfficerId) {
       result.unreachable.noEscrowOfficer++;
-      result.report?.push(reportRow(row, 'no_escrow_officer', 'none'));
+      outcomes.set(row.orderId, { outcome: 'no_escrow_officer', linkAction: 'none' });
       continue;
     }
     const to = row.escrowOfficerEmail?.trim();
     if (!to) {
       result.unreachable.escrowOfficerNoEmail++;
-      result.report?.push(reportRow(row, 'officer_no_email', 'none'));
+      outcomes.set(row.orderId, { outcome: 'officer_no_email', linkAction: 'none' });
       continue;
     }
 
     // A live link means an invite is already in flight for this role.
     if (await findLiveLink(row.orderId, PARTY_INVITE_ROLE)) {
       result.skippedExistingLink++;
-      result.report?.push(reportRow(row, 'skipped_existing_link', 'live_link_exists'));
+      outcomes.set(row.orderId, { outcome: 'skipped_existing_link', linkAction: 'live_link_exists' });
       continue;
     }
+
+    reachableRows.push({ row, to });
+  }
+
+  // ── Pass 2: one ask per property, then the per-recipient cap ──
+  const plan = planSends(reachableRows, await loadInvitedProperties());
+
+  for (const dup of plan.duplicates) {
+    result.skippedDuplicateProperty++;
+    outcomes.set(dup.row.orderId, {
+      outcome: 'skipped_duplicate_property', linkAction: 'none', duplicateOf: dup.duplicateOf,
+    });
+  }
+  for (const held of plan.capped) {
+    result.skippedRecipientCap++;
+    outcomes.set(held.row.orderId, { outcome: 'skipped_recipient_cap', linkAction: 'none' });
+  }
+
+  // ── Pass 3: act ──
+  const previews = new Map<number, PartyInviteReportRow>();
+
+  for (const { row, to } of plan.sending) {
+    outcomes.set(row.orderId, { outcome: 'would_send', linkAction: 'would_mint' });
 
     // A dry run stops here: everything below this line either writes a link row
     // or sends mail. The templates are still rendered against the same input, so
     // a template that throws fails the dry run instead of the first real send.
     if (dryRun) {
       const preview = renderPreview(row);
-      result.report!.push(preview.row);
+      previews.set(row.orderId, preview.row);
       // Keep the first one whole. One is enough to review the wording, and a
       // hundred full bodies in one response is a payload nobody reads.
       if (!result.sampleEmail && preview.rendered) {
@@ -341,6 +402,18 @@ export async function handlePartyWizardInvite(
     }
   }
 
+  // Built last, in candidate order, so the report reads in the same order as the
+  // scan regardless of which pass decided each row.
+  if (dryRun) {
+    result.report = candidates.map((row) => {
+      const decided = outcomes.get(row.orderId);
+      const built = previews.get(row.orderId)
+        ?? reportRow(row, decided?.outcome ?? 'would_send', decided?.linkAction ?? 'none');
+      if (decided?.duplicateOf !== undefined) built.duplicateOf = decided.duplicateOf;
+      return built;
+    });
+  }
+
   const reachable = result.scanned
     - result.unreachable.noEscrowOfficer
     - result.unreachable.escrowOfficerNoEmail;
@@ -352,6 +425,8 @@ export async function handlePartyWizardInvite(
     `[party-wizard-invite]${dryRun ? ' DRY RUN' : ''} scanned=${result.scanned} `
     + `sent=${result.sent} failed=${result.failed} `
     + `skipped_existing=${result.skippedExistingLink} `
+    + `skipped_duplicate_property=${result.skippedDuplicateProperty} `
+    + `skipped_recipient_cap=${result.skippedRecipientCap} `
     + `unreachable_no_officer=${result.unreachable.noEscrowOfficer} `
     + `unreachable_no_email=${result.unreachable.escrowOfficerNoEmail} `
     + `reachable=${result.reachablePct}%`,
@@ -360,6 +435,126 @@ export async function handlePartyWizardInvite(
   await recordRun(payload, result);
 
   return result;
+}
+
+// ─── One ask per property, capped per recipient ──────────────────────────────
+
+type LinkAction = PartyInviteReportRow['linkAction'];
+
+export interface Sendable {
+  row: CandidateRow;
+  to: string;
+}
+
+export interface PartyInvitePlan {
+  sending: Sendable[];
+  /** Same property as a file that already carries the ask. */
+  duplicates: Array<Sendable & { duplicateOf: string | null }>;
+  /** Over the per-recipient cap. Still eligible on the next run. */
+  capped: Sendable[];
+}
+
+/**
+ * Key a property so two files on the same address collapse to one ask.
+ *
+ * Production shipped 20021227-OCT and -PRV (both 8613 Bonita Rd) and
+ * 20021320-OCT and -PRV (both 223 Lincoln Ave) in the same run: the same escrow
+ * officer, the same property, the same listing agent, asked twice. From an inbox
+ * that is a duplicate send, whatever the file numbers say.
+ *
+ * Punctuation and case are stripped because the same address arrives written
+ * several ways ("127 Avenida De La Paz,," has a double comma in production).
+ * Anything shorter than a plausible address returns null and never groups —
+ * collapsing two unrelated files would suppress a real ask, which is worse than
+ * sending twice.
+ */
+export function propertyKey(row: CandidateRow): string | null {
+  const address = composeAddress(row);
+  if (!address) return null;
+  const normalized = address.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  return normalized.length >= 6 ? normalized : null;
+}
+
+export function planSends(reachable: Sendable[], invitedProperties: Set<string>): PartyInvitePlan {
+  const plan: PartyInvitePlan = { sending: [], duplicates: [], capped: [] };
+
+  // Lowest order id first, so which sibling file carries the ask is stable across
+  // runs rather than whatever order the database happened to return.
+  const ordered = [...reachable].sort((a, b) => a.row.orderId - b.row.orderId);
+
+  const askedThisRun = new Map<string, string>();
+  const perRecipient = new Map<string, number>();
+
+  for (const item of ordered) {
+    const key = propertyKey(item.row);
+
+    if (key) {
+      if (invitedProperties.has(key)) {
+        plan.duplicates.push({ ...item, duplicateOf: null });
+        continue;
+      }
+      const owner = askedThisRun.get(key);
+      if (owner) {
+        plan.duplicates.push({ ...item, duplicateOf: owner });
+        continue;
+      }
+    }
+
+    // Cap after dedupe: a duplicate must not consume one of a recipient's two
+    // slots, or the cap would suppress a real ask to spare a redundant one.
+    const alreadySending = perRecipient.get(item.to) ?? 0;
+    if (alreadySending >= PARTY_INVITE_MAX_PER_RECIPIENT) {
+      plan.capped.push(item);
+      continue;
+    }
+
+    // Claimed only on an actual send. A capped order has not asked anything, so
+    // claiming its property here would make its sibling a duplicate of an ask
+    // nobody made — and both would then sit unasked forever.
+    if (key) askedThisRun.set(key, item.row.fileNumber);
+    perRecipient.set(item.to, alreadySending + 1);
+    plan.sending.push(item);
+  }
+
+  return plan;
+}
+
+/**
+ * Properties that already received an invite, so a second file on the same
+ * address does not ask again on a later run.
+ *
+ * The per-order suppression (no prior notification_logs row) cannot catch this:
+ * -OCT and -PRV are different orders, and a sibling file opened a day later is a
+ * fresh candidate with a clean log.
+ */
+async function loadInvitedProperties(): Promise<Set<string>> {
+  try {
+    const rows = await db.execute(sql`
+      select distinct op.full_address, op.address, op.city, op.state, op.zip
+      from notification_logs nl
+      join order_properties op on op.order_id = nl.order_id
+      where nl.event_type = 'party_wizard.invite'
+        and nl.created_at >= now() - (${PARTY_INVITE_PROPERTY_LOOKBACK_DAYS} * interval '1 day')
+    `) as unknown as Array<{
+      full_address: string | null; address: string | null;
+      city: string | null; state: string | null; zip: string | null;
+    }>;
+
+    const keys = new Set<string>();
+    for (const r of rows) {
+      const key = propertyKey({
+        fullAddress: r.full_address, address: r.address,
+        city: r.city, state: r.state, zip: r.zip,
+      } as CandidateRow);
+      if (key) keys.add(key);
+    }
+    return keys;
+  } catch {
+    // An unreadable history must not turn into a second ask on every property.
+    // Failing closed here would silence the job entirely, so it fails open and
+    // relies on the per-order suppression that has always been there.
+    return new Set();
+  }
 }
 
 // ─── Dry-run reporting ───────────────────────────────────────────────────────

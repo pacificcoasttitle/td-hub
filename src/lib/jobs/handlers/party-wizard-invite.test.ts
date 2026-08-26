@@ -30,8 +30,11 @@ vi.mock('drizzle-orm', () => ({
 
 const jobUpdates: Array<Record<string, unknown>> = [];
 
+const executeMock = vi.fn();
+
 vi.mock('@/lib/db/client', () => ({
   db: {
+    execute: (...a: unknown[]) => executeMock(...a),
     select: () => ({
       from: () => ({
         leftJoin: () => ({
@@ -66,11 +69,11 @@ vi.mock('@/lib/domain/parties/party-wizard-service', () => ({
 
 import {
   handlePartyWizardInvite, PARTY_INVITE_DELAY_DAYS, PARTY_INVITE_MAX_AGE_DAYS,
-  PARTY_INVITE_STATUSES, PARTY_INVITE_ENABLED_SETTING,
+  PARTY_INVITE_STATUSES, PARTY_INVITE_ENABLED_SETTING, PARTY_INVITE_MAX_PER_RECIPIENT,
 } from './party-wizard-invite';
 
 function candidate(over: Record<string, unknown> = {}) {
-  return {
+  const row = {
     orderId: 1,
     fileNumber: '20020625-OCT',
     openedAt: new Date('2026-08-15T00:00:00Z'),
@@ -82,6 +85,11 @@ function candidate(over: Record<string, unknown> = {}) {
     escrowOfficerEmail: 'officer@example.com',
     ...over,
   };
+  // Distinct address per order unless a test pins one. Asks are deduped by
+  // property, so fixtures sharing one address would collapse into a single send
+  // and quietly change what the surrounding test is measuring.
+  if (!('fullAddress' in over)) row.fullAddress = `${row.orderId} Main St, Irvine, CA`;
+  return row;
 }
 
 beforeEach(() => {
@@ -89,6 +97,8 @@ beforeEach(() => {
   jobUpdates.length = 0;
   // Sending is opt-in, so every test that expects a send has to turn it on.
   getSettingMock.mockResolvedValue('true');
+  // No property has been invited before, unless a test says otherwise.
+  executeMock.mockResolvedValue([]);
   findLiveLinkMock.mockResolvedValue(null);
   mintLinkMock.mockResolvedValue({ linkId: 1, url: 'https://hub.pctitle.com/party-wizard/tok' });
   sendEmailMock.mockResolvedValue({ success: true });
@@ -192,6 +202,7 @@ describe('party wizard invite', () => {
 
       const r = await handlePartyWizardInvite();
       const accounted = r.sent + r.failed + r.skippedExistingLink
+        + r.skippedDuplicateProperty + r.skippedRecipientCap
         + r.unreachable.noEscrowOfficer + r.unreachable.escrowOfficerNoEmail;
       expect(accounted).toBe(r.scanned);
     });
@@ -239,6 +250,194 @@ describe('party wizard invite', () => {
     const r = await handlePartyWizardInvite();
     expect(r.failed).toBe(1);
     expect(r.sent).toBe(1);
+  });
+});
+
+// ─── One ask per property ────────────────────────────────────────────────────
+//
+// Production sent 20021227-OCT and -PRV in one run: both 8613 Bonita Rd, same
+// escrow officer, same listing agent. Two files is a SoftPro distinction; from an
+// inbox it is the same ask twice.
+
+describe('one ask per property, not per file', () => {
+  const bonita = { fullAddress: '8613 BONITA RD' };
+
+  it('asks once when two files share a property', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fileNumber: '20021227-OCT', ...bonita }),
+      candidate({ orderId: 2, fileNumber: '20021227-PRV', ...bonita }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(1);
+    expect(r.skippedDuplicateProperty).toBe(1);
+    expect(sendEmailMock).toHaveBeenCalledOnce();
+    expect(mintLinkMock).toHaveBeenCalledOnce();
+  });
+
+  it('names the file that carries the ask, so the skip is explainable', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fileNumber: '20021227-OCT', ...bonita }),
+      candidate({ orderId: 2, fileNumber: '20021227-PRV', ...bonita }),
+    ]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report![0]).toMatchObject({ fileNumber: '20021227-OCT', outcome: 'would_send' });
+    expect(r.report![1]).toMatchObject({
+      fileNumber: '20021227-PRV',
+      outcome: 'skipped_duplicate_property',
+      duplicateOf: '20021227-OCT',
+    });
+  });
+
+  it('picks the same file every run — lowest order id, not database order', async () => {
+    const rows = [
+      candidate({ orderId: 9, fileNumber: 'LATER', ...bonita }),
+      candidate({ orderId: 4, fileNumber: 'EARLIER', ...bonita }),
+    ];
+    candidatesMock.mockResolvedValue(rows);
+    const first = await handlePartyWizardInvite({ dryRun: true });
+
+    candidatesMock.mockResolvedValue([...rows].reverse());
+    const second = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(first.sampleEmail!.fileNumber).toBe('EARLIER');
+    expect(second.sampleEmail!.fileNumber).toBe('EARLIER');
+  });
+
+  it('does not ask again when an earlier run already asked for that property', async () => {
+    executeMock.mockResolvedValue([
+      { full_address: '8613 Bonita Rd', address: null, city: null, state: null, zip: null },
+    ]);
+    candidatesMock.mockResolvedValue([candidate({ orderId: 1, ...bonita })]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(0);
+    expect(r.skippedDuplicateProperty).toBe(1);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('matches addresses across punctuation and case, which production varies', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fullAddress: '127 Avenida De La Paz,, San Clemente, CA, 92672' }),
+      candidate({ orderId: 2, fullAddress: '127 AVENIDA DE LA PAZ, SAN CLEMENTE CA 92672' }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(1);
+    expect(r.skippedDuplicateProperty).toBe(1);
+  });
+
+  it('treats adjacent properties as separate asks — they are different files AND different homes', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fullAddress: '127 Avenida De La Paz, San Clemente, CA' }),
+      candidate({ orderId: 2, fullAddress: '129 Avenida De La Paz, San Clemente, CA' }),
+    ]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report!.every(row => row.outcome === 'would_send')).toBe(true);
+  });
+
+  /**
+   * Two orders with no address are not evidence of the same property. Grouping
+   * them would suppress a real ask, which is worse than one redundant email.
+   */
+  it('never groups orders that have no address', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fullAddress: null }),
+      candidate({ orderId: 2, fullAddress: null }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(2);
+    expect(r.skippedDuplicateProperty).toBe(0);
+  });
+
+  it('keeps sending when the invite history cannot be read', async () => {
+    executeMock.mockRejectedValue(new Error('pg down'));
+    candidatesMock.mockResolvedValue([candidate()]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(1);
+  });
+});
+
+// ─── Per-recipient cap ───────────────────────────────────────────────────────
+//
+// One officer received 12 of 21 invites in a single run, four of them adjacent
+// files. Someone who thinks the system is malfunctioning does not forward the
+// link, which is the only thing this job is for.
+
+describe('caps how many emails one person gets per run', () => {
+  function forOneOfficer(count: number) {
+    return Array.from({ length: count }, (_, i) => candidate({
+      orderId: i + 1,
+      fileNumber: `FILE-${i + 1}`,
+      escrowOfficerEmail: 'cquintanar@example.com',
+    }));
+  }
+
+  it('sends at most two to the same recipient', async () => {
+    candidatesMock.mockResolvedValue(forOneOfficer(12));
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(PARTY_INVITE_MAX_PER_RECIPIENT);
+    expect(r.sent).toBe(2);
+    expect(r.skippedRecipientCap).toBe(10);
+    expect(sendEmailMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('holds the rest rather than dropping them', async () => {
+    candidatesMock.mockResolvedValue(forOneOfficer(5));
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    const held = r.report!.filter(row => row.outcome === 'skipped_recipient_cap');
+    expect(held).toHaveLength(3);
+    // Held rows mint nothing and log nothing, so they are candidates again
+    // tomorrow. That is what makes this a rate limit and not a silent drop.
+    expect(mintLinkMock).not.toHaveBeenCalled();
+    expect(insertLogMock).not.toHaveBeenCalled();
+  });
+
+  it('counts per recipient, not per run — a second officer is unaffected', async () => {
+    candidatesMock.mockResolvedValue([
+      ...forOneOfficer(3),
+      candidate({ orderId: 10, escrowOfficerEmail: 'other@example.com' }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(3);
+    expect(r.skippedRecipientCap).toBe(1);
+    const recipients = sendEmailMock.mock.calls.map(c => (c[0] as { to: string }).to);
+    expect(recipients).toContain('other@example.com');
+  });
+
+  /**
+   * A duplicate is not an ask, so it must not consume a slot — otherwise the cap
+   * would suppress a real ask in order to spare a redundant one.
+   */
+  it('does not spend a slot on a duplicate property', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fileNumber: 'A-OCT', fullAddress: '8613 BONITA RD' }),
+      candidate({ orderId: 2, fileNumber: 'A-PRV', fullAddress: '8613 BONITA RD' }),
+      candidate({ orderId: 3, fileNumber: 'B', fullAddress: '52 CARROLL DR' }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(2);
+    expect(r.skippedDuplicateProperty).toBe(1);
+    expect(r.skippedRecipientCap).toBe(0);
   });
 });
 

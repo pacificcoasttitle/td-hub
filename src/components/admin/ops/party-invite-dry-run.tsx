@@ -9,7 +9,13 @@ import { Eye } from 'lucide-react';
 // that would be without sending to them, so the recipient address is shown in
 // full rather than summarised into a count.
 
-type Outcome = 'would_send' | 'skipped_existing_link' | 'no_escrow_officer' | 'officer_no_email';
+type Outcome =
+  | 'would_send'
+  | 'skipped_existing_link'
+  | 'skipped_duplicate_property'
+  | 'skipped_recipient_cap'
+  | 'no_escrow_officer'
+  | 'officer_no_email';
 
 interface ReportRow {
   orderId: number;
@@ -22,6 +28,7 @@ interface ReportRow {
   recipientName: string | null;
   recipientRole: string;
   outcome: Outcome;
+  duplicateOf?: string | null;
   linkRoles: string[];
   linkAction: 'would_mint' | 'live_link_exists' | 'none';
   subject: string | null;
@@ -50,6 +57,8 @@ interface DryRunResult {
 const OUTCOME_LABEL: Record<Outcome, string> = {
   would_send: 'Would send',
   skipped_existing_link: 'Skipped — live link',
+  skipped_duplicate_property: 'Skipped — same property',
+  skipped_recipient_cap: 'Held — recipient cap',
   no_escrow_officer: 'No escrow officer',
   officer_no_email: 'Officer has no email',
 };
@@ -57,6 +66,8 @@ const OUTCOME_LABEL: Record<Outcome, string> = {
 const OUTCOME_CLASS: Record<Outcome, string> = {
   would_send: 'bg-green-50 text-green-700 border-green-200',
   skipped_existing_link: 'bg-gray-50 text-gray-600 border-gray-200',
+  skipped_duplicate_property: 'bg-gray-50 text-gray-600 border-gray-200',
+  skipped_recipient_cap: 'bg-blue-50 text-blue-700 border-blue-200',
   no_escrow_officer: 'bg-amber-50 text-amber-700 border-amber-200',
   officer_no_email: 'bg-amber-50 text-amber-700 border-amber-200',
 };
@@ -85,6 +96,7 @@ export function PartyInviteDryRun() {
 
   const rows = result?.report ?? [];
   const wouldSend = rows.filter(r => r.outcome === 'would_send').length;
+  const held = rows.filter(r => r.outcome === 'skipped_recipient_cap').length;
   const templateErrors = rows.filter(r => r.templateError).length;
 
   return (
@@ -122,6 +134,11 @@ export function PartyInviteDryRun() {
             <span className="text-gray-700">
               Would send <strong className="tabular-nums text-green-700">{wouldSend}</strong>
             </span>
+            {held > 0 && (
+              <span className="text-gray-700">
+                Held for next run <strong className="tabular-nums">{held}</strong>
+              </span>
+            )}
             <span className="text-gray-700">
               Reachable <strong className="tabular-nums">{result.reachablePct}%</strong>
             </span>
@@ -185,6 +202,11 @@ export function PartyInviteDryRun() {
                         <span className={`inline-block rounded border px-2 py-0.5 text-xs font-medium ${OUTCOME_CLASS[r.outcome]}`}>
                           {OUTCOME_LABEL[r.outcome]}
                         </span>
+                        {r.outcome === 'skipped_duplicate_property' && (
+                          <span className="block text-xs text-gray-500 mt-0.5">
+                            {r.duplicateOf ? `asked on ${r.duplicateOf}` : 'asked on an earlier run'}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2 align-top text-xs text-gray-600">
                         {r.templateError

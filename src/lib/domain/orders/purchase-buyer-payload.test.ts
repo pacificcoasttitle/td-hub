@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createOrderInputSchema } from './create-order';
+import {
+  borrowerNoun, borrowerSectionLabel, ownerTarget,
+} from './names/owner-routing';
 import { buildSoftProPayload } from './softpro-payload';
 
 /**
@@ -134,7 +137,20 @@ describe('Purchase Buyer input reaches SoftPro transactionDetails', () => {
       'utf8',
     );
 
-    expect(source).toContain("const partyLabel = isPurchase ? 'Buyer' : 'Borrower'");
+    // The label used to be derived inline as `isPurchase ? 'Buyer' : 'Borrower'`.
+    // It now comes from the shared owner-routing module, so the heading, the
+    // field visibility and the payload routing cannot drift apart — which is
+    // the drift that let a SiteX name reach PrimaryBorrower* on transaction
+    // type "Other" with no field on screen.
+    //
+    // The invariant is unchanged and is now asserted against the function
+    // rather than the text: on a Purchase, the section headed "Buyer" is bound
+    // to s.borrower, which is what handleSubmit sends as PrimaryBorrower*.
+    expect(source).toContain('owner-routing');
+    expect(source).toContain('borrowerNoun(s.txType)');
+    expect(borrowerNoun('Purchase')).toBe('buyer');
+    expect(borrowerSectionLabel('Purchase')).toBe('Buyer');
+    expect(ownerTarget('Purchase')).toBe('seller');
     expect(source).toContain('person={s.borrower}');
     expect(source).toContain('onChange={s.setBorrower}');
     expect(source).toContain('person={s.secBorrower}');

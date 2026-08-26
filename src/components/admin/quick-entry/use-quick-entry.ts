@@ -8,6 +8,9 @@ import { buildPreInitAddressKey, usePreInitOnSiteX } from '@/lib/orders/use-pre-
 import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
 import { firstPartySubmitBlocker, toCreateOrderContact } from '@/lib/domain/orders/party-contact';
 import { EP, EC, type Person, type FormOptions } from './types';
+import { parseSiteXOwners } from '@/lib/domain/orders/names/sitex-owner-names';
+import { legacyToTitleCase } from '@/lib/domain/orders/names/title-case';
+import { ownerTarget } from '@/lib/domain/orders/names/owner-routing';
 
 function deriveUW(product: string): string {
   return product.toLowerCase().trim() === 'full alta' ? 'CW' : 'WC';
@@ -30,6 +33,7 @@ export function useQuickEntry() {
   const [legalDesc, setLegalDesc] = useState('');
   const [propType, setPropType] = useState('');
   const [siteXFilled, setSiteXFilled] = useState(false);
+  const [ownerWarnings, setOwnerWarnings] = useState<string[]>([]);
 
   const [sellerPrimary, setSellerPrimary] = useState<Person>({ ...EP });
   const [sellerSecondary, setSellerSecondary] = useState<Person>({ ...EP });
@@ -146,26 +150,25 @@ export function useQuickEntry() {
 
   // ─── Property helpers ────────────────────────────────────────────────────
 
-  function parseOwnerName(raw: string): Person {
-    const parts = raw.split(' ').filter(Boolean);
-    if (parts.length === 0) return { firstName: '', middleName: '', lastName: '' };
-    if (parts.length === 1) return { firstName: parts[0], middleName: '', lastName: '' };
-    return {
-      firstName: parts[1],
-      middleName: parts.length > 2 ? parts.slice(2).join(' ') : '',
-      lastName: parts[0],
-    };
-  }
-
+  /**
+   * The ONLY place the SiteX last-first flip is applied, and it is applied to a
+   * raw SiteX field. Names the operator types are never routed through here.
+   *
+   * Routing follows legacy: on a Purchase the record owners are the SELLERS and
+   * the operator keys the buyer; on anything else the owners ARE the borrower
+   * and overwrite that field.
+   */
   function fillOwners(p: SiteXPropertyResult) {
-    const isRefi = txType === 'Refinance' || txType === 'Equity';
+    const owners = parseSiteXOwners(p.primaryOwner, p.secondaryOwner);
+    setOwnerWarnings(owners.warnings);
+    if (!owners.primary) return;
 
-    if (isRefi) {
-      if (p.primaryOwner) { setBorrower(parseOwnerName(p.primaryOwner)); setBorrowerSiteX(true); }
-      if (p.secondaryOwner) { setSecBorrower(parseOwnerName(p.secondaryOwner)); setHasSecBorrower(true); setBorrowerSiteX(true); }
+    if (ownerTarget(txType) === 'seller') {
+      setSellerPrimary(owners.primary); setSellerSiteX(true);
+      if (owners.secondary) { setSellerSecondary(owners.secondary); setHasSecondarySeller(true); }
     } else {
-      if (p.primaryOwner) { setSellerPrimary(parseOwnerName(p.primaryOwner)); setSellerSiteX(true); }
-      if (p.secondaryOwner) { setSellerSecondary(parseOwnerName(p.secondaryOwner)); setHasSecondarySeller(true); setSellerSiteX(true); }
+      setBorrower(owners.primary); setBorrowerSiteX(true);
+      if (owners.secondary) { setSecBorrower(owners.secondary); setHasSecBorrower(true); }
     }
   }
 
@@ -186,8 +189,10 @@ export function useQuickEntry() {
 
   function handleConfirm(p: SiteXPropertyResult) {
     setShowConfirmModal(false);
-    const nextStreet = p.fullAddress || street;
-    const nextCity = p.city || city;
+    // custom.js:950-986 — legacy title-cases the street and the city and leaves
+    // state and ZIP exactly as they arrive, so "CA" stays "CA".
+    const nextStreet = p.fullAddress ? legacyToTitleCase(p.fullAddress) : street;
+    const nextCity = p.city ? legacyToTitleCase(p.city) : city;
     const nextState = p.state || state;
     const nextZip = p.zip || zip;
     const nextApn = p.apn || apn;
@@ -197,8 +202,8 @@ export function useQuickEntry() {
     if (p.county) setCounty(p.county);
     if (p.legalDescription) setLegalDesc(p.legalDescription);
     if (p.propertyType) setPropType(p.propertyType);
-    if (p.fullAddress) setStreet(p.fullAddress);
-    if (p.city) setCity(p.city);
+    if (p.fullAddress) setStreet(nextStreet);
+    if (p.city) setCity(nextCity);
     if (p.state) setState(p.state);
     if (p.zip) setZip(p.zip);
     setSiteXFilled(true);
@@ -236,8 +241,8 @@ export function useQuickEntry() {
       const data = await res.json();
       if (data.match === 'single' && data.property) {
         const p = data.property as SiteXPropertyResult;
-        if (p.fullAddress) setStreet(p.fullAddress);
-        if (p.city) setCity(p.city);
+        if (p.fullAddress) setStreet(legacyToTitleCase(p.fullAddress));
+        if (p.city) setCity(legacyToTitleCase(p.city));
         if (p.state) setState(p.state);
         if (p.zip) setZip(p.zip);
         if (p.county) setCounty(p.county);
@@ -247,8 +252,8 @@ export function useQuickEntry() {
         fillOwners(p);
         if (isConfidentSiteXMatch(p)) {
           preInit.onConfidentSiteX({
-            address: p.fullAddress || street,
-            city: p.city || city || 'Unknown',
+            address: p.fullAddress ? legacyToTitleCase(p.fullAddress) : street,
+            city: p.city ? legacyToTitleCase(p.city) : (city || 'Unknown'),
             state: p.state || state || 'CA',
             county: p.county!,
             apn: p.apn,
@@ -359,7 +364,7 @@ export function useQuickEntry() {
     apnSearching, searchMode, setSearchMode,
     street, setStreet, city, setCity, state, setState, zip, setZip,
     apn, setApn, county, setCounty, legalDesc, setLegalDesc, propType, setPropType,
-    siteXFilled,
+    siteXFilled, ownerWarnings,
     sellerPrimary, setSellerPrimary, sellerSecondary, setSellerSecondary,
     hasSecondarySeller, setHasSecondarySeller,
     sellerIsOrg, setSellerIsOrg, sellerOrgType, setSellerOrgType, sellerSiteX,

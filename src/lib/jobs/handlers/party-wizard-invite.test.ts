@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ─── The unreachable counter is the point of these tests ─────────────────────
 //
-// ~54% of orders have no escrow-officer email at day 3. The job must COUNT what
-// it cannot reach, by reason, and never let an unreachable order look like a
-// quiet success. These tests hold that line.
+// Only 11.5% of candidates can be reached at all — see the measurement in
+// party-wizard-invite.ts. The job must COUNT what it cannot reach, by reason,
+// and never let an unreachable order look like a quiet success. These tests hold
+// that line.
 
 const candidatesMock = vi.fn();
 const sendEmailMock = vi.fn();
@@ -21,16 +22,30 @@ vi.mock('@/lib/db/schema', () => ({
   jobs: { id: 'j.id' },
 }));
 
+// The schema fields above are mocked as their column names, so rendering a
+// drizzle `sql` template into a plain string yields readable SQL text. That is
+// what lets the query tests below assert on the predicate the job actually
+// builds instead of on a shape nobody can read.
 vi.mock('drizzle-orm', () => ({
-  and: (...a: unknown[]) => a,
-  eq: (...a: unknown[]) => a,
-  isNull: (a: unknown) => a,
-  sql: Object.assign((...a: unknown[]) => a, { raw: (s: string) => s }),
+  and: (...a: unknown[]) => a.join(' AND '),
+  eq: (a: unknown, b: unknown) => `${a} = ${b}`,
+  asc: (a: unknown) => `${a} ASC`,
+  isNull: (a: unknown) => `${a} IS NULL`,
+  sql: Object.assign(
+    (strings: TemplateStringsArray, ...values: unknown[]) => strings
+      .reduce<string>((acc, part, i) => acc + part + (i < values.length ? String(values[i]) : ''), '')
+      .replace(/\s+/g, ' ')
+      .trim(),
+    { raw: (s: string) => s },
+  ),
 }));
 
 const jobUpdates: Array<Record<string, unknown>> = [];
 
 const executeMock = vi.fn();
+
+/** The WHERE text and ORDER BY terms of the last candidate query built. */
+let lastQuery: { where: string; orderBy: string[] } = { where: '', orderBy: [] };
 
 vi.mock('@/lib/db/client', () => ({
   db: {
@@ -39,7 +54,15 @@ vi.mock('@/lib/db/client', () => ({
       from: () => ({
         leftJoin: () => ({
           leftJoin: () => ({
-            where: () => ({ limit: candidatesMock }),
+            where: (clause: string) => {
+              lastQuery = { where: clause, orderBy: [] };
+              return {
+                orderBy: (...terms: string[]) => {
+                  lastQuery.orderBy = terms;
+                  return { limit: candidatesMock };
+                },
+              };
+            },
           }),
         }),
       }),
@@ -70,7 +93,9 @@ vi.mock('@/lib/domain/parties/party-wizard-service', () => ({
 import {
   handlePartyWizardInvite, PARTY_INVITE_DELAY_DAYS, PARTY_INVITE_MAX_AGE_DAYS,
   PARTY_INVITE_STATUSES, PARTY_INVITE_ENABLED_SETTING, PARTY_INVITE_MAX_PER_RECIPIENT,
+  PARTY_INVITE_ROLE, PARTY_INVITE_TRANSACTION_TYPES,
 } from './party-wizard-invite';
+import { eligibleTransactionTypesFor } from '@/lib/domain/parties/party-wizard-fields';
 
 function candidate(over: Record<string, unknown> = {}) {
   const row = {
@@ -250,6 +275,101 @@ describe('party wizard invite', () => {
     const r = await handlePartyWizardInvite();
     expect(r.failed).toBe(1);
     expect(r.sent).toBe(1);
+  });
+});
+
+// ─── The candidate query ─────────────────────────────────────────────────────
+//
+// The query had no transaction-type predicate, so it asked refinance files for a
+// listing agent that cannot exist on them, and its LIMIT had no ORDER BY, so the
+// dry run an operator approves was not necessarily the set the live run scans.
+// Both are invisible to a mocked database unless the test reads the SQL, so
+// these assert the built text.
+
+describe('candidate query', () => {
+  beforeEach(() => {
+    candidatesMock.mockResolvedValue([candidate()]);
+  });
+
+  it('builds byte-identical SQL on two identical calls', async () => {
+    await handlePartyWizardInvite({ dryRun: true });
+    const first = { ...lastQuery, orderBy: [...lastQuery.orderBy] };
+
+    await handlePartyWizardInvite({ dryRun: true });
+    const second = { ...lastQuery, orderBy: [...lastQuery.orderBy] };
+
+    expect(second.where).toBe(first.where);
+    expect(second.orderBy).toEqual(first.orderBy);
+    // Not vacuously equal: the query has to have been built at all.
+    expect(first.where).toContain('o.tx in');
+    expect(first.orderBy).toHaveLength(2);
+  });
+
+  /**
+   * Oldest first, then id. The far edge of the window is what the LIMIT must
+   * never drop — those orders age out and are never asked again — and opened_at
+   * alone is not a total order, because a busy day puts dozens of orders on one
+   * timestamp.
+   */
+  it('orders oldest-first with an id tie-break, so the LIMIT is deterministic', async () => {
+    await handlePartyWizardInvite({ dryRun: true });
+
+    expect(lastQuery.orderBy).toEqual(['o.opened_at ASC', 'o.id ASC']);
+  });
+
+  it('asks only about Purchase, excluding refinances', async () => {
+    await handlePartyWizardInvite({ dryRun: true });
+
+    expect(PARTY_INVITE_TRANSACTION_TYPES).toEqual(['Purchase']);
+    expect(lastQuery.where).toContain("o.tx in ('Purchase')");
+    expect(lastQuery.where).not.toContain('Refinance');
+  });
+
+  /**
+   * 130 production orders carry a NULL transaction_type. `<> 'Refinance'` is
+   * NULL for every one of them, so a negative test drops them while reading as
+   * though it keeps them. A positive IN list drops them too — visibly.
+   */
+  it('excludes a null transaction type by testing positively, not negatively', async () => {
+    await handlePartyWizardInvite({ dryRun: true });
+
+    // Only the transaction-type term — the listing-agent subquery legitimately
+    // uses IS NOT NULL, and a whole-clause scan would trip over it.
+    const txTerms = lastQuery.where.split(' AND ').filter((term) => term.includes('o.tx'));
+
+    expect(txTerms).toEqual(["o.tx in ('Purchase')"]);
+    for (const negation of ['<>', '!=', 'not in', 'NOT']) {
+      expect(txTerms[0], `transaction type must not be filtered with ${negation}`).not.toContain(negation);
+    }
+  });
+
+  it('includes a Purchase in-window with no listing agent, end to end', async () => {
+    candidatesMock.mockResolvedValue([candidate({ orderId: 3, transactionType: 'Purchase' })]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.scanned).toBe(1);
+    expect(r.report).toHaveLength(1);
+    expect(r.report![0]).toMatchObject({
+      orderId: 3,
+      transactionType: 'Purchase',
+      outcome: 'would_send',
+      linkRoles: ['listing_agent'],
+    });
+    // The window and the missing-agent test are the query's, not the report's,
+    // so assert they are present in the SQL that selected this row.
+    expect(lastQuery.where).toContain("INTERVAL '3 days'");
+    expect(lastQuery.where).toContain("INTERVAL '7 days'");
+    expect(lastQuery.where).toContain("op.role = 'listing_agent'");
+  });
+
+  /**
+   * The eligible types come from the ROLE, so the refi-shaped ask can be added
+   * by defining a form rather than by editing this job's predicate.
+   */
+  it('takes its eligible transaction types from the role definition', () => {
+    expect(PARTY_INVITE_TRANSACTION_TYPES).toEqual(eligibleTransactionTypesFor(PARTY_INVITE_ROLE));
+    expect(PARTY_INVITE_TRANSACTION_TYPES.length).toBeGreaterThan(0);
   });
 });
 

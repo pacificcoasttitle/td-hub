@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { contacts, jobs, orderProperties, orders } from '@/lib/db/schema';
 import { sendEmail } from '@/lib/integrations/sendgrid/client';
@@ -8,21 +8,60 @@ import {
   buildPartyWizardEmail, buildPartyWizardSubject, buildPartyWizardText,
 } from '@/lib/domain/parties/party-wizard-email';
 import { findLiveLink, mintLinkForOrder } from '@/lib/domain/parties/party-wizard-service';
+import { eligibleTransactionTypesFor } from '@/lib/domain/parties/party-wizard-fields';
 import type { PartyRole } from '@/lib/domain/parties/party-wizard-fields';
-import { ACTIVE_ORDER_STATUSES, statusSqlList } from '@/lib/domain/orders/status-map';
+import {
+  ACTIVE_ORDER_STATUSES, statusSqlList, transactionTypeSqlList,
+} from '@/lib/domain/orders/status-map';
 
 // ─── Party wizard invite ─────────────────────────────────────────────────────
 //
-// Three days after an order opens, if we still have no listing agent, email the
-// ESCROW OFFICER a forwardable link.
+// Three days after a PURCHASE order opens, if we still have no listing agent,
+// email the ESCROW OFFICER a forwardable link.
 //
-// WHY DAY 3, AND WHY THIS IS MEASURED. Only ~54% of orders have an escrow
-// officer email by day 3. That is not a reason to wait longer — it is the
-// finding. The job therefore does NOT quietly skip what it cannot reach: every
-// unreachable order is counted by reason and returned, so the gap trends
-// weekly instead of disappearing into a log line.
+// WHY THIS IS MEASURED. Only 11.5% of candidates can be reached at all. That is
+// not a reason to wait longer — it is the finding. The job therefore does NOT
+// quietly skip what it cannot reach: every unreachable order is counted by
+// reason and returned, so the gap trends weekly instead of disappearing into a
+// log line.
 //
 // The counters are the deliverable as much as the emails are.
+//
+// HOW 11.5% WAS MEASURED, so the next person can re-derive it rather than
+// trusting it. An earlier version of this comment claimed ~54%, which was wrong
+// by a factor of five and had no stated method, so nobody could check it.
+//
+//   Replay this file's candidate predicate once per day over the last 41 days
+//   and count how many rows carry a usable escrow-officer email:
+//
+//     with asof as (
+//       select generate_series(date_trunc('day', now()) - interval '40 days',
+//                              date_trunc('day', now()), interval '1 day') as t)
+//     select count(*) as candidates,
+//            count(*) filter (where c.id is not null
+//                               and nullif(trim(c.email), '') is not null) as reachable
+//     from asof a
+//     join orders o
+//       on o.operational_status in ('open', 'in_process')
+//      and o.transaction_type = 'Purchase'
+//      and o.opened_at <= a.t - interval '3 days'
+//      and o.opened_at >= a.t - interval '7 days'
+//     left join contacts c on c.id = o.escrow_officer_id
+//     where not exists (
+//       select 1 from order_parties op
+//       where op.order_id = o.id and op.role = 'listing_agent'
+//         and coalesce(nullif(trim(op.external_email), ''),
+//                      nullif(trim(op.external_name), '')) is not null);
+//
+//   Measured 2026-08-26 WITHOUT the transaction-type predicate (i.e. against
+//   what this job used to scan): 482 reachable of 4,197 candidates = 11.5%.
+//
+//   The replay is exact for any past date because production has never sent an
+//   invite, so the per-order suppression and the property lookback are no-ops.
+//
+// The shortfall is almost entirely a MISSING FK, not a missing address: of the
+// 3,715 unreachable rows in that measurement, 3,715 had no escrow_officer_id at
+// all. See PartyInviteUnreachable for what that means for the counters.
 
 export const PARTY_INVITE_DELAY_DAYS = 3;
 
@@ -39,6 +78,36 @@ export const PARTY_INVITE_DELAY_DAYS = 3;
 export const PARTY_INVITE_MAX_AGE_DAYS = 7;
 export const PARTY_INVITE_BATCH = 100;
 export const PARTY_INVITE_ROLE: PartyRole = 'listing_agent';
+
+/**
+ * Transaction types this run may ask about, taken FROM THE ROLE.
+ *
+ * The candidate query had no transaction-type predicate at all, so it asked for
+ * a listing agent on every order it could reach. Measured over 41 simulated
+ * run-days that made the send list 83% refinances — files on which there is no
+ * listing agent to name and never will be.
+ *
+ * Two things about the shape of the fix are deliberate.
+ *
+ * FIRST, it is derived rather than hardcoded. `'Purchase'` is not a fact about
+ * this job, it is a fact about asking for a listing agent, and it lives in
+ * party-wizard-fields.ts next to the form that collects one. The refi-shaped ask
+ * (`lender_contact`, missing on 62.2% of 2,066 active refinances) is the same
+ * job pointed at a different role, and it must not require editing this file's
+ * predicate to add.
+ *
+ * SECOND, it is a positive IN list, never `<> 'Refinance'`. 130 production
+ * orders carry a NULL transaction_type, and `transaction_type <> 'Refinance'`
+ * is NULL — not true — for every one of them, so a negative test would drop
+ * them silently while reading as though it kept them. A positive list excludes
+ * them too, but it does so where a reader can see it.
+ *
+ * THIS IS A DELIBERATE NARROWING AND IT IS LARGE. Purchase-only takes the
+ * first-run send list from 8 to 3 on measured production data, and the whole
+ * 41-day total from 222 to 70. That is the point: the 152 sends it removes were
+ * asking refinance files for a party that cannot exist on them.
+ */
+export const PARTY_INVITE_TRANSACTION_TYPES = eligibleTransactionTypesFor(PARTY_INVITE_ROLE);
 
 /**
  * Hard ceiling on emails to one person per run. Permanent, not a pilot setting.
@@ -86,9 +155,30 @@ export const PARTY_INVITE_STATUSES = ACTIVE_ORDER_STATUSES;
  */
 export const PARTY_INVITE_ENABLED_SETTING = 'party_wizard_invite_enabled';
 
+/**
+ * Why we could not send. Each is a distinct operational problem.
+ *
+ * A WORD ON `escrowOfficerNoEmail`, WHICH READS AS A ZERO AND IS NOT ONE.
+ *
+ * It has never incremented. Across all 3,842 orders carrying an
+ * `escrow_officer_id`, zero point at a missing contact row and zero point at a
+ * contact with a blank email (measured 2026-08-26). So in practice the FK is
+ * either absent or it resolves to someone reachable, and this counter reports 0
+ * every run.
+ *
+ * It is KEPT rather than deleted because it is reachable code, not dead code:
+ * `contacts.email` is nullable and nothing enforces that an escrow-officer
+ * contact has one. A 0 here means "measured zero", not "not implemented" — and
+ * the day a contact sync lands a nameless officer, this is the counter that
+ * says so. Deleting it would trade a true zero for no signal at all.
+ *
+ * `noEscrowOfficer` is where the real number lives: 3,715 of 3,715 unreachable
+ * rows in the same measurement.
+ */
 export interface PartyInviteUnreachable {
-  /** Why we could not send. Each is a distinct operational problem. */
+  /** No `escrow_officer_id` on the order. This is ~100% of unreachability. */
   noEscrowOfficer: number;
+  /** FK present but it resolves to nobody with an address. Currently always 0. */
   escrowOfficerNoEmail: number;
 }
 
@@ -204,11 +294,31 @@ interface CandidateRow {
 }
 
 /**
- * Orders opened between 3 and 30 days ago with no listing agent on file and no
- * invite already sent.
+ * Eligible-transaction-type orders opened between PARTY_INVITE_DELAY_DAYS and
+ * PARTY_INVITE_MAX_AGE_DAYS ago, with no listing agent on file and no invite
+ * already sent.
  *
  * The upper bound matters: without it, every historical order with a missing
  * agent would be emailed the first time this runs.
+ *
+ * WHY THE ORDER BY IS LOAD-BEARING AND NOT COSMETIC. `limit` is 100 and the
+ * window regularly holds more than that — on 20 of the last 41 simulated
+ * run-days the candidate count exceeded 100, peaking at 163. Without an ORDER BY
+ * the planner picks which 100 come back, which means the dry run an operator
+ * reviews and the live run that follows it can scan DIFFERENT SETS. The dry run
+ * is the only safety check this feature has; one that does not scan what the
+ * live run scans is not a check.
+ *
+ * Oldest first. The rows nearest the far edge of the window are the ones about
+ * to age past PARTY_INVITE_MAX_AGE_DAYS and never be asked again, so if the
+ * limit has to drop somebody it should drop the youngest — they are still
+ * in-window tomorrow. Sorting newest-first would quietly starve exactly the
+ * orders the window is about to close on.
+ *
+ * `orders.id` breaks ties. `opened_at` is a date in practice, so a busy day can
+ * put dozens of orders on the same timestamp and leave the sort as
+ * non-deterministic as no sort at all. It also matches the tie-break planSends
+ * already uses to decide which sibling file carries a shared property.
  */
 async function loadCandidates(limit: number): Promise<CandidateRow[]> {
   const rows = await db
@@ -231,6 +341,8 @@ async function loadCandidates(limit: number): Promise<CandidateRow[]> {
     .leftJoin(contacts, eq(contacts.id, orders.escrowOfficerId))
     .where(and(
       sql`${orders.operationalStatus} in (${sql.raw(statusSqlList(PARTY_INVITE_STATUSES))})`,
+      // Positive list, never a negative test — see PARTY_INVITE_TRANSACTION_TYPES.
+      sql`${orders.transactionType} in (${sql.raw(transactionTypeSqlList(PARTY_INVITE_TRANSACTION_TYPES))})`,
       sql`${orders.openedAt} <= NOW() - INTERVAL '${sql.raw(String(PARTY_INVITE_DELAY_DAYS))} days'`,
       sql`${orders.openedAt} >= NOW() - INTERVAL '${sql.raw(String(PARTY_INVITE_MAX_AGE_DAYS))} days'`,
       // No listing agent with anything usable on it.
@@ -246,6 +358,7 @@ async function loadCandidates(limit: number): Promise<CandidateRow[]> {
         WHERE nl.order_id = ${orders.id} AND nl.event_type = 'party_wizard.invite'
       )`,
     ))
+    .orderBy(asc(orders.openedAt), asc(orders.id))
     .limit(limit);
 
   return rows as CandidateRow[];

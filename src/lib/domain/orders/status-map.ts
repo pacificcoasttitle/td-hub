@@ -50,6 +50,20 @@ export function statusSqlList(statuses: readonly OperationalStatus[]): string {
 }
 
 /**
+ * Render transaction types as a SQL literal list, e.g. `'Purchase'`.
+ *
+ * Throws on an empty list rather than emitting `in ()`, which is a syntax error
+ * in Postgres, and — worse — invites a caller to "fix" it by dropping the
+ * predicate and selecting every transaction type instead.
+ */
+export function transactionTypeSqlList(types: readonly TransactionType[]): string {
+  if (types.length === 0) {
+    throw new Error('transactionTypeSqlList: refusing to build an empty IN list');
+  }
+  return types.map((t) => `'${t}'`).join(', ');
+}
+
+/**
  * Map SoftPro OrderStatus → operational_status.
  * Returns null for blank/unknown values — callers must preserve existing
  * status on re-process and never silently guess 'open'.

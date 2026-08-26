@@ -1,0 +1,20 @@
+name: typecheck
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # scripts/ is excluded from the tsconfig Vercel builds, so a stale audit script
+  # can no longer fail a deploy. This job is what stops it rotting unnoticed.
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck:scripts

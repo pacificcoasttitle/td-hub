@@ -30,11 +30,16 @@
  *   ET AL   — appears on personal vestings ("SMITH JOHN ET AL")
  *   THE     — leads plenty of entity names but far too broad
  *   ESTATE  — "ESTATE OF JOHN SMITH" is a person's estate, not a company
+ *   TRUSTEE — a PERSON acting as trustee is a person. Measured: of 998
+ *             abstentions, 11 matched TRUSTEE and nothing else, and all 11
+ *             were people ("DANNA MICHAEL A (TRUSTEE)"). No entity in 5,418
+ *             stored owner strings relies on it, so it only ever cost real
+ *             people a parse.
  */
 const ENTITY_TOKENS = new Set([
   'LLC', 'L.L.C', 'LLP', 'PLLC', 'INC', 'INCORPORATED', 'CORP', 'CORPORATION',
   'COMPANY', 'CO.', 'LTD', 'LIMITED', 'PARTNERSHIP', 'PARTNERS',
-  'TRUST', 'TRUSTEES', 'TRUSTEE',
+  'TRUST',
   'FOUNDATION', 'ASSOCIATION', 'ASSOCIATES', 'ORGANIZATION',
   'HOLDINGS', 'INVESTMENTS', 'INVESTMENT', 'VENTURES', 'CAPITAL', 'GROUP',
   'PROPERTIES', 'REALTY', 'ENTERPRISES', 'DEVELOPMENT', 'MANAGEMENT',

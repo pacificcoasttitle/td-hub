@@ -134,6 +134,28 @@ describe('the marker list can fail, and here is where', () => {
     }
   });
 
+  // Measured against all 5,418 stored owner strings: 11 abstentions matched
+  // TRUSTEE and nothing else, and every one was a person. No entity relied on
+  // it, so it only ever cost real people a parse.
+  it('a person acting as trustee is a person, and parses', () => {
+    for (const name of [
+      'DANNA MICHAEL A (TRUSTEE)',
+      'WOODWARD STEPHANIE O (TRUSTEE)',
+      'ZOUFONOUN AMIR HOUSHANG AND LISA M (TRUSTEE)',
+    ]) {
+      expect(looksLikeEntity(name), name).toBe(false);
+      expect(parseSiteXOwners(name).branch, name).toBe('person-parsed');
+    }
+    expect(parseSiteXOwners('DANNA MICHAEL A (TRUSTEE)').primary!.lastName).toBe('Danna');
+  });
+
+  // But a TRUST is still an entity — dropping TRUSTEE must not drop TRUST.
+  it('dropping TRUSTEE did not drop TRUST', () => {
+    expect(looksLikeEntity('SHARPE ALICIA LIVING TRUST')).toBe(true);
+    expect(looksLikeEntity('OSCAR MORALES TRUST,')).toBe(true);
+    expect(looksLikeEntity('BANOS FAMILY TRUST,')).toBe(true);
+  });
+
   it('an empty or blank owner matches nothing', () => {
     expect(looksLikeEntity('')).toBe(false);
     expect(looksLikeEntity(null)).toBe(false);

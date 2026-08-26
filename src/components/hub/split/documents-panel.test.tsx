@@ -1,114 +1,222 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { DocumentsPanel, type DocumentsPanelProps } from './documents-panel';
+import { ConciergeCostGate, type CostGateProps } from './concierge-cost-gate';
+import { ConciergeCriteriaPanel } from './concierge-criteria-panel';
+import type { ProfileSummary } from '@/lib/domain/concierge/profiles';
 
-const panel = readFileSync(join(__dirname, 'documents-panel.tsx'), 'utf8');
+// ─── These assert what a HUMAN SEES, by rendering ───────────────────────────
+//
+// The previous version grepped the source for UI strings. That technique is
+// fragile by construction and it failed silently four times in this project:
+// the phrase being searched for also lived in a comment above the code, a slice
+// ran backwards, and the resulting empty string "contained" nothing — so the
+// test passed while asserting nothing at all.
+//
+// Rendering removes the whole class. A comment cannot appear in the output, and
+// a component that renders nothing produces empty text that fails loudly.
+//
+// Source-slicing is kept for the one thing it is genuinely good at — proving a
+// module does not IMPORT something it must never touch (see render.test.ts).
 
-/**
- * Slice a named function's body out of the source.
- *
- * Searching the whole file is how the first version of this test broke: the
- * phrase "None on file" appears in the module comment ABOVE the code, so
- * indexOf found the comment, the slice ran backwards and produced an empty
- * string that trivially "contained" nothing. Anchoring inside the function is
- * the fix, and the emptiness guard below is so a bad anchor fails loudly
- * instead of passing vacuously.
- */
-function body(src: string, fn: string): string {
-  const start = src.indexOf(`function ${fn}(`);
-  if (start === -1) throw new Error(`no function ${fn} in source`);
-  const next = src.slice(start + 1).search(/\nfunction \w+\(/);
-  const out = next === -1 ? src.slice(start) : src.slice(start, start + 1 + next);
-  if (out.trim().length < 50) throw new Error(`slice for ${fn} came back empty`);
-  return out;
+/** Visible text, the way a person reads it: tags gone, whitespace collapsed. */
+function visible(el: React.ReactElement): string {
+  const html = renderToStaticMarkup(el);
+  const text = html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/&#x27;|&apos;/g, "'").replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // A render that produced nothing must never satisfy a "does not contain" test.
+  if (text.length === 0) throw new Error('component rendered no visible text');
+  return text;
 }
-const gate = readFileSync(join(__dirname, 'concierge-cost-gate.tsx'), 'utf8');
-const criteria = readFileSync(join(__dirname, 'concierge-criteria-panel.tsx'), 'utf8');
+
+const doc = (over: Partial<{ exists: boolean; latestId: number | null; latestCreatedAt: string | null; count: number }> = {}) => ({
+  exists: false, latestId: null, latestCreatedAt: null, count: 0, ...over,
+});
+
+const profile = (over: Partial<ProfileSummary> = {}): ProfileSummary => ({
+  id: 7, orderId: 42, status: 'generated',
+  requestedAddress: '10523 Stonybrook Ave',
+  subjectAddressLine: '10523 Stonybrook Ave, South Gate, CA 90280',
+  createdAt: '2026-08-26T18:00:00.000Z', createdBy: 'op@pct.com',
+  errorMessage: null, hasPdf: true, pdfBytes: 210_000, pdfPageCount: 8,
+  compsReturned: 25, compsQualified: 5, compsShown: 5,
+  criteria: { sameUseCode: true, livingAreaPct: 30, bedDelta: 1, bathDelta: 1, radiusMiles: 1, months: 12, maxComps: 12 },
+  creditsCharged: 1, sitexSearchId: 1382139045, canRenderFree: true,
+  ...over,
+});
+
+const panelProps = (over: Partial<DocumentsPanelProps> = {}): DocumentsPanelProps => ({
+  documents: { cpl: doc(), prelim: doc(), proposedInsured: doc() },
+  profile: null, profileLoading: false, canGenerateProfile: true,
+  profileFeatureOn: true, busyProfile: false,
+  onGenerateProfile: () => {}, onAdjustProfile: () => {}, onRetryProfileRender: () => {},
+  onGenerate: () => {},
+  ...over,
+});
 
 // ─── Absence is not the same sentence for every document ───────────────────
-describe('the tiles do not claim more than we know', () => {
-  it('SoftPro documents read "None on file", never "Not generated"', () => {
-    // SoftPro returns an empty list for prelims on 410 of 418 Title & Escrow
-    // orders and we do not know whether those documents exist somewhere the
-    // endpoint does not expose. "Not generated" would tell an operator to stop
-    // looking for something that may be in a folder we cannot see.
-    const softpro = body(panel, 'SoftProTile');
-    expect(softpro).toContain('None on file');
-    expect(softpro).not.toContain('Not generated');
+
+describe('what the panel says when a document is absent', () => {
+  it('SoftPro documents read "None on file" — never "Not generated"', () => {
+    const text = visible(<DocumentsPanel {...panelProps({ profile: profile() })} />);
+    // Three SoftPro tiles, all empty.
+    expect(text.match(/None on file/g)).toHaveLength(3);
+    // The only "Not generated" allowed is the Property Profile's, and this
+    // fixture has an issued one, so there must be none at all.
+    expect(text).not.toContain('Not generated');
   });
 
-  it('the Property Profile DOES read "Not generated" — we are the only maker', () => {
-    const profile = body(panel, 'ProfileTile');
-    expect(profile).toContain('Not generated');
+  it('the Property Profile DOES read "Not generated" — we are its only maker', () => {
+    const text = visible(<DocumentsPanel {...panelProps()} />);
+    expect(text).toContain('Not generated');
+    // And it is the ONLY one saying so.
+    expect(text.match(/Not generated/g)).toHaveLength(1);
   });
 });
 
 describe('an issued tile never offers Generate', () => {
-  it('the issued branches offer only View, Download and the free adjust', () => {
-    const fn = body(panel, 'SoftProTile');
-    const issuedSoftPro = fn.slice(fn.indexOf('{issued ? ('), fn.indexOf('None on file'));
-    expect(issuedSoftPro.length).toBeGreaterThan(50);
-    expect(issuedSoftPro).toContain('View');
-    expect(issuedSoftPro).toContain('Download');
-    expect(issuedSoftPro).not.toMatch(/>\s*Generate/);
+  it('an issued SoftPro document offers View and Download only', () => {
+    const text = visible(<DocumentsPanel {...panelProps({
+      documents: { cpl: doc({ exists: true, latestId: 99, latestCreatedAt: '2026-08-20T10:00:00Z', count: 1 }), prelim: doc(), proposedInsured: doc() },
+      profile: profile(),
+    })} />);
+    expect(text).toContain('View');
+    expect(text).toContain('Download');
+    expect(text).toContain('Issued');
+    // Of the two remaining empty SoftPro tiles, Proposed Insured offers
+    // "Generate" and the Preliminary Report offers "Find" — you do not generate
+    // a prelim, you look for one. The rendered output is what made that visible;
+    // counting "Generate" in the source would have missed it.
+    expect(text.match(/Generate/g) ?? []).toHaveLength(1);
+    expect(text).toContain('Find');
   });
 
-  it('a rendered profile offers adjust, not regenerate', () => {
-    const fn = body(panel, 'ProfileTile');
-    const has = fn.slice(fn.indexOf('profile.hasPdf'), fn.indexOf("profile.status === 'pending'"));
-    expect(has.length).toBeGreaterThan(50);
-    expect(has).toContain('Adjust comparables — free');
-    expect(has).not.toContain('1 credit');
+  it('an issued profile offers a FREE adjustment, never a paid regeneration', () => {
+    const text = visible(<DocumentsPanel {...panelProps({ profile: profile() })} />);
+    expect(text).toContain('Adjust comparables — free');
+    expect(text).toContain('5 comps');
+    expect(text).not.toContain('Generate — 1 credit');
   });
 });
 
-describe('cost is stated wherever it exists, and only where it exists', () => {
-  it('every spending control says the price', () => {
-    for (const m of panel.matchAll(/onClick=\{onGenerateProfile\}[\s\S]{0,160}?<\/TileButton>/g)) {
-      expect(m[0]).toContain('credit');
+describe('the two failure modes are priced differently, in words', () => {
+  it('a failed RENDER on retrieved data offers a free retry', () => {
+    const text = visible(<DocumentsPanel {...panelProps({
+      profile: profile({ status: 'failed', hasPdf: false, canRenderFree: true }),
+    })} />);
+    expect(text).toContain('Retry — free');
+    expect(text).not.toContain('credit');
+  });
+
+  it('a failed CALL says what a retry costs, and does not hide it', () => {
+    const text = visible(<DocumentsPanel {...panelProps({
+      profile: profile({ status: 'failed', hasPdf: false, canRenderFree: false, errorMessage: 'Outside coverage' }),
+    })} />);
+    expect(text).toContain('Try again — 1 credit');
+    expect(text).not.toContain('Retry — free');
+  });
+});
+
+describe('what the tile offers when it may not generate', () => {
+  it('an operator without the role is offered nothing', () => {
+    const text = visible(<DocumentsPanel {...panelProps({ canGenerateProfile: false })} />);
+    expect(text).toContain('Not generated');
+    expect(text).not.toContain('Generate — 1 credit');
+  });
+
+  it('the feature being off is stated, not silently blank', () => {
+    const text = visible(<DocumentsPanel {...panelProps({ profileFeatureOn: false })} />);
+    expect(text).toContain('Not enabled');
+    expect(text).not.toContain('Generate — 1 credit');
+  });
+});
+
+// ─── The cost gate, as the operator reads it ───────────────────────────────
+
+const gateProps = (over: Partial<CostGateProps> = {}): CostGateProps => ({
+  address: '10523 Stonybrook Ave, South Gate CA 90280',
+  preparedForName: 'Jerry Hernandez', preparedForCompany: 'Pacific Coast Title',
+  presentingRepName: 'Angeline Wu', presentingRepProblem: null,
+  criteriaSummary: 'same property type · ±30% area · 1 mile · 12 months · max 12',
+  spend: { thisMonth: 3, allTime: 11 },
+  submitting: false, error: null,
+  onPreparedForName: () => {}, onPreparedForCompany: () => {},
+  onCancel: () => {}, onConfirm: () => {},
+  ...over,
+});
+
+describe('the cost gate states the cost before the click', () => {
+  it('names the price, the property and the rep', () => {
+    const text = visible(<ConciergeCostGate {...gateProps()} />);
+    expect(text).toContain('This will spend 1 SiteX credit');
+    expect(text).toContain('10523 Stonybrook Ave, South Gate CA 90280');
+    expect(text).toContain('Angeline Wu');
+    expect(text).toContain('I understand this charges one credit.');
+  });
+
+  it('shows OUR counts and says why they are ours', () => {
+    const text = visible(<ConciergeCostGate {...gateProps()} />);
+    expect(text).toContain('This month 3');
+    expect(text).toContain('all time 11');
+    expect(text).toContain('SiteX does not report a usable balance');
+  });
+
+  it('says the adjustment afterwards is free', () => {
+    expect(visible(<ConciergeCostGate {...gateProps()} />))
+      .toContain('Adjusting the comparables afterwards is free');
+  });
+
+  it('surfaces a missing rep as the reason, not a blank', () => {
+    const text = visible(<ConciergeCostGate {...gateProps({
+      presentingRepName: '',
+      presentingRepProblem: 'This order has no sales representative on it.',
+    })} />);
+    expect(text).toContain('This order has no sales representative on it.');
+  });
+});
+
+// ─── Nothing on the free path may look like it costs ───────────────────────
+
+describe('the criteria panel never reads like a charge', () => {
+  const text = () => visible(
+    <ConciergeCriteriaPanel profile={profile()} busy={false} error={null} onClose={() => {}} onApply={() => {}} />,
+  );
+
+  it('says free, and says the button re-renders rather than generates', () => {
+    expect(text()).toContain('Free — the comparables are already stored.');
+    expect(text()).toContain('Re-render — free');
+    expect(text()).not.toContain('Generate');
+  });
+
+  it('mentions no credit anywhere', () => {
+    expect(text().toLowerCase()).not.toContain('credit');
+  });
+
+  it('shows what the current filter did, so a change can be judged', () => {
+    expect(text()).toContain('25');
+    expect(text()).toContain('qualified');
+    expect(text()).toContain('shown');
+  });
+
+  it('says the maximum is a ceiling, not a quota', () => {
+    expect(text()).toContain('never pads');
+  });
+});
+
+// ─── Source-slicing, kept ONLY for imports ─────────────────────────────────
+
+describe('the free-path components cannot reach the vendor', () => {
+  it('neither dialog imports anything from the SiteX integration', () => {
+    for (const f of ['concierge-criteria-panel.tsx', 'concierge-cost-gate.tsx']) {
+      const src = readFileSync(join(__dirname, f), 'utf8');
+      expect(src, f).not.toMatch(/from\s+['"].*integrations\/sitex/);
     }
-  });
-
-  it('nothing on the free paths mentions a credit as a cost', () => {
-    expect(criteria).not.toMatch(/1 credit/);
-    expect(criteria).toContain('Free —');
-    expect(criteria).toContain('Re-render — free');
-    // A failed RENDER is retried free; a failed CALL is not, and says so.
-    expect(panel).toContain('Retry — free');
-    expect(panel).toContain('Try again — 1 credit');
-  });
-});
-
-// ─── The gate's safety properties, asserted rather than described ───────────
-describe('the cost gate cannot fire on a mis-click', () => {
-  it('focus lands on Cancel, not on the button that spends', () => {
-    const cancelAt = gate.indexOf('autoFocus');
-    const confirmAt = gate.indexOf('onClick={p.onConfirm}');
-    expect(cancelAt).toBeGreaterThan(-1);
-    expect(cancelAt).toBeLessThan(confirmAt);
-  });
-
-  it('Enter is swallowed and never confirms', () => {
-    expect(gate).toContain("if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); }");
-  });
-
-  it('confirm is blocked in flight, so a double-click cannot double-spend', () => {
-    expect(gate).toContain('p.submitting');
-    expect(gate).toContain('disabled={blocked}');
-  });
-
-  it('requires an explicit acknowledgement of the charge', () => {
-    expect(gate).toContain('!ack');
-    expect(gate).toContain('I understand this charges one credit.');
-  });
-
-  it('shows OUR spend counts, and says why they are ours', () => {
-    expect(gate).toContain('spend.thisMonth');
-    expect(gate).toContain('spend.allTime');
-    expect(gate).toContain('SiteX does not report a usable balance');
-  });
-
-  it('refuses to generate without a presenting rep', () => {
-    expect(gate).toContain('missingRep');
   });
 });

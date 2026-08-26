@@ -119,7 +119,6 @@ export interface PartiesData {
   escrow: PartyContact;
   showEscrowOfficer: boolean;
   escrowOfficer: string;
-  deliverableEmails: string[];
 }
 
 export const EMPTY_PARTY: PartyContact = { name: '', email: '', phone: '', company: '' };

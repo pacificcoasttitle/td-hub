@@ -56,7 +56,7 @@ describe('clientCreateOrder OC-1 pass-through', () => {
           hasSecondaryBorrower: false,
           borrowerIsOrg: false,
         },
-        parties: { showAgents: false, showLender: false, showEscrow: false, deliverableEmails: [] },
+        parties: { showAgents: false, showLender: false, showEscrow: false },
         titlePointSessionId: 'tp_api_id_client',
         siteXSnapshot: {
           matchCode: 'S',

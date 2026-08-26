@@ -66,7 +66,6 @@ export function useQuickEntry() {
   const [mortgageBroker, setMortgageBroker] = useState({ ...EC });
   const [escrow, setEscrow] = useState({ ...EC });
   const [escrowOfficer, setEscrowOfficer] = useState('');
-  const [deliverableEmails, setDeliverableEmails] = useState<string[]>([]);
 
   const [formOpts, setFormOpts] = useState<FormOptions | null>(null);
 
@@ -336,7 +335,6 @@ export function useQuickEntry() {
           mortgageBroker: toCreateOrderContact(mortgageBroker),
           escrowCompany: toCreateOrderContact(escrow),
         },
-        deliverableEmails: deliverableEmails.filter(Boolean),
         clientType: client?.contactType ?? undefined,
         onBehalfOfContactId: client?.id || undefined,
         titlePointSessionId: preInit.sessionId || undefined,
@@ -380,7 +378,6 @@ export function useQuickEntry() {
     buyerAgent, setBuyerAgent, listingAgent, setListingAgent,
     lender, setLender, mortgageBroker, setMortgageBroker, escrow, setEscrow,
     escrowOfficer, setEscrowOfficer,
-    deliverableEmails, setDeliverableEmails,
     formOpts, submitting, result, setResult,
     repAutoFilled, toAutoFilled, clientCompanyName,
     preInitPhase: preInit.phase,

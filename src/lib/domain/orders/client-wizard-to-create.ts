@@ -94,12 +94,6 @@ export function normalizeClientCreateBody(raw: Record<string, unknown>): Record<
   const orderTypeRaw = typeof transaction.orderType === 'string' ? transaction.orderType : 'title_only';
   const orderType = ORDER_TYPE_MAP[orderTypeRaw] ?? 'Title only';
 
-  const deliverableEmails = Array.isArray(raw.deliverableEmails)
-    ? raw.deliverableEmails
-    : Array.isArray(parties.deliverableEmails)
-      ? parties.deliverableEmails
-      : [];
-
   return {
     orderType,
     isRushOrder: false,
@@ -162,7 +156,6 @@ export function normalizeClientCreateBody(raw: Record<string, unknown>): Record<
       lender: parties.showLender ? partyContact(parties.lender) : undefined,
       escrowCompany: parties.showEscrow ? partyContact(parties.escrow) : undefined,
     },
-    deliverableEmails: (deliverableEmails as unknown[]).filter((e): e is string => typeof e === 'string' && !!e),
     clientType: typeof clientDetails.clientType === 'string' ? clientDetails.clientType : undefined,
     ...(titlePointSessionId ? { titlePointSessionId } : {}),
     ...(siteXSnapshot ? { siteXSnapshot } : {}),

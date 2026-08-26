@@ -40,8 +40,6 @@ export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
   );
   const parties = buildParties(s);
   const hasParties = parties.length > 0;
-  const emails = s.deliverableEmails.filter(Boolean);
-  const hasEmails = emails.length > 0;
 
   return (
     <div className="bg-white border border-gray-200 shadow-sm rounded-lg p-5 xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
@@ -147,15 +145,6 @@ export function OrderSummaryPanel({ s }: { s: QuickEntryState }) {
           )}
         </Section>
 
-        {/* Deliverable Emails */}
-        <Section filled={hasEmails} label="Deliverables" placeholder="Deliverable emails will appear here">
-          {hasEmails && (
-            <>
-              <p className="text-xs text-gray-400 mb-1">{emails.length} email{emails.length !== 1 ? 's' : ''}</p>
-              {emails.map((e, i) => <p key={i} className="text-sm text-[#1A1A2E] truncate">{e}</p>)}
-            </>
-          )}
-        </Section>
       </div>
     </div>
   );

@@ -139,7 +139,6 @@ export function StepReview({
           {parties.showAgents && <RF l="Listing Agent" v={pc(parties.listingAgent)} />}
           {parties.showLender && <RF l="Lender" v={pc(parties.lender)} />}
           {parties.showEscrow && <RF l="Escrow" v={pc(parties.escrow)} />}
-          {parties.deliverableEmails.length > 0 && <RF l="Deliverable Emails" v={parties.deliverableEmails.filter(Boolean).join(', ') || '—'} />}
           {!parties.showAgents && !parties.showLender && !parties.showEscrow && <RF l="—" v="No parties added" />}
         </RS>
       </div>

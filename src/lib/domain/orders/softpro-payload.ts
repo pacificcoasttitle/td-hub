@@ -13,34 +13,22 @@ const USER_TYPE_MAP: Record<string, string> = {
   real_estate_company: 'ListingAgentBroker',
 };
 
-const OFFICER_BRANCH_MAP: Record<string, string> = {
-  'jim jean': 'OCT',
-  'clive virata': 'OCT',
-  'kevin cameron': 'TSG',
-  'susan dana': 'TSG',
-  'rachel barcena': 'GLT',
-  'eddie lasmarias': 'GLT',
-  'joseph gomez': 'GLT',
-  'karla casco': 'ONT',
-  'analleli ayala': 'OCT',
-  'lupe vidaca': 'OCT',
-  'christine quintanar': 'OCT',
-  'anna ballesteros': 'PRV',
-};
+/** SoftPro's internal user directory namespace, as in PCT\elasmarias. */
+const SOFTPRO_USER_PREFIX = 'PCT\\';
 
-const ESCROW_ORDER_TYPES = ['Title & Escrow', 'Escrow only'];
+/**
+ * Title office used when the order has no title officer assigned at all. It is
+ * the Glendale head office, not an inference about any person, and it is still
+ * checked by assertKnownTitleOffice before the payload goes out.
+ */
+const DEFAULT_TITLE_OFFICE = 'GLT';
 
-function resolveBranchCode(
-  orderType: string,
-  titleOfficer?: ResolvedContact,
-  escrowOfficer?: ResolvedContact,
-): string {
-  const useEscrow = ESCROW_ORDER_TYPES.includes(orderType);
-  const officer = useEscrow ? escrowOfficer : titleOfficer;
-  if (officer?.officeLookupCode) return officer.officeLookupCode;
-  const name = (officer?.officerName ?? officer?.fullName ?? '').toLowerCase().trim();
-  if (name && OFFICER_BRANCH_MAP[name]) return OFFICER_BRANCH_MAP[name];
-  return 'GLT';
+/** A payload that must not be sent, with a message an operator can act on. */
+export class SoftProPayloadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SoftProPayloadError';
+  }
 }
 
 function stripPhone(raw: string | null | undefined): string {
@@ -93,6 +81,92 @@ export function resolveTitleExaminerLookup(titleOfficer?: ResolvedContact | null
   }
 
   return examiner;
+}
+
+export interface TitleOfficeFields {
+  LookUpCodeTitleOffice: string;
+  TitleOffice?: string;
+}
+
+/**
+ * SoftPro's Title Officer feed carries the office code and the examiner code on
+ * one row, and syncTitleOfficers stores both on the same contact. Reading them
+ * from that single contact is what makes the pair unable to contradict itself.
+ *
+ * It used to be able to. For "Title & Escrow" the office came from the ESCROW
+ * officer while the examiner came from the TITLE officer, so order 1077788 sent
+ * office PRV with examiner PCT\cvirata. PRV is Anna Ballesteros' escrow branch
+ * and is not a title office at all — the feed offers only GLT, OCT and TSG — and
+ * SoftPro answered "One or more errors occurred."
+ */
+export function resolveTitleOfficeFields(titleOfficer?: ResolvedContact | null): TitleOfficeFields {
+  if (!titleOfficer) return { LookUpCodeTitleOffice: DEFAULT_TITLE_OFFICE };
+
+  const office = (titleOfficer.officeLookupCode ?? '').trim();
+  if (!office) {
+    const who = (titleOfficer.officerName ?? titleOfficer.fullName ?? `contact ${titleOfficer.id}`).trim();
+    throw new SoftProPayloadError(
+      `Title officer ${who} has no office code, so this order has no title office to send. `
+      + 'Choose a different title officer, or ask an admin to re-run the contact sync so that officer gets one. '
+      + 'The office code is never inferred from a name.',
+    );
+  }
+
+  const examiner = resolveTitleExaminerLookup(titleOfficer);
+  return examiner
+    ? { LookUpCodeTitleOffice: office, TitleOffice: examiner }
+    : { LookUpCodeTitleOffice: office };
+}
+
+/**
+ * SoftPro matches this against its internal user directory — the same `PCT\user`
+ * namespace as TitleOffice — not against the address book.
+ *
+ * The address-book code is not rejected, which is worse than being rejected:
+ * staging accepted "AnnBalPaci" and created TEST-20002217-OCT with
+ * EscrowCompanies null and no EscrowOfficer key at all, so every Title & Escrow
+ * order created this way lost its escrow officer without saying so. Omitting the
+ * field leaves an order an operator can fix; sending the wrong namespace leaves
+ * one nobody knows is broken.
+ */
+export function resolveEscrowOfficerLookup(escrowOfficer?: ResolvedContact | null): string | null {
+  const code = (escrowOfficer?.softproLookupCode ?? escrowOfficer?.closerExaminer ?? '').trim();
+  if (!code.toUpperCase().startsWith(SOFTPRO_USER_PREFIX)) return null;
+  return code;
+}
+
+/**
+ * Last gate before the wire. LookUpCodeTitleOffice is the field behind every
+ * createOrder rejection this system has had (PCT in March, PRV in August), and
+ * SoftPro's reply to an unknown code is an unactionable "One or more errors
+ * occurred." A named refusal here is worth more than that reply.
+ *
+ * knownTitleOffices is deliberately allowed to be empty. Empty means the caller
+ * could not establish the valid set, and in that case this must wave the order
+ * through: refusing everything when a lookup is unavailable would turn a Title &
+ * Escrow bug into a total order-entry outage.
+ */
+export function assertKnownTitleOffice(
+  payload: Record<string, unknown>,
+  knownTitleOffices: readonly string[],
+): void {
+  const known = knownTitleOffices.map((c) => c.trim().toUpperCase()).filter(Boolean);
+  if (known.length === 0) return;
+
+  const tx = payload.transactionDetails as Record<string, unknown> | undefined;
+  const code = typeof tx?.LookUpCodeTitleOffice === 'string' ? tx.LookUpCodeTitleOffice.trim() : '';
+
+  if (!code) {
+    throw new SoftProPayloadError(
+      `This order has no title office. SoftPro accepts ${known.join(', ')} — assign a title officer whose office is one of those.`,
+    );
+  }
+  if (!known.includes(code.toUpperCase())) {
+    throw new SoftProPayloadError(
+      `Not sending this order: "${code}" is not a title office. SoftPro accepts ${known.join(', ')}. `
+      + 'That code comes from the assigned title officer, so check which officer is on the order and what office they belong to.',
+    );
+  }
 }
 
 export interface OpenerCompany {
@@ -180,8 +254,8 @@ export function buildSoftProPayload(
   const escrowOfficer = resolved.escrowOfficer;
 
   const salesRepLookup = salesRep?.lookupCode ?? '';
-  const examinerLookup = resolveTitleExaminerLookup(titleOfficer);
-  const branchCode = resolveBranchCode(input.orderType, titleOfficer, escrowOfficer);
+  const titleOffice = resolveTitleOfficeFields(titleOfficer);
+  const escrowOfficerLookup = resolveEscrowOfficerLookup(escrowOfficer);
 
   return {
     baseDetails: {
@@ -220,9 +294,9 @@ export function buildSoftProPayload(
     }],
     sellerDetails: buildSellerDetails(input),
     transactionDetails: {
-      LookUpCodeTitleOffice: branchCode,
-      // Examiner person lookup only — omit when missing (never send branch as TitleOffice).
-      ...(examinerLookup ? { TitleOffice: examinerLookup } : {}),
+      // Both halves come from one title-officer row; TitleOffice is the examiner
+      // person lookup and is omitted rather than falling back to the office code.
+      ...titleOffice,
       Product: input.transaction.product,
       EscrowNumber: input.transaction.escrowNumber ?? '',
       SalesAmount: input.transaction.salesAmount,
@@ -239,8 +313,14 @@ export function buildSoftProPayload(
       SecondaryBorrowerLastName: input.buyer.secondaryLastName ?? '',
       IsOrganization: input.buyer.isOrganization === true,
       OrganizationType: input.buyer.organizationType ?? '',
-      LookUpCodeEscrowOfficer: escrowOfficer?.lookupCode ?? null,
-      EscrowOfficerName: escrowOfficer?.officerName ?? escrowOfficer?.fullName ?? null,
+      LookUpCodeEscrowOfficer: escrowOfficerLookup,
+      // Empty when we are naming an officer, so SoftPro uses the name attached
+      // to the user code rather than ours — both vendor Title & Escrow examples
+      // send it that way. Null when we are not: staging TEST-20002219-OCT sent
+      // no officer code with an empty name and came back assigned to the API
+      // service account PCT\rsupport, while TEST-20002220-OCT, identical but for
+      // a null name, came back with no escrow officer at all.
+      EscrowOfficerName: escrowOfficerLookup ? '' : null,
     },
     ...(hasContactData(input.contacts?.buyerAgent) && {
       buyersAgentDetails: mapContactSection(input.contacts!.buyerAgent!),

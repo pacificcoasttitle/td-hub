@@ -145,7 +145,6 @@ export function normalizeClientCreateBody(raw: Record<string, unknown>): Record<
       loanNumber: typeof transaction.loanNumber === 'string' ? transaction.loanNumber : undefined,
       loanAmount: num(transaction.loanAmount),
       coverageAmount: num(transaction.coverageAmount),
-      branchCode: 'PCT',
       salesRep: typeof transaction.salesRep === 'string' ? transaction.salesRep : undefined,
       titleOfficer: typeof transaction.titleOfficer === 'string' ? transaction.titleOfficer : undefined,
       escrowOfficer: typeof parties.escrowOfficer === 'string' ? parties.escrowOfficer : undefined,

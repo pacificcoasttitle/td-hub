@@ -40,7 +40,11 @@ vi.mock('@/lib/domain/settings/service', () => ({
   getSetting: (...args: unknown[]) => getSettingMock(...args),
 }));
 vi.mock('@/lib/integrations/titlepoint/fips', () => ({ resolveCaliforniaFips: () => '06037' }));
-vi.mock('./softpro-payload', () => ({ buildSoftProPayload: vi.fn(() => ({})) }));
+vi.mock('./softpro-payload', () => ({
+  buildSoftProPayload: vi.fn(() => ({})),
+  assertKnownTitleOffice: vi.fn(),
+  SoftProPayloadError: class extends Error {},
+}));
 
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...a: unknown[]) => a),
@@ -136,7 +140,6 @@ const baseInput = {
     salesAmount: 0,
     loanAmount: 0,
     coverageAmount: 0,
-    branchCode: 'PCT',
   },
 };
 

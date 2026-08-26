@@ -323,7 +323,6 @@ export function useQuickEntry() {
           escrowNumber: escrowNumber || undefined,
           salesAmount: num(salesAmount), loanNumber: loanNumber || undefined,
           loanAmount: num(loanAmount), coverageAmount: num(coverageAmount),
-          branchCode: 'PCT',
           salesRep: salesRep || undefined, titleOfficer: titleOfficer || undefined,
           escrowOfficer: escrowOfficer || undefined,
           underwriterCode: underwriter || undefined,

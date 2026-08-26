@@ -50,6 +50,8 @@ vi.mock('@/lib/integrations/titlepoint/fips', () => ({
 
 vi.mock('./softpro-payload', () => ({
   buildSoftProPayload: vi.fn(() => ({})),
+  assertKnownTitleOffice: vi.fn(),
+  SoftProPayloadError: class extends Error {},
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -109,7 +111,6 @@ const basePayload = {
     salesAmount: 100000,
     loanAmount: 0,
     coverageAmount: 0,
-    branchCode: 'PCT',
   },
 };
 

@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import { orders, documents, prelimAnalyses } from '@/lib/db/schema';
 import { sql, and, eq, or, isNull, asc } from 'drizzle-orm';
 import { getAttachedDocuments } from '@/lib/integrations/softpro';
+import { describeAttachedDocuments } from '@/lib/integrations/softpro/client';
 import { analyzePrelim } from '@/lib/tessa';
 import { budgetMsFor } from '@/lib/jobs/time-budget';
 import {
@@ -221,7 +222,21 @@ export async function fetchPrelimsForOrder(
   if (!result.success || !result.data) return 0;
 
   const urls = extractUrls(result.data);
-  if (urls.length === 0) return 0;
+  if (urls.length === 0) {
+    // Distinguish "SoftPro has nothing" from "SoftPro sent a shape we drop".
+    // Both were a bare skip before, which is why the Title & Escrow gap
+    // (8 of 418 orders with a prelim) had no explanation in the logs.
+    const items = Array.isArray(result.data) ? result.data : [];
+    if (items.length === 0) {
+      console.log(`[fetch-prelims] ${fileNumber}: SoftPro returned no attached documents`);
+    } else {
+      console.warn(
+        `[fetch-prelims] ${fileNumber}: ${items.length} attached document(s) returned but none were URL strings`,
+        JSON.stringify(describeAttachedDocuments(result.data)),
+      );
+    }
+    return 0;
+  }
 
   let stored = 0;
   for (const url of urls) {

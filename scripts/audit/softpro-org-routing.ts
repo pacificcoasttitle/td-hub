@@ -52,7 +52,7 @@ const ORG_RE = /\b(LLC|L\.L\.C|INC|CORP|TRUST|COMPANY|HOLDINGS|VENTURES|ESTATES|
     const res = await getOrderContacts(fn);
     if (!res.success) { console.log(`${fn.padEnd(15)} GetOrderContacts FAILED: ${res.error?.message}`); continue; }
 
-    const con = res.data as Record<string, unknown>;
+    const con = res.data as unknown as Record<string, unknown>;
     const scoped = { buyer: con.buyer, Sellers: con.Sellers };
     const ls = leaves(scoped).filter(([, v]) => v !== 'null' && v !== 'undefined' && v !== '""');
 
@@ -92,7 +92,7 @@ const ORG_RE = /\b(LLC|L\.L\.C|INC|CORP|TRUST|COMPANY|HOLDINGS|VENTURES|ESTATES|
   console.log('\nIS THERE A Company SUB-OBJECT AT ALL, EVEN NULL?');
   const one = await getOrderContacts(String(rows[0]!.file_number));
   if (one.success) {
-    const c = one.data as Record<string, unknown>;
+    const c = one.data as unknown as Record<string, unknown>;
     console.log('  buyer   =', JSON.stringify(c.buyer));
     console.log('  Sellers =', JSON.stringify(c.Sellers));
   }

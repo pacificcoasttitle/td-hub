@@ -3,9 +3,10 @@ import { z } from 'zod';
 import { and, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
 import { getOrders } from '@/lib/domain/orders/service';
-import { db } from '@/lib/db/client';
-import { orders, contacts } from '@/lib/db/schema';
-import { getManagedRepIds } from '@/lib/domain/contacts/managed-reps';
+import { orders } from '@/lib/db/schema';
+import { buildScopeFilter } from '@/lib/domain/orders/scope';
+import { HUB_QUEUES, type HubQueueId } from '@/lib/domain/orders/hub-queues';
+import { queueFilter } from '@/lib/domain/orders/hub-queue-filters';
 import type { TaskPriority } from '@/lib/domain/escrow/tasks';
 import {
   loadEscrowTaskOrderRows,
@@ -13,7 +14,7 @@ import {
 } from '@/lib/domain/escrow/escrow-tasks-derivation';
 import { missingExpectedEscrowOfficerSql } from '@/lib/domain/orders/escrow-officer-expectation';
 
-const FULL_ACCESS_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team'];
+const HUB_QUEUE_IDS = HUB_QUEUES.map((q) => q.id) as [HubQueueId, ...HubQueueId[]];
 
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
@@ -23,6 +24,8 @@ const querySchema = z.object({
   branchId: z.coerce.number().optional(),
   sortBy: z.enum(['openedAt', 'fileNumber', 'operationalStatus', 'salesRep', 'productType', 'createdBy']).default('openedAt'),
   sortDir: z.enum(['asc', 'desc']).default('desc'),
+  /** Hub split-view queue rail. Absent means no queue filter at all. */
+  queue: z.enum(HUB_QUEUE_IDS).optional(),
   escrowOfficerId: z.preprocess(
     (v) => (v === '' ? undefined : v),
     z.string().optional(),
@@ -33,59 +36,19 @@ const querySchema = z.object({
   ),
 });
 
-async function resolveContactId(session: { contactId: number | null; email: string }): Promise<number | null> {
-  if (session.contactId) return session.contactId;
-  const [row] = await db.select({ id: contacts.id }).from(contacts)
-    .where(eq(contacts.email, session.email)).limit(1);
-  return row?.id ?? null;
-}
-
-async function buildScopeFilter(session: { id: string; role: string; contactId: number | null; email: string }): Promise<SQL | null> {
-  if (FULL_ACCESS_ROLES.includes(session.role)) return null;
-
-  if (session.role === 'sales_rep') {
-    const cid = await resolveContactId(session);
-    if (!cid) return eq(orders.id, -1);
-    return eq(orders.salesRepId, cid);
-  }
-
-  if (session.role === 'sales_manager') {
-    const cid = await resolveContactId(session);
-    if (!cid) return eq(orders.id, -1);
-    const managedIds = await getManagedRepIds(cid);
-    const allIds = [cid, ...managedIds];
-    return inArray(orders.salesRepId, allIds);
-  }
-
-  if (session.role === 'title_officer') {
-    const cid = await resolveContactId(session);
-    if (!cid) return eq(orders.id, -1);
-    return eq(orders.titleOfficerId, cid);
-  }
-
-  if (session.role === 'escrow_officer') {
-    const cid = await resolveContactId(session);
-    if (!cid) return eq(orders.id, -1);
-    return eq(orders.escrowOfficerId, cid);
-  }
-
-  if (session.role === 'escrow_assistant') {
-    return inArray(orders.orderType, ['Title & Escrow', 'Escrow only']);
-  }
-
-  if (session.role === 'client') {
-    return eq(orders.createdBy, session.id);
-  }
-
-  return eq(orders.id, -1);
-}
-
 async function buildHubExtraFilter(
   session: { role: string },
   escrowOfficerIdParam: string | undefined,
   priorityParam: number | undefined,
+  queue: HubQueueId | undefined,
+  now: Date,
 ): Promise<{ filter: SQL | null; error: NextResponse | null }> {
   const parts: SQL[] = [];
+
+  if (queue) {
+    const q = queueFilter(queue, now);
+    if (q) parts.push(q);
+  }
 
   if (escrowOfficerIdParam !== undefined && escrowOfficerIdParam !== '') {
     if (escrowOfficerIdParam.toLowerCase() === 'null') {
@@ -145,6 +108,8 @@ export async function GET(req: NextRequest) {
       session,
       params.escrowOfficerId,
       params.priority,
+      params.queue,
+      new Date(),
     );
     if (error) return error;
 

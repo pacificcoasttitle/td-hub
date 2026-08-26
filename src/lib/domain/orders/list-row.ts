@@ -47,6 +47,14 @@ export interface ListRow {
   productType: string | null;
   type: string;
   openedAt: string;
+  /**
+   * The raw instant, alongside the already-formatted `openedAt`.
+   *
+   * `openedAt` is a display string ("Aug 24, 2026") and cannot be re-parsed
+   * into a time of day, which the split view's day dividers and 4:12p column
+   * both need. Additive: no existing consumer changes.
+   */
+  openedAtIso: string | null;
   closedAt: string;
   address: string | null;
   city: string | null;
@@ -107,6 +115,7 @@ export function projectListRow(source: ListRowSource): ListRow {
     productType: source.productType ?? null,
     type: orderTypeLabel(source),
     openedAt: formatOrderDate(source.openedAt),
+    openedAtIso: toIsoInstant(source.openedAt),
     closedAt: formatOrderDate(source.closedAt),
     address: property?.address ?? null,
     city: property?.city ?? null,
@@ -145,4 +154,17 @@ function normalizeProperty(property: OrderAddressParts | null | undefined): List
 function clean(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+/**
+ * Null rather than a placeholder for a missing or unparseable date.
+ *
+ * `formatOrderDate` answers with an em-dash so a table cell always has
+ * something to draw; this one is consumed by date arithmetic, where a string
+ * that is not a date is worse than nothing.
+ */
+function toIsoInstant(value: Date | string | null | undefined): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }

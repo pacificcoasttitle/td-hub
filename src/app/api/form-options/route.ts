@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
+import { internalOfficerFilter } from '@/lib/domain/contacts/filters';
 import { db } from '@/lib/db/client';
 import { contacts } from '@/lib/db/schema';
 import { sql } from 'drizzle-orm';
@@ -81,7 +82,7 @@ export async function GET() {
         email: contacts.email,
       })
         .from(contacts)
-        .where(sql`${contacts.isTitleOfficer} = true`)
+        .where(internalOfficerFilter('title_officer'))
         .orderBy(contacts.officerName)
         .limit(200),
 
@@ -92,7 +93,7 @@ export async function GET() {
         email: contacts.email,
       })
         .from(contacts)
-        .where(sql`${contacts.isEscrowOfficer} = true`)
+        .where(internalOfficerFilter('escrow_officer'))
         .orderBy(contacts.officerName)
         .limit(200),
     ]);

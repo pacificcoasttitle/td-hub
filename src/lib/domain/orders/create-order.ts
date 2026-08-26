@@ -10,7 +10,12 @@ import { linkSessionToOrder } from '@/lib/domain/titlepoint/pre-initiate';
 import { initiateSearch } from '@/lib/domain/titlepoint/service';
 import { getSetting } from '@/lib/domain/settings/service';
 import { resolveCaliforniaFips } from '@/lib/integrations/titlepoint/fips';
-import { buildSoftProPayload, type ResolvedContacts } from './softpro-payload';
+import {
+  assertKnownTitleOffice,
+  buildSoftProPayload,
+  SoftProPayloadError,
+  type ResolvedContacts,
+} from './softpro-payload';
 
 // ─── Zod Schema ─────────────────────────────────────────────────────────────
 
@@ -56,7 +61,6 @@ export const createOrderInputSchema = z.object({
     loanNumber: z.string().optional(),
     loanAmount: z.number().default(0),
     coverageAmount: z.number().default(0),
-    branchCode: z.string().default('PCT'),
     salesRep: z.string().optional(),
     titleOfficer: z.string().optional(),
     escrowOfficer: z.string().optional(),
@@ -166,7 +170,17 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
   } catch { /* underwriter lookup failure never blocks order creation */ }
 
   const resolved = await resolveContactIds(input);
-  const softProPayload = buildSoftProPayload(input, { apn, legal, county }, resolved);
+
+  let softProPayload: Record<string, unknown>;
+  try {
+    softProPayload = buildSoftProPayload(input, { apn, legal, county }, resolved);
+    assertKnownTitleOffice(softProPayload, await loadKnownTitleOffices());
+  } catch (err) {
+    // The operator can act on these, so they must reach the form rather than
+    // becoming a generic 500 in the route's catch-all.
+    if (err instanceof SoftProPayloadError) return { success: false, error: err.message };
+    throw err;
+  }
 
   const spResult = await softproCreateOrder(softProPayload);
   if (!spResult.success || !spResult.data) {
@@ -326,6 +340,34 @@ function buildPartyInserts(orderId: number, input: CreateOrderInput): PartyInser
 
 function resolveUnderwriterCode(productType: string): string {
   return productType.toLowerCase().trim() === 'full alta' ? 'CW' : 'WC';
+}
+
+/**
+ * Office codes for the pre-send title-office check, read from the synced
+ * title-officer contacts rather than from SoftPro directly.
+ *
+ * getLookupTable('Title Officer') is the authority, but putting a live vendor
+ * call in the create path would mean a SoftPro blip blocks every order — the
+ * exact trade we are trying not to make. These rows are the same ones
+ * syncTitleOfficers writes from that feed, and they are also where the code we
+ * are about to send comes from, so a mismatch means the payload picked up an
+ * office from somewhere other than a title officer. That is precisely the bug
+ * this guards against: PRV was an escrow officer's branch and would not appear
+ * here.
+ *
+ * Returning [] on any failure is deliberate — an unavailable check must not
+ * refuse orders.
+ */
+async function loadKnownTitleOffices(): Promise<string[]> {
+  try {
+    const rows = await db
+      .select({ office: contacts.officeLookupCode })
+      .from(contacts)
+      .where(eq(contacts.isTitleOfficer, true));
+    return [...new Set(rows.map((r) => (r.office ?? '').trim().toUpperCase()).filter(Boolean))];
+  } catch {
+    return [];
+  }
 }
 
 // ─── Contact Resolution ────────────────────────────────────────────────────

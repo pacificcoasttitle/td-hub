@@ -41,7 +41,6 @@ function purchase(contacts: {
       salesAmount: 850000,
       loanAmount: 680000,
       coverageAmount: 850000,
-      branchCode: 'PCT',
     },
     contacts,
   });

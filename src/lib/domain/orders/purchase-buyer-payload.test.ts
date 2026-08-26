@@ -61,7 +61,6 @@ function purchaseFormPayload(buyer: ReturnType<typeof buyerFromFormState>) {
       salesAmount: 850000,
       loanAmount: 680000,
       coverageAmount: 850000,
-      branchCode: 'PCT',
     },
   };
 }

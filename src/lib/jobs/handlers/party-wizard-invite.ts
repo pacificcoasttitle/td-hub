@@ -99,6 +99,18 @@ export interface PartyInviteReportRow {
   templateError?: string;
 }
 
+export interface PartyInviteSampleEmail {
+  orderId: number;
+  fileNumber: string;
+  /** The address this exact email would have gone to. */
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  /** Stands where the real link would sit. */
+  linkPlaceholder: string;
+}
+
 export interface PartyInviteResult {
   scanned: number;
   sent: number;
@@ -114,6 +126,14 @@ export interface PartyInviteResult {
   refused?: true;
   /** Present on a dry run only. One row per candidate, nothing omitted. */
   report?: PartyInviteReportRow[];
+  /**
+   * Present on a dry run only. The first email this run would send, kept whole.
+   *
+   * Approving copy from a summary means approving a draft. This is the real
+   * output for a real order — same template, same data, same link placement —
+   * with the URL replaced, since a working link cannot exist without a write.
+   */
+  sampleEmail?: PartyInviteSampleEmail;
   /**
    * Why the report cannot show link URLs. Carried in the payload rather than
    * left to the reader to notice.
@@ -274,7 +294,13 @@ export async function handlePartyWizardInvite(
     // or sends mail. The templates are still rendered against the same input, so
     // a template that throws fails the dry run instead of the first real send.
     if (dryRun) {
-      result.report!.push(renderPreview(row));
+      const preview = renderPreview(row);
+      result.report!.push(preview.row);
+      // Keep the first one whole. One is enough to review the wording, and a
+      // hundred full bodies in one response is a payload nobody reads.
+      if (!result.sampleEmail && preview.rendered) {
+        result.sampleEmail = { orderId: row.orderId, fileNumber: row.fileNumber, to, ...preview.rendered };
+      }
       continue;
     }
 
@@ -382,20 +408,34 @@ function reportRow(
   };
 }
 
-function renderPreview(row: CandidateRow): PartyInviteReportRow {
+interface RenderedPreview {
+  row: PartyInviteReportRow;
+  /** Absent when the template threw — the row carries the reason instead. */
+  rendered: { subject: string; html: string; text: string; linkPlaceholder: string } | null;
+}
+
+function renderPreview(row: CandidateRow): RenderedPreview {
   const base = reportRow(row, 'would_send', 'would_mint');
   const input = {
     ...templateInput(row),
     roleLinks: [{ role: PARTY_INVITE_ROLE, url: DRY_RUN_LINK_PLACEHOLDER }],
   };
   try {
-    base.subject = buildPartyWizardSubject(input);
-    buildPartyWizardEmail(input);
-    buildPartyWizardText(input);
+    const subject = buildPartyWizardSubject(input);
+    base.subject = subject;
+    return {
+      row: base,
+      rendered: {
+        subject,
+        html: buildPartyWizardEmail(input),
+        text: buildPartyWizardText(input),
+        linkPlaceholder: DRY_RUN_LINK_PLACEHOLDER,
+      },
+    };
   } catch (err) {
     base.templateError = err instanceof Error ? err.message : 'template failed to render';
+    return { row: base, rendered: null };
   }
-  return base;
 }
 
 /**
@@ -413,7 +453,7 @@ async function recordRun(
 ): Promise<void> {
   const jobId = typeof payload.__jobId === 'number' ? payload.__jobId : null;
   if (jobId === null) return;
-  const { report: _report, ...summary } = result;
+  const { report: _report, sampleEmail: _sampleEmail, ...summary } = result;
   try {
     await db
       .update(jobs)

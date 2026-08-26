@@ -375,6 +375,57 @@ describe('dry run reports instead of sending', () => {
     expect(r.scanned).toBe(4);
   });
 
+  /**
+   * Copy gets approved from this. Rendering the templates and throwing the bodies
+   * away meant approving a draft rather than the output a real order produces.
+   */
+  it('keeps ONE fully rendered body, not just subjects', async () => {
+    candidatesMock.mockResolvedValue([candidate({ orderId: 1 }), candidate({ orderId: 2 })]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.sampleEmail).toBeDefined();
+    const sample = r.sampleEmail!;
+    // A real order, a real recipient, the real subject line.
+    expect(sample.orderId).toBe(1);
+    expect(sample.fileNumber).toBe('20020625-OCT');
+    expect(sample.to).toBe('officer@example.com');
+    expect(sample.subject).toBe(r.report![0]!.subject);
+    // Whole bodies, not fragments.
+    expect(sample.html).toContain('<html');
+    expect(sample.html).toContain('20020625-OCT');
+    expect(sample.text).toContain('20020625-OCT');
+    // Only the link is stand-in, and it says so.
+    expect(sample.html).toContain(sample.linkPlaceholder);
+    expect(sample.linkPlaceholder).toContain('DRY-RUN-NO-LINK-MINTED');
+  });
+
+  it('keeps exactly one body however many orders it scans', async () => {
+    candidatesMock.mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => candidate({ orderId: i + 1 })),
+    );
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report).toHaveLength(5);
+    expect(r.sampleEmail!.orderId).toBe(1);
+  });
+
+  it('has no body to show when nothing would send', async () => {
+    candidatesMock.mockResolvedValue([candidate({ escrowOfficerId: null })]);
+    const r = await handlePartyWizardInvite({ dryRun: true });
+    expect(r.sampleEmail).toBeUndefined();
+  });
+
+  it('keeps the rendered body out of the job payload', async () => {
+    candidatesMock.mockResolvedValue([candidate()]);
+    await handlePartyWizardInvite({ dryRun: true, __jobId: 12 });
+    const payload = jobUpdates[0]!.payload as { partyWizardInvite: Record<string, unknown> };
+    expect(payload.partyWizardInvite.sampleEmail).toBeUndefined();
+    expect(payload.partyWizardInvite.report).toBeUndefined();
+    expect(payload.partyWizardInvite.scanned).toBe(1);
+  });
+
   it('says why it cannot show link URLs rather than leaving them blank', async () => {
     candidatesMock.mockResolvedValue([candidate()]);
     const r = await handlePartyWizardInvite({ dryRun: true });

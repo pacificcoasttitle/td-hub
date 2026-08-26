@@ -28,11 +28,22 @@ interface ReportRow {
   templateError?: string;
 }
 
+interface SampleEmail {
+  orderId: number;
+  fileNumber: string;
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  linkPlaceholder: string;
+}
+
 interface DryRunResult {
   scanned: number;
   reachablePct: number;
   enabled: boolean;
   report?: ReportRow[];
+  sampleEmail?: SampleEmail;
   reportNote?: string;
 }
 
@@ -192,6 +203,66 @@ export function PartyInviteDryRun() {
           )}
         </div>
       )}
+
+      {result?.sampleEmail && <SampleEmailPanel sample={result.sampleEmail} />}
     </section>
+  );
+}
+
+/**
+ * The first email the run would send, rendered whole. Copy gets approved from
+ * this, so it is the real output for a real order rather than a sample fixture —
+ * only the link is a placeholder.
+ */
+function SampleEmailPanel({ sample }: { sample: SampleEmail }) {
+  const [view, setView] = useState<'html' | 'text' | null>('html');
+
+  return (
+    <div className="mt-4 bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-900">
+            Rendered email — file {sample.fileNumber}
+          </p>
+          <p className="text-xs text-gray-500 mt-0.5 truncate">
+            To {sample.to} · {sample.subject}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {(['html', 'text'] as const).map(mode => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setView(view === mode ? null : mode)}
+              className={`rounded px-2.5 py-1 text-xs font-medium border ${
+                view === mode
+                  ? 'border-[#1B2A4A] bg-[#1B2A4A] text-white'
+                  : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {mode === 'html' ? 'HTML' : 'Plain text'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {view === 'html' && (
+        <iframe
+          // Sandboxed with no allowances: the preview must not be able to run
+          // anything, follow the placeholder link, or reach the admin session.
+          sandbox=""
+          srcDoc={sample.html}
+          title={`Rendered invite for file ${sample.fileNumber}`}
+          className="w-full h-[620px] border-0 bg-gray-50"
+        />
+      )}
+      {view === 'text' && (
+        <pre className="px-4 py-3 text-xs text-gray-700 whitespace-pre-wrap bg-gray-50">{sample.text}</pre>
+      )}
+
+      <p className="px-4 py-2 border-t border-gray-100 text-xs text-gray-500">
+        Every link in this preview points at {sample.linkPlaceholder} — no link was minted.
+      </p>
+    </div>
   );
 }

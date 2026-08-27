@@ -31,7 +31,7 @@ export async function clientCreateOrder(
 
   const normalized = normalizeClientCreateBody(raw);
   const merged = mergeWithContactDefaults(normalized, contactData, session);
-  return createAndSendToSoftPro(merged, creatorUserId);
+  return createAndSendToSoftPro(merged, 'web_form', creatorUserId);
 }
 
 type ContactRow = typeof contacts.$inferSelect;

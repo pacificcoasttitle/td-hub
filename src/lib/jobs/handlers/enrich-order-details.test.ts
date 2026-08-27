@@ -5,11 +5,13 @@ const {
   getOrderDetailsMock,
   candidates,
   existingOrderRows,
+  candidateWhere,
 } = vi.hoisted(() => ({
   orderUpdateSets: [] as Array<Record<string, unknown>>,
   getOrderDetailsMock: vi.fn(),
   candidates: [{ id: 42, fileNumber: '20018881-OCT', lastDetailsFetchAt: null as Date | null }],
   existingOrderRows: [{ id: 42, operationalStatus: 'in_process' }],
+  candidateWhere: [] as unknown[],
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -83,11 +85,14 @@ vi.mock('@/lib/db/client', () => ({
     selectDistinct: vi.fn(() => ({
       from: vi.fn(() => ({
         leftJoin: vi.fn(() => ({
-          where: vi.fn(() => ({
-            orderBy: vi.fn(() => ({
-              limit: vi.fn(async () => candidates),
-            })),
-          })),
+          where: vi.fn((clause: unknown) => {
+            candidateWhere.push(clause);
+            return {
+              orderBy: vi.fn(() => ({
+                limit: vi.fn(async () => candidates),
+              })),
+            };
+          }),
         })),
       })),
     })),
@@ -162,9 +167,19 @@ function lastOrderFieldUpdate(): Record<string, unknown> {
   return detailUpdate;
 }
 
+/** Every leaf clause in the composed drizzle where tree. */
+function flattenClauses(node: unknown, out: Array<Record<string, unknown>> = []): Array<Record<string, unknown>> {
+  if (!node || typeof node !== 'object') return out;
+  const n = node as Record<string, unknown>;
+  out.push(n);
+  for (const arg of (n.args as unknown[]) ?? []) flattenClauses(arg, out);
+  return out;
+}
+
 describe('handleEnrichOrderDetails preserveExistingOnEmpty', () => {
   beforeEach(() => {
     orderUpdateSets.length = 0;
+    candidateWhere.length = 0;
     getOrderDetailsMock.mockReset();
   });
 
@@ -215,6 +230,21 @@ describe('handleEnrichOrderDetails preserveExistingOnEmpty', () => {
     expect(set.transactionType).toBe('Refinance');
     expect(set.marketingSource).toBe('Referral');
     expect(set.operationalStatus).toBe('in_process');
+  });
+
+  // Hub-created orders are excluded by naming softpro_sync, not by naming the
+  // hub sources — so splitting the hub's own orders into manual_entry and
+  // web_form cannot start feeding client-wizard orders to GetOrderDetails,
+  // which has no record of them.
+  it('selects candidates by source = softpro_sync, so no hub-created source is enriched', async () => {
+    getOrderDetailsMock.mockResolvedValue({ success: true, data: [softProDetail()] });
+    await handleEnrichOrderDetails();
+
+    const clauses = flattenClauses(candidateWhere[0]);
+    const sourceClauses = clauses.filter((c) => c.op === 'eq' && c.field === 'orders.source');
+
+    expect(sourceClauses).toEqual([{ op: 'eq', field: 'orders.source', value: 'softpro_sync' }]);
+    expect(clauses.some((c) => c.value === 'manual_entry' || c.value === 'web_form')).toBe(false);
   });
   // ── Terminal-state guarantee ───────────────────────────────────────────────
   // The whole point of the time budget: a run that hits its deadline must

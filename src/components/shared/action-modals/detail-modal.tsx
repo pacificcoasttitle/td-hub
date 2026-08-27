@@ -44,6 +44,7 @@ export interface OrderDetail {
 const SOURCE_LABELS: Record<string, string> = {
   manual_entry: 'TD Hub',
   softpro_sync: 'SoftPro',
+  web_form: 'Web Form',
 };
 
 function formatSource(source: string | null | undefined): string {

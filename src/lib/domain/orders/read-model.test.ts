@@ -449,4 +449,18 @@ describe('applyVisibility', () => {
     expect(applyVisibility(model, 'staff').source).toBe('softpro_sync');
     expect(applyVisibility(model, 'staff').assignments.salesRep?.name).toBe('Ryan Rep');
   });
+
+  // The client wizard now writes 'web_form' where it used to write the operator's
+  // 'manual_entry'. This reader passes the value straight through for staff, so
+  // the new value must survive verbatim rather than be normalized or dropped —
+  // and it must still be redacted from the client who submitted it.
+  it('passes a web_form order source through to staff and still redacts it from clients', () => {
+    const model = buildOrderReadModel({
+      ...baseData,
+      order: { ...baseData.order, source: 'web_form' },
+    });
+
+    expect(applyVisibility(model, 'staff').source).toBe('web_form');
+    expect(applyVisibility(model, 'client').source).toBeNull();
+  });
 });

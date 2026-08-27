@@ -179,7 +179,7 @@ describe('createLocalRecords persists what the operator entered', () => {
   });
 
   it('BEFORE-shape: nothing entered leaves every optional column NULL', async () => {
-    const result = await createAndSendToSoftPro(baseInput);
+    const result = await createAndSendToSoftPro(baseInput, 'manual_entry');
     expect(result.success).toBe(true);
 
     const row = ordersInsert();
@@ -216,7 +216,7 @@ describe('createLocalRecords persists what the operator entered', () => {
         titleOfficer: String(TITLE_OFFICER_ID),
         escrowOfficer: String(ESCROW_OFFICER_ID),
       },
-    });
+    }, 'manual_entry');
 
     const row = ordersInsert();
     expect(row).toMatchObject({
@@ -243,7 +243,7 @@ describe('createLocalRecords persists what the operator entered', () => {
         salesRep: String(SALES_REP_ID),
         titleOfficer: '999999',
       },
-    });
+    }, 'manual_entry');
 
     const row = ordersInsert();
     expect(row.salesRepId).toBe(SALES_REP_ID);
@@ -256,7 +256,7 @@ describe('createLocalRecords persists what the operator entered', () => {
     await createAndSendToSoftPro({
       ...baseInput,
       transaction: { ...baseInput.transaction, loanAmount: 0 },
-    });
+    }, 'manual_entry');
     expect(ordersInsert().loanAmount).toBeNull();
   });
 
@@ -264,10 +264,33 @@ describe('createLocalRecords persists what the operator entered', () => {
     await createAndSendToSoftPro({
       ...baseInput,
       transaction: { ...baseInput.transaction, loanNumber: '', escrowNumber: '' },
-    });
+    }, 'manual_entry');
     const row = ordersInsert();
     expect(row.loanNumber).toBeNull();
     expect(row.escrowNumber).toBeNull();
+  });
+
+  // orders.source was hardcoded to 'manual_entry' here, so the operator form and
+  // the client wizard — which share this function — wrote the same value and
+  // 'web_form' stayed a dead enum value with zero rows. The origin is now the
+  // caller's to declare, and these assert the value, not that a value exists.
+  it('the operator form declares manual_entry', async () => {
+    await createAndSendToSoftPro(baseInput, 'manual_entry');
+    expect(ordersInsert().source).toBe('manual_entry');
+  });
+
+  it('the client wizard declares web_form', async () => {
+    await createAndSendToSoftPro(baseInput, 'web_form');
+    expect(ordersInsert().source).toBe('web_form');
+  });
+
+  // isImported stays false and the status-history row stays 'manual' whichever
+  // route opened it — those two columns mean "not from the sync", not "operator".
+  it('a web_form order is still not imported and still logs a manual status row', async () => {
+    await createAndSendToSoftPro(baseInput, 'web_form');
+    expect(ordersInsert().isImported).toBe(false);
+    const statusRow = insertValuesMock.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(statusRow).toMatchObject({ status: 'open', source: 'manual' });
   });
 });
 
@@ -340,7 +363,7 @@ describe('createLocalRecords links the parties the operator picked', () => {
 
   it('the lender and listing agent picks land in their own columns', async () => {
     seedAllParties();
-    await createAndSendToSoftPro(allPartiesSelected);
+    await createAndSendToSoftPro(allPartiesSelected, 'manual_entry');
 
     const row = ordersInsert();
     expect(row.lenderId).toBe(LENDER_ID);
@@ -349,7 +372,7 @@ describe('createLocalRecords links the parties the operator picked', () => {
 
   it('every picked party row carries the contact id it was picked from', async () => {
     seedAllParties();
-    await createAndSendToSoftPro(allPartiesSelected);
+    await createAndSendToSoftPro(allPartiesSelected, 'manual_entry');
 
     expect(partyByRole('lender')[0]).toMatchObject({
       contactId: LENDER_ID,
@@ -366,7 +389,7 @@ describe('createLocalRecords links the parties the operator picked', () => {
   // mortgage broker under, so both writers land on one row.
   it('the mortgage broker is written as lender_contact rather than dropped', async () => {
     seedAllParties();
-    await createAndSendToSoftPro(allPartiesSelected);
+    await createAndSendToSoftPro(allPartiesSelected, 'manual_entry');
 
     const broker = partyByRole('lender_contact');
     expect(broker).toHaveLength(1);
@@ -385,7 +408,7 @@ describe('createLocalRecords links the parties the operator picked', () => {
         lender: { name: 'Typed Lender', companyName: 'Some Bank Nobody Synced' },
         listingAgent: { name: 'Typed Agent', email: 'typed@example.com' },
       },
-    });
+    }, 'manual_entry');
 
     const row = ordersInsert();
     expect(row.lenderId).toBeNull();
@@ -416,7 +439,7 @@ describe('createLocalRecords links the parties the operator picked', () => {
           companyLookupCode: 'BarrFinaGrou',
         },
       },
-    });
+    }, 'manual_entry');
 
     expect(ordersInsert().lenderId).toBeNull();
     expect(partyByRole('lender')[0]).toMatchObject({
@@ -436,7 +459,7 @@ describe('createLocalRecords links the parties the operator picked', () => {
         lender: { contactId: 999999, name: 'Ghost Lender', email: 'ghost@example.com' },
         listingAgent: { contactId: LISTING_AGENT_ID, name: 'Listing Person', email: 'listing@example.com' },
       },
-    });
+    }, 'manual_entry');
 
     const row = ordersInsert();
     expect(row.lenderId).toBeNull();
@@ -451,7 +474,7 @@ describe('createLocalRecords links the parties the operator picked', () => {
   // A party the operator never opened is absent from input.contacts entirely and
   // must not produce a row, which is how it behaves today.
   it('an untouched party produces no row at all', async () => {
-    await createAndSendToSoftPro(baseInput);
+    await createAndSendToSoftPro(baseInput, 'manual_entry');
 
     const roles = partyInserts().map((p) => p.role);
     expect(roles).toEqual(['seller', 'buyer']);
@@ -519,7 +542,7 @@ describe('createLocalRecords writes parties on the key the read-back matches', (
     ['lender_contact', 'enrich-orders'],
   ])('the %s row is primary, so %s updates it instead of adding a second row', async (role) => {
     seedEveryRole();
-    await createAndSendToSoftPro(everyRoleSelected);
+    await createAndSendToSoftPro(everyRoleSelected, 'manual_entry');
 
     const rows = partyByRole(role);
     expect(rows).toHaveLength(1);
@@ -532,7 +555,7 @@ describe('createLocalRecords writes parties on the key the read-back matches', (
   // with the rest rather than being left as the one exception.
   it('the buyer agent row is primary too, not left as the odd one out', async () => {
     seedEveryRole();
-    await createAndSendToSoftPro(everyRoleSelected);
+    await createAndSendToSoftPro(everyRoleSelected, 'manual_entry');
 
     expect(partyByRole('buyer_agent')[0]!.isPrimary).toBe(true);
   });
@@ -540,7 +563,7 @@ describe('createLocalRecords writes parties on the key the read-back matches', (
   // Buyer and seller were already correct. Asserted so a future change to
   // buildPartyInserts cannot quietly take them the other way.
   it('buyer and seller stay primary, as they already were', async () => {
-    await createAndSendToSoftPro(baseInput);
+    await createAndSendToSoftPro(baseInput, 'manual_entry');
 
     expect(partyByRole('buyer')[0]!.isPrimary).toBe(true);
     expect(partyByRole('seller')[0]!.isPrimary).toBe(true);
@@ -550,7 +573,7 @@ describe('createLocalRecords writes parties on the key the read-back matches', (
   // column default. This is the check that would have caught the original bug.
   it('no party row is left to the column default', async () => {
     seedEveryRole();
-    await createAndSendToSoftPro(everyRoleSelected);
+    await createAndSendToSoftPro(everyRoleSelected, 'manual_entry');
 
     expect(partyInserts()).toHaveLength(7);
     for (const row of partyInserts()) {
@@ -568,7 +591,7 @@ describe('createLocalRecords writes parties on the key the read-back matches', (
         lender: { name: 'Typed Lender', companyName: 'Some Bank Nobody Synced' },
         escrowCompany: { name: 'Typed Escrow', companyName: 'Nobody Synced Escrow' },
       },
-    });
+    }, 'manual_entry');
 
     expect(partyByRole('lender')[0]).toMatchObject({
       isPrimary: true,
@@ -589,7 +612,7 @@ describe('createLocalRecords writes parties on the key the read-back matches', (
   // batch must be distinct on that triple.
   it('the insert batch is distinct on (role, is_primary), which migration 0035 requires', async () => {
     seedEveryRole();
-    await createAndSendToSoftPro(everyRoleSelected);
+    await createAndSendToSoftPro(everyRoleSelected, 'manual_entry');
 
     const keys = partyInserts().map((p) => `${String(p.role)}:${String(p.isPrimary)}`);
     expect(new Set(keys).size).toBe(keys.length);

@@ -72,6 +72,16 @@ describe('canonical list row projection', () => {
     expect(row.closedAt).toBe('—');
   });
 
+  // The list row carries orders.source verbatim into the admin table's badge,
+  // which falls back to a title-cased label for anything it has no entry for.
+  // A client-wizard order must arrive as 'web_form', not collapsed to a hub-wide
+  // value or dropped as unrecognised.
+  it('carries every order source through unchanged, including web_form', () => {
+    expect(projectListRow(source({ source: 'web_form' })).source).toBe('web_form');
+    expect(projectListRow(source({ source: 'manual_entry' })).source).toBe('manual_entry');
+    expect(projectListRow(source({ source: 'softpro_sync' })).source).toBe('softpro_sync');
+  });
+
   it('derives identical shown fields for admin, sales, and client loader sources', () => {
     const admin = projectListRow(source({ source: 'softpro_sync' }));
     const sales = projectListRow(source());

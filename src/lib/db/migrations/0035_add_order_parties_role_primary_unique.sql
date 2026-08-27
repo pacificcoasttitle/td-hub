@@ -1,0 +1,62 @@
+-- 0035 — Enforce one order_parties row per (order_id, role, is_primary).
+--
+-- That triple is already the party identity every writer uses. All four look a
+-- row up by exactly it and then update-or-insert:
+--
+--   create-order.ts            buildPartyInserts / contactParty
+--   enrich-orders.ts           upsertResolvedParty      (lines 765-773)
+--   verify-order-sync.ts       reconcileParties         (line 307)
+--   party-wizard-service.ts    projectToOrderParties    (lines 315-323)
+--
+-- Nothing held them to it, and create-order drifted: it omitted is_primary and
+-- took the column default of false, while the other three ask for true on every
+-- role the open-order form collects (lender, listing_agent, escrow_company,
+-- lender_contact, buyer_agent). A hub order with a party entered therefore got a
+-- SECOND row for that role the first time a read-back ran, with the operator's
+-- contact_id stranded on the row the strict is_primary readers ignore.
+--
+-- Already observed in production from a different pair of writers: orders 11, 27
+-- and 42 each hold a lender_contact row written 2026-03-11 with a raw lookup
+-- code (PatLeeLeeM, NicColUSAH, JusBitEqui) at is_primary = false, plus a second
+-- written 2026-06-13 with the resolved name at is_primary = true. Same
+-- mechanism, three files, nobody noticed for three months.
+--
+-- Fixing create-order alone would make four paths agree by convention again, and
+-- this repository's recurring failure is exactly that: the same rule implemented
+-- in several places and then drifting. The constraint is the durable half.
+--
+-- SAFE TO APPLY AS-IS — NO CLEANUP NEEDED. Measured read-only against
+-- production before writing this: 33,937 rows, 24,961 distinct (order_id, role)
+-- pairs of which 8,976 hold more than one row, but 33,937 distinct
+-- (order_id, role, is_primary) triples — i.e. ZERO violations. The many
+-- multi-row roles are all legitimate primary/secondary pairs: buyer and seller
+-- (primary + secondary) and role='other' (title company primary, underwriter
+-- non-primary).
+--
+-- Consequence worth knowing: a race between two writers on the same order and
+-- role now raises a unique violation instead of silently inserting a duplicate.
+-- That is the intended direction — the failure becomes visible — but it does
+-- mean a concurrent double-write surfaces as an error rather than as bad data.
+--
+-- order_parties_order_role_idx is deliberately kept. It is redundant as a lookup
+-- (this index has (order_id, role) as its leading prefix), but dropping an index
+-- is a separate decision from adding a constraint and does not belong here.
+--
+-- Idempotent: safe to run more than once.
+--
+-- APPLY: hand-applied to production BEFORE the code that relies on it deploys
+--        (migrations do not run automatically). CREATE UNIQUE INDEX takes a
+--        brief ACCESS EXCLUSIVE lock on order_parties; at 33,937 rows that is
+--        milliseconds. Use the CONCURRENTLY form below if that is still
+--        unwelcome — it cannot run inside a transaction block.
+--
+-- Reversible:
+--   DROP INDEX IF EXISTS public.order_parties_order_role_primary_uniq;
+
+CREATE UNIQUE INDEX IF NOT EXISTS order_parties_order_role_primary_uniq
+  ON public.order_parties (order_id, role, is_primary);
+
+-- Non-blocking alternative, if the lock above is unwelcome. Run OUTSIDE a
+-- transaction and check indisvalid afterwards:
+--   CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS order_parties_order_role_primary_uniq
+--     ON public.order_parties (order_id, role, is_primary);

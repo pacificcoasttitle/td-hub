@@ -163,6 +163,21 @@ export const orderParties = pgTable('order_parties', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (table) => ({
   orderRoleIdx: index('order_parties_order_role_idx').on(table.orderId, table.role),
+  /**
+   * (order_id, role, is_primary) is the party identity every writer already
+   * uses: create-order, enrich-orders upsertResolvedParty, verify-order-sync
+   * reconcileParties and the party wizard's projectToOrderParties all look a row
+   * up by this exact triple before deciding to update or insert. Four code paths
+   * agreeing by convention is what let create-order drift to the column default
+   * and produce a second row per party; this makes the database the one that
+   * holds them to it.
+   *
+   * Applied to production by hand as migration 0035 — see that file. Verified
+   * against all 33,937 rows first: zero triples had more than one row, so no
+   * cleanup was required.
+   */
+  orderRolePrimaryUnique: uniqueIndex('order_parties_order_role_primary_uniq')
+    .on(table.orderId, table.role, table.isPrimary),
 }));
 
 // ─── Order Status History ────────────────────────────────────────────────────

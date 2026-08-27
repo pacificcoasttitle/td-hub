@@ -1,5 +1,5 @@
 import { db } from '@/lib/db/client';
-import { contactSyncState } from '@/lib/db/schema';
+import { contactSyncState, jobs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import {
   fetchSyncContactRows,
@@ -70,6 +70,58 @@ export interface SyncContactTypeResult extends SyncContactsResult {
   nextAllowedAt: string | null;
 }
 
+export interface SyncContactTypePayload {
+  /** Injected by the job runner so a partial failure can record itself. */
+  __jobId?: number;
+}
+
+/**
+ * One sentence naming who failed and why, short enough to live in `jobs.error`.
+ *
+ * A run where some rows failed and others succeeded returns normally, so the
+ * runner marks the job `completed` and writes no error — indistinguishable from
+ * a run that had nothing to do. That is how the escrow-officer sync reported
+ * clean runs for four months while four officers silently stopped updating.
+ */
+export function summarizeSyncErrors(result: SyncContactsResult, processed: number): string {
+  const names = result.errors.slice(0, 5).map((e) => e.lookupCode).join(', ');
+  const more = result.errors.length > 5 ? ` (+${result.errors.length - 5} more)` : '';
+  return `${result.entityType}: ${result.errors.length} of ${processed} rows failed — ${names}${more}. `
+    + `First: ${result.errors[0]?.error ?? 'unknown'}`;
+}
+
+/**
+ * Puts a partial failure where the Operations panel already looks.
+ *
+ * `jobs.error` is the field `/api/admin/ops/sync` reads, and the runner only
+ * ever writes it when a handler throws. This sync must not throw — one officer's
+ * unique-violation is no reason to abandon the rest of the feed — so it stamps
+ * its own row. `jobs.payload` also takes the full result, matching how
+ * sync-orders, verify-order-sync and party-wizard-invite persist theirs.
+ *
+ * Best-effort: failing to record a failure must not itself fail the run.
+ */
+async function recordRun(
+  payload: SyncContactTypePayload,
+  response: SyncContactTypeResult,
+): Promise<void> {
+  const jobId = typeof payload.__jobId === 'number' ? payload.__jobId : null;
+  if (jobId === null) return;
+  try {
+    await db
+      .update(jobs)
+      .set({
+        payload: { ...payload, __jobId: undefined, syncContacts: response },
+        ...(response.errors.length > 0
+          ? { error: summarizeSyncErrors(response, response.processed) }
+          : {}),
+      })
+      .where(eq(jobs.id, jobId));
+  } catch {
+    /* recording is best-effort; never fail the sync over it */
+  }
+}
+
 export async function handleSyncAllContacts(): Promise<SyncAllContactsResult> {
   const now = new Date();
   const stateRows = await db.select().from(contactSyncState);
@@ -93,7 +145,8 @@ export async function handleSyncAllContacts(): Promise<SyncAllContactsResult> {
 }
 
 export async function handleSyncContactType(
-  jobType: keyof typeof CONTACT_SYNC_JOB_CONFIGS
+  jobType: keyof typeof CONTACT_SYNC_JOB_CONFIGS,
+  payload: SyncContactTypePayload = {},
 ): Promise<SyncContactTypeResult> {
   const entityType = CONTACT_SYNC_JOB_CONFIGS[jobType];
   const now = new Date();
@@ -221,10 +274,17 @@ export async function handleSyncContactType(
         nextAllowedAt,
         totalFetched: fetched.items.length,
         lastResult: response,
-        lastError: null,
+        // A run that failed some rows must not clear the error column on its way
+        // out. Nulling it here is what made a partial failure invisible in the
+        // one table that tracks this sync's health.
+        lastError: result.errors.length > 0
+          ? summarizeSyncErrors(result, processed)
+          : null,
         updatedAt: new Date(),
       })
       .where(eq(contactSyncState.entityType, entityType));
+
+    await recordRun(payload, response);
 
     return response;
   } catch (err) {

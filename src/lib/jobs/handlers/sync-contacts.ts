@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { contacts, companies } from '@/lib/db/schema';
-import { and, eq, or, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { getLookupTable, getSalesReps } from '@/lib/integrations/softpro';
 import type { SoftProLookupItem } from '@/lib/integrations/softpro';
 import { COMPANY_TYPE_MAP } from '@/lib/domain/contacts/company-constants';
@@ -99,6 +99,87 @@ export async function shouldDeactivateExistingSalesReps(
   return { deactivate: true, activeCount };
 }
 
+/**
+ * Which contacts row an incoming officer feed row belongs to.
+ *
+ * `closer_examiner` is the key because production carries a partial unique index
+ * on it — `contacts_closer_examiner_uniq`, UNIQUE (closer_examiner) WHERE
+ * closer_examiner IS NOT NULL, created out of band and absent from this repo's
+ * Drizzle schema. At most one row can hold a given code, so this match is
+ * deterministic by construction and not by tie-break.
+ *
+ * The predicate this replaces was `closer_examiner = X OR softpro_lookup_code = X`,
+ * limit 1, no ORDER BY. Four officers exist twice under one `PCT\user` code —
+ * Ballesteros, Gomez, Casco, Vidaca — where the feed row carries both columns
+ * and the address-book twin carries only `softpro_lookup_code`. Both satisfied
+ * that OR, so which row came back was the query plan's choice; when it chose the
+ * twin, writing `closer_examiner` onto it collided with the unique index and the
+ * error went into the result's `errors` array, where nothing read it. Those four
+ * office rows last changed 2026-04-16 as a result.
+ *
+ * `source_id` looks like the natural vendor-side key and is not usable as one:
+ * both rows of every affected pair carry the SAME `PCT\user` source_id, so it
+ * cannot tell them apart, and no uniqueness constraint covers it.
+ */
+async function findOfficerContactId(examiner: string): Promise<number | null> {
+  const [byExaminer] = await db
+    .select({ id: contacts.id })
+    .from(contacts)
+    .where(eq(contacts.closerExaminer, examiner))
+    .limit(1);
+  if (byExaminer) return byExaminer.id;
+
+  // No feed row exists yet. Adopting an existing address-book row is what stops
+  // this creating a second one, but the choice must not depend on the plan:
+  // prefer a row already shaped like a feed row (it has an office code), then
+  // the lowest id.
+  const [byLookupCode] = await db
+    .select({ id: contacts.id })
+    .from(contacts)
+    .where(eq(contacts.softproLookupCode, examiner))
+    .orderBy(
+      sql`(${contacts.officeLookupCode} IS NOT NULL AND ${contacts.officeLookupCode} <> '') DESC`,
+      asc(contacts.id),
+    )
+    .limit(1);
+
+  return byLookupCode?.id ?? null;
+}
+
+interface PgErrorish {
+  code?: string;
+  constraint_name?: string;
+  detail?: string;
+  cause?: unknown;
+  message?: string;
+}
+
+/**
+ * Names the cause instead of storing the statement.
+ *
+ * Drizzle wraps a driver failure in an Error whose message is the entire failed
+ * query plus its bound parameters, and puts the postgres.js error on `cause`.
+ * That is why every entry in the stored `errors` arrays is a two-kilobyte SQL
+ * dump with the actual reason nowhere in it — the reason lives on `cause.code`
+ * and `cause.constraint_name`.
+ */
+export function describeSyncError(err: unknown): string {
+  const top = err as PgErrorish | null;
+  const pg = (top?.cause ?? top) as PgErrorish | null;
+  const code = pg?.code ?? top?.code;
+
+  if (code === '23505') {
+    const constraint = pg?.constraint_name ?? top?.constraint_name ?? 'a unique index';
+    return `unique violation on ${constraint}: this code already belongs to a different contacts row, `
+      + 'so the officer was not updated. Two contacts rows share one SoftPro identity.';
+  }
+  if (code) {
+    return `postgres ${code}${pg?.constraint_name ? ` on ${pg.constraint_name}` : ''}: `
+      + `${pg?.detail ?? top?.message ?? 'no detail'}`;
+  }
+  return err instanceof Error ? err.message : 'Unknown';
+}
+
 function emptyResult(entityType: string, error?: string): SyncContactsResult {
   return {
     entityType, totalFetched: 0, created: 0, updated: 0, skipped: 0,
@@ -180,10 +261,7 @@ async function syncTitleOfficers(items: SyncRow[]): Promise<SyncContactsResult> 
     if (!examiner) { skipped++; continue; }
 
     try {
-      const [existing] = await db.select({ id: contacts.id })
-        .from(contacts)
-        .where(or(eq(contacts.closerExaminer, examiner), eq(contacts.softproLookupCode, examiner)))
-        .limit(1);
+      const existingId = await findOfficerContactId(examiner);
 
       const vals = {
         closerExaminer: examiner,
@@ -197,10 +275,10 @@ async function syncTitleOfficers(items: SyncRow[]): Promise<SyncContactsResult> 
         updatedAt: new Date(),
       };
 
-      if (existing) {
+      if (existingId !== null) {
         await db.update(contacts)
           .set(omitEmptyForUpdate(vals))
-          .where(eq(contacts.id, existing.id));
+          .where(eq(contacts.id, existingId));
         updated++;
       } else {
         await db.insert(contacts).values({
@@ -211,7 +289,7 @@ async function syncTitleOfficers(items: SyncRow[]): Promise<SyncContactsResult> 
         created++;
       }
     } catch (err) {
-      errors.push({ lookupCode: examiner, error: err instanceof Error ? err.message : 'Unknown' });
+      errors.push({ lookupCode: examiner, error: describeSyncError(err) });
     }
   }
   return { entityType: 'Title Officer', totalFetched: items.length, created, updated, skipped, errors };
@@ -232,13 +310,21 @@ async function syncEscrowOfficers(items: SyncRow[]): Promise<SyncContactsResult>
       // canonical (non-PCT\ source_id) contact already exists with the
       // same email, skip the insert/update entirely to avoid resurrecting
       // the duplicate-officer problem.
+      //
+      // The prefix test is `left(source_id, 4)`, not `NOT LIKE 'PCT\%'`. In a
+      // LIKE pattern Postgres reads `\%` as an escaped literal '%', so that
+      // pattern matched only the four-character string 'PCT%' and nothing else —
+      // every real `PCT\user` source_id passed NOT LIKE, counted as "canonical",
+      // and the guard skipped the officer it exists to protect. Measured against
+      // production it skipped five of the six PCT escrow officers, which is why
+      // the officer feed reported clean runs while updating nothing.
       const email = str(item, 'Email');
       if (examiner.startsWith('PCT\\') && email) {
         const canonical = await db.select({ id: contacts.id })
           .from(contacts)
           .where(and(
             eq(contacts.email, email),
-            sql`(${contacts.sourceId} IS NOT NULL AND ${contacts.sourceId} NOT LIKE 'PCT\\%')`,
+            sql`(${contacts.sourceId} IS NOT NULL AND left(${contacts.sourceId}, 4) <> ${'PCT\\'})`,
           ))
           .limit(1);
 
@@ -248,10 +334,7 @@ async function syncEscrowOfficers(items: SyncRow[]): Promise<SyncContactsResult>
         }
       }
 
-      const [existing] = await db.select({ id: contacts.id })
-        .from(contacts)
-        .where(or(eq(contacts.closerExaminer, examiner), eq(contacts.softproLookupCode, examiner)))
-        .limit(1);
+      const existingId = await findOfficerContactId(examiner);
 
       const vals = {
         closerExaminer: examiner,
@@ -265,10 +348,10 @@ async function syncEscrowOfficers(items: SyncRow[]): Promise<SyncContactsResult>
         updatedAt: new Date(),
       };
 
-      if (existing) {
+      if (existingId !== null) {
         await db.update(contacts)
           .set(omitEmptyForUpdate(vals))
-          .where(eq(contacts.id, existing.id));
+          .where(eq(contacts.id, existingId));
         updated++;
       } else {
         await db.insert(contacts).values({
@@ -279,7 +362,10 @@ async function syncEscrowOfficers(items: SyncRow[]): Promise<SyncContactsResult>
         created++;
       }
     } catch (err) {
-      errors.push({ lookupCode: examiner, error: err instanceof Error ? err.message : 'Unknown' });
+      // One officer's failure must not end the run — the remaining officers on
+      // the feed still need syncing. It is recorded and surfaced by
+      // handleSyncContactType instead.
+      errors.push({ lookupCode: examiner, error: describeSyncError(err) });
     }
   }
   return { entityType: 'Escrow Officer', totalFetched: items.length, created, updated, skipped, errors };

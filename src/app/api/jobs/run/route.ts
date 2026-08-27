@@ -23,7 +23,12 @@ import { handleFetchPrelims } from '@/lib/jobs/handlers/fetch-prelims';
 import { handleVerifyOrderSync } from '@/lib/jobs/handlers/verify-order-sync';
 import { handleLookbackSync } from '@/lib/jobs/handlers/lookback-sync';
 import { handleSyncNewUsers } from '@/lib/jobs/handlers/sync-new-users';
-import { handleSyncAllContacts, handleSyncContactType } from '@/lib/jobs/handlers/sync-all-contacts';
+import {
+  CONTACT_SYNC_JOB_CONFIGS,
+  handleSyncAllContacts,
+  handleSyncContactType,
+} from '@/lib/jobs/handlers/sync-all-contacts';
+import type { SyncContactTypePayload } from '@/lib/jobs/handlers/sync-all-contacts';
 import { handleJobsWatchdog } from '@/lib/jobs/handlers/jobs-watchdog';
 import { handleOpsDailyReport } from '@/lib/jobs/handlers/ops-daily-report';
 import { handleRetrySoftProDocumentAttach } from '@/lib/jobs/handlers/retry-softpro-document-attach';
@@ -67,6 +72,11 @@ const NEEDS_JOB_ID = new Set([
   // Needs its row to record a REFUSAL. A run that declined to send otherwise
   // looks exactly like a run that found nothing to do.
   'party_wizard.invite',
+  // Need their rows to record a PARTIAL failure. These handlers collect
+  // per-row errors and return normally, so the runner marks them `completed`
+  // and writes no error — which is how the escrow-officer feed reported clean
+  // runs while four officers silently stopped updating.
+  ...Object.keys(CONTACT_SYNC_JOB_CONFIGS),
 ]);
 
 const JOB_HANDLERS: Record<string, JobHandler> = {
@@ -98,24 +108,24 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleSyncNewUsers(),
   'softpro.sync_all_contacts': () =>
     handleSyncAllContacts(),
-  'softpro.sync_contacts.order_contact_person': () =>
-    handleSyncContactType('softpro.sync_contacts.order_contact_person'),
-  'softpro.sync_contacts.title_officer': () =>
-    handleSyncContactType('softpro.sync_contacts.title_officer'),
-  'softpro.sync_contacts.escrow_officer': () =>
-    handleSyncContactType('softpro.sync_contacts.escrow_officer'),
-  'softpro.sync_contacts.sales_rep': () =>
-    handleSyncContactType('softpro.sync_contacts.sales_rep'),
-  'softpro.sync_contacts.escrow_company': () =>
-    handleSyncContactType('softpro.sync_contacts.escrow_company'),
-  'softpro.sync_contacts.lender': () =>
-    handleSyncContactType('softpro.sync_contacts.lender'),
-  'softpro.sync_contacts.mortgage_broker': () =>
-    handleSyncContactType('softpro.sync_contacts.mortgage_broker'),
-  'softpro.sync_contacts.selling_agent_broker': () =>
-    handleSyncContactType('softpro.sync_contacts.selling_agent_broker'),
-  'softpro.sync_contacts.underwriter': () =>
-    handleSyncContactType('softpro.sync_contacts.underwriter'),
+  'softpro.sync_contacts.order_contact_person': (payload) =>
+    handleSyncContactType('softpro.sync_contacts.order_contact_person', payload as SyncContactTypePayload),
+  'softpro.sync_contacts.title_officer': (payload) =>
+    handleSyncContactType('softpro.sync_contacts.title_officer', payload as SyncContactTypePayload),
+  'softpro.sync_contacts.escrow_officer': (payload) =>
+    handleSyncContactType('softpro.sync_contacts.escrow_officer', payload as SyncContactTypePayload),
+  'softpro.sync_contacts.sales_rep': (payload) =>
+    handleSyncContactType('softpro.sync_contacts.sales_rep', payload as SyncContactTypePayload),
+  'softpro.sync_contacts.escrow_company': (payload) =>
+    handleSyncContactType('softpro.sync_contacts.escrow_company', payload as SyncContactTypePayload),
+  'softpro.sync_contacts.lender': (payload) =>
+    handleSyncContactType('softpro.sync_contacts.lender', payload as SyncContactTypePayload),
+  'softpro.sync_contacts.mortgage_broker': (payload) =>
+    handleSyncContactType('softpro.sync_contacts.mortgage_broker', payload as SyncContactTypePayload),
+  'softpro.sync_contacts.selling_agent_broker': (payload) =>
+    handleSyncContactType('softpro.sync_contacts.selling_agent_broker', payload as SyncContactTypePayload),
+  'softpro.sync_contacts.underwriter': (payload) =>
+    handleSyncContactType('softpro.sync_contacts.underwriter', payload as SyncContactTypePayload),
   'import-orders': (payload) => {
     const dateFrom = typeof payload.dateFrom === 'string' ? payload.dateFrom : formatTodayForImport();
     const dateTo = typeof payload.dateTo === 'string' ? payload.dateTo : formatTodayForImport();

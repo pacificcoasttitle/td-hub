@@ -70,6 +70,26 @@ export function ContactSearchInput({
   );
 }
 
+/**
+ * The neutral grey line a picker uses to state a consequence in place of a
+ * control.
+ *
+ * Deliberately not amber and not red. Most party slots are legitimately empty on
+ * a normal order, and a form that shows five warnings on a normal order teaches
+ * operators to ignore warnings. Shared so the parties section and the client
+ * selector cannot drift into two tones for the same kind of statement.
+ */
+export function ContactNotice({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-1.5 flex items-start gap-1.5 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+      <svg className="h-3.5 w-3.5 text-[#6B7280] shrink-0 mt-px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <p className="text-xs text-[#6B7280]">{children}</p>
+    </div>
+  );
+}
+
 export function ContactDropdown({ children }: { children: React.ReactNode }) {
   return (
     <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">

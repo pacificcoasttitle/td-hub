@@ -68,6 +68,10 @@ export function useQuickEntry() {
   const [escrowOfficer, setEscrowOfficer] = useState('');
 
   const [formOpts, setFormOpts] = useState<FormOptions | null>(null);
+  // A null formOpts used to mean three things at once — still loading, the call
+  // failed, and the call returned nothing. The escrow officer slot has to tell
+  // the operator which of those happened, so the outcome is tracked separately.
+  const [formOptsStatus, setFormOptsStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
 
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ type: 'success' | 'error'; message: string; orderId?: number; fileNumber?: string } | null>(null);
@@ -98,7 +102,7 @@ export function useQuickEntry() {
     fetch('/api/form-options')
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
-        if (!d) return;
+        if (!d) { setFormOptsStatus('failed'); return; }
         const toOpt = (arr: Array<{ id?: number; name?: string; value?: string; label?: string; email?: string }>) =>
           (arr ?? []).map((r) => ({ value: r.value ?? String(r.id ?? ''), label: r.label ?? r.name ?? r.email ?? '' }));
         setFormOpts({
@@ -109,8 +113,9 @@ export function useQuickEntry() {
           escrowOfficers: toOpt(d.escrowOfficers),
           underwriters: d.underwriters ?? [],
         });
+        setFormOptsStatus('ready');
       })
-      .catch(() => {});
+      .catch(() => setFormOptsStatus('failed'));
   }, []);
 
   // Auto-derive underwriter from product type (unless user manually overrode)
@@ -369,7 +374,7 @@ export function useQuickEntry() {
     buyerAgent, setBuyerAgent, listingAgent, setListingAgent,
     lender, setLender, mortgageBroker, setMortgageBroker, escrow, setEscrow,
     escrowOfficer, setEscrowOfficer,
-    formOpts, submitting, result, setResult,
+    formOpts, formOptsStatus, submitting, result, setResult,
     repAutoFilled, toAutoFilled, clientCompanyName,
     preInitPhase: preInit.phase,
     preInitSubmitBlocked: preInit.submitBlocked,

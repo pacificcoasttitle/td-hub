@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { partyHasInput } from '@/lib/domain/orders/party-contact';
+import { ContactNotice } from '@/components/admin/contact-picker';
 import { PartySelector } from './party-selector';
-import { SECTION, SH, FL, IN, SEL, EC } from './types';
+import { SECTION, SH, FL, SEL, EC, type FormOption } from './types';
 import type { QuickEntryState } from './use-quick-entry';
 
 // ─── Visibility Logic (exported for other sections to consume) ──────────────
@@ -155,14 +156,7 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
       <Expand open={show.escrowOfficer && vis.escrowOfficer}>
         <div className="mb-3">
           <label className={FL}>Escrow Officer</label>
-          {officers.length ? (
-            <select value={s.escrowOfficer} onChange={e => s.setEscrowOfficer(e.target.value)} className={SEL}>
-              <option value="">Select…</option>
-              {officers.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          ) : (
-            <input className={IN} value={s.escrowOfficer} onChange={e => s.setEscrowOfficer(e.target.value)} placeholder="Officer name" />
-          )}
+          <EscrowOfficerField s={s} officers={officers} />
         </div>
       </Expand>
 
@@ -170,6 +164,49 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
           to SoftPro, and read by no recipient resolver. See
           docs/tickets/DELIVERABLE_EMAILS.md for the design when it is built. */}
     </div>
+  );
+}
+
+/**
+ * The one party slot that is a directory lookup rather than a contact search,
+ * and the one with no free-text alternative.
+ *
+ * `transaction.escrowOfficer` carries a `contacts.id`, which `resolveContacts`
+ * turns into a row and `resolveEscrowOfficerLookup` turns into the `PCT\user`
+ * code SoftPro matches against its internal user directory. A typed name is not
+ * an id, so it resolves to no row, `LookUpCodeEscrowOfficer` is omitted, and the
+ * order is created with no escrow officer while the operator is told it
+ * succeeded. That is why an empty directory gets a sentence instead of a box:
+ * a control that cannot reach the vendor is worse than the absence of one.
+ */
+function EscrowOfficerField({ s, officers }: { s: QuickEntryState; officers: FormOption[] }) {
+  if (s.formOptsStatus === 'loading') {
+    return <ContactNotice>Loading escrow officers…</ContactNotice>;
+  }
+
+  if (s.formOptsStatus === 'failed') {
+    return (
+      <ContactNotice>
+        The escrow officer directory did not load — no officer will be sent to SoftPro
+        on this order. Reload the page to try again.
+      </ContactNotice>
+    );
+  }
+
+  if (!officers.length) {
+    return (
+      <ContactNotice>
+        No escrow officers in the directory — no officer will be sent to SoftPro on
+        this order. Ask an admin to run the contact sync.
+      </ContactNotice>
+    );
+  }
+
+  return (
+    <select value={s.escrowOfficer} onChange={e => s.setEscrowOfficer(e.target.value)} className={SEL}>
+      <option value="">Select…</option>
+      {officers.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
   );
 }
 

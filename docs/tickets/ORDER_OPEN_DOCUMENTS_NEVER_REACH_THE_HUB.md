@@ -114,10 +114,14 @@ sufficient.
 ## Revisit when it lands
 
 Promote legal & vesting, grant deed and taxes from chips to full tiles once
-coverage is non-trivial. The detail pane is built so this is a small change:
-they already flow through the same `DocState` shape as the prelim tile, and
-promoting them is moving entries between two arrays in
-`documents-panel.tsx` — no new fetch path, no new state.
+coverage is non-trivial **and they carry an id** — the section above is the
+blocker, not the coverage number.
+
+On the hub side promotion is small: move the entry out of the `CHIPS` array in
+`documents-panel.tsx` and render a tile. No new fetch path and no new state.
+But it cannot happen while the category is a `DocCatBool`, because a tile's
+whole purpose is the View and Download buttons, and there is nothing to point
+them at.
 
 **Re-measure before promoting.** The threshold that matters is what fraction
 of orders opened AFTER the fix carry one, not the all-time number, which the

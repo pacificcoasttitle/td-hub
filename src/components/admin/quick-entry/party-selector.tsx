@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ContactDropdown,
   ContactDropdownMessage,
+  ContactNotice,
   ContactResultButton,
   ContactSearchInput,
   ResolvedContactCard,
@@ -190,14 +191,9 @@ export function PartySelector({
           where it would sit under the dropdown and describe a state they are
           already busy leaving. */}
       {!searchOpen && (
-        <div className="mt-1.5 flex items-start gap-1.5 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg">
-          <svg className="h-3.5 w-3.5 text-[#6B7280] shrink-0 mt-px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <p className="text-xs text-[#6B7280]">
-            No contact selected — this party will not be sent to SoftPro.
-          </p>
-        </div>
+        <ContactNotice>
+          No contact selected — this party will not be sent to SoftPro.
+        </ContactNotice>
       )}
 
       {searchOpen && (

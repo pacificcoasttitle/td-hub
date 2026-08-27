@@ -69,6 +69,7 @@ export interface MappedOrderContacts {
     escrowCompany: MappedResolvedParty | null;
     lender: MappedResolvedParty | null;
     listingAgent: MappedResolvedParty | null;
+    buyerAgent: MappedResolvedParty | null;
     mortgageBroker: MappedResolvedParty | null;
     payoffLender: MappedResolvedParty | null;
     titleCompany: MappedResolvedParty | null;
@@ -237,6 +238,7 @@ export function mapOrderContacts(data: SoftProOrderContactsData): MappedOrderCon
       escrowCompany: resolvedParty(data.EscrowCompanies?.Person, data.EscrowCompanies?.Company),
       lender: resolvedParty(data.Lenders?.Person, data.Lenders?.Company),
       listingAgent: resolvedParty(data.ListingAgentBrokers?.Person, data.ListingAgentBrokers?.Company),
+      buyerAgent: resolvedParty(data.BuyersAgentBrokers?.Person, data.BuyersAgentBrokers?.Company),
       mortgageBroker: resolvedParty(data.MortgageBrokers?.Person, data.MortgageBrokers?.Company),
       payoffLender: resolvedParty(data.PayoffLenders?.Person, data.PayoffLenders?.Company),
       titleCompany: resolvedParty(data.TitleCompanies?.Person, data.TitleCompanies?.Company),

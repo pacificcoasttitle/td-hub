@@ -5,6 +5,11 @@ export interface ConfirmationRecipientInput {
   clientEmail: string | null | undefined;
   escrowOfficerEmail?: string | null;
   listingAgentEmail?: string | null;
+  /**
+   * Gated by `confirmation_buyer_agent_recipient_enabled` in
+   * `loadRecipientEmails`, which passes null while that setting is off. This
+   * function stays a pure candidate-to-TO/CC mapping and takes no view on it.
+   */
   buyerAgentEmail?: string | null;
   salesRepEmail?: string | null;
   /** Comma-separated optional extras from PCT_INTERNAL_CC_EMAILS */

@@ -24,6 +24,12 @@ import { EMAIL_STATUS_SENT_NO_CLIENT, hasConfirmationEmailStatus } from './confi
 
 export { EMAIL_STATUS_SENT_NO_CLIENT } from './confirmation-send-guard';
 
+/**
+ * Master switch for the buyer-agent confirmation recipient. Registered in
+ * SETTINGS_REGISTRY with defaultValue 'false', so a missing row reads as off.
+ */
+const BUYER_AGENT_RECIPIENT_SETTING = 'confirmation_buyer_agent_recipient_enabled';
+
 const DOC_LABELS: Record<string, string> = {
   legal_vesting: 'Legal and Vesting',
   tax: 'Tax Roll',
@@ -303,8 +309,20 @@ async function loadRecipientEmails(
     loadContactEmail(row.listingAgentId),
   ]);
 
+  // GATED, AND THE GATE IS THE POINT. This candidate has existed since
+  // buildConfirmationRecipients was written and has never resolved for anybody:
+  // `order_parties` held zero `buyer_agent` rows for the table's entire history
+  // because SoftPro's `BuyersAgentBrokers` was missing from the response type.
+  // Mapping that field starts producing the rows, which would silently switch a
+  // dormant TO candidate live — and a buyer's agent is typically the opposite
+  // side's representative, not the client the confirmation is addressed to.
+  // Off unless somebody decides otherwise. See
+  // docs/tickets/SOFTPRO_MISSING_BUYER.md §4.
+  const buyerAgentAllowed = (await getSetting(BUYER_AGENT_RECIPIENT_SETTING)) === 'true';
   const buyerAgent = partyRows.find((r) => r.role === 'buyer_agent');
-  const buyerAgentEmail = buyerAgent?.cEmail ?? buyerAgent?.externalEmail ?? null;
+  const buyerAgentEmail = buyerAgentAllowed
+    ? buyerAgent?.cEmail ?? buyerAgent?.externalEmail ?? null
+    : null;
 
   return buildConfirmationRecipients({
     clientEmail,

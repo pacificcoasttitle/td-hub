@@ -49,11 +49,17 @@ interface EscrowPartyRow {
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function normalizeEmail(email: string): string {
+// Exported because the party wizard invite resolves the same two-step
+// escrow recipient (officer FK, then the escrow_company party row) and must
+// agree with this file on what counts as an address. Two copies of an email
+// validity test drift, and the direction they drift is "we emailed something
+// that was not an address".
+
+export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-function isValidEmail(email: string | null | undefined): email is string {
+export function isValidEmail(email: string | null | undefined): email is string {
   return Boolean(email && EMAIL_PATTERN.test(email.trim()));
 }
 

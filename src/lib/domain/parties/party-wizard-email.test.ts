@@ -170,19 +170,39 @@ describe('party wizard invite email', () => {
     });
 
     /**
-     * The consequence line is the one the owner approved and it is true for both
-     * readers: whoever holds escrow is the routing point for anything the
-     * missing party needs. It must not drift per audience.
+     * The consequence line is the last sentence that still spoke to a colleague.
+     * "Anything they need keeps coming back to you" describes a PCT officer's
+     * own desk; said to an outside firm it asserts how another company's work
+     * lands, which we cannot know. The external ending states the consequence
+     * where we can observe it — on our own order.
+     *
+     * Pinned by value, per audience, so neither can drift and so the internal
+     * sentence stays exactly what the owner approved.
      */
-    it('keeps the approved consequence line word for word', () => {
-      const consequence = 'This is the only reminder we send for this file. Until the listing '
-        + 'agent details are on the order we have no way to contact them ourselves, so anything '
-        + 'they need keeps coming back to you.';
-      for (const body of [
-        buildPartyWizardEmail(external), buildPartyWizardText(external),
-        buildPartyWizardEmail(base), buildPartyWizardText(base),
-      ]) {
-        expect(body).toContain(consequence);
+    it('re-voices the consequence for a stranger and leaves the internal one alone', () => {
+      const opening = 'This is the only reminder we send for this file. Until the listing agent '
+        + 'details are on the order we have no way to contact them ourselves, so ';
+      const internalConsequence = `${opening}anything they need keeps coming back to you.`;
+      const externalConsequence = `${opening}the order stays incomplete on our end.`;
+
+      for (const body of [buildPartyWizardEmail(base), buildPartyWizardText(base)]) {
+        expect(body).toContain(internalConsequence);
+        expect(body).not.toContain(externalConsequence);
+      }
+      for (const body of [buildPartyWizardEmail(external), buildPartyWizardText(external)]) {
+        expect(body).toContain(externalConsequence);
+        expect(body).not.toContain(internalConsequence);
+      }
+    });
+
+    /**
+     * The external ending must stay a statement about PCT, not about the
+     * reader's workload or obligations. That is the whole reason it diverged.
+     */
+    it('puts the external consequence on PCT, not on the reader', () => {
+      for (const body of [buildPartyWizardEmail(external), buildPartyWizardText(external)]) {
+        expect(body).not.toContain('keeps coming back to you');
+        expect(body).not.toMatch(/you (must|need to|should|have to)\b/i);
       }
     });
 

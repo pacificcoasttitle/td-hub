@@ -128,6 +128,61 @@ export const PARTY_INVITE_TRANSACTION_TYPES = eligibleTransactionTypesFor(PARTY_
 export const PARTY_INVITE_MAX_PER_RECIPIENT = 2;
 
 /**
+ * TOTAL emails one run may send, across every recipient and every property.
+ *
+ * The per-recipient cap bounds what any ONE person receives; it does nothing to
+ * bound the run. Twenty officers with two files each is 40 emails and no cap is
+ * exceeded. For a first pilot of copy that has never been sent to anyone, the
+ * number that matters is the total.
+ *
+ * Five, because five is a number the owner can actually read. If the wording is
+ * wrong we would rather find out from five replies than from forty.
+ *
+ * DB-backed rather than a constant so widening the pilot is a settings change,
+ * not a deploy. It is the ceiling that is configurable — the per-recipient cap
+ * above stays a constant because it is a permanent property of the feature, not
+ * a pilot dial.
+ *
+ * Held orders are NOT marked in any way: nothing is minted, nothing is logged,
+ * so they are candidates again on the next run. See planSends.
+ *
+ * WHAT FIVE ACTUALLY COSTS, MEASURED 2026-08-26 AGAINST PRODUCTION. The window
+ * holds 21 candidates right now; all 21 resolve to a usable address (the
+ * escrow_company fallback is doing that work), 21 survive the property dedupe
+ * and 19 survive the per-recipient cap. So an uncapped first run sends 19 and
+ * this ceiling holds 14 of them.
+ *
+ * "Held stays eligible" is true of the data and NOT a promise that a held order
+ * eventually sends. Roughly 5 new candidates enter the 3-to-7-day window per
+ * weekday, the cron runs Mon–Fri, and an order is only in-window for about four
+ * days — so at a ceiling of 5 the queue drains at about the rate it fills, and
+ * anything held across a weekend can age past PARTY_INVITE_MAX_AGE_DAYS without
+ * ever being asked. That is the argument for oldest-first in planSends: it spends
+ * the five slots on the orders closest to expiring. It is also the reason this
+ * number should go up once the copy is confirmed, rather than being left at 5.
+ */
+export const PARTY_INVITE_MAX_PER_RUN_SETTING = 'party_wizard_invite_max_per_run';
+export const PARTY_INVITE_DEFAULT_MAX_PER_RUN = 5;
+
+/**
+ * Read the ceiling, and fall back to the pilot default on anything unreadable.
+ *
+ * A garbled settings row must not mean "no ceiling". The failure mode of a
+ * missing cap is a mailbox full of a template nobody has approved yet, so an
+ * unparseable value fails to the smallest sane number rather than to Infinity.
+ * Zero is honoured, because "stop sending but leave the switch alone" is a
+ * thing an operator legitimately wants at 4pm on a Friday.
+ */
+async function resolveRunCap(): Promise<number> {
+  const raw = await getSetting(PARTY_INVITE_MAX_PER_RUN_SETTING);
+  const parsed = Number(raw);
+  if (raw === null || raw.trim() === '' || !Number.isFinite(parsed) || parsed < 0) {
+    return PARTY_INVITE_DEFAULT_MAX_PER_RUN;
+  }
+  return Math.floor(parsed);
+}
+
+/**
  * How far back a prior invite still suppresses a second ask for the same
  * property. Matches the link lifetime — while the first link is usable, asking
  * again for the same property is asking twice.
@@ -192,6 +247,7 @@ export type PartyInviteOutcome =
   | 'skipped_existing_link'
   | 'skipped_duplicate_property'
   | 'skipped_recipient_cap'
+  | 'skipped_run_cap'
   | 'no_escrow_officer'
   | 'officer_no_email';
 
@@ -251,6 +307,14 @@ export interface PartyInviteResult {
   skippedDuplicateProperty: number;
   /** Held back by the per-recipient cap. Eligible again next run. */
   skippedRecipientCap: number;
+  /**
+   * Would have sent, held by the total-per-run ceiling. Eligible again next
+   * run — counted rather than dropped so the operator sees the backlog the cap
+   * is creating instead of a report that just stops.
+   */
+  skippedRunCap: number;
+  /** The ceiling in force on this run, so the report explains its own held rows. */
+  runCap: number;
   unreachable: PartyInviteUnreachable;
   /** Share of candidates we could actually reach. The number to watch. */
   reachablePct: number;
@@ -459,7 +523,8 @@ export async function handlePartyWizardInvite(
     );
     const refusal: PartyInviteResult = {
       scanned: 0, sent: 0, failed: 0, skippedExistingLink: 0,
-      skippedDuplicateProperty: 0, skippedRecipientCap: 0,
+      skippedDuplicateProperty: 0, skippedRecipientCap: 0, skippedRunCap: 0,
+      runCap: 0,
       unreachable: { noEscrowOfficer: 0, escrowOfficerNoEmail: 0 },
       reachablePct: 0, viaEscrowCompanyFallback: 0,
       audience: { internal: 0, external: 0 },
@@ -468,6 +533,11 @@ export async function handlePartyWizardInvite(
     await recordRun(payload, refusal);
     return refusal;
   }
+
+  // Read BEFORE the dry-run branch and used by both paths, so a preview and the
+  // live run that follows it plan against the same ceiling. A cap applied only
+  // on the send path would make the dry run a preview of a different run.
+  const runCap = await resolveRunCap();
 
   const candidates = await loadCandidates(PARTY_INVITE_BATCH);
 
@@ -478,6 +548,8 @@ export async function handlePartyWizardInvite(
     skippedExistingLink: 0,
     skippedDuplicateProperty: 0,
     skippedRecipientCap: 0,
+    skippedRunCap: 0,
+    runCap,
     unreachable: { noEscrowOfficer: 0, escrowOfficerNoEmail: 0 },
     reachablePct: 0,
     viaEscrowCompanyFallback: 0,
@@ -523,8 +595,8 @@ export async function handlePartyWizardInvite(
     reachableRows.push({ row, to: recipient.email, recipient });
   }
 
-  // ── Pass 2: one ask per property, then the per-recipient cap ──
-  const plan = planSends(reachableRows, await loadInvitedProperties());
+  // ── Pass 2: one ask per property, then the per-recipient cap, then the run cap ──
+  const plan = planSends(reachableRows, await loadInvitedProperties(), runCap);
 
   for (const dup of plan.duplicates) {
     result.skippedDuplicateProperty++;
@@ -535,6 +607,10 @@ export async function handlePartyWizardInvite(
   for (const held of plan.capped) {
     result.skippedRecipientCap++;
     outcomes.set(held.row.orderId, { outcome: 'skipped_recipient_cap', linkAction: 'none' });
+  }
+  for (const held of plan.runCapped) {
+    result.skippedRunCap++;
+    outcomes.set(held.row.orderId, { outcome: 'skipped_run_cap', linkAction: 'none' });
   }
 
   // ── Pass 3: act ──
@@ -631,6 +707,7 @@ export async function handlePartyWizardInvite(
     + `skipped_existing=${result.skippedExistingLink} `
     + `skipped_duplicate_property=${result.skippedDuplicateProperty} `
     + `skipped_recipient_cap=${result.skippedRecipientCap} `
+    + `skipped_run_cap=${result.skippedRunCap} run_cap=${result.runCap} `
     + `unreachable_no_officer=${result.unreachable.noEscrowOfficer} `
     + `unreachable_no_email=${result.unreachable.escrowOfficerNoEmail} `
     + `via_escrow_company=${result.viaEscrowCompanyFallback} `
@@ -660,6 +737,8 @@ export interface PartyInvitePlan {
   duplicates: Array<Sendable & { duplicateOf: string | null }>;
   /** Over the per-recipient cap. Still eligible on the next run. */
   capped: Sendable[];
+  /** Would have sent, but the run was already at its ceiling. Eligible next run. */
+  runCapped: Sendable[];
 }
 
 /**
@@ -683,12 +762,47 @@ export function propertyKey(row: CandidateRow): string | null {
   return normalized.length >= 6 ? normalized : null;
 }
 
-export function planSends(reachable: Sendable[], invitedProperties: Set<string>): PartyInvitePlan {
-  const plan: PartyInvitePlan = { sending: [], duplicates: [], capped: [] };
+/**
+ * Sort key for the one decision order this whole plan hangs off.
+ *
+ * Oldest first, id as tie-break — the same total order the candidate query uses,
+ * for the same reason. Once a run has a ceiling, "which ones get held" is a real
+ * decision rather than a formality, and the rows nearest the far edge of the
+ * window are the ones about to age past PARTY_INVITE_MAX_AGE_DAYS and never be
+ * asked again. Holding those to send a fresher file instead would quietly starve
+ * exactly the orders the window is about to close on.
+ *
+ * This replaced a plain id sort. Order id is a proxy for age, not age: a
+ * backdated or re-keyed order sorts by when its row was written rather than by
+ * when the file opened, and the LIMIT upstream already sorts by opened_at, so a
+ * different sort down here could hold a row the query deliberately kept.
+ *
+ * An unusable opened_at sorts last rather than poisoning the comparator with
+ * NaN — one unreadable row must not scramble the order of the other ninety-nine.
+ */
+function planOrder(a: Sendable, b: Sendable): number {
+  const at = ageKey(a.row.openedAt);
+  const bt = ageKey(b.row.openedAt);
+  if (at !== bt) return at - bt;
+  return a.row.orderId - b.row.orderId;
+}
 
-  // Lowest order id first, so which sibling file carries the ask is stable across
-  // runs rather than whatever order the database happened to return.
-  const ordered = [...reachable].sort((a, b) => a.row.orderId - b.row.orderId);
+function ageKey(openedAt: Date | null | undefined): number {
+  const t = openedAt instanceof Date ? openedAt.getTime() : Number.NaN;
+  return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+}
+
+export function planSends(
+  reachable: Sendable[],
+  invitedProperties: Set<string>,
+  runCap: number,
+): PartyInvitePlan {
+  const plan: PartyInvitePlan = { sending: [], duplicates: [], capped: [], runCapped: [] };
+
+  // Deterministic and oldest-first, so both which sibling file carries a shared
+  // property and which orders the run cap holds are stable across runs rather
+  // than whatever order the database happened to return.
+  const ordered = [...reachable].sort(planOrder);
 
   const askedThisRun = new Map<string, string>();
   const perRecipient = new Map<string, number>();
@@ -716,9 +830,19 @@ export function planSends(reachable: Sendable[], invitedProperties: Set<string>)
       continue;
     }
 
-    // Claimed only on an actual send. A capped order has not asked anything, so
+    // The run ceiling is checked LAST, so an order that the per-recipient cap
+    // would have held anyway is reported under that reason. Reading
+    // 'skipped_run_cap' should mean "raise the ceiling and this one goes out",
+    // and for a recipient already at their limit that would not be true.
+    if (plan.sending.length >= runCap) {
+      plan.runCapped.push(item);
+      continue;
+    }
+
+    // Claimed only on an actual send. A held order has not asked anything, so
     // claiming its property here would make its sibling a duplicate of an ask
-    // nobody made — and both would then sit unasked forever.
+    // nobody made — and both would then sit unasked forever. Same for the
+    // recipient tally: a held order must not spend one of anyone's slots.
     if (key) askedThisRun.set(key, item.row.fileNumber);
     perRecipient.set(item.to, alreadySending + 1);
     plan.sending.push(item);

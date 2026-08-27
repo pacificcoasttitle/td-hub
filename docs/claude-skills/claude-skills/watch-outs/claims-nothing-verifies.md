@@ -11,9 +11,15 @@ failure.
 This is distinct from a bug. A bug does the wrong thing. These do the wrong
 thing *while telling you they do the right thing*.
 
-Seven instances surfaced in a single day (2026-08-27) during the
+Eight instances surfaced in a single day (2026-08-27) during the
 `ORDERS_NEVER_INGESTED` investigation. That frequency is the reason this is a
 pattern entry and not a ticket.
+
+The eighth is the worst shape of it and has its own section below: not a comment
+that lied, but a **verification step run specifically to detect a failure, which
+was structurally incapable of showing that failure.** A wrong comment misleads
+whoever reads it. A verification that cannot fail manufactures confidence on
+demand, and it does so at exactly the moment someone has decided to be careful.
 
 ## Canonical Example: the comment and the SQL disagreed
 
@@ -57,11 +63,63 @@ Nobody had misread the code. Everybody had read the comment.
 | 5 | `needs_manual_delivery` flags a prelim for a human | Written by the delivery path, read by nothing. 130 accumulated with no surface anywhere in the app. |
 | 6 | `orders.opened_at` is when the order opened | `NOT NULL DEFAULT NOW()`, and `GetOrders` carries no open date — so every row from that path claimed to have opened at the moment it was written. Blinded the prelim backfill gate that measures exactly this. |
 | 7 | *(above)* `asc nulls first` | `ASC` is `NULLS LAST`. |
+| 8 | *(below)* "sweep stopped — process handle confirms it" | Killed the wrapper, not the child. Both confirming signals were downstream of the wrapper, so both were guaranteed to pass. The job ran 47 more minutes. |
 
 The common shape: **the claim was load-bearing for a later decision.** #3 and #4
 were cited as evidence that ingestion was monitored. #6 was the input to the
 gate built to stop unintended emails. #7 was the reason nobody expected
 backfilled orders to starve live traffic.
+
+## #8: the verification that could not fail
+
+Worst shape of the pattern, and the one to internalise.
+
+A long-running recovery sweep needed to be stopped mid-flight. It was launched
+as `powershell -File sweep.ps1` through a wrapper, so the reported PID was the
+**wrapper**, not the PowerShell child doing the work.
+
+```powershell
+# BROKEN — every signal here is downstream of the wrapper
+Stop-Process -Id $wrapperPid -Force
+Get-Process -Id $wrapperPid   # returns nothing: "confirmed stopped"
+Get-Content $terminalFile     # stops updating: "confirmed stopped"
+```
+
+Both checks passed. Both were incapable of failing. Killing the wrapper
+guarantees `Get-Process` finds nothing, and it guarantees the captured stdout
+goes quiet — because the wrapper was what captured it. The child kept running
+for **47 more minutes**, completed the entire remaining range, and ran straight
+through a production deploy that the operator had scheduled specifically because
+they believed nothing was in flight.
+
+The stop was reported as confirmed twice, on two independent-looking signals that
+were the same signal.
+
+```sql
+-- CORRECT — ask the thing being written to, over a full cycle of the job
+select max(created_at), count(*) filter (where created_at > now() - interval '3 minutes')
+from orders where created_at >= $sweep_start;
+```
+
+### The rule
+
+**Kill the child PID. Verify a stop by the absence of new database rows over a
+full cycle of the job — never by a process handle.**
+
+For a job that writes through an HTTP request, note that killing the client does
+not stop the server: an in-flight request runs to completion, so writes continue
+for up to the request timeout after the kill. A full cycle means at least that
+long.
+
+### The generalisation
+
+Before trusting any verification, ask: **what would this check look like if the
+thing I'm checking for were true?** If the answer is "the same", the check is
+decoration. This is the identical error as #3 and #4 — those safety nets queried
+`orders` to detect a missing order, and could only ever see what was there. The
+difference is that #8 was a deliberate act of caution rather than a design
+oversight, which is what makes it worse: the operator paid the cost of stopping,
+and got none of the benefit.
 
 ## Detection
 

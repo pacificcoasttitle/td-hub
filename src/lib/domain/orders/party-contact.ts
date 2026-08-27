@@ -13,6 +13,12 @@ export interface PartyFormContact {
   company: string;
   companyLookupCode?: string;
   clientLookupCode?: string;
+  /**
+   * The `contacts` row the operator picked. Absent on free text, and absent when
+   * the pick was a company rather than a person — the company-first typeahead
+   * mixes both and only a person has a contact id.
+   */
+  contactId?: number;
 }
 
 export const EMPTY_PARTY: PartyFormContact = {
@@ -22,6 +28,7 @@ export const EMPTY_PARTY: PartyFormContact = {
   company: '',
   companyLookupCode: '',
   clientLookupCode: '',
+  contactId: undefined,
 };
 
 export interface CreateOrderContact {
@@ -31,9 +38,13 @@ export interface CreateOrderContact {
   companyName?: string;
   companyLookupCode?: string;
   clientLookupCode?: string;
+  contactId?: number;
 }
 
 export interface ContactSearchHit {
+  /** Positive for a contact row. The company-first search puts companies in the
+   *  same list under a negative synthetic id, which is not a contact id. */
+  id?: number | null;
   fullName?: string | null;
   firstName?: string | null;
   lastName?: string | null;
@@ -60,6 +71,7 @@ export function applyContactSelection(hit: ContactSearchHit): PartyFormContact {
     phone: hit.phone?.trim() ?? '',
     clientLookupCode: (hit.clientLookupCode ?? hit.lookupCode ?? '').trim(),
     companyLookupCode: (hit.companyLookupCode ?? hit.flookupCode ?? '').trim(),
+    contactId: typeof hit.id === 'number' && hit.id > 0 ? hit.id : undefined,
   };
 }
 
@@ -100,6 +112,7 @@ export function toCreateOrderContact(c: PartyFormContact): CreateOrderContact | 
     companyName: c.company.trim() || undefined,
     companyLookupCode: c.companyLookupCode?.trim() || undefined,
     clientLookupCode: c.clientLookupCode?.trim() || undefined,
+    contactId: c.contactId,
   };
 }
 

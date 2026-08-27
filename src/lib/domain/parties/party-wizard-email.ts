@@ -99,21 +99,34 @@ function misdirectedSentence(input: PartyWizardEmailInput): string | null {
 /**
  * Why it is worth doing now rather than later.
  *
- * Deliberately claims only what is true: the job sends one invite per file and
- * never follows up, and an order with no agent contact leaves the officer as the
- * only route to them. There is no estimated closing date on the record to quote
- * and no service-level promise to invent, so neither appears here.
+ * Both variants claim only what is true: the job sends one invite per file and
+ * never follows up, and an order with no agent contact leaves us no route to
+ * them. There is no estimated closing date on the record to quote and no
+ * service-level promise to invent, so neither appears in either variant.
  *
- * SHARED BY BOTH AUDIENCES, unchanged. It is the sentence the owner approved,
- * and it happens to be true either way: whoever holds escrow is the routing
- * point for anything the missing party needs, whether they work for PCT or not.
- * Rewording it per audience would put an approved sentence back up for review to
- * no purpose.
+ * The INTERNAL sentence is the one the owner approved and is reproduced here
+ * byte for byte. Do not reword it without asking.
+ *
+ * WHY THE EXTERNAL VARIANT DIVERGES. The approved sentence ends "so anything
+ * they need keeps coming back to you". Said to a PCT colleague that is a
+ * description of their own desk. Said to an outside firm it is an assertion
+ * about how another company's work lands, which we have no way of knowing and
+ * no standing to make — and every other sentence in the external variant was
+ * already re-voiced for an outsider, so this one reading as presumptuous is the
+ * odd one out rather than the house style.
+ *
+ * The external ending therefore states the consequence where we can actually
+ * observe it: on our own order. It is a fact about what PCT cannot do, not a
+ * claim about what the reader has to do. No deadline, no delay, no obligation —
+ * they are doing us a favour, and copy that implies otherwise earns a delete.
  */
 function consequenceSentence(input: PartyWizardEmailInput): string {
-  return `This is the only reminder we send for this file. Until the ${missingRoles(input)} details `
-    + `are on the order we have no way to contact them ourselves, so anything they need keeps `
-    + `coming back to you.`;
+  const opening = `This is the only reminder we send for this file. Until the ${missingRoles(input)} `
+    + `details are on the order we have no way to contact them ourselves, so `;
+  if (input.audience === 'external') {
+    return `${opening}the order stays incomplete on our end.`;
+  }
+  return `${opening}anything they need keeps coming back to you.`;
 }
 
 function roleBlock(block: RoleLinkBlock): string {

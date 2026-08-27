@@ -24,6 +24,9 @@ vi.mock('@/lib/db/schema', () => ({
   },
   contacts: { id: 'c.id', fullName: 'c.full_name', email: 'c.email' },
   jobs: { id: 'j.id' },
+  // Unused by the job, but the real settings module is loaded for its registry
+  // and imports this. A missing export on a factory mock throws on access.
+  settings: { id: 's.id', key: 's.key', value: 's.value' },
 }));
 
 vi.mock('drizzle-orm/pg-core', () => ({
@@ -90,7 +93,11 @@ vi.mock('@/lib/db/client', () => ({
 vi.mock('@/lib/integrations/sendgrid/client', () => ({
   sendEmail: (...a: unknown[]) => sendEmailMock(...a),
 }));
-vi.mock('@/lib/domain/settings/service', () => ({
+// Only `getSetting` is stubbed. SETTINGS_REGISTRY stays real, so the test that
+// pins the shipped default of 5 reads the registry an operator would actually
+// see rather than a copy of it maintained here.
+vi.mock('@/lib/domain/settings/service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/domain/settings/service')>()),
   getSetting: (...a: unknown[]) => getSettingMock(...a),
 }));
 vi.mock('@/lib/domain/notifications/dispatch', () => ({
@@ -105,8 +112,24 @@ import {
   handlePartyWizardInvite, PARTY_INVITE_DELAY_DAYS, PARTY_INVITE_MAX_AGE_DAYS,
   PARTY_INVITE_STATUSES, PARTY_INVITE_ENABLED_SETTING, PARTY_INVITE_MAX_PER_RECIPIENT,
   PARTY_INVITE_ROLE, PARTY_INVITE_TRANSACTION_TYPES,
+  PARTY_INVITE_MAX_PER_RUN_SETTING, PARTY_INVITE_DEFAULT_MAX_PER_RUN,
 } from './party-wizard-invite';
 import { eligibleTransactionTypesFor } from '@/lib/domain/parties/party-wizard-fields';
+import { SETTINGS_REGISTRY } from '@/lib/domain/settings/service';
+
+/**
+ * Answer the enabled switch and the run ceiling separately.
+ *
+ * The two settings are read from the same mock, so a blanket `'true'` would make
+ * the ceiling `Number('true')` — NaN — and every test would be silently leaning
+ * on the parse fallback instead of on the value it thinks it set.
+ */
+function settings({ enabled = 'true', maxPerRun = '100' }: {
+  enabled?: string | null; maxPerRun?: string | null;
+} = {}) {
+  getSettingMock.mockImplementation(async (key: string) =>
+    (key === PARTY_INVITE_MAX_PER_RUN_SETTING ? maxPerRun : enabled));
+}
 
 function candidate(over: Record<string, unknown> = {}) {
   const row = {
@@ -138,8 +161,10 @@ function candidate(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   jobUpdates.length = 0;
-  // Sending is opt-in, so every test that expects a send has to turn it on.
-  getSettingMock.mockResolvedValue('true');
+  // Sending is opt-in, so every test that expects a send has to turn it on. The
+  // run ceiling is deliberately slack here so tests about OTHER guardrails
+  // measure those guardrails; the cap has its own block below.
+  settings();
   // No property has been invited before, unless a test says otherwise.
   executeMock.mockResolvedValue([]);
   findLiveLinkMock.mockResolvedValue(null);
@@ -245,7 +270,7 @@ describe('party wizard invite', () => {
 
       const r = await handlePartyWizardInvite();
       const accounted = r.sent + r.failed + r.skippedExistingLink
-        + r.skippedDuplicateProperty + r.skippedRecipientCap
+        + r.skippedDuplicateProperty + r.skippedRecipientCap + r.skippedRunCap
         + r.unreachable.noEscrowOfficer + r.unreachable.escrowOfficerNoEmail;
       expect(accounted).toBe(r.scanned);
     });
@@ -762,6 +787,234 @@ describe('caps how many emails one person gets per run', () => {
   });
 });
 
+// ─── Total-per-run ceiling ───────────────────────────────────────────────────
+//
+// The per-recipient cap bounds what one person receives and does nothing to
+// bound the run: twenty officers with two files each is forty emails and no cap
+// is exceeded. For a first pilot of copy nobody has ever received, the number
+// that matters is the total, and the owner approved five.
+
+describe('caps the total emails a single run may send', () => {
+  /** Distinct recipients and distinct properties, so ONLY the run cap can bite. */
+  function distinctOrders(count: number) {
+    return Array.from({ length: count }, (_, i) => candidate({
+      orderId: i + 1,
+      fileNumber: `FILE-${i + 1}`,
+      openedAt: new Date(Date.UTC(2026, 7, 10, 0, 0, i)),
+      fullAddress: `${i + 1} Distinct Ave, Irvine, CA`,
+      escrowOfficerEmail: `officer${i + 1}@example.com`,
+    }));
+  }
+
+  it('ships with a pilot default of five, in the registry an operator reads', () => {
+    expect(PARTY_INVITE_DEFAULT_MAX_PER_RUN).toBe(5);
+    const def = SETTINGS_REGISTRY.find(s => s.key === PARTY_INVITE_MAX_PER_RUN_SETTING);
+    expect(def).toBeDefined();
+    expect(def!.defaultValue).toBe('5');
+    expect(def!.type).toBe('number');
+  });
+
+  it('sends five of twelve and holds the rest', async () => {
+    settings({ maxPerRun: '5' });
+    candidatesMock.mockResolvedValue(distinctOrders(12));
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(5);
+    expect(r.skippedRunCap).toBe(7);
+    expect(r.runCap).toBe(5);
+    expect(sendEmailMock).toHaveBeenCalledTimes(5);
+  });
+
+  /**
+   * The dry run is the only safety check this feature has. One that previews a
+   * different set from the one the live run sends is not a check, so the cap has
+   * to live in planSends where both paths go through it — not on the send path.
+   */
+  it('previews exactly the set the live run sends', async () => {
+    settings({ maxPerRun: '5' });
+    const rows = distinctOrders(12);
+
+    candidatesMock.mockResolvedValue(rows);
+    const preview = await handlePartyWizardInvite({ dryRun: true });
+    const wouldSend = preview.report!
+      .filter(row => row.outcome === 'would_send')
+      .map(row => row.fileNumber);
+
+    vi.clearAllMocks();
+    settings({ maxPerRun: '5' });
+    executeMock.mockResolvedValue([]);
+    findLiveLinkMock.mockResolvedValue(null);
+    mintLinkMock.mockResolvedValue({ linkId: 1, url: 'https://hub.pctitle.com/party-wizard/tok' });
+    sendEmailMock.mockResolvedValue({ success: true });
+    candidatesMock.mockResolvedValue(rows);
+    const live = await handlePartyWizardInvite();
+
+    const actuallySent = insertLogMock.mock.calls
+      .map(c => (c[0] as { orderId: number }).orderId)
+      .map(id => `FILE-${id}`);
+
+    expect(wouldSend).toHaveLength(5);
+    expect(actuallySent).toEqual(wouldSend);
+    expect(live.sent).toBe(5);
+    expect(preview.skippedRunCap).toBe(live.skippedRunCap);
+  });
+
+  /**
+   * Oldest first, matching the candidate query's `opened_at ASC, id ASC`. The
+   * rows nearest the far edge of the window are the ones about to age out and
+   * never be asked again, so they are the ones a ceiling must not hold.
+   */
+  it('holds the youngest, not whatever the database returned first', async () => {
+    settings({ maxPerRun: '2' });
+    // Highest order id is the OLDEST file, so an id sort would pick the wrong two.
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fileNumber: 'NEWEST', openedAt: new Date('2026-08-20T00:00:00Z'), fullAddress: '1 A St', escrowOfficerEmail: 'one@example.com' }),
+      candidate({ orderId: 2, fileNumber: 'MIDDLE', openedAt: new Date('2026-08-18T00:00:00Z'), fullAddress: '2 B St', escrowOfficerEmail: 'two@example.com' }),
+      candidate({ orderId: 3, fileNumber: 'OLDEST', openedAt: new Date('2026-08-15T00:00:00Z'), fullAddress: '3 C St', escrowOfficerEmail: 'three@example.com' }),
+    ]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    const sending = r.report!.filter(row => row.outcome === 'would_send').map(row => row.fileNumber);
+    expect(sending).toEqual(['MIDDLE', 'OLDEST']);
+    expect(r.report!.find(row => row.fileNumber === 'NEWEST')!.outcome).toBe('skipped_run_cap');
+  });
+
+  it('picks the same five however the rows arrive', async () => {
+    settings({ maxPerRun: '5' });
+    const rows = distinctOrders(12);
+
+    candidatesMock.mockResolvedValue(rows);
+    const forwards = await handlePartyWizardInvite({ dryRun: true });
+
+    candidatesMock.mockResolvedValue([...rows].reverse());
+    const backwards = await handlePartyWizardInvite({ dryRun: true });
+
+    const chosen = (r: Awaited<ReturnType<typeof handlePartyWizardInvite>>) =>
+      r.report!.filter(row => row.outcome === 'would_send').map(row => row.fileNumber).sort();
+
+    expect(chosen(forwards)).toEqual(['FILE-1', 'FILE-2', 'FILE-3', 'FILE-4', 'FILE-5']);
+    expect(chosen(backwards)).toEqual(chosen(forwards));
+  });
+
+  /**
+   * A held order must be indistinguishable, from the database's point of view,
+   * from an order the run never looked at. No link, no notification log — the
+   * two things that make an order stop being a candidate.
+   */
+  it('leaves held orders eligible: mints nothing and logs nothing for them', async () => {
+    settings({ maxPerRun: '2' });
+    candidatesMock.mockResolvedValue(distinctOrders(6));
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(2);
+    expect(r.skippedRunCap).toBe(4);
+    expect(mintLinkMock).toHaveBeenCalledTimes(2);
+    expect(insertLogMock).toHaveBeenCalledTimes(2);
+    const touched = insertLogMock.mock.calls.map(c => (c[0] as { orderId: number }).orderId);
+    expect(touched).toEqual([1, 2]);
+  });
+
+  it('names the held rows as their own outcome instead of dropping them', async () => {
+    settings({ maxPerRun: '2' });
+    candidatesMock.mockResolvedValue(distinctOrders(4));
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report).toHaveLength(4);
+    expect(r.report!.map(row => row.outcome)).toEqual([
+      'would_send', 'would_send', 'skipped_run_cap', 'skipped_run_cap',
+    ]);
+    // A held row still shows who it would have gone to — that is the point of
+    // seeing it rather than a shorter report.
+    expect(r.report![3]!.recipientEmail).toBe('officer4@example.com');
+  });
+
+  /**
+   * Reading `skipped_run_cap` should mean "raise the ceiling and this goes out".
+   * For someone already at their two, that would not be true, so the
+   * per-recipient cap is attributed first.
+   */
+  it('attributes a recipient already at their limit to the recipient cap', async () => {
+    settings({ maxPerRun: '2' });
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fileNumber: 'A1', fullAddress: '1 A St', escrowOfficerEmail: 'one@example.com' }),
+      candidate({ orderId: 2, fileNumber: 'A2', fullAddress: '2 A St', escrowOfficerEmail: 'one@example.com' }),
+      candidate({ orderId: 3, fileNumber: 'A3', fullAddress: '3 A St', escrowOfficerEmail: 'one@example.com' }),
+      candidate({ orderId: 4, fileNumber: 'B1', fullAddress: '4 B St', escrowOfficerEmail: 'two@example.com' }),
+    ]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report!.map(row => row.outcome)).toEqual([
+      'would_send', 'would_send', 'skipped_recipient_cap', 'skipped_run_cap',
+    ]);
+    expect(r.skippedRecipientCap).toBe(1);
+    expect(r.skippedRunCap).toBe(1);
+  });
+
+  it('does not spend a slot on a duplicate property', async () => {
+    settings({ maxPerRun: '2' });
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, fileNumber: 'A-OCT', fullAddress: '8613 BONITA RD', escrowOfficerEmail: 'a@example.com' }),
+      candidate({ orderId: 2, fileNumber: 'A-PRV', fullAddress: '8613 BONITA RD', escrowOfficerEmail: 'b@example.com' }),
+      candidate({ orderId: 3, fileNumber: 'B', fullAddress: '52 CARROLL DR', escrowOfficerEmail: 'c@example.com' }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(2);
+    expect(r.skippedDuplicateProperty).toBe(1);
+    expect(r.skippedRunCap).toBe(0);
+  });
+
+  it('honours zero as "send nothing" without touching the master switch', async () => {
+    settings({ maxPerRun: '0' });
+    candidatesMock.mockResolvedValue(distinctOrders(3));
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.enabled).toBe(true);
+    expect(r.refused).toBeUndefined();
+    expect(r.sent).toBe(0);
+    expect(r.skippedRunCap).toBe(3);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The failure mode of a missing ceiling is a mailbox full of a template nobody
+   * has approved. An unreadable value therefore falls back to the pilot default,
+   * never to unlimited.
+   */
+  it('falls back to the pilot default on an unreadable value, never to unlimited', async () => {
+    for (const junk of [null, '', '   ', 'lots', '-3', 'NaN']) {
+      vi.clearAllMocks();
+      settings({ maxPerRun: junk });
+      executeMock.mockResolvedValue([]);
+      findLiveLinkMock.mockResolvedValue(null);
+      candidatesMock.mockResolvedValue(distinctOrders(9));
+
+      const r = await handlePartyWizardInvite({ dryRun: true });
+
+      expect(r.runCap, `value ${JSON.stringify(junk)} must fall back`).toBe(5);
+      expect(r.report!.filter(row => row.outcome === 'would_send')).toHaveLength(5);
+    }
+  });
+
+  it('widens without a code change when the setting is raised', async () => {
+    settings({ maxPerRun: '20' });
+    candidatesMock.mockResolvedValue(distinctOrders(12));
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.runCap).toBe(20);
+    expect(r.sent).toBe(12);
+    expect(r.skippedRunCap).toBe(0);
+  });
+});
+
 // ─── Off unless someone said yes ─────────────────────────────────────────────
 //
 // This was a shut-off flag defaulting to false: a running job with a brake. A
@@ -849,7 +1102,7 @@ describe('dry run reports instead of sending', () => {
    * the switch must not gate the preview.
    */
   it('runs while sending is switched off', async () => {
-    getSettingMock.mockResolvedValue('false');
+    settings({ enabled: 'false' });
     candidatesMock.mockResolvedValue([candidate()]);
 
     const r = await handlePartyWizardInvite({ dryRun: true });

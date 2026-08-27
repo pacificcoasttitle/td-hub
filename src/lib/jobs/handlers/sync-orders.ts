@@ -10,6 +10,8 @@ import {
 } from '@/lib/domain/orders/service';
 import { applySiteXPropertyFields } from '@/lib/domain/orders/apply-sitex-property';
 import { propertyLookup } from '@/lib/integrations/sitex/client';
+import { createDeadline } from '@/lib/jobs/time-budget';
+import { syncWindow } from '@/lib/jobs/sync-window';
 
 export interface SyncOrdersPayload {
   dateFrom?: string;
@@ -22,13 +24,12 @@ export interface SyncOrdersResult {
   updated: number;
   enriched: number;
   sitexEnriched: number;
+  /** The window actually requested, so a run's coverage is auditable after the fact. */
+  dateFrom: string;
+  dateTo: string;
+  /** True when the time budget ended the run before every fetched order was processed. */
+  stoppedEarly: boolean;
   errors: Array<{ fileNumber: string; error: string }>;
-}
-
-function formatDateForSoftPro(d: Date): string {
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${month}-${day}-${d.getFullYear()}`;
 }
 
 /**
@@ -40,15 +41,16 @@ function formatDateForSoftPro(d: Date): string {
 export async function handleSyncOrders(
   payload: SyncOrdersPayload = {}
 ): Promise<SyncOrdersResult> {
-  const now = new Date();
-  const dateFrom = payload.dateFrom ?? formatDateForSoftPro(now);
-  const dateTo = payload.dateTo ?? formatDateForSoftPro(now);
+  const window = syncWindow();
+  const dateFrom = payload.dateFrom ?? window.dateFrom;
+  const dateTo = payload.dateTo ?? window.dateTo;
 
   const adapterResult = await getOrders({ dateFrom, dateTo });
 
   if (!adapterResult.success || !adapterResult.data) {
     return {
       totalFetched: 0, created: 0, updated: 0, enriched: 0, sitexEnriched: 0,
+      dateFrom, dateTo, stoppedEarly: false,
       errors: [{
         fileNumber: '*',
         error: adapterResult.error?.message ?? 'Failed to fetch orders from SoftPro',
@@ -61,9 +63,21 @@ export async function handleSyncOrders(
   let updated = 0;
   let enriched = 0;
   let sitexEnriched = 0;
+  let stoppedEarly = false;
   const errors: Array<{ fileNumber: string; error: string }> = [];
 
+  // A 7-day window fetches roughly 7x the rows a today-only run did. Almost all
+  // are already known and cost one lookup each, but a burst of genuinely new
+  // orders pulls contacts and SiteX per order, so the run is bounded rather than
+  // risking the function ceiling. Stopping early is safe: the window is trailing,
+  // so whatever is left is re-requested by the next run.
+  const deadline = createDeadline('softpro.sync_recent_orders');
+
   for (const item of items) {
+    if (deadline.exceeded()) {
+      stoppedEarly = true;
+      break;
+    }
     try {
       const existing = await getOrderByFileNumber(item.OrderNumber);
       const mapped = mapSoftProOrder(item);
@@ -94,7 +108,12 @@ export async function handleSyncOrders(
     }
   }
 
-  return { totalFetched: items.length, created, updated, enriched, sitexEnriched, errors };
+  return {
+    totalFetched: items.length,
+    created, updated, enriched, sitexEnriched,
+    dateFrom, dateTo, stoppedEarly,
+    errors,
+  };
 }
 
 // ─── SiteX Enrichment ───────────────────────────────────────────────────────

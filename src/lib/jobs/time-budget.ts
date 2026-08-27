@@ -42,6 +42,13 @@ export const UNIT_P99_MS = {
   'softpro.fetch_prelims': 90_000,
   /** One order: get_order_contacts, p99 31.9s, observed max 60s (client timeout). */
   'softpro.enrich_orders': 60_000,
+  /**
+   * One order from the trailing-window sync. Already-known orders cost a single
+   * DB lookup, but a NEW order pulls get_order_contacts (max 60s, the client
+   * timeout) and then a sitex property_lookup (observed max 23.5s) inline, so the
+   * worst case is the sum of both rather than either alone.
+   */
+  'softpro.sync_recent_orders': 90_000,
   /** One order: get_order_details, p99 6.4s, observed max 120s (client timeout). */
   'softpro.enrich_order_details': 60_000,
   /** One document: upload_document, p99 60s (client timeout). */

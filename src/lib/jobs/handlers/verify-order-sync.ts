@@ -1,10 +1,11 @@
 import { db } from '@/lib/db/client';
 import { jobs, orders, orderParties, contacts } from '@/lib/db/schema';
-import { eq, sql } from 'drizzle-orm';
-import { getOrderContacts, getOrderDetails, mapOrderContacts } from '@/lib/integrations/softpro';
+import { eq, inArray, sql } from 'drizzle-orm';
+import { getOrderContacts, getOrderDetails, getOrders, mapOrderContacts } from '@/lib/integrations/softpro';
 import type { MappedOrderContacts } from '@/lib/integrations/softpro';
 import { mapStatus } from '@/lib/domain/orders/status-map';
 import { createDeadline } from '@/lib/jobs/time-budget';
+import { SYNC_LOOKBACK_DAYS, syncWindow } from '@/lib/jobs/sync-window';
 import type { DriftCounts } from '@/lib/domain/ops/status-drift';
 
 type ExistingParty = typeof orderParties.$inferSelect;
@@ -63,7 +64,153 @@ const INTER_CALL_DELAY_MS = 250;
 /** Statuses that mean SoftPro considers the file finished. */
 const TERMINAL = new Set(['closed', 'completed', 'canceled', 'duplicate']);
 
+// ─── Ingest gap detector ────────────────────────────────────────────────────
+//
+// The drift detector above, the look-back sync, and every other check we had
+// all START FROM `orders`. They can find a stale row or a drifted status, but
+// none of them can see a row that was never written — a check that only examines
+// what exists cannot detect absence. That blind spot hid 221 missing orders
+// across 29 consecutive business days, affecting 28 sales reps, until a rep
+// noticed one of his own files was gone.
+//
+// This detector inverts the direction: it starts from SOFTPRO'S list for a date
+// range and asks what we are missing from it. Because the vendor is the source
+// of truth for "an order exists", absence becomes detectable.
+//
+// NOT BUILT ON FILE-NUMBER SEQUENCES, deliberately. File numbers carry branch
+// suffixes (-GLT, -OCT, -CSS) and run in parallel series — the recovery turned up
+// live orders numbered 99100995 alongside the 2002xxxx range — so numbering is
+// not reliably contiguous and sequence gaps generate phantoms. Sequence counting
+// also UNDERCOUNTS: the gap analysis predicted 201 missing and the direct
+// comparison recovered 221. This is a direct set difference on the vendor's own
+// order numbers. No inference.
+//
+// READ-ONLY, like the rest of this job. It reports the missing numbers; the sync
+// is what ingests them. Conflating "detect" with "fix" is what makes a broken
+// detector invisible.
+
+/** Missing order numbers listed in the result before truncating. */
+const MISSING_SAMPLE_LIMIT = 25;
+
+export interface IngestGapResult {
+  dateFrom: string;
+  dateTo: string;
+  windowDays: number;
+  /** Distinct order numbers SoftPro returned for the window. */
+  vendorCount: number;
+  /** How many of those we already hold. */
+  heldCount: number;
+  /**
+   * Orders SoftPro has that we do not.
+   *
+   * NULL, never 0, when the vendor list is unusable — a failed call or an empty
+   * response proves nothing about our completeness. Reporting 0 there would
+   * recreate the exact false-green this detector exists to eliminate: a vendor
+   * outage must never read as a clean bill of health.
+   */
+  missingCount: number | null;
+  missingSample: string[];
+  /** True when the vendor call failed or returned nothing usable. */
+  vendorUnavailable: boolean;
+  error: string | null;
+}
+
+export interface IngestGapOptions {
+  /** Clock, for the default trailing window. Ignored when an explicit range is given. */
+  now?: Date;
+  /** Explicit MM-DD-YYYY range, for sizing historical loss rather than the live window. */
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+/** Inclusive day span of an MM-DD-YYYY range, for reporting. */
+function spanDays(dateFrom: string, dateTo: string): number {
+  const parse = (s: string) => {
+    const [m, d, y] = s.split('-').map(Number);
+    return m && d && y ? Date.UTC(y, m - 1, d) : NaN;
+  };
+  const from = parse(dateFrom);
+  const to = parse(dateTo);
+  if (Number.isNaN(from) || Number.isNaN(to)) return 0;
+  return Math.round((to - from) / 86_400_000) + 1;
+}
+
+/**
+ * Compares SoftPro's order list for a date range against ours.
+ *
+ * Defaults to the SAME window constant the sync runs on, so the live detector
+ * always covers exactly the range the sync is responsible for — widen one and the
+ * other follows. An explicit range is accepted so the same comparison can size
+ * historical loss, which is the only sound way to measure it: file numbers carry
+ * branch suffixes and run in parallel series, so sequence scanning both invents
+ * phantom gaps and undercounts real ones.
+ */
+export async function detectIngestGap(
+  options: IngestGapOptions | Date = {},
+): Promise<IngestGapResult> {
+  const opts: IngestGapOptions = options instanceof Date ? { now: options } : options;
+  const fallback = syncWindow(opts.now ?? new Date());
+  const dateFrom = opts.dateFrom ?? fallback.dateFrom;
+  const dateTo = opts.dateTo ?? fallback.dateTo;
+  const windowDays =
+    opts.dateFrom || opts.dateTo ? spanDays(dateFrom, dateTo) : SYNC_LOOKBACK_DAYS;
+
+  const base = {
+    dateFrom,
+    dateTo,
+    windowDays,
+    vendorCount: 0,
+    heldCount: 0,
+    missingCount: null,
+    missingSample: [] as string[],
+    vendorUnavailable: true,
+    error: null as string | null,
+  };
+
+  const result = await getOrders({ dateFrom, dateTo }).catch((err: unknown) => ({
+    success: false as const,
+    data: null,
+    error: { message: err instanceof Error ? err.message : 'getOrders threw' },
+  }));
+
+  if (!result.success || !result.data) {
+    return { ...base, error: result.error?.message ?? 'Failed to fetch orders from SoftPro' };
+  }
+
+  const vendorNumbers = [
+    ...new Set(result.data.map((o) => o.OrderNumber?.trim()).filter((n): n is string => !!n)),
+  ];
+
+  // An empty vendor list is not a clean result — a real business week always has
+  // orders — so it is reported as unavailable rather than as zero gap.
+  if (vendorNumbers.length === 0) {
+    return { ...base, error: 'SoftPro returned no orders for the window' };
+  }
+
+  const held = await db
+    .select({ fileNumber: orders.fileNumber })
+    .from(orders)
+    .where(inArray(orders.fileNumber, vendorNumbers));
+
+  const heldSet = new Set(held.map((h) => h.fileNumber));
+  const missing = vendorNumbers.filter((n) => !heldSet.has(n));
+
+  return {
+    dateFrom,
+    dateTo,
+    windowDays,
+    vendorCount: vendorNumbers.length,
+    heldCount: heldSet.size,
+    missingCount: missing.length,
+    missingSample: missing.slice(0, MISSING_SAMPLE_LIMIT),
+    vendorUnavailable: false,
+    error: null,
+  };
+}
+
 export interface VerifyOrderSyncResult extends DriftCounts {
+  /** Orders SoftPro has for the trailing window that we never ingested. */
+  ingestGap: IngestGapResult;
   /** True when the time budget stopped the run before the sample was exhausted. */
   stoppedEarly: boolean;
   /** Drift rate over `checked`, or null when nothing was checked. */
@@ -124,6 +271,16 @@ async function sampleInProcessOrders(limit: number) {
 export async function handleVerifyOrderSync(
   payload: Record<string, unknown> = {},
 ): Promise<VerifyOrderSyncResult> {
+  // Runs first and cheaply (one vendor list call plus one indexed lookup). Its
+  // failure must never take down the drift detector, and vice versa — they are
+  // independent checks that happen to share a run.
+  const ingestGap = await detectIngestGap().catch((err: unknown) => ({
+    dateFrom: '', dateTo: '', windowDays: SYNC_LOOKBACK_DAYS,
+    vendorCount: 0, heldCount: 0, missingCount: null, missingSample: [],
+    vendorUnavailable: true,
+    error: err instanceof Error ? err.message : 'ingest gap detector threw',
+  }) satisfies IngestGapResult);
+
   const sample = await sampleInProcessOrders(DRIFT_SAMPLE_SIZE);
   const deadline = createDeadline('softpro.verify_sync');
 
@@ -195,6 +352,7 @@ export async function handleVerifyOrderSync(
   );
 
   const result: VerifyOrderSyncResult = {
+    ingestGap,
     checked,
     drifted,
     unchecked,

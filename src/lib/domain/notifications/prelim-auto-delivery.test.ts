@@ -2,12 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   deliveryMarkerRows,
+  orderRows,
   insertRows,
   resolvePrelimRecipientsMock,
   getPrelimDeliveryModeMock,
   sendPrelimDeliveryEmailMock,
 } = vi.hoisted(() => ({
   deliveryMarkerRows: [] as Array<{ id: number }>,
+  /** The order row the backfill gate reads. Mutated per test. */
+  orderRows: [] as Array<{ openedAt: Date | null; createdAt: Date | null }>,
   insertRows: [] as Array<{ table: string; values: Record<string, unknown> }>,
   resolvePrelimRecipientsMock: vi.fn(),
   getPrelimDeliveryModeMock: vi.fn(),
@@ -29,14 +32,22 @@ vi.mock('@/lib/db/schema', () => ({
     entityId: 'admin_activity_logs.entity_id',
     meta: 'admin_activity_logs.meta',
   },
+  orders: {
+    __table: 'orders',
+    id: 'orders.id',
+    openedAt: 'orders.opened_at',
+    createdAt: 'orders.created_at',
+  },
 }));
 
 vi.mock('@/lib/db/client', () => ({
   db: {
+    // Branches on the table because two different lookups share this chain: the
+    // delivery marker and the backfill gate's order row.
     select: vi.fn(() => ({
-      from: vi.fn(() => ({
+      from: vi.fn((table: { __table?: string }) => ({
         where: vi.fn(() => ({
-          limit: vi.fn(async () => deliveryMarkerRows),
+          limit: vi.fn(async () => (table?.__table === 'orders' ? orderRows : deliveryMarkerRows)),
         })),
       })),
     })),
@@ -107,6 +118,12 @@ describe('maybeAutoDeliverPrelim', () => {
   beforeEach(() => {
     deliveryMarkerRows.splice(0, deliveryMarkerRows.length);
     insertRows.splice(0, insertRows.length);
+    // Default: an order the sync saw happen — opened and written the same hour,
+    // so the backfill gate is transparent to every test that predates it.
+    orderRows.splice(0, orderRows.length, {
+      openedAt: new Date('2026-07-15T00:00:00.000Z'),
+      createdAt: new Date('2026-07-15T01:00:00.000Z'),
+    });
     resolvePrelimRecipientsMock.mockReset();
     getPrelimDeliveryModeMock.mockReset();
     sendPrelimDeliveryEmailMock.mockReset();
@@ -271,6 +288,99 @@ describe('maybeAutoDeliverPrelim', () => {
       outcome: 'blocked_no_recipient',
       needs_manual_delivery: true,
     });
+  });
+
+  // ── Backfill gate ──
+  //
+  // The rule is a LAG, not an age: how far our record trails the real world. The
+  // pair that matters is the last two cases — same old order, opposite verdicts,
+  // decided only by when the row was written.
+
+  it('holds a prelim when the order row was backfilled long after it opened', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+    orderRows.splice(0, orderRows.length, {
+      openedAt: new Date('2026-06-01T00:00:00.000Z'),
+      createdAt: new Date('2026-07-16T00:00:00.000Z'), // 45d later
+    });
+
+    const result = await maybeAutoDeliverPrelim(baseInput);
+
+    expect(result).toMatchObject({
+      outcome: 'skipped_backfilled_order',
+      sent: false,
+      needsManualDelivery: true,
+    });
+    expect(result.reason).toContain('45.0d after its open date');
+    expect(sendPrelimDeliveryEmailMock).not.toHaveBeenCalled();
+    expect(resolvePrelimRecipientsMock).not.toHaveBeenCalled();
+    expect(latestOutcome()).toMatchObject({
+      outcome: 'skipped_backfilled_order',
+      needs_manual_delivery: true,
+    });
+  });
+
+  it('holds a prelim when the order has no open date to measure the lag against', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+    orderRows.splice(0, orderRows.length, {
+      openedAt: null,
+      createdAt: new Date('2026-07-16T00:00:00.000Z'),
+    });
+
+    const result = await maybeAutoDeliverPrelim(baseInput);
+
+    expect(result).toMatchObject({
+      outcome: 'skipped_backfilled_order',
+      needsManualDelivery: true,
+    });
+    expect(result.reason).toContain('no open date');
+    expect(sendPrelimDeliveryEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('holds a prelim when the order row is missing entirely', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+    orderRows.splice(0, orderRows.length);
+
+    const result = await maybeAutoDeliverPrelim(baseInput);
+
+    expect(result.outcome).toBe('skipped_backfilled_order');
+    expect(sendPrelimDeliveryEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('delivers when the lag sits just inside the threshold', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+    orderRows.splice(0, orderRows.length, {
+      openedAt: new Date('2026-07-01T00:00:00.000Z'),
+      createdAt: new Date('2026-07-10T00:00:00.000Z'), // 9d — under 10
+    });
+
+    const result = await maybeAutoDeliverPrelim(baseInput);
+
+    expect(result.outcome).toBe('delivered');
+    expect(sendPrelimDeliveryEmailMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('delivers a late prelim on a long-held order, however old the order is', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+    // Opened in March 2025 and written the same day — held all along. The prelim
+    // arriving 16 months later is a real delivery. Age must not suppress it;
+    // only the lag may, and here there is none.
+    orderRows.splice(0, orderRows.length, {
+      openedAt: new Date('2025-03-05T00:00:00.000Z'),
+      createdAt: new Date('2025-03-05T00:30:00.000Z'),
+    });
+
+    const result = await maybeAutoDeliverPrelim({
+      ...baseInput,
+      documentCreatedAt: new Date('2026-07-20T00:00:00.000Z'),
+    });
+
+    expect(result.outcome).toBe('delivered');
+    expect(sendPrelimDeliveryEmailMock).toHaveBeenCalledTimes(1);
   });
 
   it('does not auto-send in test mode', async () => {

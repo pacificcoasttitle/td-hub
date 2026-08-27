@@ -1,13 +1,10 @@
+import { EMPTY_PARTY, type PartyFormContact } from '@/lib/domain/orders/party-contact';
+
 export interface Person { firstName: string; middleName: string; lastName: string; }
-export interface PartyContact {
-  name: string;
-  email: string;
-  phone: string;
-  company: string;
-  companyLookupCode?: string;
-  clientLookupCode?: string;
-  contactId?: number;
-}
+
+/** One definition, so the form state and the payload mapping cannot drift. */
+export type PartyContact = PartyFormContact;
+
 export interface FormOption { value: string; label: string; }
 
 export interface Underwriter { code: string; name: string }
@@ -22,11 +19,7 @@ export interface FormOptions {
 }
 
 export const EP: Person = { firstName: '', middleName: '', lastName: '' };
-export const EC: PartyContact = {
-  name: '', email: '', phone: '', company: '',
-  companyLookupCode: '', clientLookupCode: '',
-  contactId: undefined,
-};
+export const EC: PartyContact = EMPTY_PARTY;
 
 export const ORG_TYPES = ['LLC', 'Corporation', 'Partnership', 'Trust', 'Other'];
 export const TX_TYPES = ['', 'Purchase', 'Refinance', 'Equity', 'Other'];

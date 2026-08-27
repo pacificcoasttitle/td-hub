@@ -4,6 +4,10 @@
  * SoftPro keeps a contact section only when hasContactData is true:
  * lookup code, email, or companyName. A name (or phone) alone is dropped
  * after a 200 — the silent write this module exists to stop.
+ *
+ * Parties are chosen from the contact typeahead and nowhere else. There is no
+ * free-text path into these fields, so every value here came from a `contacts`
+ * or `companies` row.
  */
 
 export interface PartyFormContact {
@@ -14,11 +18,18 @@ export interface PartyFormContact {
   companyLookupCode?: string;
   clientLookupCode?: string;
   /**
-   * The `contacts` row the operator picked. Absent on free text, and absent when
-   * the pick was a company rather than a person — the company-first typeahead
-   * mixes both and only a person has a contact id.
+   * The `contacts` row the operator picked. Absent when the pick was a company
+   * rather than a person — the company-inclusive typeahead mixes both and only
+   * a person has a contact id.
    */
   contactId?: number;
+  /**
+   * Street and city, carried for the resolved card only. Deliberately not read
+   * by toCreateOrderContact: SoftPro takes the party address from the lookup
+   * code, so sending ours would be a second source of truth for one field.
+   */
+  address?: string;
+  city?: string;
 }
 
 export const EMPTY_PARTY: PartyFormContact = {
@@ -29,6 +40,8 @@ export const EMPTY_PARTY: PartyFormContact = {
   companyLookupCode: '',
   clientLookupCode: '',
   contactId: undefined,
+  address: '',
+  city: '',
 };
 
 export interface CreateOrderContact {
@@ -42,8 +55,8 @@ export interface CreateOrderContact {
 }
 
 export interface ContactSearchHit {
-  /** Positive for a contact row. The company-first search puts companies in the
-   *  same list under a negative synthetic id, which is not a contact id. */
+  /** Positive for a contact row. The company-inclusive search puts companies in
+   *  the same list under a negative synthetic id, which is not a contact id. */
   id?: number | null;
   fullName?: string | null;
   firstName?: string | null;
@@ -55,6 +68,8 @@ export interface ContactSearchHit {
   clientLookupCode?: string | null;
   companyLookupCode?: string | null;
   flookupCode?: string | null;
+  address?: string | null;
+  city?: string | null;
 }
 
 export function partyDisplayName(hit: ContactSearchHit): string {
@@ -72,9 +87,12 @@ export function applyContactSelection(hit: ContactSearchHit): PartyFormContact {
     clientLookupCode: (hit.clientLookupCode ?? hit.lookupCode ?? '').trim(),
     companyLookupCode: (hit.companyLookupCode ?? hit.flookupCode ?? '').trim(),
     contactId: typeof hit.id === 'number' && hit.id > 0 ? hit.id : undefined,
+    address: hit.address?.trim() ?? '',
+    city: hit.city?.trim() ?? '',
   };
 }
 
+/** A party slot holds a selection. Empty means the operator picked nobody. */
 export function partyHasInput(c: PartyFormContact): boolean {
   return !!(
     c.name.trim()
@@ -86,7 +104,14 @@ export function partyHasInput(c: PartyFormContact): boolean {
   );
 }
 
-/** Same gate as softpro-payload hasContactData. */
+/**
+ * Same gate as softpro-payload hasContactData.
+ *
+ * Kept as a gate even though the typeahead can no longer produce a party that
+ * fails it — every one of the 21,702 active contacts carries an email, a
+ * company or a lookup code. It mirrors the vendor's real rule, so it stays as
+ * the thing that stops a future data change becoming a silent drop.
+ */
 export function partyReachesSoftPro(c: PartyFormContact): boolean {
   return !!(
     c.companyLookupCode?.trim()
@@ -94,12 +119,6 @@ export function partyReachesSoftPro(c: PartyFormContact): boolean {
     || c.email.trim()
     || c.company.trim()
   );
-}
-
-export function partySubmitBlocker(c: PartyFormContact, label: string): string | null {
-  if (!partyHasInput(c)) return null;
-  if (partyReachesSoftPro(c)) return null;
-  return `${label}: a name alone won't save this party; add an email or company`;
 }
 
 export function toCreateOrderContact(c: PartyFormContact): CreateOrderContact | undefined {
@@ -114,26 +133,4 @@ export function toCreateOrderContact(c: PartyFormContact): CreateOrderContact | 
     clientLookupCode: c.clientLookupCode?.trim() || undefined,
     contactId: c.contactId,
   };
-}
-
-export const PARTY_SUBMIT_LABELS = {
-  buyerAgent: "Buyer's Agent",
-  listingAgent: 'Listing Agent',
-  lender: 'Lender',
-  mortgageBroker: 'Mortgage Broker',
-  escrowCompany: 'Escrow Company',
-} as const;
-
-export function firstPartySubmitBlocker(parties: {
-  buyerAgent: PartyFormContact;
-  listingAgent: PartyFormContact;
-  lender: PartyFormContact;
-  mortgageBroker: PartyFormContact;
-  escrowCompany: PartyFormContact;
-}): string | null {
-  for (const key of Object.keys(PARTY_SUBMIT_LABELS) as Array<keyof typeof PARTY_SUBMIT_LABELS>) {
-    const msg = partySubmitBlocker(parties[key], PARTY_SUBMIT_LABELS[key]);
-    if (msg) return msg;
-  }
-  return null;
 }

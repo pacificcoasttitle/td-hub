@@ -6,7 +6,7 @@ import type { ParsedAddress } from '@/components/ui/address-autocomplete';
 import type { SiteXPropertyResult } from '@/components/shared/property-confirm-modal';
 import { buildPreInitAddressKey, usePreInitOnSiteX } from '@/lib/orders/use-pre-init-on-sitex';
 import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
-import { firstPartySubmitBlocker, toCreateOrderContact } from '@/lib/domain/orders/party-contact';
+import { toCreateOrderContact } from '@/lib/domain/orders/party-contact';
 import { EP, EC, type Person, type FormOptions } from './types';
 import { parseSiteXOwners } from '@/lib/domain/orders/names/sitex-owner-names';
 import { legacyToTitleCase } from '@/lib/domain/orders/names/title-case';
@@ -282,14 +282,6 @@ export function useQuickEntry() {
 
   async function handleSubmit() {
     setResult(null);
-    const partyBlock = firstPartySubmitBlocker({
-      buyerAgent, listingAgent, lender, mortgageBroker, escrowCompany: escrow,
-    });
-    if (partyBlock) {
-      setResult({ type: 'error', message: partyBlock });
-      return;
-    }
-
     setSubmitting(true);
     try {
       const num = (s: string) => {

@@ -74,6 +74,21 @@ describe('the flip is SiteX-only', () => {
     }
   });
 
+  // Same guard for the read-back. `enrich-orders` writes `order_parties`
+  // `external_name` straight from SoftPro's `GetOrderContacts` strings, and
+  // that is the answer to "can re-enrichment overwrite a correct SoftPro name
+  // with a flipped one" — it cannot, because the flip is not on the path.
+  // Pinned here so the answer stays no.
+  it('the SoftPro read-back does not import the SiteX owner parser', () => {
+    const src = readFileSync(
+      join(__dirname, '..', '..', '..', 'jobs', 'handlers', 'enrich-orders.ts'),
+      'utf8',
+    );
+    expect(src).not.toContain('sitex-owner-names');
+    expect(src).not.toContain('parseSiteXOwners');
+    expect(src).not.toContain('orders/names');
+  });
+
   it('the flip itself is not exported', async () => {
     const mod = await import('./sitex-owner-names');
     expect(Object.keys(mod)).toEqual(['parseSiteXOwners']);

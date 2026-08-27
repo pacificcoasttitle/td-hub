@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import { orders, orderProperties, orderStatusHistory, contacts } from '@/lib/db/schema';
 import { eq, or, sql } from 'drizzle-orm';
 import { internalOfficerFilter } from '@/lib/domain/contacts/filters';
+import { isValidEmail } from '@/lib/domain/notifications/prelim-recipient-resolution';
 import { parseSoftProDate } from '@/lib/integrations/softpro/types';
 import type { SoftProOrderDetailItem, SoftProResolvedPerson } from '@/lib/integrations/softpro/types';
 import {
@@ -132,13 +133,27 @@ function constructedName(c: ContactRecord): string {
 // what `resolveEscrowOfficerId is independent of candidate order` pins.
 
 /**
- * The better of two equally-matching rows: the officer-feed row wins, and
- * otherwise the lower id does. Total, antisymmetric, and order-independent.
+ * The better of two equally-matching rows. Total, antisymmetric, and
+ * order-independent.
+ *
+ * An officer-feed row wins only when it carries a usable email — the same
+ * `isValidEmail` test `resolvePrelimRecipients` uses for prelim `to` (and
+ * stricter than confirmation CC, which accepts any non-empty trimmed string).
+ * Preferring a feed row with no address (Joseph Gomez, contact 14) would take
+ * prelim down the `if (escrowOfficerId)` branch, leave `to = null`, and skip
+ * the `escrow_company` fallback. Lowest-id alone would still pick 14 over
+ * address-book 10999, so an officer-feed row without a usable email ranks last.
  */
+function preferenceRank(c: ContactRecord): 0 | 1 | 2 {
+  if (c.isInternalOfficerRow && isValidEmail(c.email)) return 0;
+  if (c.isInternalOfficerRow) return 2;
+  return 1;
+}
+
 function preferredOf(a: ContactRecord, b: ContactRecord): ContactRecord {
-  if (a.isInternalOfficerRow !== b.isInternalOfficerRow) {
-    return a.isInternalOfficerRow ? a : b;
-  }
+  const aRank = preferenceRank(a);
+  const bRank = preferenceRank(b);
+  if (aRank !== bRank) return aRank < bRank ? a : b;
   return a.id <= b.id ? a : b;
 }
 

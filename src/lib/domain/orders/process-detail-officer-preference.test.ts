@@ -46,6 +46,29 @@ const EXTERNAL_OFFICER: ContactRecord = {
   isInternalOfficerRow: false,
 };
 
+// Joseph Gomez: officer-feed row 14 has no email (SoftPro column-shifted the
+// vendor row). Address-book 10999 is jgomez@pct.com. Preferring 14 would
+// blank prelim `to` on his 86 orders.
+const GOMEZ_OFFICER: ContactRecord = {
+  id: 14,
+  firstName: null,
+  lastName: null,
+  fullName: 'Joseph Gomez',
+  officerName: 'Joseph Gomez',
+  softproLookupCode: 'PCT\\jgomez',
+  sourceId: 'PCT\\jgomez',
+  email: null,
+  phone: null,
+  isInternalOfficerRow: true,
+};
+
+const GOMEZ_ADDRESS_BOOK: ContactRecord = {
+  ...GOMEZ_OFFICER,
+  id: 10999,
+  email: 'jgomez@pct.com',
+  isInternalOfficerRow: false,
+};
+
 /** Every ordering of the same candidates, so no test passes by luck of order. */
 function permutations<T>(items: T[]): T[][] {
   if (items.length <= 1) return [items];
@@ -60,12 +83,19 @@ function permutations<T>(items: T[]): T[][] {
 describe('escrow officer resolution when a person has both an officer row and an address-book row', () => {
   const both = [ADDRESS_BOOK_ROW, OFFICER_ROW, EXTERNAL_OFFICER];
 
-  it('prefers the officer-feed row over the address-book row on the name tier', () => {
+  it('prefers the officer-feed row when both rows are present and the officer has a usable email', () => {
     expect(resolveEscrowOfficerId('Anna Ballesteros', both)).toBe(12);
+    expect(resolveOfficerIdByLookupCode('PCT\\aballesteros', both)).toBe(12);
   });
 
-  it('prefers the officer-feed row over the address-book row on the lookup-code tier', () => {
-    expect(resolveOfficerIdByLookupCode('PCT\\aballesteros', both)).toBe(12);
+  it('prefers the address-book row when both rows are present and the officer has no usable email', () => {
+    const gomezBoth = [GOMEZ_ADDRESS_BOOK, GOMEZ_OFFICER, EXTERNAL_OFFICER];
+    expect(resolveEscrowOfficerId('Joseph Gomez', gomezBoth)).toBe(10999);
+    expect(resolveOfficerIdByLookupCode('PCT\\jgomez', gomezBoth)).toBe(10999);
+    for (const candidates of permutations(gomezBoth)) {
+      expect(resolveEscrowOfficerId('Joseph Gomez', candidates)).toBe(10999);
+      expect(resolveOfficerIdByLookupCode('PCT\\jgomez', candidates)).toBe(10999);
+    }
   });
 
   it('gives the same answer for every ordering of the candidates', () => {

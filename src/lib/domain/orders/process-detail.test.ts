@@ -9,6 +9,7 @@ const existingPropertyRows: Array<{ id: number }> = [];
 vi.mock('drizzle-orm', () => ({
   eq: (field: unknown, value: unknown) => ({ op: 'eq', field, value }),
   or: (...parts: unknown[]) => ({ op: 'or', parts }),
+  and: (...parts: unknown[]) => ({ op: 'and', parts }),
   // internalOfficerFilter and the officer loaders build fragments with the
   // template tag; nothing here executes them, they only have to be values.
   sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ op: 'sql', strings, values }),
@@ -31,6 +32,7 @@ vi.mock('@/lib/db/schema', () => ({
     orderId: 'order_properties.order_id',
   },
   orderStatusHistory: { __table: 'order_status_history' },
+  orderParties: { __table: 'order_parties' },
   contacts: {
     __table: 'contacts',
     id: 'contacts.id',

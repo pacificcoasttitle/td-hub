@@ -113,16 +113,31 @@ function sampleOpsSummary(): DailySummary {
 
 /** All sendable system notification samples. */
 export function buildAllSampleEmails(): SampleEmail[] {
-  const partyInput = {
+  const partyInputBase = {
     fileNumber: orderData.fileNumber,
     propertyAddress: orderData.address,
     transactionType: 'Purchase',
-    escrowOfficerName: 'Jamie Escrow',
     openedAt: new Date('2026-07-15T16:00:00Z'),
     // v1 wizard collects listing_agent only (escrow forwards the link).
     roleLinks: [
       { role: 'listing_agent' as const, url: `${APP_URL}/party/sample-listing-agent-token` },
     ],
+  };
+
+  // Both variants are listed because both send. The external one is the
+  // majority case — most orders resolve to an outside escrow firm, not a PCT
+  // officer — and a gallery that showed only the internal copy would leave the
+  // copy most recipients actually receive unreviewed.
+  const partyInputInternal = {
+    ...partyInputBase,
+    recipientName: 'Jamie Escrow',
+    audience: 'internal' as const,
+  };
+  const partyInputExternal = {
+    ...partyInputBase,
+    recipientName: 'Dana Ruiz',
+    recipientCompany: 'Corner Escrow, Inc.',
+    audience: 'external' as const,
   };
 
   const ops = sampleOpsSummary();
@@ -174,10 +189,17 @@ export function buildAllSampleEmails(): SampleEmail[] {
     },
     {
       key: 'party_wizard_invite',
-      label: 'Party information collection',
-      subject: buildPartyWizardSubject(partyInput),
-      html: buildPartyWizardEmail(partyInput),
-      text: buildPartyWizardText(partyInput),
+      label: 'Party information collection (PCT escrow officer)',
+      subject: buildPartyWizardSubject(partyInputInternal),
+      html: buildPartyWizardEmail(partyInputInternal),
+      text: buildPartyWizardText(partyInputInternal),
+    },
+    {
+      key: 'party_wizard_invite_external',
+      label: 'Party information collection (outside escrow company)',
+      subject: buildPartyWizardSubject(partyInputExternal),
+      html: buildPartyWizardEmail(partyInputExternal),
+      text: buildPartyWizardText(partyInputExternal),
     },
     {
       key: 'user_invite',

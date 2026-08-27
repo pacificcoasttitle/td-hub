@@ -166,10 +166,53 @@ Purchase opportunity (21 vs 18 reachable at 30 days). It needs its own role form
 in `party-wizard-fields.ts` — `FORMS` currently holds `listing_agent` only, and
 `getSubmissionSchema` returns null for everything else. Not designed here.
 
-## What is not addressed
+## The reachability ceiling was self-inflicted, and we had already solved it
 
-Both opportunities are capped by the same upstream problem: **88.5% of candidates
-have no `escrow_officer_id`**, and it is worst exactly where the corrected
-targeting points. Fixing `transaction_type` makes the job ask the right question;
-it does not make the job able to reach anyone. Officer resolution
-(`resolve-order-officers.ts`) is the larger lever and is a separate ticket.
+Both opportunities looked capped by the same upstream problem: **88.5% of
+candidates have no `escrow_officer_id`**. That framed officer resolution
+(`resolve-order-officers.ts`) as the blocker and a separate ticket.
+
+It was not the blocker. The invite job read `orders.escrow_officer_id` and
+nothing else, while **`resolvePrelimRecipients` has read the `escrow_company`
+party row as a fallback since the prelim delivery work** — officer FK first, then
+the party row's `external_email`, then that party's linked contact. The pattern
+was already solved in our own code. This job simply never had it.
+
+Applying that same precedence, on the corrected Purchase-only candidate set:
+
+| Window | Candidates | Reachable, officer FK only | Reachable, with fallback |
+| --- | --- | --- | --- |
+| Purchase, 7 days | 24 | 2 (8.3%) | **24 (100%)** |
+| Purchase, 30 days | 313 | 19 (6.1%) | **298 (95.2%)** |
+| Refinance, 7 days | 44 | 16 (36.4%) | **43 (97.7%)** |
+| Refinance, 30 days | 413 | 82 (19.9%) | **377 (91.3%)** |
+
+The binding constraint was never the missing FK. It was that we only looked in
+one place.
+
+## Two claims in the original investigation were wrong
+
+Recorded rather than quietly corrected, because both changed a decision.
+
+**1. `escrowOfficerNoEmail` is not structurally impossible, only empirically
+zero.** The original claim was that the counter can never fire. `contacts.email`
+is nullable and nothing enforces that an escrow-officer contact carries one, so
+the branch is reachable; it has simply never been taken. Across all 3,842 orders
+with an `escrow_officer_id`, **0 point at a missing contact row and 0 at a
+contact with a blank email**. That is a true zero, not dead code, so the counter
+was kept and documented rather than deleted.
+
+**2. The escrow officer FK does not mean "PCT colleague".** The scoping assumed
+the officer FK resolves to an internal officer and only the `escrow_company`
+fallback reaches outside firms — so the copy variant could be selected by which
+lookup found the recipient. It cannot. Of the 3,842 orders with an officer FK,
+**only 701 (18.2%) point at a `@pct.com` address**; the other 81.8% are outside
+firms recorded as the officer — escrowforum.com (103), escrowoptions.com (87),
+powerhouseescrow.com (86), cornerescrow.com (79). In the other direction, **118
+`escrow_company` party rows carry `@pct.com` addresses**.
+
+The consequence is larger than a copy detail: **the invite has been aimed at
+external recipients all along, with copy written for a colleague, independent of
+the fallback.** The variant is therefore selected by email domain — reusing the
+existing definition of internal in `contacts/filters.ts` — and never by
+resolution source.

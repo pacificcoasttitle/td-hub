@@ -17,9 +17,19 @@ const insertLogMock = vi.fn();
 vi.mock('@/lib/db/schema', () => ({
   orders: { id: 'o.id', openedAt: 'o.opened_at', operationalStatus: 'o.status', fileNumber: 'o.file_number', transactionType: 'o.tx', escrowOfficerId: 'o.eo' },
   orderProperties: { orderId: 'op.order_id', fullAddress: 'op.full', address: 'op.addr', city: 'op.city', state: 'op.state', zip: 'op.zip' },
-  orderParties: { orderId: 'p.order_id', role: 'p.role' },
+  orderParties: {
+    orderId: 'p.order_id', role: 'p.role', contactId: 'p.contact_id',
+    externalEmail: 'p.external_email', externalName: 'p.external_name',
+    externalCompany: 'p.external_company',
+  },
   contacts: { id: 'c.id', fullName: 'c.full_name', email: 'c.email' },
   jobs: { id: 'j.id' },
+}));
+
+vi.mock('drizzle-orm/pg-core', () => ({
+  alias: (table: Record<string, string>, name: string) => Object.fromEntries(
+    Object.entries(table).map(([key, col]) => [key, `${name}.${String(col).split('.').pop()}`]),
+  ),
 }));
 
 // The schema fields above are mocked as their column names, so rendering a
@@ -50,23 +60,24 @@ let lastQuery: { where: string; orderBy: string[] } = { where: '', orderBy: [] }
 vi.mock('@/lib/db/client', () => ({
   db: {
     execute: (...a: unknown[]) => executeMock(...a),
-    select: () => ({
-      from: () => ({
-        leftJoin: () => ({
-          leftJoin: () => ({
-            where: (clause: string) => {
-              lastQuery = { where: clause, orderBy: [] };
-              return {
-                orderBy: (...terms: string[]) => {
-                  lastQuery.orderBy = terms;
-                  return { limit: candidatesMock };
-                },
-              };
+    select: () => {
+      // Four left joins now: property, officer contact, the escrow_company
+      // party row, and that party's contact. Chained rather than nested so
+      // adding a fifth does not mean another level of indentation.
+      const afterJoins = {
+        leftJoin: () => afterJoins,
+        where: (clause: string) => {
+          lastQuery = { where: clause, orderBy: [] };
+          return {
+            orderBy: (...terms: string[]) => {
+              lastQuery.orderBy = terms;
+              return { limit: candidatesMock };
             },
-          }),
-        }),
-      }),
-    }),
+          };
+        },
+      };
+      return { from: () => afterJoins };
+    },
     update: () => ({
       set: (values: Record<string, unknown>) => {
         jobUpdates.push(values);
@@ -108,6 +119,13 @@ function candidate(over: Record<string, unknown> = {}) {
     escrowOfficerId: 7,
     escrowOfficerName: 'Liliana Arias',
     escrowOfficerEmail: 'officer@example.com',
+    // No escrow_company party unless a test supplies one, so the existing
+    // reachability cases still measure the officer FK path on its own.
+    escrowCompanyEmail: null,
+    escrowCompanyName: null,
+    escrowCompanyCompany: null,
+    escrowCompanyContactEmail: null,
+    escrowCompanyContactName: null,
     ...over,
   };
   // Distinct address per order unless a test pins one. Asks are deduped by
@@ -370,6 +388,189 @@ describe('candidate query', () => {
   it('takes its eligible transaction types from the role definition', () => {
     expect(PARTY_INVITE_TRANSACTION_TYPES).toEqual(eligibleTransactionTypesFor(PARTY_INVITE_ROLE));
     expect(PARTY_INVITE_TRANSACTION_TYPES.length).toBeGreaterThan(0);
+  });
+});
+
+// ─── The escrow_company fallback ─────────────────────────────────────────────
+//
+// The job used orders.escrow_officer_id and nothing else, so 88.5% of candidates
+// were unreachable — every one of them for the same reason, a missing FK. The
+// escrow_company party row carries an address on most of those files, and
+// resolvePrelimRecipients has read it for exactly this purpose since the prelim
+// work. The precedence here is deliberately that resolver's.
+
+describe('falls back to the escrow_company party row', () => {
+  const withCompany = {
+    escrowOfficerId: null,
+    escrowOfficerName: null,
+    escrowOfficerEmail: null,
+    escrowCompanyEmail: 'orders@cornerescrow.com',
+    escrowCompanyName: 'Dana Ruiz',
+    escrowCompanyCompany: 'Corner Escrow, Inc.',
+  };
+
+  it('reaches an order with no officer FK, which used to be unreachable', async () => {
+    candidatesMock.mockResolvedValue([candidate(withCompany)]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(1);
+    expect(r.unreachable.noEscrowOfficer).toBe(0);
+    expect(r.viaEscrowCompanyFallback).toBe(1);
+    expect(sendEmailMock.mock.calls[0][0]).toMatchObject({ to: 'orders@cornerescrow.com' });
+  });
+
+  it('prefers the officer FK when both exist, matching the prelim resolver', async () => {
+    candidatesMock.mockResolvedValue([candidate({
+      escrowCompanyEmail: 'orders@cornerescrow.com',
+      escrowCompanyCompany: 'Corner Escrow, Inc.',
+    })]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(sendEmailMock.mock.calls[0][0]).toMatchObject({ to: 'officer@example.com' });
+    expect(r.viaEscrowCompanyFallback).toBe(0);
+  });
+
+  it("uses the party row's linked contact when it has no external_email", async () => {
+    candidatesMock.mockResolvedValue([candidate({
+      ...withCompany,
+      escrowCompanyEmail: null,
+      escrowCompanyContactEmail: 'dana@cornerescrow.com',
+      escrowCompanyContactName: 'Dana Ruiz',
+    })]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(1);
+    expect(sendEmailMock.mock.calls[0][0]).toMatchObject({ to: 'dana@cornerescrow.com' });
+  });
+
+  it('rejects a party row whose email is not an address', async () => {
+    candidatesMock.mockResolvedValue([candidate({
+      ...withCompany,
+      escrowCompanyEmail: 'see attached',
+    })]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(0);
+    expect(r.unreachable.noEscrowOfficer).toBe(1);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('counts an order as unreachable only when BOTH lookups fail', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, ...withCompany }),
+      candidate({ orderId: 2, escrowOfficerId: null, escrowOfficerEmail: null }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.sent).toBe(1);
+    expect(r.unreachable.noEscrowOfficer).toBe(1);
+    expect(r.reachablePct).toBe(50);
+  });
+
+  it('logs which lookup found the recipient, not a fixed role', async () => {
+    candidatesMock.mockResolvedValue([candidate(withCompany)]);
+
+    await handlePartyWizardInvite();
+
+    expect(insertLogMock).toHaveBeenCalledWith(expect.objectContaining({
+      recipientRole: 'escrow_company',
+      recipientEmail: 'orders@cornerescrow.com',
+      recipientName: 'Dana Ruiz',
+    }));
+  });
+
+  /**
+   * A second escrow_company row would make one order into two candidates: two
+   * links minted and two emails to the same person about the same file.
+   */
+  it('collapses a duplicated escrow_company join into one candidate', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, ...withCompany }),
+      candidate({ orderId: 1, ...withCompany }),
+    ]);
+
+    const r = await handlePartyWizardInvite();
+
+    expect(r.scanned).toBe(1);
+    expect(r.sent).toBe(1);
+    expect(mintLinkMock).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── Which copy variant ──────────────────────────────────────────────────────
+//
+// THE THING THAT MUST NOT REGRESS. Only 18.2% of the escrow-officer contacts
+// orders point at are @pct.com; the other 81.8% are outside firms recorded as
+// the officer. Keying the variant off which lookup found the recipient would
+// send colleague copy to thousands of strangers.
+
+describe('picks the copy variant by domain, not by lookup source', () => {
+  it('sends colleague copy to a @pct.com officer', async () => {
+    candidatesMock.mockResolvedValue([candidate({ escrowOfficerEmail: 'cquintanar@pct.com' })]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report![0]!.recipientAudience).toBe('internal');
+    expect(r.audience).toEqual({ internal: 1, external: 0 });
+    expect(r.sampleEmail!.subject).toBe('Missing listing agent details — file 20020625-OCT');
+  });
+
+  /** The 81.8% case: an outside firm sitting in the officer FK. */
+  it('sends stranger copy to an officer FK that is NOT a PCT address', async () => {
+    candidatesMock.mockResolvedValue([candidate({
+      escrowOfficerEmail: 'lupe@powerhouseescrow.com',
+      escrowOfficerName: 'Lupe Vidaca',
+    })]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report![0]!.recipientRole).toBe('escrow_officer');
+    expect(r.report![0]!.recipientAudience).toBe('external');
+    expect(r.audience).toEqual({ internal: 0, external: 1 });
+    expect(r.sampleEmail!.html).toContain('Pacific Coast Title is handling the title work');
+  });
+
+  /** And the mirror: a PCT address reached through the party-row fallback. */
+  it('sends colleague copy to a @pct.com address found via the fallback', async () => {
+    candidatesMock.mockResolvedValue([candidate({
+      escrowOfficerId: null,
+      escrowOfficerEmail: null,
+      escrowCompanyEmail: 'aballesteros@pct.com',
+      escrowCompanyName: 'Anna Ballesteros',
+    })]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.report![0]!.recipientRole).toBe('escrow_company');
+    expect(r.report![0]!.recipientAudience).toBe('internal');
+    expect(r.sampleEmail!.html).not.toContain('Pacific Coast Title is handling the title work');
+  });
+
+  it('splits a mixed batch across both variants', async () => {
+    candidatesMock.mockResolvedValue([
+      candidate({ orderId: 1, escrowOfficerEmail: 'a@pct.com' }),
+      candidate({ orderId: 2, escrowOfficerEmail: 'b@cornerescrow.com' }),
+      candidate({ orderId: 3, escrowOfficerEmail: 'c@novaescrow.com' }),
+    ]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.audience).toEqual({ internal: 1, external: 2 });
+    expect(r.report!.map((row) => row.recipientAudience))
+      .toEqual(['internal', 'external', 'external']);
+  });
+
+  it('labels the sample body with the variant it rendered', async () => {
+    candidatesMock.mockResolvedValue([candidate({ escrowOfficerEmail: 'b@cornerescrow.com' })]);
+
+    const r = await handlePartyWizardInvite({ dryRun: true });
+
+    expect(r.sampleEmail!.audience).toBe('external');
   });
 });
 

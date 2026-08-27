@@ -105,6 +105,14 @@ export interface SoftProOrderContactsData {
   EscrowCompanies: SoftProResolvedRole | null;
   Lenders: SoftProResolvedRole | null;
   ListingAgentBrokers: SoftProResolvedRole | null;
+  /**
+   * Returned on every GetOrderContacts response, between ListingAgentBrokers
+   * and MortgageBrokers, and carried a real agent on 7 of 25 orders sampled in
+   * docs/tickets/SOFTPRO_MISSING_BUYER.md. It was absent from this interface
+   * until 27 Aug 2026, so the mapper could not see it and `order_parties` held
+   * zero `buyer_agent` rows for the table's entire history.
+   */
+  BuyersAgentBrokers: SoftProResolvedRole | null;
   MortgageBrokers: SoftProResolvedRole | null;
   PayoffLenders: SoftProResolvedRole | null;
   TitleCompanies: SoftProResolvedRole | null;

@@ -60,6 +60,37 @@ interface EnrichOrdersPayload {
 
 const ENRICH_ORDERS_MAX_DURATION_MS = 300_000;
 const DEFAULT_ENRICH_ORDERS_BATCH_SIZE = 25;
+
+/**
+ * How long `contacts_empty_confirmed` suppresses a re-read.
+ *
+ * The flag used to be terminal. Line 246 below is the only writer that can
+ * clear it, and reaching it required passing the batch picker's own
+ * `contacts_empty_confirmed = false` filter — so a true value excluded an order
+ * from every scheduled run forever. 96 orders were latched with zero party rows
+ * when this was measured, all of them `in_process`, and one of the two sampled
+ * (`20021133-ONT`) had since acquired a real borrower in SoftPro that no
+ * scheduled job would ever have collected. See
+ * docs/tickets/SOFTPRO_MISSING_BUYER.md §3.
+ *
+ * The flag is still worth having: its job is to stop re-polling an order the
+ * vendor genuinely holds nothing for every six hours, which is a real saving.
+ * So it expires rather than terminates — a latched order rejoins the queue once
+ * its last read is this old.
+ *
+ * SIZED AGAINST MEASURED COST. The eligible population is 399 orders under the
+ * old predicate and 489 under this one; deleting the flag outright gives 495.
+ * Because a run is capped at SOFTPRO_ENRICH_ORDERS_BATCH_SIZE, per-run call
+ * volume does not move at all — what changes is the drain rate. At 7 days the
+ * 90 newly-reachable orders cost ~90 extra GetOrderContacts calls per week
+ * against a measured baseline of ~2,300 per day: +0.55%. Deleting the flag
+ * would re-read all 96 every 6 hours instead — ~384 calls/day, +17% — and would
+ * keep doing it forever for orders SoftPro has nothing for.
+ */
+const CONTACTS_EMPTY_RETRY_INTERVAL = '7 days';
+
+/** Normal staleness gate for orders that are not latched. */
+const CONTACTS_FETCH_STALE_INTERVAL = '6 hours';
 // Was ENRICH_ORDERS_MAX_DURATION_MS * 0.8 = 240s, which left no room for a
 // worst-case unit (get_order_contacts can reach its 60s client timeout):
 // 240 + 60 = 300, exactly the ceiling. Now sized from the measured unit p99.
@@ -295,10 +326,6 @@ export async function handleEnrichOrders(payload: EnrichOrdersPayload = {}): Pro
     .where(
       and(
         or(
-          isNull(orders.contactsEmptyConfirmed),
-          eq(orders.contactsEmptyConfirmed, false),
-        ),
-        or(
           and(
             isNull(orders.lenderId),
             isNull(orders.listingAgentId),
@@ -308,10 +335,12 @@ export async function handleEnrichOrders(payload: EnrichOrdersPayload = {}): Pro
           isNull(orders.clientContactId),
           sql`NOT EXISTS (SELECT 1 FROM ${orderParties} op WHERE op.order_id = ${orders.id})`,
         ),
-        or(
-          isNull(orders.lastContactsFetchAt),
-          sql`${orders.lastContactsFetchAt} < NOW() - INTERVAL '6 hours'`,
-        ),
+        // The latch and the staleness gate are ONE condition, not two ANDed
+        // arms. Keeping them separate is what made the flag terminal: an order
+        // had to clear the latch filter to reach the writer that clears the
+        // latch. Expressed as a per-order interval there is no such cycle —
+        // being latched lengthens the retry gap instead of closing it.
+        contactsFetchDue(),
       )
     )
     .orderBy(sql`${orders.lastContactsFetchAt} ASC NULLS FIRST`)
@@ -375,7 +404,281 @@ export async function handleEnrichOrders(payload: EnrichOrdersPayload = {}): Pro
   return stats;
 }
 
+// ─── Re-enrich the orders the old one-way latch stranded ─────────────────────
+//
+// A backfill, not a new writer. The live path calls `enrichSingleOrder`, so the
+// 96 stranded orders go through the same mapper, the same identity resolution
+// and the same `upsertResolvedParty` as every other order — a one-off writer
+// would be a second way to produce party rows, which is how the two defects
+// this fixes came to differ from each other in the first place.
+//
+// The dry run resolves everything the writer would resolve and writes nothing.
+// It is not a summary: it lists every order and every party row, including the
+// resolved `externalEmail`, because that field is the one that decides whether
+// anybody new gets emailed.
+
+/** Enough headroom for the whole latched population in one pass. */
+const REENRICH_LATCHED_DEFAULT_LIMIT = 250;
+
+export interface ReenrichLatchedPayload {
+  /** Resolve and report everything; write nothing, send nothing. */
+  dryRun?: boolean;
+  limit?: number;
+  /** Overrides the Vercel-sized budget. Only a local run should set this. */
+  timeBudgetMs?: number;
+  __jobId?: unknown;
+}
+
+/** Injectable vendor read, so a local dry run can avoid appending call logs. */
+export interface ReenrichLatchedDeps {
+  readContacts?: (fileNumber: string) => Promise<{
+    success: boolean;
+    data?: SoftProOrderContactsData | null;
+    error?: { message: string } | null;
+  }>;
+}
+
+export interface ReenrichPlannedParty {
+  role: PartyRole;
+  isPrimary: boolean;
+  externalName: string | null;
+  externalCompany: string | null;
+  /** The field that changes who gets emailed. Never summarised away. */
+  externalEmail: string | null;
+  externalPhone: string | null;
+  contactId: number | null;
+}
+
+export interface ReenrichReportRow {
+  orderId: number;
+  fileNumber: string;
+  transactionType: string | null;
+  operationalStatus: string | null;
+  lastContactsFetchAt: string | null;
+  existingPartyRows: number;
+  vendorRead: 'ok' | 'failed';
+  vendorError: string | null;
+  /** SoftPro still holds nothing — the order stays latched, retried in 7 days. */
+  stillEmpty: boolean;
+  wouldWrite: ReenrichPlannedParty[];
+}
+
+export interface ReenrichLatchedResult {
+  dryRun: boolean;
+  /** Latched orders with zero party rows, i.e. the population. */
+  scanned: number;
+  attempted: number;
+  vendorReadFailed: number;
+  /** Orders that would gain at least one party row. */
+  ordersWithNewParties: number;
+  /** Total party rows across those orders. */
+  partyRowsPlanned: number;
+  /** Orders SoftPro still has nothing for. */
+  ordersStillEmpty: number;
+  /** Party rows carrying an email — the recipient-changing subset. */
+  partyRowsWithEmail: number;
+  /** Live-run only. */
+  partiesWritten: number;
+  failed: number;
+  stoppedEarly: boolean;
+  errors: Array<{ fileNumber: string; error: string }>;
+  /** Dry run only. One row per order, nothing omitted. */
+  report?: ReenrichReportRow[];
+  reportNote?: string;
+}
+
+const REENRICH_REPORT_NOTE =
+  'Party rows are previewed with the same mapper and the same identity '
+  + 'resolution the writer uses, so externalEmail here is the value that would '
+  + 'be stored. Foreign-key resolution (lender_id, listing_agent_id, '
+  + 'title_company_id, underwriter_id) is NOT previewed because resolving it '
+  + 'creates contacts and companies rows; every order in this population holds '
+  + 'zero party rows today, so no FK-only row is being hidden.';
+
+export async function handleReenrichLatchedOrders(
+  payload: ReenrichLatchedPayload = {},
+  deps: ReenrichLatchedDeps = {},
+): Promise<ReenrichLatchedResult> {
+  const dryRun = payload.dryRun === true;
+  const limit = typeof payload.limit === 'number' && payload.limit > 0
+    ? payload.limit
+    : REENRICH_LATCHED_DEFAULT_LIMIT;
+  const readContacts = deps.readContacts ?? getOrderContacts;
+  const budgetMs = typeof payload.timeBudgetMs === 'number' && payload.timeBudgetMs > 0
+    ? payload.timeBudgetMs
+    : enrichOrdersTimeBudgetMs();
+  const startedAt = Date.now();
+
+  // Deterministic and identical for the dry run and the live run that follows
+  // it: oldest read first, id breaking ties. A preview of a different set is
+  // not a preview.
+  const latched = await db
+    .select({
+      id: orders.id,
+      fileNumber: orders.fileNumber,
+      orderType: orders.orderType,
+      transactionType: orders.transactionType,
+      operationalStatus: orders.operationalStatus,
+      lastContactsFetchAt: orders.lastContactsFetchAt,
+    })
+    .from(orders)
+    .where(and(
+      eq(orders.contactsEmptyConfirmed, true),
+      sql`NOT EXISTS (SELECT 1 FROM ${orderParties} op WHERE op.order_id = ${orders.id})`,
+    ))
+    .orderBy(sql`${orders.lastContactsFetchAt} ASC NULLS FIRST`, orders.id)
+    .limit(limit);
+
+  const result: ReenrichLatchedResult = {
+    dryRun,
+    scanned: latched.length,
+    attempted: 0,
+    vendorReadFailed: 0,
+    ordersWithNewParties: 0,
+    partyRowsPlanned: 0,
+    ordersStillEmpty: 0,
+    partyRowsWithEmail: 0,
+    partiesWritten: 0,
+    failed: 0,
+    stoppedEarly: false,
+    errors: [],
+  };
+
+  if (dryRun) {
+    result.report = [];
+    result.reportNote = REENRICH_REPORT_NOTE;
+  }
+
+  for (const order of latched) {
+    if (Date.now() - startedAt >= budgetMs) {
+      result.stoppedEarly = true;
+      break;
+    }
+    result.attempted++;
+
+    if (!dryRun) {
+      try {
+        const enriched = await enrichSingleOrder(order.id);
+        result.partiesWritten += enriched.partiesWritten;
+        if (enriched.partiesWritten > 0) result.ordersWithNewParties++;
+        else if (enriched.contactsEmptyConfirmed) result.ordersStillEmpty++;
+        if (enriched.outcome === 'failed') {
+          result.failed++;
+          if (enriched.error) {
+            result.errors.push({ fileNumber: order.fileNumber, error: enriched.error });
+          }
+        }
+      } catch (err) {
+        result.failed++;
+        result.errors.push({
+          fileNumber: order.fileNumber,
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
+      continue;
+    }
+
+    const row: ReenrichReportRow = {
+      orderId: order.id,
+      fileNumber: order.fileNumber,
+      transactionType: order.transactionType,
+      operationalStatus: order.operationalStatus,
+      lastContactsFetchAt: order.lastContactsFetchAt?.toISOString() ?? null,
+      existingPartyRows: 0,
+      vendorRead: 'ok',
+      vendorError: null,
+      stillEmpty: false,
+      wouldWrite: [],
+    };
+
+    const apiResult = await readContacts(order.fileNumber);
+    if (!apiResult.success || !apiResult.data) {
+      row.vendorRead = 'failed';
+      row.vendorError = apiResult.error?.message ?? 'GetOrderContacts returned no data';
+      result.vendorReadFailed++;
+      result.report!.push(row);
+      continue;
+    }
+
+    const mapped = mapOrderContacts(apiResult.data);
+    row.wouldWrite = await previewPartyRows(mapped);
+    row.stillEmpty = row.wouldWrite.length === 0;
+
+    if (row.wouldWrite.length > 0) {
+      result.ordersWithNewParties++;
+      result.partyRowsPlanned += row.wouldWrite.length;
+      result.partyRowsWithEmail += row.wouldWrite.filter((p) => p.externalEmail).length;
+    } else {
+      result.ordersStillEmpty++;
+    }
+
+    result.report!.push(row);
+  }
+
+  console.log(
+    `[reenrich-latched]${dryRun ? ' DRY RUN' : ''} scanned=${result.scanned} `
+    + `attempted=${result.attempted} orders_with_parties=${result.ordersWithNewParties} `
+    + `party_rows=${dryRun ? result.partyRowsPlanned : result.partiesWritten} `
+    + `rows_with_email=${result.partyRowsWithEmail} `
+    + `still_empty=${result.ordersStillEmpty} read_failed=${result.vendorReadFailed} `
+    + `failed=${result.failed} stopped_early=${result.stoppedEarly}`,
+  );
+
+  return result;
+}
+
+/**
+ * What `persistResolvedParties` would store, resolved but not written.
+ *
+ * Shares `plannedPartyRows` and `resolvePartyIdentityFromMaster` with the
+ * writer, and repeats its "nothing usable, skip the row" rule, so the preview
+ * cannot drift from the write. Every statement it issues is a SELECT.
+ */
+async function previewPartyRows(mapped: MappedOrderContacts): Promise<ReenrichPlannedParty[]> {
+  const noFks: OrderFkUpdates = {
+    lenderId: null, listingAgentId: null, titleCompanyId: null,
+    underwriterId: null, clientContactId: null,
+  };
+
+  const planned: ReenrichPlannedParty[] = [];
+  for (const row of plannedPartyRows(mapped, noFks)) {
+    if (!row.party) continue;
+    const identity = await resolvePartyIdentityFromMaster(row.party, null, null);
+    if (!identity.name && !identity.company && !identity.email && !identity.phone) continue;
+    planned.push({
+      role: row.role,
+      isPrimary: row.isPrimary,
+      externalName: identity.name,
+      externalCompany: identity.company,
+      externalEmail: identity.email,
+      externalPhone: identity.phone,
+      contactId: identity.contactId,
+    });
+  }
+  return planned;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Is this order due for a contacts read?
+ *
+ * A never-fetched order is always due. Otherwise the gap depends on whether the
+ * last read came back empty: CONTACTS_FETCH_STALE_INTERVAL normally,
+ * CONTACTS_EMPTY_RETRY_INTERVAL when `contacts_empty_confirmed` is set. The
+ * flag therefore throttles rather than excludes, and an order that stays empty
+ * is re-read on the long cadence indefinitely instead of never again.
+ */
+export function contactsFetchDue() {
+  return or(
+    isNull(orders.lastContactsFetchAt),
+    sql`${orders.lastContactsFetchAt} < NOW() - CASE
+          WHEN ${orders.contactsEmptyConfirmed} IS TRUE
+            THEN INTERVAL '${sql.raw(CONTACTS_EMPTY_RETRY_INTERVAL)}'
+          ELSE INTERVAL '${sql.raw(CONTACTS_FETCH_STALE_INTERVAL)}'
+        END`,
+  );
+}
 
 function softProContactsEmpty(data: SoftProOrderContactsData, mapped: MappedOrderContacts): boolean {
   const hasParty = Object.values(mapped.parties).some((party) => party !== null);
@@ -708,7 +1011,7 @@ async function ensureCompanyFromResolved(
 
 type PartyRole = typeof orderParties.role.enumValues[number];
 
-interface PartyUpsert {
+export interface PartyUpsert {
   role: PartyRole;
   isPrimary: boolean;
   party: MappedResolvedParty | null;
@@ -716,26 +1019,43 @@ interface PartyUpsert {
   companyId?: number | null;
 }
 
-async function persistResolvedParties(
-  orderId: number,
+/**
+ * The party rows one GetOrderContacts response maps to.
+ *
+ * Exported and shared so the re-enrichment dry run previews exactly what the
+ * writer would write. A preview built from its own list is a preview of a
+ * different run.
+ */
+export function plannedPartyRows(
   mapped: MappedOrderContacts,
   updates: OrderFkUpdates,
-): Promise<number> {
-  const rows: PartyUpsert[] = [
+): PartyUpsert[] {
+  return [
     { role: 'buyer', isPrimary: true, party: mapped.parties.buyer },
     { role: 'buyer', isPrimary: false, party: mapped.parties.secondaryBuyer },
     { role: 'seller', isPrimary: true, party: mapped.parties.seller },
     { role: 'seller', isPrimary: false, party: mapped.parties.secondarySeller },
     { role: 'lender', isPrimary: true, party: mapped.parties.lender, contactId: updates.lenderId },
     { role: 'listing_agent', isPrimary: true, party: mapped.parties.listingAgent, contactId: updates.listingAgentId },
+    // Mirrors listing_agent, minus the contact FK: there is no
+    // orders.buyer_agent_id column to resolve one onto, and SoftPro returned no
+    // BuyersAgentBrokers.Person.LookupCode on any of the 7 files that carry an
+    // agent, so there is nothing to resolve with either.
+    { role: 'buyer_agent', isPrimary: true, party: mapped.parties.buyerAgent },
     { role: 'escrow_company', isPrimary: true, party: mapped.parties.escrowCompany },
     { role: 'lender_contact', isPrimary: true, party: mapped.parties.mortgageBroker },
     { role: 'other', isPrimary: true, party: mapped.parties.titleCompany, companyId: updates.titleCompanyId },
     { role: 'other', isPrimary: false, party: mapped.parties.underwriter, companyId: updates.underwriterId },
   ];
+}
 
+async function persistResolvedParties(
+  orderId: number,
+  mapped: MappedOrderContacts,
+  updates: OrderFkUpdates,
+): Promise<number> {
   let written = 0;
-  for (const row of rows) {
+  for (const row of plannedPartyRows(mapped, updates)) {
     if (!row.party && !row.contactId && !row.companyId) continue;
     if (await upsertResolvedParty(orderId, row)) written++;
   }
@@ -782,7 +1102,10 @@ async function upsertResolvedParty(orderId: number, row: PartyUpsert): Promise<b
 
   if (existing) {
     await db.update(orderParties).set(values).where(eq(orderParties.id, existing.id));
-  } else {
+    return true;
+  }
+
+  try {
     await db.insert(orderParties).values({
       orderId,
       role: row.role,
@@ -793,7 +1116,26 @@ async function upsertResolvedParty(orderId: number, row: PartyUpsert): Promise<b
       externalEmail: externalEmail ?? null,
       externalPhone: externalPhone ?? null,
     });
+  } catch (err) {
+    // Migration 0035 put a unique index on (order_id, role, is_primary), so the
+    // gap between the SELECT above and this INSERT is no longer a silent
+    // duplicate — it RAISES. That gap is reachable: the scheduled batch holds a
+    // single-flight lock against itself but not against the manual
+    // POST /api/orders/[id]/enrich, and re-enriching 96 orders must not abort
+    // part-way because one of them was also enriched by hand at that moment.
+    // The lost race means the row now exists, so converge onto it.
+    if (!isUniqueViolation(err)) throw err;
+    await db.update(orderParties).set(values).where(and(
+      eq(orderParties.orderId, orderId),
+      eq(orderParties.role, row.role),
+      eq(orderParties.isPrimary, row.isPrimary),
+    ));
   }
 
   return true;
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null
+    && (err as { code?: unknown }).code === '23505';
 }

@@ -21,6 +21,7 @@ import {
 } from './confirmation-recipients';
 import { parseTaxResultData } from './tax-result-data';
 import { EMAIL_STATUS_SENT_NO_CLIENT, hasConfirmationEmailStatus } from './confirmation-send-guard';
+import { isBuyerAgentRecipientEnabled } from './buyer-agent-recipient-gate';
 
 export { EMAIL_STATUS_SENT_NO_CLIENT } from './confirmation-send-guard';
 
@@ -303,8 +304,22 @@ async function loadRecipientEmails(
     loadContactEmail(row.listingAgentId),
   ]);
 
+  // GATED, AND THE GATE IS THE POINT. This candidate has existed since
+  // buildConfirmationRecipients was written and has never resolved for anybody:
+  // `order_parties` held zero `buyer_agent` rows for the table's entire history
+  // because SoftPro's `BuyersAgentBrokers` was missing from the response type.
+  // Mapping that field starts producing the rows, which would silently switch a
+  // dormant TO candidate live — and a buyer's agent is typically the opposite
+  // side's representative, not the client the confirmation is addressed to.
+  // Off unless somebody decides otherwise. See
+  // docs/tickets/SOFTPRO_MISSING_BUYER.md §4.
+  //
+  // `resolveRecipients` gates `order.closed` on the same setting.
+  const buyerAgentAllowed = await isBuyerAgentRecipientEnabled();
   const buyerAgent = partyRows.find((r) => r.role === 'buyer_agent');
-  const buyerAgentEmail = buyerAgent?.cEmail ?? buyerAgent?.externalEmail ?? null;
+  const buyerAgentEmail = buyerAgentAllowed
+    ? buyerAgent?.cEmail ?? buyerAgent?.externalEmail ?? null
+    : null;
 
   return buildConfirmationRecipients({
     clientEmail,

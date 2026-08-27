@@ -75,7 +75,7 @@ at all:
 | `client_contact_id` | 3,469 (86%) |
 | `escrow_officer_id` | 1,596 (39%) |
 | `listing_agent_id` | 607 (15%) |
-| `order_parties` role `buyer_agent` | **0 rows exist in the entire table** |
+| `order_parties` role `buyer_agent` | **0 rows exist in the entire table** — cause found 27 Aug 2026, see "The same defect class, elsewhere" below |
 
 The buyer-agent TO candidate has never resolved for anyone. The only writer of
 that role is the hub create path, and the confirmation reads the FK rather than
@@ -204,6 +204,26 @@ next, not the individual field.
   hub create path, so the branch has never resolved for anyone. Either buyer
   agents are being filed under another role or they are not captured at all —
   either way, do not count it as a working recipient.
+
+  **ANSWERED, 27 Aug 2026 — neither. We were dropping them.** SoftPro returns
+  `BuyersAgentBrokers` as a top-level key on *every* `GetOrderContacts`
+  response, and it carried a real agent on 7 of 25 orders sampled. The field was
+  simply missing from `SoftProOrderContactsData`, so `mapOrderContacts` could
+  not see it and `persistResolvedParties` had no row to write. The agents were
+  in the vendor the whole time; the read path could not reach them. See
+  `SOFTPRO_MISSING_BUYER.md` §4 and `fix/enrich-latch-and-buyer-agent`.
+
+  Two consequences worth carrying forward. First, "do not count it as a working
+  recipient" still holds, but now by decision rather than by accident: the
+  candidate is gated behind the `confirmation_buyer_agent_recipient_enabled`
+  setting, default OFF, so mapping the field cannot be what puts a buyer's agent
+  on a client-facing TO line. Second, it would not have mattered yet anyway —
+  across all 7 files SoftPro supplied a name and a company and **no email
+  address, and no person lookup code** to resolve one from, and the single
+  company lookup code returned (`Coldw840`) resolves to a `companies` row whose
+  email is null. A `buyer_agent` row is currently a name, a company and
+  sometimes a phone number. The recipient stays dead until the vendor starts
+  sending agent emails, which is a data question for SoftPro, not a code one.
 - **`companies.deliverableEmails`.** Declared on the companies page type with no
   column behind it, so it was always `undefined`. Removed alongside the form
   field.

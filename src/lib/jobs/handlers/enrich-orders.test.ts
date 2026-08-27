@@ -40,7 +40,7 @@ vi.mock('@/lib/db/schema', () => ({
     orderId: 'order_parties.order_id',
     role: {
       __field: 'order_parties.role',
-      enumValues: ['buyer', 'seller', 'lender', 'listing_agent', 'escrow_company', 'lender_contact', 'other'],
+      enumValues: ['buyer', 'seller', 'buyer_agent', 'listing_agent', 'lender', 'lender_contact', 'escrow_company', 'other'],
     },
     isPrimary: 'order_parties.is_primary',
   },
@@ -141,6 +141,12 @@ const softProEmptyContactsPayload: SoftProOrderContactsData = {
     CompanyLookUpCode: null,
     PersonLookupCode: null,
   },
+  BuyersAgentBrokers: {
+    Company: null,
+    Person: null,
+    CompanyLookUpCode: null,
+    PersonLookupCode: null,
+  },
   MortgageBrokers: {
     Company: null,
     Person: null,
@@ -166,6 +172,87 @@ const softProEmptyContactsPayload: SoftProOrderContactsData = {
     PersonLookupCode: null,
   },
 };
+
+/**
+ * Verbatim shape of `BuyersAgentBrokers` on 20017694-ONT, read from production
+ * SoftPro on 27 Aug 2026. The nulls are the measurement, not filler: the vendor
+ * supplies a person name and a company name and NO email, phone or lookup code
+ * on this role, which is why mapping it adds no email recipient.
+ */
+const softProBuyerAgentPayload: SoftProOrderContactsData = {
+  ...softProEmptyContactsPayload,
+  BuyersAgentBrokers: {
+    Person: { LookupCode: null, Name: 'Leonard Bustos', Email: null, Phone: null },
+    Company: {
+      LookupCode: null, Name: 'Moving Results Realty', Email: null, Phone: null,
+      Address: null, City: null, State: null, Zip: null,
+    },
+    CompanyLookUpCode: null,
+    PersonLookupCode: null,
+  },
+};
+
+/** Party-row inserts only — `db.insert` is shared with vendor_api_logs here. */
+function insertedPartyRows(): Array<Record<string, unknown>> {
+  return insertValuesMock.mock.calls
+    .map((call) => call[0] as Record<string, unknown>)
+    .filter((values) => typeof values?.role === 'string' && 'orderId' in values);
+}
+
+describe('BuyersAgentBrokers → buyer_agent party row', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    updateSetMock.mockReturnValue({ where: updateWhereMock });
+    updateWhereMock.mockResolvedValue(undefined);
+    insertValuesMock.mockResolvedValue(undefined);
+    resolveClientContactIdMock.mockResolvedValue(null);
+  });
+
+  it('creates a buyer_agent row from a real-shaped BuyersAgentBrokers payload', async () => {
+    // First select is the order lookup; every later one is a resolution probe
+    // that must come back empty so the upsert takes the insert branch.
+    selectLimitMock
+      .mockResolvedValueOnce([{ id: 501, fileNumber: '20017694-ONT', orderType: 'Sale' }])
+      .mockResolvedValue([]);
+    getOrderContactsMock.mockResolvedValue({ success: true, data: softProBuyerAgentPayload });
+
+    const { enrichSingleOrder } = await import('./enrich-orders');
+    const result = await enrichSingleOrder(501);
+
+    expect(result).toMatchObject({
+      success: true,
+      outcome: 'parties_written',
+      partiesWritten: 1,
+      contactsEmptyConfirmed: false,
+    });
+
+    const parties = insertedPartyRows();
+    expect(parties).toHaveLength(1);
+    expect(parties[0]).toMatchObject({
+      orderId: 501,
+      role: 'buyer_agent',
+      isPrimary: true,
+      externalName: 'Leonard Bustos',
+      externalCompany: 'Moving Results Realty',
+      // The measured fact this change turns on: a row, and no new recipient.
+      externalEmail: null,
+      contactId: null,
+    });
+  });
+
+  it('creates nothing when BuyersAgentBrokers is present but empty', async () => {
+    selectLimitMock
+      .mockResolvedValueOnce([{ id: 502, fileNumber: '20018364-GLT', orderType: 'Sale' }])
+      .mockResolvedValue([]);
+    getOrderContactsMock.mockResolvedValue({ success: true, data: softProEmptyContactsPayload });
+
+    const { enrichSingleOrder } = await import('./enrich-orders');
+    const result = await enrichSingleOrder(502);
+
+    expect(result).toMatchObject({ outcome: 'empty_confirmed', partiesWritten: 0 });
+    expect(insertedPartyRows()).toHaveLength(0);
+  });
+});
 
 describe('enrichSingleOrder empty contact confirmation', () => {
   beforeEach(() => {

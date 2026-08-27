@@ -5,8 +5,26 @@ import { sql } from 'drizzle-orm';
 import { classifyVendorStatus } from '@/lib/domain/ops/vendor-health';
 import { friendlyJobName } from '@/lib/domain/ops/daily-summary';
 import { classifyDrift, driftContext, driftPct } from '@/lib/domain/ops/status-drift';
+import {
+  describeSuspectedTruncation,
+  SOFTPRO_SEARCH_ROW_CAP,
+} from '@/lib/integrations/softpro/vendor-limits';
 
 const ADMIN_ROLES = ['super_admin', 'admin'];
+
+/** Shape the order sync records on its own job row. */
+interface SyncOrdersRunPayload {
+  truncationSuspected?: boolean;
+  truncationSuspectedChunks?: number;
+  failedChunks?: number;
+  chunks?: Array<{
+    dateFrom: string;
+    dateTo: string;
+    rowCount: number | null;
+    truncationSuspected: boolean;
+    error: string | null;
+  }>;
+}
 
 /** Shape the drift detector records on its own job row. */
 interface DriftRunPayload {
@@ -30,7 +48,7 @@ export async function GET() {
   }
 
   try {
-    const [jobRows, vendorRows, watchdog24h, watchdog7d, driftRows] = await Promise.all([
+    const [jobRows, vendorRows, watchdog24h, watchdog7d, driftRows, syncRows] = await Promise.all([
       db.execute(sql`
         select job_type, count(*) filter (where status = 'failed')::int as failed
         from jobs
@@ -75,6 +93,26 @@ export async function GET() {
         order by created_at desc
         limit 15
       `) as unknown as Promise<Array<{ drift: DriftRunPayload | null; ran_at: string }>>,
+
+      // Order-sync runs that hit a coverage problem in the last 24 hours: a day
+      // of the trailing window that could not be read, or one whose row count
+      // sat exactly on SoftPro's silent search cap. Same mechanism as the drift
+      // counts above — the handler writes its result onto its own job row,
+      // because the runner persists only the input payload.
+      db.execute(sql`
+        select payload -> 'syncOrders' as sync,
+               to_char(created_at, 'Mon DD HH24:MI') as ran_at
+        from jobs
+        where job_type = 'softpro.sync_recent_orders'
+          and created_at > now() - interval '24 hours'
+          and payload -> 'syncOrders' is not null
+          and (
+            (payload -> 'syncOrders' ->> 'truncationSuspected') = 'true'
+            or (payload -> 'syncOrders' ->> 'failedChunks')::int > 0
+          )
+        order by created_at desc
+        limit 10
+      `) as unknown as Promise<Array<{ sync: SyncOrdersRunPayload | null; ran_at: string }>>,
     ]);
 
     const failingVendors = vendorRows
@@ -103,6 +141,42 @@ export async function GET() {
       attention.push(
         `${kills24h} job run${kills24h === 1 ? '' : 's'} had to be stopped after hanging: `
         + watchdog24h.map((r) => `${friendlyJobName(r.job_type)} (${r.kills})`).join(', '),
+      );
+    }
+
+    // ─── Order sync coverage ─────────────────────────────────────────────
+    // Two distinct failures, both invisible from job status alone because the
+    // run completes successfully in either case. Reported, never blocking: an
+    // alarm that can halt the order sync would be worse than the thing it warns
+    // about.
+    const truncatedRun = syncRows.find((r) => r.sync?.truncationSuspected === true);
+    if (truncatedRun?.sync) {
+      const suspect = (truncatedRun.sync.chunks ?? []).filter((c) => c.truncationSuspected);
+      const first = suspect[0];
+      attention.push(
+        `New order sync (${truncatedRun.ran_at}): `
+        + (first
+          ? describeSuspectedTruncation({
+            operation: 'GetOrders',
+            dateFrom: first.dateFrom,
+            dateTo: first.dateTo,
+            rowCount: first.rowCount ?? SOFTPRO_SEARCH_ROW_CAP,
+          })
+          : `SoftPro's order list came back at its ${SOFTPRO_SEARCH_ROW_CAP}-row search cap. `
+            + 'Treat that count as unreliable rather than as a total.'),
+      );
+    }
+
+    const gapRun = syncRows.find((r) => (r.sync?.failedChunks ?? 0) > 0);
+    if (gapRun?.sync) {
+      const failed = (gapRun.sync.chunks ?? []).filter((c) => c.error !== null);
+      const n = gapRun.sync.failedChunks ?? failed.length;
+      const listed = failed.slice(0, 4).map((c) => c.dateFrom).join(', ');
+      attention.push(
+        `New order sync (${gapRun.ran_at}): ${n} day${n === 1 ? '' : 's'} of the trailing `
+        + `window could not be read from SoftPro${listed ? ` (${listed}${failed.length > 4 ? ', …' : ''})` : ''}. `
+        + 'The window is trailing so the next run asks for those dates again, but an order '
+        + 'opened on a date that keeps failing is not being ingested at all.',
       );
     }
 

@@ -7,7 +7,10 @@
  * file-number sequence scan could see. This measures the rest the sound way:
  * ask the vendor what exists for a range, compare directly, count what we lack.
  *
- * Writes NOTHING. One GetOrders call plus one indexed lookup per window.
+ * Writes NOTHING. One indexed lookup per window, and one GetOrders call per day
+ * within it — the detector chunks every range it is given, because a single wide
+ * call is truncated silently at the vendor's row cap and a truncated vendor list
+ * makes historical loss look smaller than it was.
  */
 import { detectIngestGap } from '../../src/lib/jobs/handlers/verify-order-sync';
 

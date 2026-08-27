@@ -125,14 +125,37 @@ import {
   syncContactRows,
 } from './sync-contacts';
 
-/** One SoftPro "Escrow Officer" feed row, in the shape the vendor sends. */
+/**
+ * One SoftPro "Escrow Officer" feed row, in the shape the vendor sends.
+ *
+ * `Row State` is part of that shape — every well-formed row on the live feed
+ * carries it, and the shape guard treats its absence as the signature of a
+ * column shift. It was missing from this fixture, which made the fixture
+ * itself malformed by the vendor's own convention.
+ */
 function officerRow(overrides: Record<string, string> = {}) {
   return {
     'Escrow officer/Closer': 'PCT\\aballesteros',
     'Office LookupCode': 'PRV',
     'Officer Name': 'Anna Ballesteros',
     Email: 'aballesteros@pct.com',
+    'Row State': 'Unchanged',
     ...overrides,
+  };
+}
+
+/**
+ * The real `PCT\jgomez` row from the production feed, 27 Aug 2026: shifted one
+ * column left, so `Officer Name` is empty, `Email` holds the `Row State` value
+ * "Unchanged", and `Row State` itself is gone.
+ */
+function shiftedGomezRow() {
+  return {
+    'Escrow officer/Closer': 'PCT\\jgomez',
+    'Office LookupCode': 'GLT',
+    'Officer Name': '',
+    Email: 'Unchanged',
+    LastModifiedAt: '2026-05-12T20:30:24Z',
   };
 }
 
@@ -305,6 +328,105 @@ describe('a unique violation is named, not buried', () => {
     expect(describeSyncError({ code: '23505', constraint_name: 'contacts_pkey' }))
       .toContain('unique violation on contacts_pkey');
     expect(describeSyncError(new Error('plain failure'))).toBe('plain failure');
+  });
+});
+
+// ── The shape guard ─────────────────────────────────────────────────────────
+//
+// The officer match was fixed in PR #55, which unblocked a write that lands bad
+// data: `PCT\jgomez`'s feed row is column-shifted, so the first successful sync
+// after that fix would have written `email = 'Unchanged'` onto his contact.
+describe('a column-shifted officer row is rejected, not imported', () => {
+  beforeEach(() => {
+    resetAll();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  it('writes nothing at all for the shifted row', async () => {
+    const result = await syncContactRows('Escrow Officer', [shiftedGomezRow()]);
+
+    // No match query, no update, no insert — the row is declined before any of
+    // that. Partially importing it, or shifting the values back, would be a
+    // guess about which column moved.
+    expect(contactSelectWheres).toHaveLength(0);
+    expect(updateSets).toHaveLength(0);
+    expect(result.created).toBe(0);
+    expect(result.updated).toBe(0);
+  });
+
+  it('names the officer and says the row was rejected for shape', async () => {
+    const result = await syncContactRows('Escrow Officer', [shiftedGomezRow()]);
+
+    // Recorded as an error, not a silent `skipped++`, so it reaches jobs.error
+    // and contact_sync_state.last_error.
+    expect(result.skipped).toBe(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]!.lookupCode).toBe('PCT\\jgomez');
+    expect(result.errors[0]!.error).toContain('REJECTED for shape');
+    expect(result.errors[0]!.error).toContain('SoftPro');
+    expect(result.rejected).toEqual([
+      { lookupCode: 'PCT\\jgomez', reasons: expect.any(Array) },
+    ]);
+  });
+
+  it('still imports a well-formed row', async () => {
+    contactSelectQueue.push([], [{ id: 12 }]);
+
+    const result = await syncContactRows('Escrow Officer', [officerRow()]);
+
+    expect(result.updated).toBe(1);
+    expect(result.errors).toEqual([]);
+    expect(result.rejected).toEqual([]);
+    expect(updateSets[0]).toMatchObject({
+      officeLookupCode: 'PRV',
+      email: 'aballesteros@pct.com',
+      isEscrowOfficer: true,
+    });
+  });
+
+  it('one malformed row does not prevent the others syncing', async () => {
+    // Gomez sits in the middle. The two well-formed officers either side of him
+    // must both land — a malformed vendor row must not halt the feed.
+    contactSelectQueue.push(
+      [], [{ id: 12 }],   // Ballesteros: guard clear, matched
+      [], [{ id: 16 }],   // Vidaca: guard clear, matched
+    );
+
+    const result = await syncContactRows('Escrow Officer', [
+      officerRow(),
+      shiftedGomezRow(),
+      officerRow({
+        'Escrow officer/Closer': 'PCT\\lvidaca',
+        'Office LookupCode': 'GLT',
+        'Officer Name': 'Lupe Vidaca',
+        Email: 'lvidaca@pct.com',
+      }),
+    ]);
+
+    expect(result.updated).toBe(2);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.errors).toHaveLength(1);
+    expect(updateWheres).toEqual([
+      { type: 'eq', left: 'contacts.id', right: 12 },
+      { type: 'eq', left: 'contacts.id', right: 16 },
+    ]);
+    // And the officer whose branch code was stale gets the vendor's value.
+    expect(updateSets[1]).toMatchObject({ officeLookupCode: 'GLT', lookupCode: 'GLT' });
+  });
+
+  it('rejects a shifted row even when the displaced value looks like a real email', async () => {
+    // The case a narrow `Email === 'Unchanged'` test would wave through.
+    const result = await syncContactRows('Escrow Officer', [{
+      'Escrow officer/Closer': 'PCT\\someone',
+      'Office LookupCode': 'GLT',
+      'Officer Name': 'someone@pct.com',
+      Email: 'GLT',
+      'Row State': 'Unchanged',
+    }]);
+
+    expect(result.updated).toBe(0);
+    expect(result.rejected).toHaveLength(1);
+    expect(updateSets).toHaveLength(0);
   });
 });
 

@@ -86,7 +86,15 @@ export interface SyncContactTypePayload {
 export function summarizeSyncErrors(result: SyncContactsResult, processed: number): string {
   const names = result.errors.slice(0, 5).map((e) => e.lookupCode).join(', ');
   const more = result.errors.length > 5 ? ` (+${result.errors.length - 5} more)` : '';
-  return `${result.entityType}: ${result.errors.length} of ${processed} rows failed — ${names}${more}. `
+  const rejected = result.rejected ?? [];
+  // Named separately because the two need different responses: a failure is
+  // ours to fix, a shape rejection is a malformed vendor row that only SoftPro
+  // can fix, and the message has to say which one a reader is looking at.
+  const shapeNote = rejected.length > 0
+    ? ` ${rejected.length} of those were REJECTED FOR SHAPE and must be escalated to SoftPro: `
+      + `${rejected.map((r) => r.lookupCode).join(', ')}.`
+    : '';
+  return `${result.entityType}: ${result.errors.length} of ${processed} rows failed — ${names}${more}.${shapeNote} `
     + `First: ${result.errors[0]?.error ?? 'unknown'}`;
 }
 
@@ -172,6 +180,17 @@ export async function handleSyncContactType(
     };
   }
 
+  // `lastError` is deliberately NOT cleared here.
+  //
+  // It used to be nulled at the start of every run, which meant a recorded
+  // failure survived only until the next invocation. That is fatal for a
+  // rejection: the officer feed fetches with `modifiedSince = last_synced_at`,
+  // so the run after a rejection usually returns zero rows and takes the
+  // empty-batch path, which records nothing — the rejection would be erased by
+  // a run that did no work and could not have resolved it. `last_error` is
+  // last-write-wins with no history, so it has to mean "the last thing that
+  // went wrong and has not been superseded by a run that actually succeeded".
+  // The completion path below clears it on a genuinely clean run.
   await db
     .insert(contactSyncState)
     .values({
@@ -179,7 +198,6 @@ export async function handleSyncContactType(
       jobType,
       status: 'running',
       lastStartedAt: now,
-      lastError: null,
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -188,7 +206,6 @@ export async function handleSyncContactType(
         jobType,
         status: 'running',
         lastStartedAt: now,
-        lastError: null,
         updatedAt: now,
       },
     });
@@ -261,10 +278,27 @@ export async function handleSyncContactType(
       nextAllowedAt: nextAllowedAt?.toISOString() ?? null,
     };
 
-    if (processed > 0 && result.created === 0 && result.updated === 0 && result.errors.length === processed) {
-      throw new Error(`${jobType}: ${processed} attempts, 0 successes`);
+    // "Every row we tried to write failed" means something systemic — the
+    // unique-index collision that broke four officers looked exactly like this.
+    // Rows the shape guard declined were never attempted, so they are excluded
+    // from both sides of the comparison. Counting them as attempts would let a
+    // single permanently-malformed vendor row hold this job in `failed` forever,
+    // and a rejection is an expected steady state until SoftPro fixes the feed.
+    const rejectedCount = result.rejected?.length ?? 0;
+    const attempted = processed - rejectedCount;
+    const unexpectedFailures = result.errors.length - rejectedCount;
+    if (attempted > 0 && result.created === 0 && result.updated === 0 && unexpectedFailures === attempted) {
+      throw new Error(`${jobType}: ${attempted} attempts, 0 successes`);
     }
 
+    // A row the shape guard rejected still advances `lastSyncedAt`, and that is
+    // intended. The next fetch sends `modifiedSince = lastSyncedAt`, so the
+    // rejected row will not come back — but it also cannot become well-formed on
+    // its own, because only SoftPro can fix a column-shifted feed row. When they
+    // do fix it they modify it, which moves the row's own `LastModifiedAt` (the
+    // field the feed filters on) into the new window, and the row returns and is
+    // retried automatically. Holding the cursor back instead would re-fetch and
+    // re-reject the same row on every run forever without ever repairing it.
     await db.update(contactSyncState)
       .set({
         status,

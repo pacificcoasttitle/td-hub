@@ -201,6 +201,115 @@ describe('partial failures surface', () => {
   });
 });
 
+// ── A shape rejection has to survive the next run ───────────────────────────
+//
+// `contact_sync_state.last_error` is last-write-wins with no history. A
+// rejection is a steady state — the row stays malformed until SoftPro fixes it
+// — so the record of it must not be erased by a later run that did no work and
+// could not have resolved it.
+describe('shape rejections surface and persist', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    updateSets.length = 0;
+    insertOnConflictDoUpdateMock.mockResolvedValue(undefined);
+    updateWhereMock.mockResolvedValue(undefined);
+    selectLimitMock.mockResolvedValue([]);
+    sortSyncContactRowsMock.mockImplementation((_: string, items: unknown[]) => items);
+  });
+
+  /** The whole batch is one rejected row — the case that used to trip the tripwire. */
+  function onlyGomezRejected() {
+    fetchSyncContactRowsMock.mockResolvedValueOnce({
+      items: [{ LookupCode: 'PCT\\jgomez' }],
+      error: null,
+    });
+    syncContactRowsMock.mockResolvedValueOnce({
+      entityType: 'Escrow Officer',
+      totalFetched: 1,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      errors: [{
+        lookupCode: 'PCT\\jgomez',
+        error: "officer feed row for PCT\\jgomez REJECTED for shape (not imported): column 'Row State' is absent from the row. Escalate to SoftPro.",
+      }],
+      rejected: [{ lookupCode: 'PCT\\jgomez', reasons: ["column 'Row State' is absent from the row"] }],
+    });
+  }
+
+  it('does not clear last_error at the start of a run', async () => {
+    onlyGomezRejected();
+
+    await handleSyncContactType('softpro.sync_contacts.escrow_officer', { __jobId: 7 });
+
+    // The run-start upsert used to set lastError: null, which meant a rejection
+    // recorded by one run was gone before the next one had done anything.
+    const runStart = insertOnConflictDoUpdateMock.mock.calls[0]![0] as {
+      set: Record<string, unknown>;
+    };
+    expect(runStart.set.status).toBe('running');
+    expect(runStart.set).not.toHaveProperty('lastError');
+  });
+
+  it('does not treat a rejection as the systemic "0 successes" failure', async () => {
+    onlyGomezRejected();
+
+    // A run whose only row was declined must still complete. Throwing here would
+    // put the job in `failed` on every run for as long as the vendor row stays
+    // malformed, which is indefinitely.
+    const result = await handleSyncContactType(
+      'softpro.sync_contacts.escrow_officer',
+      { __jobId: 8 },
+    );
+
+    expect(result.status).toBe('completed');
+    expect(result.rejected).toHaveLength(1);
+  });
+
+  it('names the rejected officer on jobs.error and last_error, and says escalate', async () => {
+    onlyGomezRejected();
+
+    await handleSyncContactType('softpro.sync_contacts.escrow_officer', { __jobId: 11 });
+
+    const jobUpdate = updateSets.find((s) => 'payload' in s);
+    const stateUpdate = updateSets.find((s) => 'lastResult' in s);
+    for (const message of [jobUpdate!.error, stateUpdate!.lastError] as string[]) {
+      expect(message).toContain('PCT\\jgomez');
+      expect(message).toContain('REJECTED FOR SHAPE');
+      expect(message).toContain('escalated to SoftPro');
+    }
+    // The full reasons ride along on jobs.payload for whoever escalates it.
+    expect(
+      ((jobUpdate!.payload as Record<string, Record<string, unknown>>).syncContacts).rejected,
+    ).toHaveLength(1);
+  });
+
+  it('still trips the tripwire when every attempted row genuinely failed', async () => {
+    fetchSyncContactRowsMock.mockResolvedValueOnce({
+      items: [{ LookupCode: 'PCT\\jgomez' }, { LookupCode: 'PCT\\aballesteros' }],
+      error: null,
+    });
+    syncContactRowsMock.mockResolvedValueOnce({
+      entityType: 'Escrow Officer',
+      totalFetched: 2,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      errors: [
+        { lookupCode: 'PCT\\jgomez', error: 'REJECTED for shape' },
+        { lookupCode: 'PCT\\aballesteros', error: 'unique violation on contacts_closer_examiner_uniq' },
+      ],
+      rejected: [{ lookupCode: 'PCT\\jgomez', reasons: ['shifted'] }],
+    });
+
+    // One rejection, one real failure, nothing written: excluding the rejection
+    // still leaves "every row we actually tried failed", which is systemic.
+    await expect(
+      handleSyncContactType('softpro.sync_contacts.escrow_officer', { __jobId: 12 }),
+    ).rejects.toThrow('1 attempts, 0 successes');
+  });
+});
+
 // ── Batch sizing ────────────────────────────────────────────────────────────
 // This job has no interruptible loop, so the batch size IS its time budget.
 // These pin the sizing so nobody restores a value that runs past the ceiling.

@@ -1,6 +1,7 @@
 'use client';
 
 import type { ProfileSummary } from '@/lib/domain/concierge/profiles';
+import type { DocCatFull, OrderDocuments } from '@/components/shared/orders-hub-parts';
 
 // ─── Documents — the panel that answers "did this already happen?" ──────────
 //
@@ -8,34 +9,67 @@ import type { ProfileSummary } from '@/lib/domain/concierge/profiles';
 // team fires an action to discover whether it already ran, and cannot see the
 // document they produced without leaving the hub.
 //
+// ─── TWO TILES AND FIVE CHIPS, AND THE SPLIT IS MEASURED ────────────────────
+//
+// Across all 8,036 orders:
+//
+//   Preliminary report   5,634 orders   70.1%   ← tile
+//   Property profile         — ours to make     ← tile
+//   Legal & vesting          7 orders   0.09%   ← chip
+//   Grant deed               7 orders   0.09%   ← chip
+//   Taxes                    7 orders   0.09%   ← chip
+//   CPL                      2 orders   0.02%   ← chip
+//   Proposed insured         0 orders   0%      ← chip
+//
+// The seven-order sets for legal & vesting, grant deed and taxes are the
+// IDENTICAL seven orders — a March test batch. Five equal tiles would give
+// two-thirds of the panel to documents that are absent on 99.9% of orders,
+// which is the empty-pane problem restated. They are chips until the
+// AddDocuments batching fix lands, then re-measured and promoted.
+//
 // ─── ABSENCE IS NOT THE SAME SENTENCE FOR EVERY DOCUMENT ────────────────────
 //
-// CPL, Prelim and Proposed Insured read "None on file" when absent — a claim
-// about OUR records and nothing more.
+// The rule is WHO MAKES IT, not tile-versus-chip:
 //
-// They must NOT read "Not generated". SoftPro returns an empty document list
-// for prelims on 410 of 418 Title & Escrow orders, and we do not know whether
-// those documents exist somewhere the endpoint does not expose. A tile
-// asserting "not generated" would tell an operator to stop looking for
-// something that may be sitting in a folder we cannot see. "None on file" is
-// true either way.
+//   "Not received"   — produced by SoftPro at order-open, has not reached us.
+//                      Prelim, legal & vesting, grant deed, taxes.
+//   "Not generated"  — ours to produce, and nobody has.
+//                      CPL, proposed insured, property profile.
 //
-// Property Profile reads "Not generated", because we are the only thing that
-// makes one. There is no folder it could be hiding in.
+// "None on file" was the earlier wording for everything SoftPro-sourced. It is
+// true and it is misleading: legal & vesting, grant deed and taxes ARE produced
+// at order-open, so a reader seeing "none on file" concludes the document does
+// not exist when it exists and simply has not been transmitted. "Not received"
+// says the same thing about our records without the false implication.
+//
+// Measurement also moved two documents across the line. CPL and proposed
+// insured are NOT SoftPro-sourced — generateProposedInsured and the FNF CPL
+// path are both ours — so "not received" would blame an upstream system for
+// failing to send something it was never asked for.
 
-export interface DocState {
-  exists: boolean;
-  latestId: number | null;
-  latestCreatedAt: string | null;
-  count: number;
+/**
+ * Re-exported so the pane's own modules do not each reach into the shared
+ * component file for it.
+ *
+ * NOTE THE ASYMMETRY, which is the API's and not ours: cpl, prelim and
+ * proposedInsured arrive as DocCatFull (id, count, date — enough to open the
+ * document). legalVesting, tax and grantDeed arrive as a bare `exists` boolean
+ * with no id, so those three CANNOT be linked even when present. Their chips
+ * report existence only. Worth fixing when the batching work makes them real.
+ */
+export type { OrderDocuments };
+export type DocState = DocCatFull;
+
+/** Only a full record can be opened. A bare `exists` flag cannot. */
+function openable(d: OrderDocuments[keyof OrderDocuments] | undefined): DocCatFull | null {
+  if (!d || !d.exists) return null;
+  return 'latestId' in d && d.latestId !== null ? (d as DocCatFull) : null;
 }
 
+export type GenerateKind = 'cpl' | 'proposed' | 'prelim';
+
 export interface DocumentsPanelProps {
-  documents?: {
-    cpl?: DocState;
-    prelim?: DocState;
-    proposedInsured?: DocState;
-  };
+  documents?: OrderDocuments;
   profile: ProfileSummary | null;
   profileLoading: boolean;
   canGenerateProfile: boolean;
@@ -44,7 +78,7 @@ export interface DocumentsPanelProps {
   onGenerateProfile: () => void;
   onAdjustProfile: () => void;
   onRetryProfileRender: () => void;
-  onGenerate: (kind: 'cpl' | 'proposed' | 'prelim') => void;
+  onGenerate: (kind: GenerateKind) => void;
 }
 
 const shortTime = (iso: string | null | undefined): string => {
@@ -56,67 +90,82 @@ const shortTime = (iso: string | null | undefined): string => {
   }).format(d);
 };
 
+/** The five that are absent on essentially every order. Order is deliberate:
+ *  the three that WILL fill in after the batching fix come first. */
+const CHIPS: Array<{
+  key: keyof OrderDocuments;
+  label: string;
+  /** Who produces it decides the absent wording. */
+  absent: 'Not received' | 'Not generated';
+}> = [
+  { key: 'legalVesting', label: 'Legal & vesting', absent: 'Not received' },
+  { key: 'grantDeed', label: 'Grant deed', absent: 'Not received' },
+  { key: 'tax', label: 'Taxes', absent: 'Not received' },
+  { key: 'cpl', label: 'CPL', absent: 'Not generated' },
+  { key: 'proposedInsured', label: 'Proposed insured', absent: 'Not generated' },
+];
+
 export function DocumentsPanel(p: DocumentsPanelProps) {
   return (
-    <section className="bg-white border border-[#E9EAEE] rounded-[9px]">
-      <header className="h-7 flex items-center px-[13px] border-b border-[#F0F1F3]">
-        <h2 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9AA0AA]">Documents</h2>
+    <section className="bg-white border border-[#EEF0F4] rounded-[9px]">
+      <header className="h-7 flex items-center px-[13px] border-b border-[#EEF0F4]">
+        <h2 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#8A94A6]">
+          Documents
+        </h2>
       </header>
-      <div className="px-[13px] py-[9px] grid grid-cols-4 gap-[10px]">
-        <SoftProTile
-          title="Closing Protection Letter"
-          doc={p.documents?.cpl}
-          onGenerate={() => p.onGenerate('cpl')}
-        />
-        <SoftProTile
-          title="Proposed Insured"
-          doc={p.documents?.proposedInsured}
-          onGenerate={() => p.onGenerate('proposed')}
-        />
-        <SoftProTile
-          title="Preliminary Report"
-          doc={p.documents?.prelim}
-          onGenerate={() => p.onGenerate('prelim')}
-          generateLabel="Find"
-        />
-        <ProfileTile {...p} />
+
+      <div className="px-[13px] py-[9px]">
+        <div className="grid grid-cols-2 gap-[10px]">
+          <PrelimTile doc={p.documents?.prelim} onFind={() => p.onGenerate('prelim')} />
+          <ProfileTile {...p} />
+        </div>
+
+        <div className="mt-[10px] pt-[8px] border-t border-[#EEF0F4] flex flex-wrap items-center gap-[6px]">
+          <span className="text-[10px] text-[#8A94A6] mr-[2px]">Also on file</span>
+          {CHIPS.map((c) => (
+            <DocChip
+              key={c.key}
+              label={c.label}
+              absent={c.absent}
+              doc={p.documents?.[c.key]}
+            />
+          ))}
+        </div>
       </div>
     </section>
   );
 }
 
 /**
- * A document SoftPro owns. Absence is reported as "None on file" — see the
- * module note. Never "Not generated".
+ * The prelim. SoftPro produces it; we hold a copy in our own S3, put there by
+ * the fetch_prelims job and the prelim webhook. 83% of Title-only orders have
+ * one, which is why it is a tile.
+ *
+ * Absent reads "Not received" — our records are empty, and the document may
+ * well exist upstream. It must never read "Not generated".
  */
-function SoftProTile({
-  title, doc, onGenerate, generateLabel = 'Generate',
-}: {
-  title: string;
-  doc?: DocState;
-  onGenerate: () => void;
-  generateLabel?: string;
-}) {
-  const issued = !!doc?.exists && doc.latestId !== null;
+function PrelimTile({ doc, onFind }: { doc?: DocCatFull; onFind: () => void }) {
+  const open = openable(doc);
+  const issued = open !== null;
   return (
-    <Tile title={title} issued={issued}>
+    <Tile title="Preliminary report" issued={issued}>
       {issued ? (
         <>
           <Meta>
-            Issued {shortTime(doc!.latestCreatedAt)}
-            {doc!.count > 1 && ` · ${doc!.count} on file`}
+            Issued {shortTime(open!.latestCreatedAt)}
+            {open!.count > 1 && ` · ${open!.count} on file`}
           </Meta>
           <Row>
-            <TileButton onClick={() => window.open(`/api/documents/${doc!.latestId}/view`, '_blank', 'noopener')}>View</TileButton>
-            <TileButton onClick={() => window.open(`/api/documents/${doc!.latestId}/download`, '_blank', 'noopener')}>Download</TileButton>
+            <TileButton onClick={() => window.open(`/api/documents/${open!.latestId}/view`, '_blank', 'noopener')}>View</TileButton>
+            <TileButton onClick={() => window.open(`/api/documents/${open!.latestId}/download`, '_blank', 'noopener')}>Download</TileButton>
           </Row>
         </>
       ) : (
         <>
-          {/* Deliberate wording. We know our records are empty; we do NOT know
-              the document was never produced. */}
-          <Meta>None on file</Meta>
-          <Row><TileButton primary onClick={onGenerate}>{generateLabel}</TileButton></Row>
+          <Meta>Not received</Meta>
+          {/* "Find", not "Generate" — you do not generate a prelim, you look
+              for one SoftPro may already hold. */}
+          <Row><TileButton primary onClick={onFind}>Find</TileButton></Row>
         </>
       )}
     </Tile>
@@ -131,7 +180,7 @@ function ProfileTile({
   profile, profileLoading, canGenerateProfile, profileFeatureOn, busyProfile,
   onGenerateProfile, onAdjustProfile, onRetryProfileRender,
 }: DocumentsPanelProps) {
-  const title = 'Property Profile';
+  const title = 'Property profile';
 
   if (profileLoading) return <Tile title={title}><Meta>Checking…</Meta></Tile>;
 
@@ -192,7 +241,6 @@ function ProfileTile({
 
   return (
     <Tile title={title}>
-      {/* True: nothing else produces this document. */}
       <Meta>Not generated</Meta>
       {canGenerateProfile && profileFeatureOn && (
         <Row>
@@ -206,9 +254,54 @@ function ProfileTile({
   );
 }
 
-function truncate(s: string, n: number): string {
-  return s.length <= n ? s : `${s.slice(0, n - 1)}…`;
+/**
+ * One of the five that are absent on essentially every order. A chip, not a
+ * tile — but a chip that becomes a working link the moment a document appears,
+ * so the day the batching fix lands these start opening documents without any
+ * further change here.
+ */
+function DocChip({
+  label, absent, doc,
+}: { label: string; absent: string; doc?: OrderDocuments[keyof OrderDocuments] }) {
+  const open = openable(doc);
+
+  // Present, and we hold enough to open it.
+  if (open) {
+    return (
+      <button
+        type="button"
+        onClick={() => window.open(`/api/documents/${open.latestId}/view`, '_blank', 'noopener')}
+        className="text-[10.5px] border border-[#C9D6E8] bg-[#F4F7FC] rounded-md px-[8px] py-[3px] text-[#1B2A4A] font-semibold hover:bg-[#E9F0FA] outline-none focus-visible:ring-1 focus-visible:ring-brand-orange/30"
+      >
+        {label} — {open.count > 1 ? `${open.count} on file` : 'view'}
+      </button>
+    );
+  }
+
+  // Present, but the API gives no id for this category, so it cannot be
+  // opened. Say it is on file rather than offering a link that cannot work.
+  if (doc?.exists) {
+    return (
+      <span className="text-[10.5px] border border-[#C9D6E8] bg-[#F4F7FC] rounded-md px-[8px] py-[3px] text-[#1B2A4A] font-semibold">
+        {label} — on file
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-[10.5px] border border-[#EEF0F4] rounded-md px-[8px] py-[3px] text-[#8A94A6]">
+      {label} — {absent.toLowerCase()}
+    </span>
+  );
 }
+
+// ─── Tile chrome ────────────────────────────────────────────────────────────
+
+const TONE = {
+  plain: 'border-[#EEF0F4]',
+  issued: 'border-[#CFE3D6] bg-[#F6FBF8]',
+  warn: 'border-[#EFD9AE] bg-[#FDF9F2]',
+} as const;
 
 function Tile({
   title, issued, tone, children,
@@ -218,15 +311,16 @@ function Tile({
   tone?: 'warn';
   children: React.ReactNode;
 }) {
-  const border = tone === 'warn' ? 'border-[#EFD9AE] bg-[#FDF9F2]'
-    : issued ? 'border-[#CDE8DA] bg-[#F7FCF9]'
-    : 'border-[#E9EAEE] bg-white';
-  const dot = tone === 'warn' ? '#D69A2E' : issued ? '#3FA97C' : '#C9CDD4';
+  const t = tone === 'warn' ? TONE.warn : issued ? TONE.issued : TONE.plain;
   return (
-    <div className={`border rounded-[8px] p-[9px] min-h-[66px] flex flex-col gap-[4px] ${border}`}>
-      <div className="flex items-start gap-[5px]">
-        <span className="w-[6px] h-[6px] rounded-full mt-[4px] shrink-0" style={{ background: dot }} aria-hidden />
-        <span className="text-[10.5px] font-semibold text-[#3C4557] leading-[1.25]">{title}</span>
+    <div className={`border rounded-[7px] px-[10px] py-[8px] min-h-[74px] flex flex-col ${t}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11.5px] font-semibold text-[#1B2A4A] truncate">{title}</span>
+        {issued && (
+          <span className="shrink-0 text-[9.5px] font-semibold text-[#2F7D53] uppercase tracking-[0.06em]">
+            Issued
+          </span>
+        )}
       </div>
       {children}
     </div>
@@ -234,11 +328,13 @@ function Tile({
 }
 
 function Meta({ children, title }: { children: React.ReactNode; title?: string }) {
-  return <p className="text-[10px] text-[#6B7280] leading-[1.3]" title={title}>{children}</p>;
+  return (
+    <p className="text-[10.5px] text-[#8A94A6] mt-[3px] truncate" title={title}>{children}</p>
+  );
 }
 
 function Row({ children }: { children: React.ReactNode }) {
-  return <div className="flex flex-wrap gap-[5px] mt-auto pt-[3px]">{children}</div>;
+  return <div className="flex gap-[6px] mt-[6px] flex-wrap">{children}</div>;
 }
 
 function TileButton({
@@ -254,15 +350,17 @@ function TileButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={[
-        'h-6 px-[8px] rounded-[5px] text-[10.5px] font-semibold transition-colors',
-        'outline-none focus-visible:ring-1 focus-visible:ring-brand-orange/30 disabled:opacity-50',
+      className={`h-[22px] px-[8px] rounded-[5px] text-[10.5px] font-semibold outline-none focus-visible:ring-1 focus-visible:ring-brand-orange/30 disabled:opacity-40 ${
         primary
           ? 'bg-brand-orange text-white hover:bg-brand-orange-hover'
-          : 'bg-white border border-[#E5E5E5] text-[#3C4557] hover:bg-[#FAFAFB]',
-      ].join(' ')}
+          : 'bg-white border border-[#DCE1EA] text-[#3C4557] hover:bg-[#F7F9FC]'
+      }`}
     >
       {children}
     </button>
   );
+}
+
+function truncate(s: string, n: number): string {
+  return s.length <= n ? s : `${s.slice(0, n - 1)}…`;
 }

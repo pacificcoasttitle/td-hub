@@ -419,6 +419,25 @@ export function OrdersSplitView({
   const modalAddress = modalOrder ? (fullAddress(modalOrder) ?? '') : '';
   const anyIncomplete = useMemo(() => rows.some(isIncomplete), [rows]);
 
+  // Notes are posted from the pane's footer strip. The strip clears itself
+  // optimistically; a failure surfaces as the note simply not appearing, which
+  // is the same signal a network failure gives anywhere else in this view.
+  const [savingNote, setSavingNote] = useState(false);
+  const addNote = useCallback(async (orderId: number, text: string) => {
+    setSavingNote(true);
+    try {
+      await fetch(`/api/orders/${orderId}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+    } catch {
+      // Deliberately silent — see above.
+    } finally {
+      setSavingNote(false);
+    }
+  }, []);
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-white">
       <SplitToolbar
@@ -481,6 +500,8 @@ export function OrdersSplitView({
           onAdjustProfile={concierge.openCriteria}
           onRetryProfileRender={() => void concierge.retryRender()}
           onGenerateDocument={fireAction}
+          savingNote={savingNote}
+          onAddNote={addNote}
         />
       </div>
 

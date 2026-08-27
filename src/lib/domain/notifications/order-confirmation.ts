@@ -21,14 +21,9 @@ import {
 } from './confirmation-recipients';
 import { parseTaxResultData } from './tax-result-data';
 import { EMAIL_STATUS_SENT_NO_CLIENT, hasConfirmationEmailStatus } from './confirmation-send-guard';
+import { isBuyerAgentRecipientEnabled } from './buyer-agent-recipient-gate';
 
 export { EMAIL_STATUS_SENT_NO_CLIENT } from './confirmation-send-guard';
-
-/**
- * Master switch for the buyer-agent confirmation recipient. Registered in
- * SETTINGS_REGISTRY with defaultValue 'false', so a missing row reads as off.
- */
-const BUYER_AGENT_RECIPIENT_SETTING = 'confirmation_buyer_agent_recipient_enabled';
 
 const DOC_LABELS: Record<string, string> = {
   legal_vesting: 'Legal and Vesting',
@@ -318,7 +313,9 @@ async function loadRecipientEmails(
   // side's representative, not the client the confirmation is addressed to.
   // Off unless somebody decides otherwise. See
   // docs/tickets/SOFTPRO_MISSING_BUYER.md §4.
-  const buyerAgentAllowed = (await getSetting(BUYER_AGENT_RECIPIENT_SETTING)) === 'true';
+  //
+  // `resolveRecipients` gates `order.closed` on the same setting.
+  const buyerAgentAllowed = await isBuyerAgentRecipientEnabled();
   const buyerAgent = partyRows.find((r) => r.role === 'buyer_agent');
   const buyerAgentEmail = buyerAgentAllowed
     ? buyerAgent?.cEmail ?? buyerAgent?.externalEmail ?? null

@@ -1,6 +1,7 @@
 import { db } from '@/lib/db/client';
 import { orders, orderParties, contacts } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { isBuyerAgentRecipientEnabled } from './buyer-agent-recipient-gate';
 
 export interface Recipient {
   role: string;
@@ -27,6 +28,20 @@ export async function resolveRecipients(
 ): Promise<Recipient[]> {
   if (!recipientRoles || recipientRoles.length === 0) return [];
 
+  // Every `notification_types`-driven send funnels through here, so this is the
+  // one place the buyer-agent gate has to hold for all of them — `order.closed`
+  // today, and whatever is added to a `recipient_roles` array next. The
+  // confirmation path gates the same decision with the same setting in
+  // `order-confirmation.ts`, which resolves its TO line separately.
+  //
+  // `order.closed` has never fired, which is a statement about the past. A gate
+  // covering one path and not the other fails the moment the second one does.
+  const roles = recipientRoles.includes('buyer_agent') && !(await isBuyerAgentRecipientEnabled())
+    ? recipientRoles.filter((role) => role !== 'buyer_agent')
+    : recipientRoles;
+
+  if (roles.length === 0) return [];
+
   const recipients: Recipient[] = [];
   const seen = new Set<string>();
 
@@ -37,7 +52,7 @@ export async function resolveRecipients(
     recipients.push(r);
   };
 
-  const officerRoles = recipientRoles.filter((r) => r in OFFICER_FIELDS);
+  const officerRoles = roles.filter((r) => r in OFFICER_FIELDS);
   if (officerRoles.length > 0) {
     const [order] = await db
       .select({
@@ -66,7 +81,7 @@ export async function resolveRecipients(
     }
   }
 
-  const partyRoles = recipientRoles.filter((r) => PARTY_ROLES.has(r));
+  const partyRoles = roles.filter((r) => PARTY_ROLES.has(r));
   if (partyRoles.length > 0) {
     const parties = await db
       .select({
@@ -96,7 +111,7 @@ export async function resolveRecipients(
     }
   }
 
-  if (recipientRoles.includes('internal') && internalCc) {
+  if (roles.includes('internal') && internalCc) {
     for (const email of internalCc) {
       if (email?.trim()) {
         add({ role: 'internal', name: null, email: email.trim(), phone: null });

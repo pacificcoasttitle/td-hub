@@ -61,8 +61,8 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
   },
   {
     key: 'confirmation_buyer_agent_recipient_enabled',
-    label: 'Confirmation Email — Include Buyer\'s Agent',
-    description: 'When enabled, a buyer_agent party row with an email address becomes a TO recipient on the open-order confirmation. OFF by default and deliberately so: buildConfirmationRecipients has offered this candidate since it was written, but order_parties held zero buyer_agent rows for the table\'s entire history, so it has never once resolved. Mapping SoftPro\'s BuyersAgentBrokers (27 Aug 2026) starts creating those rows, and a vendor-type addition must not be what decides that a buyer\'s agent begins receiving a client-facing confirmation. Turning this ON adds a party — usually the opposite side\'s agent, not PCT\'s client — to the TO line. The rows are written and visible in the UI either way.',
+    label: 'Client Emails — Include Buyer\'s Agent',
+    description: 'When enabled, a buyer_agent party row with an email address becomes a recipient on client-facing order email. This is the single switch for that decision and covers every path that can make it: the open-order confirmation TO line, and any notification_types-driven send whose recipient_roles include buyer_agent (order.closed today). OFF by default and deliberately so: buildConfirmationRecipients has offered this candidate since it was written, but order_parties held zero buyer_agent rows for the table\'s entire history, so it has never once resolved. Mapping SoftPro\'s BuyersAgentBrokers (27 Aug 2026) starts creating those rows, and a vendor-type addition must not be what decides that a buyer\'s agent begins receiving client-facing mail. Turning this ON adds a party — usually the opposite side\'s agent, not PCT\'s client — to those emails. The rows are written and visible in the UI either way.',
     category: 'Email',
     type: 'boolean',
     defaultValue: 'false',

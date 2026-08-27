@@ -1,0 +1,136 @@
+# Watch-Out: Claims Nothing Verifies
+
+## The Trap
+
+A comment, a column name, or a flag asserts behavior. Nothing checks that the
+assertion is true. The claim is read as documentation by every later reader,
+including the people deciding whether a safety check is adequate — so a wrong
+claim doesn't just fail, it actively misdirects the investigation of its own
+failure.
+
+This is distinct from a bug. A bug does the wrong thing. These do the wrong
+thing *while telling you they do the right thing*.
+
+Seven instances surfaced in a single day (2026-08-27) during the
+`ORDERS_NEVER_INGESTED` investigation. That frequency is the reason this is a
+pattern entry and not a ticket.
+
+## Canonical Example: the comment and the SQL disagreed
+
+`src/lib/jobs/handlers/fetch-prelims.ts` chose which orders to fetch prelims
+for:
+
+```typescript
+// BROKEN — comment asserts the opposite of what runs
+// Prioritize orders never attempted (lastPrelimFetchAt IS NULL → asc nulls first),
+// then those whose last attempt is older than 6 hours.
+  .orderBy(asc(orders.lastPrelimFetchAt))
+  .limit(50)
+```
+
+**In Postgres, `ORDER BY col ASC` is `NULLS LAST`.** Null values sort as
+larger than any non-null value. So never-attempted orders were served *last*,
+behind every previously-attempted order that had aged past the 6-hour window —
+the exact inverse of the stated priority.
+
+The measured effect on 2026-08-27: 48 recycling rows sorted ahead of 118
+never-attempted rows against a `limit 50`, so roughly **two** new orders were
+examined per 15-minute cycle. 113 freshly imported orders sat untouched for
+hours, and genuinely new orders queued behind them for their prelim delivery.
+
+Nobody had misread the code. Everybody had read the comment.
+
+```typescript
+// CORRECT — spell out the null placement, and tiebreak the group
+  .orderBy(sql`${orders.lastPrelimFetchAt} asc nulls first, coalesce(${orders.openedAt}, ${orders.createdAt}) desc`)
+  .limit(50)
+```
+
+## The other six from the same day
+
+| # | Claim | Reality |
+|---|---|---|
+| 1 | `import-orders` returns `completed` | Returned its failure in an `errors` array instead of throwing; the runner marked success. Two May runs are still recorded as completed having done nothing. |
+| 2 | The job route accepts a JSON payload | `req.json().catch(() => ({}))` turns unparseable JSON into an empty payload, then runs with default arguments and reports success. Silently converted explicit date ranges into "today". |
+| 3 | `lookback_sync` is a safety net for sync gaps | Reads `FROM orders`. Cannot see an order that was never inserted. |
+| 4 | `verify_sync` verifies the sync | Same. Both nets could only examine what already existed, which is why 457 missing orders went unnoticed for four months. |
+| 5 | `needs_manual_delivery` flags a prelim for a human | Written by the delivery path, read by nothing. 130 accumulated with no surface anywhere in the app. |
+| 6 | `orders.opened_at` is when the order opened | `NOT NULL DEFAULT NOW()`, and `GetOrders` carries no open date — so every row from that path claimed to have opened at the moment it was written. Blinded the prelim backfill gate that measures exactly this. |
+| 7 | *(above)* `asc nulls first` | `ASC` is `NULLS LAST`. |
+
+The common shape: **the claim was load-bearing for a later decision.** #3 and #4
+were cited as evidence that ingestion was monitored. #6 was the input to the
+gate built to stop unintended emails. #7 was the reason nobody expected
+backfilled orders to starve live traffic.
+
+## Detection
+
+### Database semantics that differ from the obvious reading
+
+- `ORDER BY col ASC` → `NULLS LAST`. `DESC` → `NULLS FIRST`. Always write the
+  clause explicitly when nulls are meaningful.
+- `NULL != 'x'` is `NULL`, i.e. excluded — a `ne()` filter on a nullable column
+  silently drops null rows. (`dashboard/activity/route.ts` documents this
+  correctly; it is the counter-example to copy.)
+- `NOT IN (subquery)` returns no rows if the subquery yields a single NULL.
+- A `DEFAULT` on a column the vendor may not populate manufactures data rather
+  than recording absence.
+
+### Comments that need a test, not a reviewer
+
+Any comment stating an ordering, a priority, a threshold, a cap, or "this
+cannot happen" is a testable assertion. If there is no test, treat the comment
+as unverified. Grep starting points:
+
+```bash
+# Priority and ordering claims
+rg -n "nulls (first|last)|[Pp]rioriti[sz]e|first, then|oldest|newest" src/lib
+
+# Claims of impossibility
+rg -n "cannot|never|always|guaranteed|by definition" src/lib --type ts
+```
+
+### Flags and columns with no reader
+
+A written-but-never-read field is a report into a void. For every flag that
+records a condition needing action:
+
+```bash
+# Does anything READ it, or only write it?
+rg -n "needs_manual_delivery|<flag_name>" src/
+```
+
+If every hit is a write, the flag has no surface and the condition it records
+is not being acted on.
+
+### Safety checks that read the same store they guard
+
+Ask what the check is protecting against, then ask whether its data source can
+represent that failure. A check that queries `orders` cannot detect a missing
+order. A check that samples rows cannot detect absent rows. This is the class
+that produced #3 and #4, and it is invisible to code review because the code is
+correct — it is the *premise* that is wrong.
+
+## The Rule
+
+Write the claim so the machine enforces it, or don't write the claim.
+
+In practice:
+
+1. Spell out the semantics rather than relying on a default — `nulls first`,
+   explicit `NOT NULL`, explicit tiebreak.
+2. If a comment asserts behavior, add the test that fails when it stops being
+   true.
+3. Prefer recording provenance at write time over inferring it later from
+   timestamps. Both #6 and the residual hole in #7's fix reduce to this.
+4. When a flag records "a human must look at this", ship the place the human
+   looks in the same change.
+
+## Reference
+
+- `docs/tickets/ORDERS_NEVER_INGESTED.md` — the investigation these came out of
+- `src/lib/jobs/handlers/fetch-prelims.ts` — #7, fixed, with the reasoning inline
+- `src/lib/db/schema/orders.ts` — #6, fixed, `opened_at` nullable with no default
+- `src/app/api/dashboard/activity/route.ts` — correct handling of the nullable
+  `ne()` trap, worth copying
+- `watch-outs/silent-job-failures.md` — #1 in its own entry, predates this

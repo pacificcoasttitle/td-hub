@@ -65,7 +65,17 @@ export type LinkFailure =
   | 'invalid'        // bad signature, malformed, or no such row
   | 'inactive'       // revoked OR expired — deliberately indistinguishable
   | 'unsupported'    // role we cannot render a form for
-  | 'misconfigured'; // secret unset
+  | 'misconfigured'  // secret unset
+  /**
+   * Per-IP abuse limit tripped — see party-wizard-abuse.ts.
+   *
+   * It is a member of THIS union, rather than a separate type, so that the
+   * throttled page is rendered by the same code path as every other failure
+   * and cannot accidentally grow its own layout, its own copy, or an `order`
+   * payload. resolvePartyWizardLink never returns it; the guard does, before
+   * resolution runs at all.
+   */
+  | 'throttled';
 
 export type ResolveResult =
   | { ok: true; link: ResolvedLink }

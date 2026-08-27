@@ -37,6 +37,9 @@ yarn-error.log*
 # archives
 /zipfiles/
 
+# local scratch (per-machine agent probes; also excluded from tsconfig)
+/_scratch_untracked/
+
 # vercel
 .vercel
 

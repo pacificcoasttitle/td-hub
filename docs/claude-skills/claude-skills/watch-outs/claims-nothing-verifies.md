@@ -11,9 +11,20 @@ failure.
 This is distinct from a bug. A bug does the wrong thing. These do the wrong
 thing *while telling you they do the right thing*.
 
-Seven instances surfaced in a single day (2026-08-27) during the
+Nine instances surfaced in a single day (2026-08-27) during the
 `ORDERS_NEVER_INGESTED` investigation. That frequency is the reason this is a
 pattern entry and not a ticket.
+
+The eighth is the worst shape of it and has its own section below: not a comment
+that lied, but a **verification step run specifically to detect a failure, which
+was structurally incapable of showing that failure.** A wrong comment misleads
+whoever reads it. A verification that cannot fail manufactures confidence on
+demand, and it does so at exactly the moment someone has decided to be careful.
+
+The ninth is the shortest and the most humbling, and it is why this entry is not
+only about code: the handover message that recorded the rule from #8 asserted two
+things about repository state that nobody had checked, and one of them was that
+the rule was already in the docs.
 
 ## Canonical Example: the comment and the SQL disagreed
 
@@ -57,11 +68,97 @@ Nobody had misread the code. Everybody had read the comment.
 | 5 | `needs_manual_delivery` flags a prelim for a human | Written by the delivery path, read by nothing. 130 accumulated with no surface anywhere in the app. |
 | 6 | `orders.opened_at` is when the order opened | `NOT NULL DEFAULT NOW()`, and `GetOrders` carries no open date — so every row from that path claimed to have opened at the moment it was written. Blinded the prelim backfill gate that measures exactly this. |
 | 7 | *(above)* `asc nulls first` | `ASC` is `NULLS LAST`. |
+| 8 | *(below)* "sweep stopped — process handle confirms it" | Killed the wrapper, not the child. Both confirming signals were downstream of the wrapper, so both were guaranteed to pass. The job ran 47 more minutes. |
+| 9 | *(below)* "main moved f03a181 → dcc1aef, three more PRs landed after" and "standing rule, now in the docs" | One PR landed after `dcc1aef`, not three, and `main` was at `3afdc9f`. The rule was in an open PR. Both stated in the handover whose subject was not asserting state unchecked. |
 
 The common shape: **the claim was load-bearing for a later decision.** #3 and #4
 were cited as evidence that ingestion was monitored. #6 was the input to the
 gate built to stop unintended emails. #7 was the reason nobody expected
 backfilled orders to starve live traffic.
+
+## #8: the verification that could not fail
+
+Worst shape of the pattern, and the one to internalise.
+
+A long-running recovery sweep needed to be stopped mid-flight. It was launched
+as `powershell -File sweep.ps1` through a wrapper, so the reported PID was the
+**wrapper**, not the PowerShell child doing the work.
+
+```powershell
+# BROKEN — every signal here is downstream of the wrapper
+Stop-Process -Id $wrapperPid -Force
+Get-Process -Id $wrapperPid   # returns nothing: "confirmed stopped"
+Get-Content $terminalFile     # stops updating: "confirmed stopped"
+```
+
+Both checks passed. Both were incapable of failing. Killing the wrapper
+guarantees `Get-Process` finds nothing, and it guarantees the captured stdout
+goes quiet — because the wrapper was what captured it. The child kept running
+for **47 more minutes**, completed the entire remaining range, and ran straight
+through a production deploy that the operator had scheduled specifically because
+they believed nothing was in flight.
+
+The stop was reported as confirmed twice, on two independent-looking signals that
+were the same signal.
+
+```sql
+-- CORRECT — ask the thing being written to, over a full cycle of the job
+select max(created_at), count(*) filter (where created_at > now() - interval '3 minutes')
+from orders where created_at >= $sweep_start;
+```
+
+### The rule
+
+**Kill the child PID. Verify a stop by the absence of new database rows over a
+full cycle of the job — never by a process handle.**
+
+For a job that writes through an HTTP request, note that killing the client does
+not stop the server: an in-flight request runs to completion, so writes continue
+for up to the request timeout after the kill. A full cycle means at least that
+long.
+
+### The generalisation
+
+Before trusting any verification, ask: **what would this check look like if the
+thing I'm checking for were true?** If the answer is "the same", the check is
+decoration. This is the identical error as #3 and #4 — those safety nets queried
+`orders` to detect a missing order, and could only ever see what was there. The
+difference is that #8 was a deliberate act of caution rather than a design
+oversight, which is what makes it worse: the operator paid the cost of stopping,
+and got none of the benefit.
+
+## #9: the same error, in the message about the error
+
+The handover written to carry #8's rule to the next session opened with a warning
+against asserting repository state without fetching, and then asserted two pieces
+of repository state without fetching:
+
+> MAIN HAS MOVED A LOT. It went f03a181 -> dcc1aef and three more PRs landed
+> after.
+
+> STANDING RULE, now in the docs, and it applies to your Preview runs [...]
+
+One PR had landed after `dcc1aef`, not three; `main` was at `3afdc9f`. And the
+rule was not in the docs — it was in an open pull request, which is precisely the
+state the same message elsewhere identified as the way a standing rule gets lost.
+
+Two details make this worth recording rather than shrugging off.
+
+**Both claims were checkable in one command.** `git log dcc1aef..origin/main`
+and `gh pr view 48 --json state`. The cost of verifying was seconds; the cost of
+being wrong was a downstream session rebasing onto a stale SHA and citing a rule
+with no canonical home.
+
+**The medium changed but the failure did not.** Instances 1–8 were code and
+comments. This one is prose, in a status report, and prose gets far less scrutiny
+than a diff — nobody code-reviews a handover. A status report is a set of
+assertions about system state, and the ones that will be acted on deserve the
+same standard as an assertion in a comment: enforced, or not made.
+
+The corollary for anyone writing a handover: **the sentences most likely to be
+wrong are the ones you did not have to look anything up to write.** Counts of
+things that landed, "X is deployed", "Y is merged", "nothing is running" — these
+feel like recall rather than claims, which is exactly why they escape checking.
 
 ## Detection
 
@@ -125,6 +222,10 @@ In practice:
    timestamps. Both #6 and the residual hole in #7's fix reduce to this.
 4. When a flag records "a human must look at this", ship the place the human
    looks in the same change.
+5. In a handover or status report, every claim about repository or system state
+   carries the command that produced it, or it is marked as unverified. A SHA
+   comes from `git log`, a merge state from `gh pr view`, "nothing is running"
+   from the table the job writes. #9 is what this rule exists to prevent.
 
 ## Reference
 

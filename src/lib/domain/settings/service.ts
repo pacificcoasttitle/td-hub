@@ -93,6 +93,14 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     defaultValue: 'false',
   },
   {
+    key: 'party_wizard_invite_max_per_run',
+    label: 'Party Wizard Invite — Max Emails Per Run',
+    description: 'Total ceiling on how many invite emails a single run may send, on top of the permanent per-recipient cap of 2 and the one-ask-per-property rule. Set to 5 for the first pilot so the first real sends are a handful of readable emails rather than a backlog cleared in one morning. Orders held back by this ceiling are reported as "Held — run cap" in the dry run and stay eligible on the next run; nothing about being held marks them as invited. Raise it once the first sends are confirmed to land and get forwarded. 0 stops sending without touching the master switch.',
+    category: 'Notifications',
+    type: 'number',
+    defaultValue: '5',
+  },
+  {
     key: 'prelim_summary_shut_off',
     label: 'Prelim Summary Shut Off',
     description: 'When enabled, prelim summary webhooks are received but not processed.',

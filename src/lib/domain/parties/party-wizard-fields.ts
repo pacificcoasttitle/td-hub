@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { partyRoleEnum } from '@/lib/db/schema/orders';
+import type { TransactionType } from '@/lib/domain/orders/status-map';
 
 export type PartyRole = (typeof partyRoleEnum)['enumValues'][number];
 
@@ -34,6 +35,22 @@ export interface WizardSection {
 
 export interface RoleFormDefinition {
   role: PartyRole;
+  /**
+   * Transaction types on which asking for this role is a coherent question.
+   *
+   * This lives with the role rather than in the invite job because eligibility
+   * is a property of the ROLE, not of the job that happens to send today. A
+   * refinance has no listing agent — production carries 25 `listing_agent` rows
+   * across 3,575 refinance orders — so a listing-agent ask on a refi is asking
+   * about a party that structurally cannot exist. A future `lender_contact` ask
+   * is the mirror image: it belongs on refinances and is largely noise on a
+   * purchase. Hardcoding `'Purchase'` in the job would have to be unpicked to
+   * add the second role.
+   *
+   * Read by the invite job's candidate query. Empty is not permitted — a role
+   * with no eligible transaction types would silently select nothing.
+   */
+  eligibleTransactionTypes: readonly TransactionType[];
   /** Second person — the recipient is the party, not a PCT employee. */
   heading: string;
   intro: string;
@@ -42,6 +59,7 @@ export interface RoleFormDefinition {
 
 const LISTING_AGENT_FORM: RoleFormDefinition = {
   role: 'listing_agent',
+  eligibleTransactionTypes: ['Purchase'],
   heading: 'Listing agent details',
   intro: 'We are handling the title work for this property. Confirming your details keeps escrow and closing documents flowing to the right place.',
   sections: [
@@ -76,6 +94,17 @@ export function getRoleForm(role: PartyRole): RoleFormDefinition | null {
 
 /** Roles the wizard can currently collect. Used to reject a link for anything else. */
 export const SUPPORTED_WIZARD_ROLES = Object.keys(FORMS) as PartyRole[];
+
+/**
+ * Transaction types on which asking `role` is coherent.
+ *
+ * Returns an empty list for a role with no form, which callers must treat as
+ * "select nothing" rather than "select everything" — an unknown role is not a
+ * licence to email about it.
+ */
+export function eligibleTransactionTypesFor(role: PartyRole): readonly TransactionType[] {
+  return getRoleForm(role)?.eligibleTransactionTypes ?? [];
+}
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 

@@ -3,9 +3,9 @@ import { createOrderInputSchema } from './create-order';
 import { buildSoftProPayload } from './softpro-payload';
 import {
   applyContactSelection,
-  firstPartySubmitBlocker,
+  EMPTY_PARTY,
+  partyHasInput,
   partyReachesSoftPro,
-  partySubmitBlocker,
   toCreateOrderContact,
   type CreateOrderContact,
   type PartyFormContact,
@@ -55,6 +55,7 @@ function softpro(contacts: Parameters<typeof purchase>[0]) {
 }
 
 const MARJAN = applyContactSelection({
+  id: 4821,
   firstName: 'Marjan',
   lastName: 'Rassibi',
   fullName: null,
@@ -63,9 +64,12 @@ const MARJAN = applyContactSelection({
   phone: '(818)668-8222',
   lookupCode: 'MarRasFirs',
   flookupCode: 'First4768',
+  address: '21031 Ventura Blvd',
+  city: 'Woodland Hills',
 });
 
 const AGENT = applyContactSelection({
+  id: 1201,
   fullName: 'Alex Chen',
   companyName: 'Coast Realty',
   email: 'alex@coastrealty.com',
@@ -75,6 +79,7 @@ const AGENT = applyContactSelection({
 });
 
 const LENDER = applyContactSelection({
+  id: 3310,
   fullName: 'Pat Lopez',
   companyName: 'Harbor Lending',
   email: 'pat@harborlending.com',
@@ -84,6 +89,7 @@ const LENDER = applyContactSelection({
 });
 
 const BROKER = applyContactSelection({
+  id: 5504,
   fullName: 'Sam Ortiz',
   companyName: 'Pacific Mortgage',
   email: 'sam@pacmtg.com',
@@ -92,9 +98,16 @@ const BROKER = applyContactSelection({
   companyLookupCode: 'Pacific88',
 });
 
-function emptyParty(): PartyFormContact {
-  return { name: '', email: '', phone: '', company: '', companyLookupCode: '', clientLookupCode: '' };
-}
+/** A company hit from /api/companies: negative synthetic id, no person. */
+const COMPANY_PICK = applyContactSelection({
+  id: -78,
+  fullName: null,
+  companyName: 'First Priority Escrow',
+  email: 'info@firstpriorityescrow.com',
+  phone: '818-668-8222',
+  companyLookupCode: 'First4768',
+  clientLookupCode: '',
+});
 
 describe('applyContactSelection', () => {
   it('builds a display name from first/last when fullName is null (First Priority shape)', () => {
@@ -103,6 +116,40 @@ describe('applyContactSelection', () => {
     expect(MARJAN.email).toBe('escrow@firstpriorityescrow.com');
     expect(MARJAN.clientLookupCode).toBe('MarRasFirs');
     expect(MARJAN.companyLookupCode).toBe('First4768');
+    expect(MARJAN.contactId).toBe(4821);
+  });
+
+  it('carries street and city for the resolved card but keeps them off the wire', () => {
+    expect(MARJAN.address).toBe('21031 Ventura Blvd');
+    expect(MARJAN.city).toBe('Woodland Hills');
+    expect(toCreateOrderContact(MARJAN)).not.toHaveProperty('address');
+    expect(toCreateOrderContact(MARJAN)).not.toHaveProperty('city');
+  });
+
+  it('a company pick has a company lookup code and no contact id', () => {
+    expect(COMPANY_PICK.contactId).toBeUndefined();
+    expect(COMPANY_PICK.companyLookupCode).toBe('First4768');
+    expect(COMPANY_PICK.name).toBe('');
+  });
+});
+
+describe('an unselected party is cleanly absent, not an empty shell', () => {
+  it('empty slot maps to undefined and omits the whole SoftPro section', () => {
+    const empty: PartyFormContact = { ...EMPTY_PARTY };
+    expect(partyHasInput(empty)).toBe(false);
+    expect(toCreateOrderContact(empty)).toBeUndefined();
+
+    const payload = softpro({
+      buyerAgent: toCreateOrderContact(empty),
+      listingAgent: toCreateOrderContact(empty),
+      lender: toCreateOrderContact(empty),
+      mortgageBroker: toCreateOrderContact(empty),
+      escrowCompany: toCreateOrderContact(empty),
+    });
+
+    for (const key of ['buyersAgentDetails', 'listingAgentDetails', 'lenderDetails', 'mortgageDetails', 'escrowDetails']) {
+      expect(payload).not.toHaveProperty(key);
+    }
   });
 });
 
@@ -112,42 +159,23 @@ describe('silent-drop gates', () => {
     expect(legacyContact(emailOnly)).toBeUndefined();
   });
 
-  it('AFTER: email/phone only reaches SoftPro Email (no company required)', () => {
-    const emailOnly: PartyFormContact = {
-      name: '', email: 'escrow@firstpriorityescrow.com', phone: '(818)668-8222',
-      company: '', companyLookupCode: '', clientLookupCode: '',
-    };
-    expect(toCreateOrderContact(emailOnly)).toEqual({
-      email: 'escrow@firstpriorityescrow.com',
-      phone: '(818)668-8222',
-    });
-    const details = softpro({ escrowCompany: toCreateOrderContact(emailOnly) }).escrowDetails as Record<string, unknown>;
-    expect(details.Email).toBe('escrow@firstpriorityescrow.com');
-  });
-
   it('BEFORE: name only was sent and then dropped by SoftPro hasContactData', () => {
     const nameOnly = { name: 'Marjan Rassibi', email: '', phone: '', company: '' };
     expect(legacyContact(nameOnly)).toEqual({ name: 'Marjan Rassibi' });
     expect(softpro({ escrowCompany: legacyContact(nameOnly) }).escrowDetails).toBeUndefined();
   });
 
-  it('AFTER: name only is blocked before submit and never sent', () => {
-    const nameOnly: PartyFormContact = {
-      name: 'Marjan Rassibi', email: '', phone: '', company: '',
-      companyLookupCode: '', clientLookupCode: '',
-    };
+  it('AFTER: the typeahead is the only way in, and every selection clears the gate', () => {
+    for (const party of [MARJAN, AGENT, LENDER, BROKER, COMPANY_PICK]) {
+      expect(partyReachesSoftPro(party)).toBe(true);
+      expect(toCreateOrderContact(party)).toBeDefined();
+    }
+  });
+
+  it('the gate still refuses a name-only party, so a data change cannot become a silent drop', () => {
+    const nameOnly: PartyFormContact = { ...EMPTY_PARTY, name: 'Marjan Rassibi' };
     expect(partyReachesSoftPro(nameOnly)).toBe(false);
     expect(toCreateOrderContact(nameOnly)).toBeUndefined();
-    expect(partySubmitBlocker(nameOnly, 'Escrow Company')).toBe(
-      "Escrow Company: a name alone won't save this party; add an email or company",
-    );
-    expect(firstPartySubmitBlocker({
-      buyerAgent: emptyParty(),
-      listingAgent: emptyParty(),
-      lender: emptyParty(),
-      mortgageBroker: emptyParty(),
-      escrowCompany: nameOnly,
-    })).toMatch(/Escrow Company/);
   });
 });
 
@@ -165,6 +193,7 @@ describe('createOrder / SoftPro payload before vs after — selected contact', (
       companyName: 'Coast Realty',
       companyLookupCode: 'Coast9912',
       clientLookupCode: 'AleCheCoas',
+      contactId: 1201,
     });
     expect(softpro({ buyerAgent: after }).buyersAgentDetails).toEqual({
       CompanyLookUpCode: 'Coast9912',
@@ -177,8 +206,7 @@ describe('createOrder / SoftPro payload before vs after — selected contact', (
   });
 
   it('Listing Agent: same mapping, listingAgentDetails', () => {
-    const after = toCreateOrderContact(AGENT);
-    expect(softpro({ listingAgent: after }).listingAgentDetails).toEqual({
+    expect(softpro({ listingAgent: toCreateOrderContact(AGENT) }).listingAgentDetails).toEqual({
       CompanyLookUpCode: 'Coast9912',
       ClientLookUpCode: 'AleCheCoas',
       Name: 'Alex Chen',
@@ -188,14 +216,8 @@ describe('createOrder / SoftPro payload before vs after — selected contact', (
     });
   });
 
-  it('Lender (companyFirst): selected contact writes lookups onto lenderDetails', () => {
+  it('Lender: selected contact writes lookups onto lenderDetails', () => {
     const beforeTyped = { name: '', email: '', phone: '', company: 'Harbor Lending' };
-    expect(legacyContact(beforeTyped)).toEqual({
-      name: '',
-      email: undefined,
-      phone: undefined,
-      companyName: 'Harbor Lending',
-    });
     const beforeDetails = softpro({ lender: legacyContact(beforeTyped) }).lenderDetails as Record<string, unknown>;
     expect(beforeDetails.CompanyLookUpCode).toBe('');
     expect(beforeDetails.CompanyName).toBe('Harbor Lending');
@@ -211,10 +233,7 @@ describe('createOrder / SoftPro payload before vs after — selected contact', (
   });
 
   it('Mortgage Broker: BEFORE omitted from handleSubmit; AFTER writes mortgageDetails', () => {
-    const legacyPayload = purchase({
-      escrowCompany: undefined,
-      // mortgageBroker was never passed
-    });
+    const legacyPayload = purchase({});
     expect(legacyPayload.contacts?.mortgageBroker).toBeUndefined();
     expect(softpro({}).mortgageDetails).toBeUndefined();
 
@@ -228,17 +247,14 @@ describe('createOrder / SoftPro payload before vs after — selected contact', (
     });
   });
 
-  it('Escrow Company: screenshot email-in-company still writes as company; selected contact writes lookups', () => {
+  it('Escrow Company: the reported email-in-company row can no longer be produced', () => {
+    // The defect: a browser autofilled an email into the free-text Company Name
+    // box and it went out as CompanyName. There is no such box now, so the only
+    // way to fill this section is a selection, which carries lookup codes.
     const screenshot = { name: '', email: '', phone: '', company: 'escrow@firstpriorityescrow.com' };
     const before = softpro({ escrowCompany: legacyContact(screenshot) }).escrowDetails as Record<string, unknown>;
-    expect(before).toEqual({
-      CompanyLookUpCode: '',
-      ClientLookUpCode: '',
-      Name: '',
-      Email: '',
-      Telephone: '',
-      CompanyName: 'escrow@firstpriorityescrow.com',
-    });
+    expect(before.CompanyName).toBe('escrow@firstpriorityescrow.com');
+    expect(before.CompanyLookUpCode).toBe('');
 
     expect(softpro({ escrowCompany: toCreateOrderContact(MARJAN) }).escrowDetails).toEqual({
       CompanyLookUpCode: 'First4768',
@@ -250,23 +266,14 @@ describe('createOrder / SoftPro payload before vs after — selected contact', (
     });
   });
 
-  it('free-text company without a selection still reaches SoftPro (no lookup required)', () => {
-    const typed: PartyFormContact = {
-      name: 'Guest Officer',
-      email: '',
-      phone: '',
-      company: 'New Escrow Shop',
-      companyLookupCode: '',
-      clientLookupCode: '',
-    };
-    expect(partySubmitBlocker(typed, 'Escrow Company')).toBeNull();
-    expect(softpro({ escrowCompany: toCreateOrderContact(typed) }).escrowDetails).toEqual({
-      CompanyLookUpCode: '',
+  it('a company pick still carries CompanyLookUpCode with no client code', () => {
+    expect(softpro({ escrowCompany: toCreateOrderContact(COMPANY_PICK) }).escrowDetails).toEqual({
+      CompanyLookUpCode: 'First4768',
       ClientLookUpCode: '',
-      Name: 'Guest Officer',
-      Email: '',
-      Telephone: '',
-      CompanyName: 'New Escrow Shop',
+      Name: '',
+      Email: 'info@firstpriorityescrow.com',
+      Telephone: '818-668-8222',
+      CompanyName: 'First Priority Escrow',
     });
   });
 

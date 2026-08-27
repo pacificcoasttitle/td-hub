@@ -1,6 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ContactDropdown,
+  ContactDropdownMessage,
+  ContactResultButton,
+  ContactSearchInput,
+  ResolvedContactCard,
+  contactInitial,
+  formatContactAddress,
+  joinIdentity,
+} from './contact-picker';
 
 export interface ClientContact {
   id: number;
@@ -42,14 +52,10 @@ function isEscrowRestricted(orderType?: string): boolean {
 }
 
 /** Street + city for picker display. Empty string when nothing useful — never an em-dash. */
-export function formatClientPickerAddress(
-  client: Pick<ClientContact, 'address' | 'city'> | null | undefined,
-): string {
-  if (!client) return '';
-  const street = client.address?.trim() || '';
-  const city = client.city?.trim() || '';
-  if (street && city) return `${street}, ${city}`;
-  return street || city;
+export const formatClientPickerAddress = formatContactAddress;
+
+function clientIdentity(c: ClientContact): string {
+  return joinIdentity([c.email, c.phone, c.companyName && c.fullName ? c.companyName : null]);
 }
 
 export function ClientSelector({ selected, onSelect, onClear, orderType }: ClientSelectorProps) {
@@ -105,61 +111,26 @@ export function ClientSelector({ selected, onSelect, onClear, orderType }: Clien
   }, []);
 
   if (selected) {
-    const selectedAddress = formatClientPickerAddress(selected);
     return (
-      <div className="bg-[#1B2A4A]/5 border border-[#1B2A4A]/15 rounded-lg px-4 py-3">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="h-9 w-9 rounded-full bg-[#1B2A4A] flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-sm font-bold">
-                {(selected.fullName ?? selected.companyName ?? '?').charAt(0).toUpperCase()}
-              </span>
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-[#1A1A2E] truncate">
-                {selected.fullName ?? selected.companyName ?? 'Unknown'}
-              </p>
-              <p className="text-xs text-[#6B7280] truncate">
-                {[selected.email, selected.phone, selected.companyName && selected.fullName ? selected.companyName : null]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
-              {selectedAddress ? (
-                <p className="text-xs text-[#6B7280] truncate mt-0.5">{selectedAddress}</p>
-              ) : null}
-            </div>
-          </div>
-          <button
-            onClick={onClear}
-            className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-[#6B7280] border border-gray-200 rounded-lg hover:bg-white hover:text-[#1A1A2E] transition-colors"
-          >
-            Change
-          </button>
-        </div>
-      </div>
+      <ResolvedContactCard
+        initial={contactInitial(selected.fullName, selected.companyName)}
+        title={selected.fullName ?? selected.companyName ?? 'Unknown'}
+        detail={clientIdentity(selected)}
+        subDetail={formatContactAddress(selected)}
+        onAction={onClear}
+      />
     );
   }
 
   return (
     <div ref={containerRef} className="relative">
-      <div className="relative">
-        <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6B7280]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-        </svg>
-        {searching && (
-          <svg className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#F26B2B] animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-        )}
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => handleInput(e.target.value)}
-          onFocus={() => { if (query.length >= 2) setOpen(true); }}
-          placeholder="Search client by name or email…"
-          className="w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-lg text-sm text-[#1A1A2E] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#F26B2B]/40 focus:border-[#F26B2B] bg-white"
-        />
-      </div>
+      <ContactSearchInput
+        value={query}
+        onChange={handleInput}
+        onFocus={() => { if (query.length >= 2) setOpen(true); }}
+        placeholder="Search client by name or email…"
+        searching={searching}
+      />
 
       {clearedMsg && (
         <div className="mt-1.5 flex items-center gap-1.5 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
@@ -172,54 +143,31 @@ export function ClientSelector({ selected, onSelect, onClear, orderType }: Clien
       )}
 
       {open && query.length >= 2 && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+        <ContactDropdown>
           {searching ? (
-            <div className="px-4 py-4 text-sm text-[#6B7280] text-center">Searching…</div>
+            <ContactDropdownMessage>Searching…</ContactDropdownMessage>
           ) : results.length > 0 ? (
             results.map((c) => {
               const disabled = restricted && isEscrowClient(c);
-              const addressLine = formatClientPickerAddress(c);
               return (
-                <button
+                <ContactResultButton
                   key={c.id}
-                  onClick={() => !disabled && handleSelect(c)}
+                  initial={contactInitial(c.fullName, c.companyName)}
+                  title={c.fullName ?? c.companyName ?? 'Unknown'}
+                  detail={disabled ? `Not available for ${orderType} orders` : clientIdentity(c)}
+                  subDetail={formatContactAddress(c)}
+                  badge={c.role ? c.role.replace(/_/g, ' ') : undefined}
                   disabled={disabled}
-                  className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-0 transition-colors ${disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'hover:bg-gray-50'}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 ${disabled ? 'bg-gray-200' : 'bg-[#1B2A4A]/10'}`}>
-                      <span className={`text-xs font-bold ${disabled ? 'text-gray-400' : 'text-[#1B2A4A]'}`}>
-                        {(c.fullName ?? c.companyName ?? '?').charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-sm font-medium truncate ${disabled ? 'text-gray-400' : 'text-[#1A1A2E]'}`}>
-                        {c.fullName ?? c.companyName ?? 'Unknown'}
-                      </p>
-                      <p className="text-xs text-[#6B7280] truncate">
-                        {disabled
-                          ? `Not available for ${orderType} orders`
-                          : [c.email, c.phone, c.companyName && c.fullName ? c.companyName : null].filter(Boolean).join(' · ')}
-                      </p>
-                      {!disabled && addressLine ? (
-                        <p className="text-xs text-[#6B7280] truncate mt-0.5">{addressLine}</p>
-                      ) : null}
-                    </div>
-                    {c.role && (
-                      <span className={`flex-shrink-0 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded ${disabled ? 'bg-red-50 text-red-400' : 'bg-gray-100 text-[#6B7280]'}`}>
-                        {c.role.replace(/_/g, ' ')}
-                      </span>
-                    )}
-                  </div>
-                </button>
+                  onClick={() => handleSelect(c)}
+                />
               );
             })
           ) : (
-            <div className="px-4 py-4 text-sm text-[#6B7280] text-center">
+            <ContactDropdownMessage>
               No clients found for &ldquo;{query}&rdquo;
-            </div>
+            </ContactDropdownMessage>
           )}
-        </div>
+        </ContactDropdown>
       )}
     </div>
   );

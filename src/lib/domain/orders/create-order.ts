@@ -28,10 +28,10 @@ const contactSchema = z.object({
   phone: z.string().optional(),
   companyName: z.string().optional(),
   /**
-   * The contacts row behind a typeahead pick. Optional because free text is the
-   * other half of this form, not an error — a party typed by hand simply has no
-   * contact to link. Never trusted as given: it is looked up with the officer
-   * ids and only a row that came back is written.
+   * The contacts row behind a typeahead pick. Optional because a company pick
+   * is the other half of this form, not an error — a company has a lookup code
+   * but no contact row to link. Never trusted as given: it is looked up with
+   * the officer ids and only a row that came back is written.
    */
   contactId: z.number().int().positive().optional(),
 });

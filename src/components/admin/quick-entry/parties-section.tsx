@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { partyHasInput } from '@/lib/domain/orders/party-contact';
-import { ContactFields } from './contact-fields';
+import { PartySelector } from './party-selector';
 import { SECTION, SH, FL, IN, SEL, EC } from './types';
 import type { QuickEntryState } from './use-quick-entry';
 
@@ -128,27 +128,27 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
 
       {/* Buyer's Agent */}
       <Expand open={show.buyerAgent && vis.buyerAgent}>
-        <ContactFields c={s.buyerAgent} set={s.setBuyerAgent} searchRole="buyer_agent" label="Buyer's Agent" />
+        <PartySelector c={s.buyerAgent} set={s.setBuyerAgent} searchRole="buyer_agent" label="Buyer's Agent" />
       </Expand>
 
       {/* Listing Agent */}
       <Expand open={show.listingAgent && vis.listingAgent}>
-        <ContactFields c={s.listingAgent} set={s.setListingAgent} searchRole="listing_agent" label="Listing Agent" />
+        <PartySelector c={s.listingAgent} set={s.setListingAgent} searchRole="listing_agent" label="Listing Agent" />
       </Expand>
 
       {/* Lender */}
       <Expand open={show.lender && vis.lender}>
-        <ContactFields c={s.lender} set={s.setLender} companyFirst searchRole="lender" label="Lender" />
+        <PartySelector c={s.lender} set={s.setLender} includeCompanies searchRole="lender" label="Lender" />
       </Expand>
 
       {/* Mortgage Broker */}
       <Expand open={show.mortgageBroker && vis.mortgageBroker}>
-        <ContactFields c={s.mortgageBroker} set={s.setMortgageBroker} searchRole="mortgage_broker" label="Mortgage Broker" />
+        <PartySelector c={s.mortgageBroker} set={s.setMortgageBroker} searchRole="mortgage_broker" label="Mortgage Broker" />
       </Expand>
 
       {/* Escrow Company (external — Title Only / Sub Escrow) */}
       <Expand open={show.escrowCompany && vis.escrowCompany}>
-        <ContactFields c={s.escrow} set={s.setEscrow} companyFirst searchRole="escrow" label="Escrow Company" />
+        <PartySelector c={s.escrow} set={s.setEscrow} includeCompanies searchRole="escrow" label="Escrow Company" />
       </Expand>
 
       {/* Escrow Officer (internal PCT — Title & Escrow / Escrow Only) */}
@@ -188,7 +188,7 @@ function Chk({ label, checked, onChange }: { label: string; checked: boolean; on
 function Expand({ open, children }: { open: boolean; children: React.ReactNode }) {
   if (!open) return null;
   return (
-    <div className="pl-6 border-l-2 border-gray-200 mt-2 mb-4 relative z-10">
+    <div className="pl-3 sm:pl-6 border-l-2 border-gray-200 mt-2 mb-4 relative z-10">
       {children}
     </div>
   );

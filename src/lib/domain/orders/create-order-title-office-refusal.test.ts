@@ -107,7 +107,7 @@ describe('createAndSendToSoftPro title-office refusals', () => {
       throw new FakePayloadError('Title officer Rachel Barcena has no office code');
     });
 
-    const result = await createAndSendToSoftPro(input);
+    const result = await createAndSendToSoftPro(input, 'manual_entry');
 
     expect(result).toEqual({
       success: false,
@@ -121,7 +121,7 @@ describe('createAndSendToSoftPro title-office refusals', () => {
       throw new FakePayloadError('Not sending this order: "PRV" is not a title office.');
     });
 
-    const result = await createAndSendToSoftPro(input);
+    const result = await createAndSendToSoftPro(input, 'manual_entry');
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('Not sending this order: "PRV" is not a title office.');
@@ -137,13 +137,13 @@ describe('createAndSendToSoftPro title-office refusals', () => {
       return { success: true, data: { orderNumber: '20012345-OCT' } };
     });
 
-    await createAndSendToSoftPro(input);
+    await createAndSendToSoftPro(input, 'manual_entry');
 
     expect(callOrder).toEqual(['assert', 'send']);
   });
 
   it('lets unrelated failures keep failing loudly rather than swallowing them', async () => {
     buildPayloadMock.mockImplementation(() => { throw new TypeError('boom'); });
-    await expect(createAndSendToSoftPro(input)).rejects.toThrow('boom');
+    await expect(createAndSendToSoftPro(input, 'manual_entry')).rejects.toThrow('boom');
   });
 });

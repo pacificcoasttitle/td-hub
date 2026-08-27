@@ -42,10 +42,12 @@ export const DEFAULT_PAGE_SIZE = 25;
 const SOURCE_LABELS: Record<string, string> = {
   manual_entry: 'TD Hub',
   softpro_sync: 'SoftPro',
+  web_form: 'Web Form',
 };
 const SOURCE_STYLES: Record<string, string> = {
   manual_entry: 'bg-orange-100 text-orange-800',
   softpro_sync: 'bg-blue-100 text-blue-800',
+  web_form: 'bg-emerald-100 text-emerald-800',
 };
 
 function fmtSource(s: string) {

@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body: unknown = await req.json();
-    const result = await createAndSendToSoftPro(body, session.id);
+    const result = await createAndSendToSoftPro(body, 'manual_entry', session.id);
 
     if (!result.success) {
       return NextResponse.json({ error: sanitizeCreateOrderError(result.error) }, { status: 422 });

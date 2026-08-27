@@ -79,4 +79,28 @@ describe('clientCreateOrder OC-1 pass-through', () => {
     });
     expect((payload.property as { address: string }).address).toBe('123 Main');
   });
+
+  // The client wizard and the operator form share createAndSendToSoftPro, which
+  // used to hardcode 'manual_entry'. The origin is now positional argument two,
+  // and this is the only place the client route can declare it.
+  it('declares web_form as the origin so the order is not labelled operator-entered', async () => {
+    await clientCreateOrder(
+      {
+        property: { street: '123 Main', city: 'Glendale', state: 'CA', zip: '91203' },
+        seller: { primary: { firstName: 'A', lastName: 'B' }, hasSecondary: false, isOrg: false },
+        transaction: {
+          transactionType: 'Purchase',
+          productType: 'Residential Resale',
+          orderType: 'title_only',
+          primaryBorrower: { firstName: 'C', lastName: 'D' },
+          hasSecondaryBorrower: false,
+          borrowerIsOrg: false,
+        },
+        parties: { showAgents: false, showLender: false, showEscrow: false },
+      },
+      { id: 'user-1', email: 'c@example.com', contactId: null } as never,
+    );
+
+    expect(createAndSendMock.mock.calls[0]?.[1]).toBe('web_form');
+  });
 });

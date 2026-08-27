@@ -139,7 +139,7 @@ describe('createAndSendToSoftPro SiteX pass-through + session link', () => {
         fips: '06037',
       },
       titlePointSessionId: 'tp_api_id_123',
-    });
+    }, 'manual_entry');
 
     expect(result.success).toBe(true);
     expect(propertyLookupMock).not.toHaveBeenCalled();
@@ -176,7 +176,7 @@ describe('createAndSendToSoftPro SiteX pass-through + session link', () => {
       },
     });
 
-    await createAndSendToSoftPro(basePayload);
+    await createAndSendToSoftPro(basePayload, 'manual_entry');
 
     expect(propertyLookupMock).toHaveBeenCalledTimes(1);
     expect(autoTriggerMock).toHaveBeenCalled();

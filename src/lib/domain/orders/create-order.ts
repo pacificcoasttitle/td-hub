@@ -105,6 +105,17 @@ export const createOrderInputSchema = z.object({
 
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>;
 
+/**
+ * Which route opened the order, written verbatim to `orders.source`.
+ *
+ * Required rather than defaulted: this function hardcoded 'manual_entry', so
+ * the client wizard's orders were indistinguishable from an operator's and
+ * 'web_form' had zero rows. A default would let a fourth caller inherit the
+ * operator label the same silent way. `softpro_sync` is deliberately absent —
+ * the sync job writes its own rows via upsertSoftProOrder.
+ */
+export type OrderOrigin = 'manual_entry' | 'web_form';
+
 export interface CreateOrderResult {
   success: boolean;
   orderId?: number;
@@ -116,7 +127,7 @@ const SOFTPRO_CONFIG_ERROR_MESSAGE = 'Order could not be sent to SoftPro — ser
 
 // ─── Main Entry Point ───────────────────────────────────────────────────────
 
-export async function createAndSendToSoftPro(raw: unknown, userId?: string): Promise<CreateOrderResult> {
+export async function createAndSendToSoftPro(raw: unknown, origin: OrderOrigin, userId?: string): Promise<CreateOrderResult> {
   const parsed = createOrderInputSchema.safeParse(raw);
   if (!parsed.success) {
     return { success: false, error: `Validation failed: ${parsed.error.message}` };
@@ -205,7 +216,7 @@ export async function createAndSendToSoftPro(raw: unknown, userId?: string): Pro
 
   const fileNumber = spResult.data.orderNumber;
 
-  const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county, fips }, resolved, userId, underwriterId);
+  const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county, fips }, resolved, origin, userId, underwriterId);
 
   if (input.titlePointSessionId) {
     try {
@@ -253,6 +264,7 @@ async function createLocalRecords(
   sitex: SiteXPropertyData | null,
   enriched: { apn: string; legal: string; county: string; fips: string | null },
   resolved: ResolvedContacts,
+  origin: OrderOrigin,
   userId?: string,
   underwriterId?: number | null,
 ): Promise<{ orderId: number }> {
@@ -270,7 +282,7 @@ async function createLocalRecords(
     loanNumber: input.transaction.loanNumber || null,
     escrowNumber: input.transaction.escrowNumber || null,
     openedAt: new Date(),
-    source: 'manual_entry',
+    source: origin,
     isImported: false,
     softproLastSyncedAt: new Date(),
     createdBy: userId ?? null,

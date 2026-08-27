@@ -92,6 +92,53 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     type: 'boolean',
     defaultValue: 'false',
   },
+  // Abuse limits for the UNAUTHENTICATED party wizard page. Windows are fixed
+  // in party-wizard-abuse.ts (10 minutes for volume, 60 for breadth); only the
+  // counts are tunable here. They start as reasoned estimates rather than
+  // measured values because the feature has never sent, so the first real week
+  // of traffic is expected to move them — which is why they are settings.
+  // A value below 1 is ignored and the compiled-in default is used, so a
+  // fat-fingered 0 cannot black out the page.
+  {
+    key: 'party_wizard_get_limit_per_ip',
+    label: 'Party Wizard Page Loads Per IP (10 min)',
+    description: 'Maximum party wizard page loads one IP address may make in 10 minutes using valid links. A real recipient opening a forwarded link, reloading while typing, and coming back on a phone uses well under 10; an office behind one NAT with several live links might reach 30. Above this the page shows a calm "try again shortly" card. Default 40.',
+    category: 'Notifications',
+    type: 'number',
+    defaultValue: '40',
+  },
+  {
+    key: 'party_wizard_post_limit_per_ip',
+    label: 'Party Wizard Submissions Per IP (10 min)',
+    description: 'Maximum party wizard form submissions one IP address may make in 10 minutes. A legitimate party submits once, or twice to fix a typo. Sits just above the existing per-link cap of 5 so it only bites when one host submits across several different links. Default 6.',
+    category: 'Notifications',
+    type: 'number',
+    defaultValue: '6',
+  },
+  {
+    key: 'party_wizard_invalid_limit_per_ip',
+    label: 'Party Wizard Invalid Links Per IP (60 min)',
+    description: 'Maximum party wizard links with a bad signature one IP address may present in 60 minutes. Tokens are HMAC-signed, so a bad signature means the link was truncated in the forward or is being guessed. Tripping this blocks that IP from ALL party wizard traffic for the hour, valid links included — this is the strongest abuse signal available and is acted on hardest. Keep it low. Default 6.',
+    category: 'Notifications',
+    type: 'number',
+    defaultValue: '6',
+  },
+  {
+    key: 'party_wizard_distinct_tokens_per_ip',
+    label: 'Party Wizard Distinct Links Per IP (60 min)',
+    description: 'Maximum DIFFERENT party wizard links one IP address may open in 60 minutes. Catches the case the volume limits cannot: a compromised mailbox holding many real links, opened slowly. Honest breadth is 1, or about 3 for an office handling several files at once. Reloading the same link does not count again. Default 10.',
+    category: 'Notifications',
+    type: 'number',
+    defaultValue: '10',
+  },
+  {
+    key: 'party_wizard_invite_max_per_run',
+    label: 'Party Wizard Invite — Max Emails Per Run',
+    description: 'Total ceiling on how many invite emails a single run may send, on top of the permanent per-recipient cap of 2 and the one-ask-per-property rule. Set to 5 for the first pilot so the first real sends are a handful of readable emails rather than a backlog cleared in one morning. Orders held back by this ceiling are reported as "Held — run cap" in the dry run and stay eligible on the next run; nothing about being held marks them as invited. Raise it once the first sends are confirmed to land and get forwarded. 0 stops sending without touching the master switch.',
+    category: 'Notifications',
+    type: 'number',
+    defaultValue: '5',
+  },
   {
     key: 'prelim_summary_shut_off',
     label: 'Prelim Summary Shut Off',

@@ -14,6 +14,7 @@ type Outcome =
   | 'skipped_existing_link'
   | 'skipped_duplicate_property'
   | 'skipped_recipient_cap'
+  | 'skipped_run_cap'
   | 'no_escrow_officer'
   | 'officer_no_email';
 
@@ -49,6 +50,8 @@ interface DryRunResult {
   scanned: number;
   reachablePct: number;
   enabled: boolean;
+  /** Total emails this run may send. Absent on an older payload. */
+  runCap?: number;
   report?: ReportRow[];
   sampleEmail?: SampleEmail;
   reportNote?: string;
@@ -59,6 +62,7 @@ const OUTCOME_LABEL: Record<Outcome, string> = {
   skipped_existing_link: 'Skipped — live link',
   skipped_duplicate_property: 'Skipped — same property',
   skipped_recipient_cap: 'Held — recipient cap',
+  skipped_run_cap: 'Held — run cap',
   no_escrow_officer: 'No escrow officer',
   officer_no_email: 'Officer has no email',
 };
@@ -68,6 +72,7 @@ const OUTCOME_CLASS: Record<Outcome, string> = {
   skipped_existing_link: 'bg-gray-50 text-gray-600 border-gray-200',
   skipped_duplicate_property: 'bg-gray-50 text-gray-600 border-gray-200',
   skipped_recipient_cap: 'bg-blue-50 text-blue-700 border-blue-200',
+  skipped_run_cap: 'bg-blue-50 text-blue-700 border-blue-200',
   no_escrow_officer: 'bg-amber-50 text-amber-700 border-amber-200',
   officer_no_email: 'bg-amber-50 text-amber-700 border-amber-200',
 };
@@ -96,7 +101,8 @@ export function PartyInviteDryRun() {
 
   const rows = result?.report ?? [];
   const wouldSend = rows.filter(r => r.outcome === 'would_send').length;
-  const held = rows.filter(r => r.outcome === 'skipped_recipient_cap').length;
+  const heldRecipientCap = rows.filter(r => r.outcome === 'skipped_recipient_cap').length;
+  const heldRunCap = rows.filter(r => r.outcome === 'skipped_run_cap').length;
   const templateErrors = rows.filter(r => r.templateError).length;
 
   return (
@@ -133,10 +139,18 @@ export function PartyInviteDryRun() {
             </span>
             <span className="text-gray-700">
               Would send <strong className="tabular-nums text-green-700">{wouldSend}</strong>
+              {typeof result.runCap === 'number' && (
+                <span className="text-gray-500"> of {result.runCap} allowed this run</span>
+              )}
             </span>
-            {held > 0 && (
+            {heldRunCap > 0 && (
               <span className="text-gray-700">
-                Held for next run <strong className="tabular-nums">{held}</strong>
+                Held by run cap <strong className="tabular-nums">{heldRunCap}</strong>
+              </span>
+            )}
+            {heldRecipientCap > 0 && (
+              <span className="text-gray-700">
+                Held by recipient cap <strong className="tabular-nums">{heldRecipientCap}</strong>
               </span>
             )}
             <span className="text-gray-700">
@@ -205,6 +219,14 @@ export function PartyInviteDryRun() {
                         {r.outcome === 'skipped_duplicate_property' && (
                           <span className="block text-xs text-gray-500 mt-0.5">
                             {r.duplicateOf ? `asked on ${r.duplicateOf}` : 'asked on an earlier run'}
+                          </span>
+                        )}
+                        {/* A held row is not a rejected row: nothing is minted
+                            and nothing is logged, so it is a candidate again
+                            tomorrow. Say so where the operator reads it. */}
+                        {(r.outcome === 'skipped_run_cap' || r.outcome === 'skipped_recipient_cap') && (
+                          <span className="block text-xs text-gray-500 mt-0.5">
+                            eligible again next run
                           </span>
                         )}
                       </td>

@@ -8,6 +8,10 @@ const existingPropertyRows: Array<{ id: number }> = [];
 
 vi.mock('drizzle-orm', () => ({
   eq: (field: unknown, value: unknown) => ({ op: 'eq', field, value }),
+  or: (...parts: unknown[]) => ({ op: 'or', parts }),
+  // internalOfficerFilter and the officer loaders build fragments with the
+  // template tag; nothing here executes them, they only have to be values.
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ op: 'sql', strings, values }),
 }));
 
 vi.mock('@/lib/integrations/softpro/types', () => ({
@@ -41,7 +45,10 @@ vi.mock('@/lib/db/schema', () => ({
     isSalesRep: 'contacts.is_sales_rep',
     isTitleOfficer: 'contacts.is_title_officer',
     isEscrowOfficer: 'contacts.is_escrow_officer',
+    roles: 'contacts.roles',
+    officeLookupCode: 'contacts.office_lookup_code',
   },
+  profiles: { __table: 'profiles', contactId: 'profiles.contact_id' },
 }));
 
 vi.mock('@/lib/db/client', () => ({

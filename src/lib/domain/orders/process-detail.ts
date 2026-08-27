@@ -1,6 +1,7 @@
 import { db } from '@/lib/db/client';
 import { orders, orderProperties, orderStatusHistory, contacts } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, or, sql } from 'drizzle-orm';
+import { internalOfficerFilter } from '@/lib/domain/contacts/filters';
 import { parseSoftProDate } from '@/lib/integrations/softpro/types';
 import type { SoftProOrderDetailItem, SoftProResolvedPerson } from '@/lib/integrations/softpro/types';
 import {
@@ -25,6 +26,15 @@ export interface ContactRecord {
   sourceId: string | null;
   email: string | null;
   phone: string | null;
+  /**
+   * This row is SoftPro's own officer-feed row for a PCT employee, as
+   * internalOfficerFilter defines one — a `PCT\user` code and a branch office
+   * code on the same row.
+   *
+   * Required, not optional, so a loader cannot forget to say. `false` is a
+   * claim ("this is not an officer-feed row"), not an absence.
+   */
+  isInternalOfficerRow: boolean;
 }
 
 // ─── Officer loaders ─────────────────────────────────────────────────────────
@@ -41,16 +51,54 @@ const officerColumns = {
   phone: contacts.phone,
 };
 
+/** Loaders that have no officer-feed row to distinguish still have to say so. */
+const NOT_AN_OFFICER_ROW = sql<boolean>`false`;
+
 export async function loadSalesReps(): Promise<ContactRecord[]> {
-  return db.select(officerColumns).from(contacts).where(eq(contacts.isSalesRep, true));
+  return db
+    .select({ ...officerColumns, isInternalOfficerRow: NOT_AN_OFFICER_ROW })
+    .from(contacts)
+    .where(eq(contacts.isSalesRep, true));
 }
 
 export async function loadTitleOfficers(): Promise<ContactRecord[]> {
-  return db.select(officerColumns).from(contacts).where(eq(contacts.isTitleOfficer, true));
+  return db
+    .select({ ...officerColumns, isInternalOfficerRow: NOT_AN_OFFICER_ROW })
+    .from(contacts)
+    .where(eq(contacts.isTitleOfficer, true));
 }
 
+/**
+ * Candidates for the INBOUND escrow-officer resolver — every contact SoftPro
+ * has ever named as an escrow officer, plus the officer-feed row for each PCT
+ * employee, flagged so the resolvers can prefer it.
+ *
+ * Two separate facts are being combined, and the union matters as much as the
+ * flag:
+ *
+ * `is_escrow_officer` is set by reconcileEscrowOfficerFlagsFromOrders from past
+ * order assignments, so it marks 725 contacts, most of them outside escrow
+ * officers at other firms — Paul Sepulveda, Nestor Reyes, Marjan Rassibi. They
+ * have no `PCT\` code and no office code and they are the majority of what
+ * arrives. They must stay resolvable: narrowing this query to
+ * internalOfficerFilter alone was measured against every officer ever assigned
+ * and would have stopped resolving 719 of them across 3,141 orders, writing
+ * NULL escrow officers onto inbound orders at nine times the size of the bug
+ * being fixed.
+ *
+ * `internalOfficerFilter` selects the six PCT escrow officers as SoftPro's own
+ * officer feed defines them. Four of those six — Ballesteros (12), Gomez (14),
+ * Casco (15), Vidaca (16) — have `is_escrow_officer = false`, because every
+ * order they were ever assigned resolved to their address-book twin instead, so
+ * the reconciler flagged the twin and never them. Without the union arm they
+ * are not candidates at all and no ordering could reach them.
+ */
 export async function loadEscrowOfficers(): Promise<ContactRecord[]> {
-  return db.select(officerColumns).from(contacts).where(eq(contacts.isEscrowOfficer, true));
+  const officerFeedRow = internalOfficerFilter('escrow_officer');
+  return db
+    .select({ ...officerColumns, isInternalOfficerRow: sql<boolean>`${officerFeedRow}` })
+    .from(contacts)
+    .where(or(eq(contacts.isEscrowOfficer, true), officerFeedRow));
 }
 
 // ─── Resolvers ───────────────────────────────────────────────────────────────
@@ -65,37 +113,75 @@ function constructedName(c: ContactRecord): string {
   return parts.join(' ').trim().toLowerCase();
 }
 
+// ─── Choosing between rows that match equally well ───────────────────────────
+//
+// Anna Ballesteros is two `contacts` rows — 12, the SoftPro officer-feed row
+// carrying PRV and `PCT\aballesteros`, and 17165, the address-book row. Both
+// answer to the same name, and both carry `PCT\aballesteros` because
+// refreshOfficerContact below stamps the feed's lookup code onto whichever row
+// resolved. So every tier of every resolver can match both, and something has
+// to decide.
+//
+// That decision is a comparator applied by reduction, deliberately, rather than
+// an ORDER BY on the loader or a `limit 1`. A clause is only as stable as the
+// next person to edit it: the ambiguous unordered `limit 1` fixed in
+// syncEscrowOfficers (PR #55) is exactly the shape being avoided here, and
+// reintroducing it one function over would be a poor joke. A reduction over a
+// total order cannot be broken by reordering the query, the loop, or the rows:
+// every permutation of the same candidate set yields the same answer, which is
+// what `resolveEscrowOfficerId is independent of candidate order` pins.
+
+/**
+ * The better of two equally-matching rows: the officer-feed row wins, and
+ * otherwise the lower id does. Total, antisymmetric, and order-independent.
+ */
+function preferredOf(a: ContactRecord, b: ContactRecord): ContactRecord {
+  if (a.isInternalOfficerRow !== b.isInternalOfficerRow) {
+    return a.isInternalOfficerRow ? a : b;
+  }
+  return a.id <= b.id ? a : b;
+}
+
+/** The preferred id among every candidate satisfying `matches`, or null. */
+function bestMatchId(
+  officers: ContactRecord[],
+  matches: (c: ContactRecord) => boolean,
+): number | null {
+  let best: ContactRecord | null = null;
+  for (const o of officers) {
+    if (!matches(o)) continue;
+    best = best === null ? o : preferredOf(best, o);
+  }
+  return best?.id ?? null;
+}
+
 export function resolveSalesRepId(marketingRep: string | null | undefined, reps: ContactRecord[]): number | null {
   if (!marketingRep || !marketingRep.trim()) return null;
   const target = normalizeName(marketingRep);
-  for (const rep of reps) if (constructedName(rep) === target) return rep.id;
-  for (const rep of reps) if (normalizeName(rep.fullName) === target) return rep.id;
-  return null;
+  return bestMatchId(reps, (r) => constructedName(r) === target)
+    ?? bestMatchId(reps, (r) => normalizeName(r.fullName) === target);
 }
 
 export function resolveTitleOfficerId(titleOfficer: string | null | undefined, officers: ContactRecord[]): number | null {
   if (!titleOfficer || !titleOfficer.trim()) return null;
   const target = normalizeName(titleOfficer);
-  for (const o of officers) if (normalizeName(o.officerName) === target) return o.id;
-  for (const o of officers) if (constructedName(o) === target) return o.id;
-  return null;
+  return bestMatchId(officers, (o) => normalizeName(o.officerName) === target)
+    ?? bestMatchId(officers, (o) => constructedName(o) === target);
 }
 
-function resolveOfficerIdByLookupCode(lookupCode: string | null | undefined, officers: ContactRecord[]): number | null {
+export function resolveOfficerIdByLookupCode(lookupCode: string | null | undefined, officers: ContactRecord[]): number | null {
   if (!lookupCode || !lookupCode.trim()) return null;
   const target = lookupCode.trim().toLowerCase();
-  for (const o of officers) if (o.softproLookupCode?.trim().toLowerCase() === target) return o.id;
-  for (const o of officers) if (o.sourceId?.trim().toLowerCase() === target) return o.id;
-  return null;
+  return bestMatchId(officers, (o) => o.softproLookupCode?.trim().toLowerCase() === target)
+    ?? bestMatchId(officers, (o) => o.sourceId?.trim().toLowerCase() === target);
 }
 
 export function resolveEscrowOfficerId(escrowOfficer: string | null | undefined, officers: ContactRecord[]): number | null {
   if (!escrowOfficer || !escrowOfficer.trim()) return null;
   const target = normalizeName(escrowOfficer);
-  for (const o of officers) if (normalizeName(o.officerName) === target) return o.id;
-  for (const o of officers) if (normalizeName(o.fullName) === target) return o.id;
-  for (const o of officers) if (constructedName(o) === target) return o.id;
-  return null;
+  return bestMatchId(officers, (o) => normalizeName(o.officerName) === target)
+    ?? bestMatchId(officers, (o) => normalizeName(o.fullName) === target)
+    ?? bestMatchId(officers, (o) => constructedName(o) === target);
 }
 
 // ─── Price parsing ───────────────────────────────────────────────────────────

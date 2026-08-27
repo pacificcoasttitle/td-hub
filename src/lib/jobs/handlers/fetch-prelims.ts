@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { orders, documents, prelimAnalyses } from '@/lib/db/schema';
-import { sql, and, eq, or, isNull, asc } from 'drizzle-orm';
+import { sql, and, eq, or, isNull } from 'drizzle-orm';
 import { getAttachedDocuments } from '@/lib/integrations/softpro';
 import { describeAttachedDocuments } from '@/lib/integrations/softpro/client';
 import { analyzePrelim } from '@/lib/tessa';
@@ -45,10 +45,39 @@ const MAX_TESSA_ATTEMPTS = 5;
  * are stored in S3 and recorded in the documents table.
  */
 export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
-  // Prioritize orders never attempted (lastPrelimFetchAt IS NULL → asc nulls first),
-  // then those whose last attempt is older than 6 hours.
   // Orders attempted within the last 6 hours are skipped to prevent the cron
-  // from re-polling the same unproductive files every 30 minutes.
+  // from re-polling the same unproductive files every cycle.
+  //
+  // ORDERING, both halves of which are load-bearing.
+  //
+  // `nulls first` is written out because Postgres does the opposite by default:
+  // `ORDER BY col ASC` is `NULLS LAST`, so plain `asc()` served never-attempted
+  // orders LAST, behind every previously-attempted order that had aged past the
+  // 6-hour window. The comment here used to claim "asc nulls first" while the
+  // code did the reverse, and the effect was starvation: on 2026-08-27, 48
+  // recycling rows sorted ahead of 118 never-attempted ones against a limit of
+  // 50, so roughly two new orders were examined per cycle. 113 freshly imported
+  // orders sat untouched, and a genuinely new order's prelim queued behind them.
+  //
+  // The secondary sort is what keeps `nulls first` from inverting the problem.
+  // Never-attempted is one undifferentiated group, and a backfill drops hundreds
+  // of rows into it at once; without a tiebreak, today's orders compete with a
+  // 2025 import for the same slots in arbitrary order. Newest-first means live
+  // work is always served before historical, and the backfill drains on
+  // whatever capacity is left.
+  //
+  // `coalesce(opened_at, created_at)` rather than `opened_at` alone because
+  // opened_at is legitimately NULL on first insert — GetOrders carries no open
+  // date and enrich_order_details fills it in later — so ordering on it directly
+  // would push every brand-new order to the back. Falling back to row-creation
+  // time keeps a fresh order at the front during that gap.
+  //
+  // RESIDUAL HOLE: an imported order is also newly created, so between its
+  // insert and its enrichment it looks new by this measure and can still be
+  // served ahead of live work. The window is a few minutes and the prelim
+  // backfill gate makes the outcome harmless, but the durable answer is
+  // provenance recorded at write time rather than inferred from timestamps —
+  // the same conclusion orders.opened_at reached.
   const ordersWithoutPrelims = await db
     .select({ id: orders.id, fileNumber: orders.fileNumber })
     .from(orders)
@@ -60,7 +89,7 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
         sql`${orders.lastPrelimFetchAt} < NOW() - INTERVAL '6 hours'`,
       ),
     ))
-    .orderBy(asc(orders.lastPrelimFetchAt))
+    .orderBy(sql`${orders.lastPrelimFetchAt} asc nulls first, coalesce(${orders.openedAt}, ${orders.createdAt}) desc`)
     .limit(50);
 
   const startTime = Date.now();

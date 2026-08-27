@@ -22,6 +22,11 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
+      # `npm test` carries the RLS drift guard (src/lib/db/rls-lockdown.test.ts):
+      # a table added to the Drizzle schema with no ENABLE ROW LEVEL SECURITY
+      # migration fails here. It needs no credentials, and so cannot verify that
+      # the migration was actually applied — that is `npm run db:verify-rls`,
+      # which needs DATABASE_URL and is run by hand rather than skipped in CI.
       - run: npm test
 
   # scripts/ is excluded from the tsconfig Vercel builds, so a stale audit script

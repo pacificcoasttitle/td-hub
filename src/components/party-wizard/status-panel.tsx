@@ -96,4 +96,18 @@ export const FAILURE_PANEL: Record<LinkFailure, { title: string; body: string }>
     title: 'This form is temporarily unavailable',
     body: 'Something on our end is not responding. Please try again shortly.',
   },
+  /**
+   * Says nothing about the link, on purpose.
+   *
+   * This card is shown for a real link and for a guessed one alike, so any
+   * mention of validity — "your link is fine, but…" — would turn the throttle
+   * into the oracle the throttle exists to close. It also says nothing about
+   * being blocked: the reader is far more likely to be an agent on hotel wifi
+   * sharing an address with a hundred other people than an attacker, and
+   * accusing them is both rude and unhelpful.
+   */
+  throttled: {
+    title: 'Please try again in a few minutes',
+    body: 'We are limiting how often this page can be opened from one network. Nothing is wrong with your link — wait a few minutes and open it again, or reply to the person who sent it and they will take your details directly.',
+  },
 };

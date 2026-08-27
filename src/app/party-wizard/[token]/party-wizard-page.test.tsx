@@ -75,6 +75,11 @@ const RETURNING: ResolveResult = {
 const INACTIVE: ResolveResult = { ok: false, reason: 'inactive', order: context() };
 const INVALID: ResolveResult = { ok: false, reason: 'invalid' };
 const UNSUPPORTED: ResolveResult = { ok: false, reason: 'unsupported', order: context() };
+/**
+ * Rate limited. No `order`, and not by omission — the guard blocks in front of
+ * resolution, so on this path no order has been loaded at all.
+ */
+const THROTTLED: ResolveResult = { ok: false, reason: 'throttled' };
 
 const ALL_STATES: Array<[string, ResolveResult]> = [
   ['fresh form', FRESH],
@@ -82,6 +87,7 @@ const ALL_STATES: Array<[string, ResolveResult]> = [
   ['inactive link', INACTIVE],
   ['invalid link', INVALID],
   ['unsupported role', UNSUPPORTED],
+  ['throttled request', THROTTLED],
 ];
 
 // ─── The constraint that matters most ────────────────────────────────────────
@@ -312,7 +318,7 @@ describe('revoked and expired are indistinguishable', () => {
 
   it('the page has no separate copy to give them, by construction', () => {
     expect(Object.keys(FAILURE_PANEL).sort())
-      .toEqual(['inactive', 'invalid', 'misconfigured', 'unsupported']);
+      .toEqual(['inactive', 'invalid', 'misconfigured', 'throttled', 'unsupported']);
   });
 
   it('both classify to the same state and therefore render byte-identical markup', () => {
@@ -343,6 +349,49 @@ describe('invalid link', () => {
     expect(body).not.toContain('Bonita');
     expect(body).not.toContain('Rose Lucero');
     expect(html).not.toContain('mailto:');
+  });
+});
+
+describe('throttled request', () => {
+  const html = render(THROTTLED);
+  const body = text(html);
+
+  it('reuses the branded status card rather than a fifth visual language', () => {
+    // Same subtree as the invalid state: brand header plus one StatusPanel.
+    expect(body).toContain('PACIFIC COAST TITLE COMPANY');
+    expect(html).toContain('rounded-full border text-lg font-bold');
+    expect(html.match(/<h2/g)).toHaveLength(1);
+  });
+
+  it('is calm, and does not accuse the reader of anything', () => {
+    expect(body).toContain('Please try again in a few minutes');
+    expect(body).not.toMatch(/abuse|blocked|banned|suspicious|denied|forbidden|violation/i);
+    expect(body).not.toMatch(/\berror\b/i);
+  });
+
+  it('says nothing about whether the link was real', () => {
+    // The same card is served for a genuine forwarded link and for a guess, so
+    // any word about validity either way would be the oracle this closes.
+    expect(body).not.toMatch(/\bnot valid\b/i);
+    expect(body).not.toMatch(/\bexpired\b/i);
+    expect(body).not.toMatch(/no longer active/i);
+    expect(body).toContain('Nothing is wrong with your link');
+  });
+
+  it('offers the way out that does not depend on us', () => {
+    expect(body).toContain('reply to the person who sent it');
+  });
+
+  it('names no order, no property and no person, because none was loaded', () => {
+    expect(body).not.toContain('20021227-OCT');
+    expect(body).not.toContain('Bonita');
+    expect(body).not.toContain('Rose Lucero');
+    expect(html).not.toContain('mailto:');
+  });
+
+  it('renders no form, so a throttled caller cannot submit past the block', () => {
+    expect(html).not.toContain('<form');
+    expect(html).not.toContain('<input');
   });
 });
 

@@ -51,6 +51,10 @@ export const VENDORS = [
   { value: 'title_production', label: 'Title Production' },
   { value: 'sitex', label: 'SiteX' },
   { value: 'softpro_webhook', label: 'SoftPro Webhooks' },
+  // Not a vendor — public party wizard traffic, logged here because this table
+  // is also the rate-limit counter (party-wizard-abuse.ts). Filter to it and
+  // switch to Error to see only the requests that were throttled.
+  { value: 'party_wizard', label: 'Party Wizard (public)' },
 ];
 
 export function StatCard({ label, value, loading, color }: { label: string; value?: number | string; loading: boolean; color?: string }) {

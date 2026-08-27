@@ -157,7 +157,39 @@ describe('computeClientMetrics', () => {
       orders: [order(1, 10), order(2, 200)],
     });
     expect(m.recency.daysSinceLastOrder).toBe(10);
-    expect(m.recency.firstOrderAt!.getTime()).toBe(order(2, 200).openedAt.getTime());
+    expect(m.recency.firstOrderAt!.getTime()).toBe(order(2, 200).openedAt!.getTime());
+  });
+
+  it('counts an undated order but never lets it stand in for recency', () => {
+    // The failure this guards: treating a null open date as "now" would advance
+    // lastOrderAt and make a client who has not ordered in 200 days read as
+    // having ordered today - reporting a dormant client as active.
+    const m = computeClientMetrics({
+      clientId: 1, contactId: 10, now: NOW,
+      orders: [
+        order(1, 200),
+        { orderId: 2, openedAt: null, closedAt: null, operationalStatus: 'in_process' },
+      ],
+    });
+
+    expect(m.counts.total).toBe(2);
+    expect(m.counts.open).toBe(1);
+    // Windows and recency see only the dated order.
+    expect(m.counts.thisMonth).toBe(0);
+    expect(m.counts.last90).toBe(0);
+    expect(m.recency.daysSinceLastOrder).toBe(200);
+  });
+
+  it('reports no recency at all when every order is undated', () => {
+    const m = computeClientMetrics({
+      clientId: 1, contactId: 10, now: NOW,
+      orders: [{ orderId: 1, openedAt: null, closedAt: null, operationalStatus: 'in_process' }],
+    });
+
+    expect(m.counts.total).toBe(1);
+    expect(m.recency.lastOrderAt).toBeNull();
+    expect(m.recency.daysSinceLastOrder).toBeNull();
+    expect(m.rate.avgMonthlyOrders).toBeNull();
   });
 
   it('withholds an average below one month of history', () => {

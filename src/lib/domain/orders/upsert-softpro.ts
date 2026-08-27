@@ -65,7 +65,11 @@ export async function upsertFromSoftPro(
         salesPrice: mapped.salesPrice,
         salesRepId,
         titleOfficerId,
-        openedAt: mapped.openedAt ?? new Date(),
+        // GetOrders carries no open date, so this is normally null on first
+        // insert and enrich_order_details fills it from ReceivedDate. Left null
+        // rather than defaulted to now(): a row that claims to have opened today
+        // is indistinguishable from one that did.
+        openedAt: mapped.openedAt,
         completedAt: mapped.completedAt,
         closedAt: mapped.closedAt,
         source: 'softpro_sync',

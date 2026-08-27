@@ -243,7 +243,8 @@ export async function processOrderDetail(
       salesRepId,
       titleOfficerId,
       escrowOfficerId,
-      openedAt: openedAt ?? new Date(),
+      // Null when SoftPro returned no ReceivedDate. Not now() — see the column.
+      openedAt,
       completedAt,
       closedAt,
       source: 'softpro_sync',

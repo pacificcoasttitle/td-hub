@@ -60,7 +60,20 @@ export const orders = pgTable('orders', {
   titleCompanyId: integer('title_company_id').references(() => companies.id),
   underwriterId: integer('underwriter_id').references(() => companies.id),
 
-  openedAt: timestamp('opened_at').notNull().defaultNow(),
+  /**
+   * When the order opened, per SoftPro's ReceivedDate. NULL when the vendor has
+   * not told us.
+   *
+   * Deliberately nullable with no default. It used to be notNull().defaultNow(),
+   * which meant every row the vendor gave no date for silently claimed to have
+   * opened at the moment we happened to write it. That is not "unknown", it is a
+   * false statement, and it propagated: it blinded the prelim backfill gate,
+   * moved rows into the party wizard's 3-7 day eligibility window, and skewed
+   * every latency figure measured from this column. 174 rows carried a
+   * fabricated value before this changed. A null is honest and every reader can
+   * see it.
+   */
+  openedAt: timestamp('opened_at'),
   completedAt: timestamp('completed_at'),
   closedAt: timestamp('closed_at'),
 

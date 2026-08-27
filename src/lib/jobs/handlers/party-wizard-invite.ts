@@ -1,6 +1,7 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/lib/db/client';
-import { contacts, jobs, orderProperties, orders } from '@/lib/db/schema';
+import { contacts, jobs, orderParties, orderProperties, orders } from '@/lib/db/schema';
 import { sendEmail } from '@/lib/integrations/sendgrid/client';
 import { getSetting } from '@/lib/domain/settings/service';
 import { insertNotificationLog } from '@/lib/domain/notifications/dispatch';
@@ -10,6 +11,9 @@ import {
 import { findLiveLink, mintLinkForOrder } from '@/lib/domain/parties/party-wizard-service';
 import { eligibleTransactionTypesFor } from '@/lib/domain/parties/party-wizard-fields';
 import type { PartyRole } from '@/lib/domain/parties/party-wizard-fields';
+import { pickInviteRecipient } from '@/lib/domain/parties/party-wizard-recipient';
+import type { InviteRecipient, InviteRecipientRole } from '@/lib/domain/parties/party-wizard-recipient';
+import type { PartyWizardAudience } from '@/lib/domain/parties/party-wizard-email';
 import {
   ACTIVE_ORDER_STATUSES, statusSqlList, transactionTypeSqlList,
 } from '@/lib/domain/orders/status-map';
@@ -176,9 +180,9 @@ export const PARTY_INVITE_ENABLED_SETTING = 'party_wizard_invite_enabled';
  * rows in the same measurement.
  */
 export interface PartyInviteUnreachable {
-  /** No `escrow_officer_id` on the order. This is ~100% of unreachability. */
+  /** No `escrow_officer_id`, and the escrow_company fallback found nobody either. */
   noEscrowOfficer: number;
-  /** FK present but it resolves to nobody with an address. Currently always 0. */
+  /** FK present but unusable, and the fallback found nobody either. */
   escrowOfficerNoEmail: number;
 }
 
@@ -202,7 +206,14 @@ export interface PartyInviteReportRow {
   /** The address that would actually be emailed, resolved by the live resolver. */
   recipientEmail: string | null;
   recipientName: string | null;
-  recipientRole: 'escrow_officer';
+  /** Which lookup found them — the officer FK, or the escrow_company fallback. */
+  recipientRole: InviteRecipientRole | null;
+  /**
+   * Which copy variant they would receive. The single most important column in
+   * a dry run now: it is what says whether a stranger is about to be sent
+   * colleague copy.
+   */
+  recipientAudience: PartyWizardAudience | null;
   outcome: PartyInviteOutcome;
   /**
    * The file that owns the single ask for this property, when this row was
@@ -222,6 +233,8 @@ export interface PartyInviteSampleEmail {
   fileNumber: string;
   /** The address this exact email would have gone to. */
   to: string;
+  /** Which variant this body is, so a reviewer knows which copy they approved. */
+  audience: PartyWizardAudience;
   subject: string;
   html: string;
   text: string;
@@ -241,6 +254,17 @@ export interface PartyInviteResult {
   unreachable: PartyInviteUnreachable;
   /** Share of candidates we could actually reach. The number to watch. */
   reachablePct: number;
+  /**
+   * Reached only because of the escrow_company fallback. Measures what the
+   * fallback is worth, and is expected to be most of the batch: at the 7-day
+   * window it takes Purchase reachability from 2 of 24 to 24 of 24.
+   */
+  viaEscrowCompanyFallback: number;
+  /**
+   * How the batch splits across the two copy variants. External is the majority
+   * and that is the reviewable fact, not a footnote.
+   */
+  audience: { internal: number; external: number };
   /** Whether sending was permitted on this run. */
   enabled: boolean;
   dryRun: boolean;
@@ -291,6 +315,26 @@ interface CandidateRow {
   escrowOfficerId: number | null;
   escrowOfficerName: string | null;
   escrowOfficerEmail: string | null;
+  /** escrow_company party row — the fallback when the officer FK is absent. */
+  escrowCompanyEmail: string | null;
+  escrowCompanyName: string | null;
+  escrowCompanyCompany: string | null;
+  escrowCompanyContactEmail: string | null;
+  escrowCompanyContactName: string | null;
+}
+
+/** Resolve one candidate's recipient with the shared two-step precedence. */
+function recipientFor(row: CandidateRow): InviteRecipient | null {
+  return pickInviteRecipient({
+    officerId: row.escrowOfficerId,
+    officerName: row.escrowOfficerName,
+    officerEmail: row.escrowOfficerEmail,
+    companyExternalEmail: row.escrowCompanyEmail,
+    companyExternalName: row.escrowCompanyName,
+    companyExternalCompany: row.escrowCompanyCompany,
+    companyContactEmail: row.escrowCompanyContactEmail,
+    companyContactName: row.escrowCompanyContactName,
+  });
 }
 
 /**
@@ -321,6 +365,9 @@ interface CandidateRow {
  * already uses to decide which sibling file carries a shared property.
  */
 async function loadCandidates(limit: number): Promise<CandidateRow[]> {
+  const escrowParty = alias(orderParties, 'escrow_party');
+  const escrowPartyContact = alias(contacts, 'escrow_party_contact');
+
   const rows = await db
     .select({
       orderId: orders.id,
@@ -335,10 +382,20 @@ async function loadCandidates(limit: number): Promise<CandidateRow[]> {
       escrowOfficerId: orders.escrowOfficerId,
       escrowOfficerName: contacts.fullName,
       escrowOfficerEmail: contacts.email,
+      escrowCompanyEmail: escrowParty.externalEmail,
+      escrowCompanyName: escrowParty.externalName,
+      escrowCompanyCompany: escrowParty.externalCompany,
+      escrowCompanyContactEmail: escrowPartyContact.email,
+      escrowCompanyContactName: escrowPartyContact.fullName,
     })
     .from(orders)
     .leftJoin(orderProperties, eq(orderProperties.orderId, orders.id))
     .leftJoin(contacts, eq(contacts.id, orders.escrowOfficerId))
+    .leftJoin(escrowParty, and(
+      eq(escrowParty.orderId, orders.id),
+      eq(escrowParty.role, 'escrow_company'),
+    ))
+    .leftJoin(escrowPartyContact, eq(escrowPartyContact.id, escrowParty.contactId))
     .where(and(
       sql`${orders.operationalStatus} in (${sql.raw(statusSqlList(PARTY_INVITE_STATUSES))})`,
       // Positive list, never a negative test — see PARTY_INVITE_TRANSACTION_TYPES.
@@ -361,7 +418,21 @@ async function loadCandidates(limit: number): Promise<CandidateRow[]> {
     .orderBy(asc(orders.openedAt), asc(orders.id))
     .limit(limit);
 
-  return rows as CandidateRow[];
+  // Production holds exactly one escrow_company party per order (5,880 rows
+  // across 5,880 orders), but nothing in the schema enforces that, and a second
+  // row would turn one order into two candidates — two links minted, two emails
+  // to the same person about the same file. Collapsing here costs one pass and
+  // removes the possibility.
+  return dedupeByOrderId(rows as CandidateRow[]);
+}
+
+function dedupeByOrderId(rows: CandidateRow[]): CandidateRow[] {
+  const seen = new Set<number>();
+  return rows.filter((row) => {
+    if (seen.has(row.orderId)) return false;
+    seen.add(row.orderId);
+    return true;
+  });
 }
 
 function composeAddress(row: CandidateRow): string | null {
@@ -390,7 +461,9 @@ export async function handlePartyWizardInvite(
       scanned: 0, sent: 0, failed: 0, skippedExistingLink: 0,
       skippedDuplicateProperty: 0, skippedRecipientCap: 0,
       unreachable: { noEscrowOfficer: 0, escrowOfficerNoEmail: 0 },
-      reachablePct: 0, enabled: false, dryRun: false, refused: true,
+      reachablePct: 0, viaEscrowCompanyFallback: 0,
+      audience: { internal: 0, external: 0 },
+      enabled: false, dryRun: false, refused: true,
     };
     await recordRun(payload, refusal);
     return refusal;
@@ -407,6 +480,8 @@ export async function handlePartyWizardInvite(
     skippedRecipientCap: 0,
     unreachable: { noEscrowOfficer: 0, escrowOfficerNoEmail: 0 },
     reachablePct: 0,
+    viaEscrowCompanyFallback: 0,
+    audience: { internal: 0, external: 0 },
     enabled,
     dryRun,
   };
@@ -420,17 +495,21 @@ export async function handlePartyWizardInvite(
   const reachableRows: Sendable[] = [];
 
   for (const row of candidates) {
+    // Officer FK first, then the escrow_company party row. Both branches are
+    // tried before an order is called unreachable, so the counters below now
+    // mean "nobody at all", not "no officer FK".
+    const recipient = recipientFor(row);
+
     // Count what we cannot reach, by reason, BEFORE doing any work — an
     // unreachable order must never look like a silent success.
-    if (!row.escrowOfficerId) {
-      result.unreachable.noEscrowOfficer++;
-      outcomes.set(row.orderId, { outcome: 'no_escrow_officer', linkAction: 'none' });
-      continue;
-    }
-    const to = row.escrowOfficerEmail?.trim();
-    if (!to) {
-      result.unreachable.escrowOfficerNoEmail++;
-      outcomes.set(row.orderId, { outcome: 'officer_no_email', linkAction: 'none' });
+    if (!recipient) {
+      if (!row.escrowOfficerId) {
+        result.unreachable.noEscrowOfficer++;
+        outcomes.set(row.orderId, { outcome: 'no_escrow_officer', linkAction: 'none' });
+      } else {
+        result.unreachable.escrowOfficerNoEmail++;
+        outcomes.set(row.orderId, { outcome: 'officer_no_email', linkAction: 'none' });
+      }
       continue;
     }
 
@@ -441,7 +520,7 @@ export async function handlePartyWizardInvite(
       continue;
     }
 
-    reachableRows.push({ row, to });
+    reachableRows.push({ row, to: recipient.email, recipient });
   }
 
   // ── Pass 2: one ask per property, then the per-recipient cap ──
@@ -461,19 +540,28 @@ export async function handlePartyWizardInvite(
   // ── Pass 3: act ──
   const previews = new Map<number, PartyInviteReportRow>();
 
-  for (const { row, to } of plan.sending) {
+  for (const { row, to, recipient } of plan.sending) {
     outcomes.set(row.orderId, { outcome: 'would_send', linkAction: 'would_mint' });
+
+    if (recipient.role === 'escrow_company') result.viaEscrowCompanyFallback++;
+    result.audience[recipient.audience]++;
 
     // A dry run stops here: everything below this line either writes a link row
     // or sends mail. The templates are still rendered against the same input, so
     // a template that throws fails the dry run instead of the first real send.
     if (dryRun) {
-      const preview = renderPreview(row);
+      const preview = renderPreview(row, recipient);
       previews.set(row.orderId, preview.row);
       // Keep the first one whole. One is enough to review the wording, and a
       // hundred full bodies in one response is a payload nobody reads.
       if (!result.sampleEmail && preview.rendered) {
-        result.sampleEmail = { orderId: row.orderId, fileNumber: row.fileNumber, to, ...preview.rendered };
+        result.sampleEmail = {
+          orderId: row.orderId,
+          fileNumber: row.fileNumber,
+          to,
+          audience: recipient.audience,
+          ...preview.rendered,
+        };
       }
       continue;
     }
@@ -484,7 +572,10 @@ export async function handlePartyWizardInvite(
       continue;
     }
 
-    const input = { ...templateInput(row), roleLinks: [{ role: PARTY_INVITE_ROLE, url: minted.url }] };
+    const input = {
+      ...templateInput(row, recipient),
+      roleLinks: [{ role: PARTY_INVITE_ROLE, url: minted.url }],
+    };
 
     const subject = buildPartyWizardSubject(input);
 
@@ -504,8 +595,8 @@ export async function handlePartyWizardInvite(
         orderId: row.orderId,
         channel: 'email',
         recipientEmail: to,
-        recipientName: row.escrowOfficerName ?? undefined,
-        recipientRole: 'escrow_officer',
+        recipientName: recipient.name ?? undefined,
+        recipientRole: recipient.role,
         subject,
         status: ok ? 'sent' : 'failed',
         errorMessage: ok ? undefined : send.error?.message?.slice(0, 500),
@@ -521,7 +612,7 @@ export async function handlePartyWizardInvite(
     result.report = candidates.map((row) => {
       const decided = outcomes.get(row.orderId);
       const built = previews.get(row.orderId)
-        ?? reportRow(row, decided?.outcome ?? 'would_send', decided?.linkAction ?? 'none');
+        ?? reportRow(row, recipientFor(row), decided?.outcome ?? 'would_send', decided?.linkAction ?? 'none');
       if (decided?.duplicateOf !== undefined) built.duplicateOf = decided.duplicateOf;
       return built;
     });
@@ -542,6 +633,8 @@ export async function handlePartyWizardInvite(
     + `skipped_recipient_cap=${result.skippedRecipientCap} `
     + `unreachable_no_officer=${result.unreachable.noEscrowOfficer} `
     + `unreachable_no_email=${result.unreachable.escrowOfficerNoEmail} `
+    + `via_escrow_company=${result.viaEscrowCompanyFallback} `
+    + `internal=${result.audience.internal} external=${result.audience.external} `
     + `reachable=${result.reachablePct}%`,
   );
 
@@ -556,7 +649,9 @@ type LinkAction = PartyInviteReportRow['linkAction'];
 
 export interface Sendable {
   row: CandidateRow;
+  /** `recipient.email`, kept flat because the cap keys on it. */
   to: string;
+  recipient: InviteRecipient;
 }
 
 export interface PartyInvitePlan {
@@ -675,12 +770,14 @@ async function loadInvitedProperties(): Promise<Set<string>> {
 /** Stands in for the URL a real send would carry. Never a working link. */
 const DRY_RUN_LINK_PLACEHOLDER = 'https://example.invalid/party-wizard/DRY-RUN-NO-LINK-MINTED';
 
-function templateInput(row: CandidateRow) {
+function templateInput(row: CandidateRow, recipient: InviteRecipient) {
   return {
     fileNumber: row.fileNumber,
     propertyAddress: composeAddress(row),
     transactionType: row.transactionType,
-    escrowOfficerName: row.escrowOfficerName,
+    recipientName: recipient.name,
+    recipientCompany: recipient.company,
+    audience: recipient.audience,
     openedAt: row.openedAt,
   };
 }
@@ -695,6 +792,7 @@ function usableDate(openedAt: Date | null | undefined): Date | null {
 
 function reportRow(
   row: CandidateRow,
+  recipient: InviteRecipient | null,
   outcome: PartyInviteOutcome,
   linkAction: PartyInviteReportRow['linkAction'],
 ): PartyInviteReportRow {
@@ -706,9 +804,10 @@ function reportRow(
     ageDays: opened ? Math.floor((Date.now() - opened.getTime()) / 86_400_000) : null,
     transactionType: row.transactionType,
     propertyAddress: composeAddress(row),
-    recipientEmail: row.escrowOfficerEmail?.trim() || null,
-    recipientName: row.escrowOfficerName,
-    recipientRole: 'escrow_officer',
+    recipientEmail: recipient?.email ?? null,
+    recipientName: recipient?.name ?? null,
+    recipientRole: recipient?.role ?? null,
+    recipientAudience: recipient?.audience ?? null,
     outcome,
     linkRoles: [PARTY_INVITE_ROLE],
     linkAction,
@@ -722,10 +821,10 @@ interface RenderedPreview {
   rendered: { subject: string; html: string; text: string; linkPlaceholder: string } | null;
 }
 
-function renderPreview(row: CandidateRow): RenderedPreview {
-  const base = reportRow(row, 'would_send', 'would_mint');
+function renderPreview(row: CandidateRow, recipient: InviteRecipient): RenderedPreview {
+  const base = reportRow(row, recipient, 'would_send', 'would_mint');
   const input = {
-    ...templateInput(row),
+    ...templateInput(row, recipient),
     roleLinks: [{ role: PARTY_INVITE_ROLE, url: DRY_RUN_LINK_PLACEHOLDER }],
   };
   try {

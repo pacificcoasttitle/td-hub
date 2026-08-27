@@ -10,9 +10,18 @@ const base = {
   fileNumber: '20020625-OCT',
   propertyAddress: '1358 5th St, La Verne, CA 91750',
   transactionType: 'Purchase',
-  escrowOfficerName: 'Liliana Arias',
+  recipientName: 'Liliana Arias',
+  audience: 'internal' as const,
   openedAt: new Date('2026-08-15T17:00:00Z'),
   roleLinks: [{ role: 'listing_agent' as const, url: URL_A }],
+};
+
+/** Same order, resolved to an outside escrow firm instead of a PCT officer. */
+const external = {
+  ...base,
+  recipientName: 'Dana Ruiz',
+  recipientCompany: 'Corner Escrow, Inc.',
+  audience: 'external' as const,
 };
 
 describe('party wizard invite email', () => {
@@ -29,7 +38,7 @@ describe('party wizard invite email', () => {
   });
 
   it('falls back to a plain greeting when the name is unknown', () => {
-    const html = buildPartyWizardEmail({ ...base, escrowOfficerName: null });
+    const html = buildPartyWizardEmail({ ...base, recipientName: null });
     expect(html).toContain('Hi,');
   });
 
@@ -99,6 +108,106 @@ describe('party wizard invite email', () => {
         expect(body).not.toMatch(/within \d+ (hours|days)/i);
         expect(body).not.toMatch(/by (Monday|Tuesday|Wednesday|Thursday|Friday)/i);
       }
+    });
+  });
+
+  // ─── The external variant ─────────────────────────────────────────────────
+  //
+  // The copy above was written for a PCT escrow officer. Only 18.2% of the
+  // escrow-officer contacts orders point at are on a @pct.com address, and the
+  // escrow_company fallback resolves almost entirely to outside firms. Sending
+  // colleague copy to a stranger reads as a misdirected email, and a
+  // misdirected email does not get forwarded.
+
+  describe('external recipients get copy written for a stranger', () => {
+    it('names PCT in the subject, which the internal subject never does', () => {
+      expect(buildPartyWizardSubject(external)).toBe(
+        'Pacific Coast Title — listing agent details needed on file 20020625-OCT',
+      );
+      expect(buildPartyWizardSubject(base)).not.toContain('Pacific Coast Title');
+    });
+
+    it('introduces PCT and states the relationship to their file, in both bodies', () => {
+      const ask = 'Pacific Coast Title is handling the title work on this file, which you are '
+        + 'holding escrow on. We do not have the listing agent details, so we cannot contact '
+        + 'them directly. If you have them, please forward the secure link below.';
+      expect(buildPartyWizardEmail(external)).toContain(ask);
+      expect(buildPartyWizardText(external)).toContain(ask);
+    });
+
+    it('gives a stranger a way out if the file is not theirs, in both bodies', () => {
+      const out = 'If this file is not one of yours, please disregard this message — no reply '
+        + 'is needed and we will not follow up.';
+      expect(buildPartyWizardEmail(external)).toContain(out);
+      expect(buildPartyWizardText(external)).toContain(out);
+      // A colleague can just open the order; they do not need this.
+      expect(buildPartyWizardEmail(base)).not.toContain('please disregard this message');
+      expect(buildPartyWizardText(base)).not.toContain('please disregard this message');
+    });
+
+    it('names the firm so they can tell which of their files this is', () => {
+      expect(buildPartyWizardEmail(external)).toContain('Corner Escrow, Inc.');
+      expect(buildPartyWizardText(external)).toContain('Escrow held by: Corner Escrow, Inc.');
+    });
+
+    it('says "Pacific Coast Title" where the internal copy says "TD Hub"', () => {
+      expect(buildPartyWizardEmail(base))
+        .toContain('TD Hub will not contact the party');
+      expect(buildPartyWizardEmail(external))
+        .toContain('Pacific Coast Title will not contact the party');
+      expect(buildPartyWizardEmail(external)).not.toContain('TD Hub will not contact');
+    });
+
+    /**
+     * "Action required" is what you say to a colleague. To an outside firm doing
+     * us a favour on a file we have no claim over, it is an instruction we are
+     * not entitled to give.
+     */
+    it('asks rather than instructs', () => {
+      expect(buildPartyWizardEmail(base)).toContain('Action required');
+      expect(buildPartyWizardEmail(external)).not.toContain('Action required');
+      expect(buildPartyWizardEmail(external)).toContain('Request');
+    });
+
+    /**
+     * The consequence line is the one the owner approved and it is true for both
+     * readers: whoever holds escrow is the routing point for anything the
+     * missing party needs. It must not drift per audience.
+     */
+    it('keeps the approved consequence line word for word', () => {
+      const consequence = 'This is the only reminder we send for this file. Until the listing '
+        + 'agent details are on the order we have no way to contact them ourselves, so anything '
+        + 'they need keeps coming back to you.';
+      for (const body of [
+        buildPartyWizardEmail(external), buildPartyWizardText(external),
+        buildPartyWizardEmail(base), buildPartyWizardText(base),
+      ]) {
+        expect(body).toContain(consequence);
+      }
+    });
+
+    it('makes no promise it cannot keep, same as the internal copy', () => {
+      for (const body of [buildPartyWizardEmail(external), buildPartyWizardText(external)]) {
+        expect(body).not.toMatch(/business days/i);
+        expect(body).not.toMatch(/within \d+ (hours|days)/i);
+      }
+    });
+
+    it('still carries the link as a button and a readable URL', () => {
+      const html = buildPartyWizardEmail(external);
+      expect(html).toContain(`href="${URL_A}"`);
+      expect(html.split(URL_A).length - 1).toBeGreaterThanOrEqual(2);
+      expect(buildPartyWizardText(external)).toContain(URL_A);
+    });
+
+    it('omits the firm row when we do not have the company name', () => {
+      const html = buildPartyWizardEmail({ ...external, recipientCompany: null });
+      expect(html).not.toContain('Escrow held by');
+      expect(html).toContain('20020625-OCT');
+    });
+
+    it('keeps the plain-text variant free of markup', () => {
+      expect(buildPartyWizardText(external)).not.toMatch(/<[a-z/]/i);
     });
   });
 

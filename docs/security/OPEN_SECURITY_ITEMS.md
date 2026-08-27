@@ -2,7 +2,9 @@
 
 **Status: documented. Items 1–5 are NOT fixed and no remediation has been
 attempted on them. Item 6 is partly remediated — RLS is enabled on all 42
-`public` tables as of 2026-08-27; its remaining steps are open.**
+`public` tables as of 2026-08-27 (migration `0038`), and the anon/authenticated
+write grants were revoked the same day (migration `0039`); item 6 step 2 and
+item 7 remain open.**
 
 Owner: unassigned
 Opened: 2026-08-25
@@ -179,7 +181,8 @@ anonymous read of real rows from production and one anonymous `DELETE` that
 passed the privilege check.**
 
 Opened: 2026-08-27. Source: Supabase advisor (`rls_disabled_in_public`).
-Step 1 was applied the same day; steps 2 and 4 are open. Per-step status is in
+Step 1 was applied the same day; step 4 followed as `0039`. Step 2 is still
+open. Per-step status is in
 **Required, in order** below, and it is the section to read if you only read one.
 
 **Where this stands.** Migration `0038_enable_rls_remaining_public.sql` is
@@ -403,30 +406,25 @@ Per-table reasoning for what is at stake:
    with a banner rather than skipping** when `DATABASE_URL` is absent. That PR
    was still open when this was written; until it merges, nothing prevents the
    next table landing RLS-off.
-4. **Investigated, being tested, not executed on production.** Revoke the
-   blanket `anon`/`authenticated` DML grants across `public`. RLS is sufficient
-   to deny `SELECT`/`INSERT`/`UPDATE`/`DELETE`, so for those this is defence in
-   depth — but `TRUNCATE` is **not** covered by RLS at all, so for that grant a
-   revoke is the only control, and it is not a grant anybody chose.
+4. **Applied 2026-08-27.** Revoke the blanket `anon`/`authenticated` DML grants
+   across `public`. RLS is sufficient to deny `SELECT`/`INSERT`/`UPDATE`/`DELETE`,
+   so for those this is defence in depth — but `TRUNCATE` is **not** covered by
+   RLS at all, so for that grant a revoke is the only control.
 
-   **The correction that changes what this step means:** a revoke on the 42
-   existing tables would not hold. There are four `ALTER DEFAULT PRIVILEGES`
-   entries on schema `public` — creators `postgres` and `supabase_admin` —
-   granting the same `arwdDxtm` set to `anon`, `authenticated` and `service_role`
-   on **every newly created table**. Revoke on the 42 and the next
-   `CREATE TABLE` re-grants: the identical drift shape as 0032's hand-written
-   list, one layer down. Any revoke has to include
-   `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE …` or it has a shelf life of
-   one migration. Blast radius and Supabase-dependency analysis are in #54; a
-   revoke is currently being tested against a throwaway table. **Nothing has
-   been revoked, and the production change is not authorised.**
+   A revoke on the 42 existing tables alone would not hold. There are
+   `ALTER DEFAULT PRIVILEGES` entries on schema `public` granting the same
+   `arwdDxtm` set to `anon` on every newly created table. Shipped as
+   `0039_revoke_anon_write_grants.sql` and applied to production: table grants
+   plus default privileges for creator role `postgres`. The residual
+   `supabase_admin` default-privileges entry is item 7 — 0039 could not reach it.
 
 ### What was NOT done, on purpose
 
 **This section was written before the follow-up and is corrected here rather
-than annotated.** RLS *was* subsequently enabled — that is step 1, `0038`. Still
-untouched: no policy created, no grant altered, no key rotated, no data read or
-written beyond what is recorded below.
+than annotated.** RLS *was* subsequently enabled — that is step 1, `0038`. Write
+grants were subsequently revoked — that is step 4, `0039`. Still untouched: no
+policy created, no key rotated, no data read or written beyond what is recorded
+below.
 
 **One anonymous write was attempted, under conditions where it could destroy
 nothing.** The `DELETE` recorded above was issued as anon against
@@ -435,15 +433,127 @@ could match, on a table that was empty at the time. It was run because the grant
 tables cannot answer the actual question — whether PostgREST passes a write
 through to the privilege check — and a 200 answered it. No row was deleted.
 
-No `INSERT`, `UPDATE` or `TRUNCATE` was attempted. For those three the grants are
-still reported as *granted*, not as *exercised*; `TRUNCATE`'s unreachability in
-particular is established from PostgREST's 501, the function catalog and
-`rolcanlogin`, not by trying it. `EXPLAIN` was used in place of execution
+No `INSERT`, `UPDATE` or `TRUNCATE` was attempted during the 0038 investigation.
+Those three grants were later revoked by `0039`; `TRUNCATE`'s unreachability
+before that revoke was established from PostgREST's 501, the function catalog
+and `rolcanlogin`, not by trying it. `EXPLAIN` was used in place of execution
 wherever the question was "would this be permitted" rather than "does this
 endpoint pass a write through at all".
 
 No key value is recorded here — only the chunk path where the anon key can be
 found, its format, and the fact that the service-role key is absent from it.
+
+---
+
+## 7. Default privileges owned by `supabase_admin` still re-grant writes to `anon`
+
+**Severity: low, and narrow. Verified first-hand, including the failed attempt to
+fix it.**
+
+Opened: 2026-08-27, while closing item 6 step 4. This is the leftover of that
+work, recorded separately because it needs a different credential rather than
+another migration.
+
+### What was closed
+
+Migration `0039_revoke_anon_write_grants.sql` took `INSERT, UPDATE, DELETE,
+TRUNCATE, REFERENCES, TRIGGER, MAINTAIN` off `anon` and `authenticated` on every
+table in `public`, and revoked the same set from the **default** privileges for
+creator role `postgres` so a new table is not born with them. Measured after
+applying, on a table created for the purpose and then dropped:
+
+```
+before 0039   anon=arwdDxtm/postgres    (a table one second old, nobody granted anything)
+after  0039   anon=r/postgres
+```
+
+The request that migration `0038` recorded as authorised —
+`DELETE /rest/v1/party_submissions?id=eq.-2147483647`, HTTP 200 — now answers
+`HTTP 401 42501 permission denied for table party_submissions`.
+
+### What is left, and why it could not be closed
+
+There are **six** `ALTER DEFAULT PRIVILEGES` entries on schema `public`, not
+four: creators `postgres` and `supabase_admin`, each for tables (`r`), sequences
+(`S`) and functions (`f`). 0039 fixed the `postgres` tables entry. The
+`supabase_admin` tables entry is unchanged and still reads:
+
+```
+supabase_admin  r  {postgres=arwdDxtm/supabase_admin,anon=arwdDxtm/supabase_admin,
+                    authenticated=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin}
+```
+
+`ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin` requires membership in
+`supabase_admin`. Attempted inside a transaction that was then rolled back, as
+the application's own role:
+
+```
+postgres is a member of: anon, authenticated, authenticator, service_role,
+                         pg_monitor, pg_read_all_data, pg_signal_backend,
+                         pg_create_subscription, supabase_privileged_role
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin ... -> permission denied to
+                                                        change default privileges
+```
+
+**Scope of the residual.** That entry applies only to objects created *by*
+`supabase_admin` in `public`. The application creates tables as `postgres`, and
+so does the dashboard — the Management API path behind the SQL and table editors
+runs as `postgres` (measured with `select current_user` through it). So the
+residual bites only when Supabase's own platform tooling creates a table in
+`public`, e.g. an extension install. Narrow, but it is exactly the same failure
+mode as item 6: a control that holds until something creates a table by another
+route.
+
+First step for whoever owns it: ask Supabase support to clear the entry, or
+establish whether any role available to this project can be granted membership
+in `supabase_admin`. Do not paper over it with an event trigger —
+`CREATE EVENT TRIGGER` requires superuser, and `postgres` here is not one
+(`rolsuper = false`).
+
+### Two related entries, reported and deliberately not touched
+
+Neither is authorised work and neither was applied:
+
+- **`public` functions (`f`), both creators** — `EXECUTE` to `anon` on every
+  newly created function in `public`. This is the escalation path that would make
+  the `TRUNCATE` grant reachable in the first place: PostgREST answers the
+  TRUNCATE method with 501 and `anon.rolcanlogin = false`, so the only way to
+  reach it was a `SECURITY DEFINER` function in an exposed schema. 0039 removed
+  the privilege, so the path now leads nowhere — but the default `EXECUTE` grant
+  is still worth removing on its own terms.
+- **`public` and `storage` sequences (`S`)** — `rwU` to `anon` on every new
+  sequence, which is `nextval`/`setval`. Inert without `INSERT`, which is now
+  gone.
+
+### SELECT was deliberately left in place
+
+`anon` and `authenticated` still hold `SELECT` on all 42 tables. RLS with no
+policies already returns zero rows to both, so the grant conveys nothing today —
+`GET /rest/v1/orders` returns `HTTP 200 []`. Revoking it was measured on the
+throwaway table and is **not** disruptive to PostgREST: the OpenAPI document was
+byte-identical at 301,856 bytes, 44 paths, 43 definitions, and anon reads changed
+from `200 []` to `401 42501 permission denied`.
+
+It was left alone because it is the one privilege whose removal changes what an
+outside caller sees on all 42 tables at once, and the Supabase **dashboard UI**
+could not be exercised in that session to confirm the dashboard does not read
+through the anon key — only its Management API path could be, which runs as
+`postgres`. Revoking `SELECT` is the right next step, in daylight, with the
+dashboard open in a browser. It would also make the `postgres` default-privileges
+entry disappear from `pg_default_acl` entirely, since an ACL only persists there
+while it differs from the built-in default.
+
+### Rollback, if any of this ever needs undoing
+
+Executable as `postgres`, and rehearsed against real tables before this item was
+written — applied, reverted, and re-applied, with the catalog checked at each
+step:
+
+```sql
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  GRANT ALL ON TABLES TO anon, authenticated;
+```
 
 ---
 
@@ -481,11 +591,13 @@ the durable half of the fix has been the half that has no owner.
 ## Explicitly out of scope for this document
 
 - No remediation attempted on items 1–5. Item 6's step 1 was applied
-  (migration `0038`); its other steps were not.
+  (migration `0038`) and step 4 was applied (migration `0039`); step 2 and
+  item 7 remain open.
 - No secret values recorded, including in file paths where the path itself
   identifies a credential store.
 - No enumeration or retrieval of any customer document.
 - Item 5 is reported only; treat its severity as unestablished.
 - Item 6 enabled RLS on the five remaining tables and exercised one anonymous
   `DELETE` constructed so that no row could match. Its `INSERT`/`UPDATE`/
-  `TRUNCATE` exposure is still reported from the grant tables, not exercised.
+  `TRUNCATE` grants were later revoked by `0039`; they were reported from the
+  grant tables, not exercised, before that revoke.

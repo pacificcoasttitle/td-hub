@@ -36,6 +36,14 @@ export interface PartyNoteInput {
   submittedAt: Date;
   /** Seller contact supplied alongside, if any. */
   seller?: { name: string | null; email: string | null; phone: string | null } | null;
+  /**
+   * The name we showed them on the form, when they told us it is wrong.
+   *
+   * Worth a line of its own rather than a field somewhere: it is a person who
+   * knows the file telling us the SiteX owner name is not their client, and
+   * that is the only channel we have for that correction.
+   */
+  counterpartDisputed?: string | null;
 }
 
 function line(label: string, value: string | null | undefined): string | null {
@@ -66,6 +74,15 @@ export function buildPartyNote(input: PartyNoteInput): string {
     lines.push(line('  Name', input.seller.name));
     lines.push(line('  Email', input.seller.email));
     lines.push(line('  Phone', input.seller.phone));
+  }
+
+  const disputed = input.counterpartDisputed?.trim();
+  if (disputed) {
+    lines.push(
+      '',
+      'ACTION: the agent says the owner name on file is wrong.',
+      `  We showed them "${disputed}" and they marked it as not their client.`,
+    );
   }
 
   // Only worth stating when it is not the same person, otherwise it is noise.

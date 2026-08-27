@@ -15,8 +15,9 @@ export const runtime = 'nodejs';
 /** One generic message per failure class — never confirm whether an id exists. */
 const FAILURE_MESSAGES: Record<string, { status: number; message: string }> = {
   invalid: { status: 404, message: 'This link is not valid.' },
-  revoked: { status: 410, message: 'This link has been withdrawn. Please contact your escrow officer.' },
-  expired: { status: 410, message: 'This link has expired. Please contact your escrow officer.' },
+  // Revoked and expired share one reason and one message on purpose — telling
+  // them apart would confirm that a link had been deliberately withdrawn.
+  inactive: { status: 410, message: 'This link is no longer active. Please contact your escrow officer.' },
   unsupported: { status: 400, message: 'This link cannot be completed online.' },
   misconfigured: { status: 503, message: 'This form is temporarily unavailable.' },
   rate_limited: { status: 429, message: 'Too many submissions. Please wait a few minutes and try again.' },

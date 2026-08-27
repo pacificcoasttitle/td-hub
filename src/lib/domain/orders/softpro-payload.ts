@@ -186,6 +186,20 @@ export interface ResolvedContacts {
   escrowOfficer?: ResolvedContact;
   opener?: ResolvedContact;
   openerCompany?: OpenerCompany;
+  /**
+   * Transaction parties the operator picked from the typeahead, for local
+   * persistence only. buildSoftProPayload deliberately does not read this: the
+   * wire format is the lookup codes on input.contacts and this branch does not
+   * change what SoftPro receives. A key is absent when the party was typed as
+   * free text, or when a company-first pick was a company rather than a person.
+   */
+  parties?: {
+    escrowCompany?: ResolvedContact;
+    lender?: ResolvedContact;
+    buyerAgent?: ResolvedContact;
+    listingAgent?: ResolvedContact;
+    mortgageBroker?: ResolvedContact;
+  };
 }
 
 function deriveUserType(

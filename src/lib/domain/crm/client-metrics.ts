@@ -25,7 +25,16 @@ import { pacificMidnightUtc, pacificYmd } from '@/lib/domain/ops/calendar-day';
 /** One order as the engine needs it. Deliberately minimal. */
 export interface ClientOrderRow {
   orderId: number;
-  openedAt: Date;
+  /**
+   * Null when SoftPro has given us no open date.
+   *
+   * Such a row is counted in `total` and in `open` — we know the order exists
+   * and we know its status — but it takes no part in any window count or in
+   * recency. Treating an unknown date as "now" would advance lastOrderAt and
+   * make a client that has not ordered in a year read as active, which is the
+   * exact opposite of the truth and worse than saying nothing.
+   */
+  openedAt: Date | null;
   closedAt: Date | null;
   /** Terminal states are not "open". */
   operationalStatus: string | null;
@@ -232,12 +241,16 @@ export function computeClientMetrics(input: ComputeInput): ClientOrderMetrics {
   let firstOrderAt: Date | null = null;
 
   for (const o of rows) {
+    // Status is known even when the date is not, so this counts either way.
+    if (isOpenOrder(o.operationalStatus)) open++;
+
     const opened = o.openedAt;
+    if (!opened) continue;
+
     if (inWindow(opened, monthStart, addDays(now, 1))) thisMonth++;
     if (inWindow(opened, last90Start, now)) last90++;
     if (inWindow(opened, prior90Start, last90Start)) prior90++;
     if (inWindow(opened, lastYearStart, lastYearEnd)) same90LastYear++;
-    if (isOpenOrder(o.operationalStatus)) open++;
     if (!lastOrderAt || opened > lastOrderAt) lastOrderAt = opened;
     if (!firstOrderAt || opened < firstOrderAt) firstOrderAt = opened;
   }

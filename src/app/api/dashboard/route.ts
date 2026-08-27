@@ -72,7 +72,7 @@ export async function GET() {
       .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
       .orderBy(desc(orders.openedAt))
       .limit(5),
-    [] as Array<{ id: number; fileNumber: string; operationalStatus: string; transactionType: string | null; openedAt: Date; closedAt: Date | null; address: string | null; city: string | null; state: string | null; county: string | null }>),
+    [] as Array<{ id: number; fileNumber: string; operationalStatus: string; transactionType: string | null; openedAt: Date | null; closedAt: Date | null; address: string | null; city: string | null; state: string | null; county: string | null }>),
   ]);
 
   const today = new Date();

@@ -40,7 +40,8 @@ export type EscrowTaskOrderData = {
   orderType: string | null;
   escrowOfficerId: number | null;
   operationalStatus: 'open' | 'in_process' | 'completed';
-  openedAt: Date;
+  /** Null when SoftPro has given us no open date — see orders.openedAt. */
+  openedAt: Date | null;
   completedAt: Date | null;
   orderUpdatedAt: Date;
   address: string | null;

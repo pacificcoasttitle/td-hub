@@ -65,7 +65,8 @@ interface OrderLinkRow {
   orderId: number;
   salesRepId: number | null;
   contactId: number | null;
-  openedAt: Date;
+  /** Null when SoftPro has given us no open date — see orders.openedAt. */
+  openedAt: Date | null;
   closedAt: Date | null;
   /** Carried so list rows can reuse the metrics engine without a second query. */
   operationalStatus: string | null;
@@ -191,7 +192,9 @@ export function composeBusinessSummaries(
       if (row.salesRepId !== client.ownerContactId) continue;
       if (seen.has(row.orderId)) continue;
       seen.add(row.orderId);
-      if (!lastOpenedAt || row.openedAt > lastOpenedAt) lastOpenedAt = row.openedAt;
+      // An undated order still counts toward orderCount via `seen`, but it
+      // cannot move "last ordered" — an unknown date is not a recent one.
+      if (row.openedAt && (!lastOpenedAt || row.openedAt > lastOpenedAt)) lastOpenedAt = row.openedAt;
       if (row.closedAt && (!lastClosedAt || row.closedAt > lastClosedAt)) lastClosedAt = row.closedAt;
     }
     if (seen.size > 0) {
@@ -667,6 +670,8 @@ export function bucketOrdersByMonth(
     if (seen.has(row.orderId)) continue;
     seen.add(row.orderId);
     const d = row.openedAt;
+    // No date, no month column to put it in.
+    if (!d) continue;
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     if (buckets.has(key)) buckets.set(key, buckets.get(key)! + 1);
   }
@@ -836,7 +841,7 @@ export async function getClientDetail(session: SessionUser, clientId: number, re
     fileNumber: string;
     operationalStatus: string;
     transactionType: string | null;
-    openedAt: Date;
+    openedAt: Date | null;
     closedAt: Date | null;
     salesPrice: string | null;
   }> = [];
@@ -1209,7 +1214,7 @@ export interface TransactionClientSuggestion {
 interface TxLinkRow {
   orderId: number;
   contactId: number | null;
-  openedAt: Date;
+  openedAt: Date | null;
   role: string;
 }
 
@@ -1255,7 +1260,9 @@ export function composeTransactionClientSuggestions(
     }
     entry.orders.add(row.orderId);
     entry.roles.add(row.role);
-    if (!entry.lastOrderAt || row.openedAt > entry.lastOrderAt) entry.lastOrderAt = row.openedAt;
+    if (row.openedAt && (!entry.lastOrderAt || row.openedAt > entry.lastOrderAt)) {
+      entry.lastOrderAt = row.openedAt;
+    }
   }
 
   const contactsById = new Map(contactRows.map((c) => [c.id, c]));

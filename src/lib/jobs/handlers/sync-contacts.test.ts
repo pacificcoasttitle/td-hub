@@ -5,15 +5,23 @@ const {
   getLookupTableMock,
   getSalesRepsMock,
   updateSets,
+  updateWheres,
   deactivateCalls,
   contactSelectQueue,
+  contactSelectWheres,
+  orderByCalls,
+  updateFailures,
   activeRepCount,
 } = vi.hoisted(() => ({
   getLookupTableMock: vi.fn(),
   getSalesRepsMock: vi.fn(),
   updateSets: [] as Record<string, unknown>[],
+  updateWheres: [] as unknown[],
   deactivateCalls: [] as unknown[],
   contactSelectQueue: [] as Array<Array<{ id: number }>>,
+  contactSelectWheres: [] as unknown[],
+  orderByCalls: [] as unknown[][],
+  updateFailures: [] as unknown[],
   activeRepCount: { value: 0 },
 }));
 
@@ -24,7 +32,14 @@ vi.mock('@/lib/db/client', () => {
     } else {
       updateSets.push(vals);
     }
-    return { where: vi.fn(async () => undefined) };
+    return {
+      where: vi.fn(async (w: unknown) => {
+        updateWheres.push(w);
+        const failure = updateFailures.shift();
+        if (failure) throw failure;
+        return undefined;
+      }),
+    };
   });
 
   const select = vi.fn((cols?: Record<string, unknown>) => {
@@ -37,9 +52,17 @@ vi.mock('@/lib/db/client', () => {
     }
     return {
       from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => contactSelectQueue.shift() ?? []),
-        })),
+        where: vi.fn((w: unknown) => {
+          contactSelectWheres.push(w);
+          const limit = vi.fn(async () => contactSelectQueue.shift() ?? []);
+          return {
+            limit,
+            orderBy: vi.fn((...args: unknown[]) => {
+              orderByCalls.push(args);
+              return { limit };
+            }),
+          };
+        }),
       })),
     };
   });
@@ -86,6 +109,7 @@ vi.mock('@/lib/integrations/softpro', () => ({
 
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
+  asc: vi.fn((col) => ({ type: 'asc', col })),
   eq: vi.fn((left, right) => ({ type: 'eq', left, right })),
   or: vi.fn((...args: unknown[]) => ({ type: 'or', args })),
   sql: Object.assign(vi.fn((...args: unknown[]) => ({ type: 'sql', args })), {
@@ -94,11 +118,35 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 import {
+  describeSyncError,
   fetchSyncContactRows,
   omitEmptyForUpdate,
   shouldDeactivateExistingSalesReps,
   syncContactRows,
 } from './sync-contacts';
+
+/** One SoftPro "Escrow Officer" feed row, in the shape the vendor sends. */
+function officerRow(overrides: Record<string, string> = {}) {
+  return {
+    'Escrow officer/Closer': 'PCT\\aballesteros',
+    'Office LookupCode': 'PRV',
+    'Officer Name': 'Anna Ballesteros',
+    Email: 'aballesteros@pct.com',
+    ...overrides,
+  };
+}
+
+function resetAll(): void {
+  vi.clearAllMocks();
+  updateSets.length = 0;
+  updateWheres.length = 0;
+  deactivateCalls.length = 0;
+  contactSelectQueue.length = 0;
+  contactSelectWheres.length = 0;
+  orderByCalls.length = 0;
+  updateFailures.length = 0;
+  activeRepCount.value = 0;
+}
 
 describe('omitEmptyForUpdate', () => {
   it('drops null/empty string keys and keeps provided values', () => {
@@ -113,6 +161,150 @@ describe('omitEmptyForUpdate', () => {
       state: 'CA',
       isActive: true,
     });
+  });
+});
+
+// ── The deterministic officer match ─────────────────────────────────────────
+//
+// Four officers exist twice under one `PCT\user` code: the feed row carries
+// closer_examiner AND softpro_lookup_code, the address-book twin carries only
+// softpro_lookup_code. The old predicate was an OR over both columns with
+// limit 1 and no ORDER BY, so which row came back was the query plan's choice.
+describe('officer match is deterministic', () => {
+  beforeEach(resetAll);
+
+  it('picks the closer_examiner row when BOTH rows satisfy the old predicate', async () => {
+    // Queue: dedupe guard finds no canonical row, then the closer_examiner
+    // lookup finds contact 12 — the office-bearing feed row.
+    contactSelectQueue.push([], [{ id: 12 }]);
+
+    const result = await syncContactRows('Escrow Officer', [officerRow()]);
+
+    expect(result.updated).toBe(1);
+    expect(result.errors).toEqual([]);
+
+    // The match ran as an equality on closer_examiner, not an OR across two
+    // columns. Two selects total: the guard, then the match. The
+    // softpro_lookup_code fallback was never reached, so the twin could not win.
+    expect(contactSelectWheres).toHaveLength(2);
+    expect(contactSelectWheres[1]).toEqual({
+      type: 'eq',
+      left: 'contacts.closer_examiner',
+      right: 'PCT\\aballesteros',
+    });
+    expect(orderByCalls).toHaveLength(0);
+
+    // And the write landed on 12, the row that holds the office code.
+    expect(updateWheres[0]).toEqual({ type: 'eq', left: 'contacts.id', right: 12 });
+    expect(updateSets[0]).toMatchObject({
+      closerExaminer: 'PCT\\aballesteros',
+      officeLookupCode: 'PRV',
+      isEscrowOfficer: true,
+    });
+  });
+
+  it('is stable across runs — the same row every time, not the plan of the day', async () => {
+    const chosen: unknown[] = [];
+    for (let run = 0; run < 3; run++) {
+      resetAll();
+      contactSelectQueue.push([], [{ id: 12 }]);
+      await syncContactRows('Escrow Officer', [officerRow()]);
+      chosen.push(updateWheres[0]);
+    }
+    expect(chosen).toEqual([
+      { type: 'eq', left: 'contacts.id', right: 12 },
+      { type: 'eq', left: 'contacts.id', right: 12 },
+      { type: 'eq', left: 'contacts.id', right: 12 },
+    ]);
+  });
+
+  it('falls back to softpro_lookup_code only when no feed row exists, and orders it', async () => {
+    // Guard clear, closer_examiner miss, then the address-book row.
+    contactSelectQueue.push([], [], [{ id: 17165 }]);
+
+    const result = await syncContactRows('Escrow Officer', [officerRow()]);
+
+    expect(result.updated).toBe(1);
+    expect(contactSelectWheres).toHaveLength(3);
+    expect(contactSelectWheres[2]).toEqual({
+      type: 'eq',
+      left: 'contacts.softpro_lookup_code',
+      right: 'PCT\\aballesteros',
+    });
+    // The fallback is ordered, so even it cannot be a coin flip.
+    expect(orderByCalls).toHaveLength(1);
+    expect(orderByCalls[0]).toHaveLength(2);
+    expect(orderByCalls[0]![1]).toEqual({ type: 'asc', col: 'contacts.id' });
+    expect(updateWheres[0]).toEqual({ type: 'eq', left: 'contacts.id', right: 17165 });
+  });
+
+  it('applies the same match to title officers', async () => {
+    contactSelectQueue.push([{ id: 5 }]);
+
+    const result = await syncContactRows('Title Officer', [{
+      'Title officer/Examiner': 'PCT\\cvirata',
+      'Office LookupCode': 'OCT',
+      'Officer Name': 'Clive Virata',
+      Email: 'unit66@pct.com',
+    }]);
+
+    expect(result.updated).toBe(1);
+    expect(contactSelectWheres[0]).toEqual({
+      type: 'eq',
+      left: 'contacts.closer_examiner',
+      right: 'PCT\\cvirata',
+    });
+  });
+});
+
+// ── The swallowed error becomes visible ─────────────────────────────────────
+describe('a unique violation is named, not buried', () => {
+  beforeEach(resetAll);
+
+  /** How Drizzle surfaces a driver failure: the query as message, pg on cause. */
+  function drizzleUniqueViolation() {
+    return Object.assign(
+      new Error('Failed query: update "contacts" set "closer_examiner" = $1 ...\nparams: PCT\\aballesteros'),
+      { cause: { code: '23505', constraint_name: 'contacts_closer_examiner_uniq' } },
+    );
+  }
+
+  it('reports the constraint instead of the statement, and keeps going', async () => {
+    // Two officers. The first update collides; the second must still land.
+    updateFailures.push(drizzleUniqueViolation());
+    contactSelectQueue.push(
+      [], [{ id: 17165 }],   // officer 1: guard clear, matched
+      [], [{ id: 13 }],      // officer 2: guard clear, matched
+    );
+
+    const result = await syncContactRows('Escrow Officer', [
+      officerRow(),
+      officerRow({
+        'Escrow officer/Closer': 'PCT\\cquintanar',
+        'Office LookupCode': 'OCT',
+        'Officer Name': 'Christine Quintanar',
+        Email: 'cquintanar@pct.com',
+      }),
+    ]);
+
+    expect(result.errors).toHaveLength(1);
+    const message = result.errors[0]!.error;
+    expect(result.errors[0]!.lookupCode).toBe('PCT\\aballesteros');
+    expect(message).toContain('unique violation on contacts_closer_examiner_uniq');
+    expect(message).toContain('already belongs to a different contacts row');
+    expect(message).not.toContain('Failed query');
+
+    // One officer's failure did not end the run.
+    expect(result.updated).toBe(1);
+    expect(updateWheres[1]).toEqual({ type: 'eq', left: 'contacts.id', right: 13 });
+  });
+
+  it('describeSyncError names the constraint whether pg is on cause or on the error', () => {
+    expect(describeSyncError(drizzleUniqueViolation()))
+      .toContain('unique violation on contacts_closer_examiner_uniq');
+    expect(describeSyncError({ code: '23505', constraint_name: 'contacts_pkey' }))
+      .toContain('unique violation on contacts_pkey');
+    expect(describeSyncError(new Error('plain failure'))).toBe('plain failure');
   });
 });
 

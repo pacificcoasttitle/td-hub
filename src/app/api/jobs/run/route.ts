@@ -59,6 +59,11 @@ const TITLEPOINT_DRAIN_JOB_NAMES = new Set(['titlepoint.drain']);
 const NEEDS_JOB_ID = new Set([
   'softpro.verify_sync',
   'softpro.lookback_sync',
+  // Needs its row to record PER-DAY coverage: which slices of the trailing
+  // window were read, which failed, and which came back at SoftPro's silent row
+  // cap. A cron run's HTTP response is read by nobody, so without this the only
+  // record of a lost day would scroll out of the runtime log.
+  'softpro.sync_recent_orders',
   // Needs its row to record a REFUSAL. A run that declined to send otherwise
   // looks exactly like a run that found nothing to do.
   'party_wizard.invite',

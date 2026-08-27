@@ -17,6 +17,11 @@ import {
   softProCategoryToErrorCode,
 } from './error-category';
 import {
+  describeSuspectedTruncation,
+  isSuspectedTruncation,
+  SOFTPRO_SEARCH_ROW_CAP,
+} from './vendor-limits';
+import {
   addSoftProUserIdToRecord,
   addSoftProUserIdToWritePayload,
   buildSoftProHeaders,
@@ -125,7 +130,11 @@ export function describeAttachedDocuments(data: unknown): Record<string, unknown
   };
 }
 
-function buildSuccessResponseMeta<T>(operation: string, raw: SoftProResponse<T>): Record<string, unknown> {
+function buildSuccessResponseMeta<T>(
+  operation: string,
+  raw: SoftProResponse<T>,
+  requestMeta?: Record<string, string>,
+): Record<string, unknown> {
   const meta: Record<string, unknown> = {
     status: raw.Status,
     bodyStatus: raw.Status,
@@ -134,6 +143,27 @@ function buildSuccessResponseMeta<T>(operation: string, raw: SoftProResponse<T>)
 
   if (operation === 'get_attached_documents') {
     meta.attached = describeAttachedDocuments(raw.data);
+  }
+
+  // Recorded HERE rather than in the sync handler so the count is captured for
+  // EVERY GetOrders caller — the hourly sync, the ingest gap detector, and any
+  // one-off audit script — without each of them having to remember. Until this
+  // existed, `vendor_api_logs` held 3,635 successful get_orders rows and not one
+  // of them recorded how many orders came back, so the question "has the cap
+  // already truncated us?" could not be answered from history at all.
+  if (operation === 'get_orders' && Array.isArray(raw.data)) {
+    const resultCount = raw.data.length;
+    meta.resultCount = resultCount;
+    meta.vendorRowCap = SOFTPRO_SEARCH_ROW_CAP;
+    meta.truncationSuspected = isSuspectedTruncation(resultCount);
+    if (meta.truncationSuspected) {
+      meta.truncationNote = describeSuspectedTruncation({
+        operation: 'GetOrders',
+        dateFrom: String(requestMeta?.DateFrom ?? ''),
+        dateTo: String(requestMeta?.DateTo ?? ''),
+        rowCount: resultCount,
+      });
+    }
   }
 
   if (operation === 'get_order_details' && Array.isArray(raw.data)) {
@@ -385,7 +415,7 @@ async function makeRequest<T>(
       errorCategory: success ? undefined : category,
       requestMeta: { url, method, ...(loggedBody ? { payload: loggedBody } : { queryParams: options?.queryParams }) },
       responseMeta: success
-        ? buildSuccessResponseMeta(operation, raw)
+        ? buildSuccessResponseMeta(operation, raw, options?.queryParams)
         : { status: raw.Status, bodyStatus: raw.Status, message: raw.Message, rawBody: raw },
     });
 

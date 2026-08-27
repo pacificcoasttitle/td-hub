@@ -5,7 +5,11 @@ import { getOrderContacts, getOrderDetails, getOrders, mapOrderContacts } from '
 import type { MappedOrderContacts } from '@/lib/integrations/softpro';
 import { mapStatus } from '@/lib/domain/orders/status-map';
 import { createDeadline } from '@/lib/jobs/time-budget';
-import { SYNC_LOOKBACK_DAYS, syncWindow } from '@/lib/jobs/sync-window';
+import { chunkDateRange, SYNC_CHUNK_DAYS, SYNC_LOOKBACK_DAYS, syncWindow } from '@/lib/jobs/sync-window';
+import {
+  describeSuspectedTruncation,
+  isSuspectedTruncation,
+} from '@/lib/integrations/softpro/vendor-limits';
 import type { DriftCounts } from '@/lib/domain/ops/status-drift';
 
 type ExistingParty = typeof orderParties.$inferSelect;
@@ -92,26 +96,44 @@ const TERMINAL = new Set(['closed', 'completed', 'canceled', 'duplicate']);
 /** Missing order numbers listed in the result before truncating. */
 const MISSING_SAMPLE_LIMIT = 25;
 
+/** What one GetOrders call over one slice of the range returned. */
+export interface IngestGapChunkResult {
+  dateFrom: string;
+  dateTo: string;
+  /** Rows returned, or null when the slice was never read. Not a total when suspect. */
+  rowCount: number | null;
+  /** Row count sat exactly on SoftPro's silent search cap. */
+  truncationSuspected: boolean;
+  error: string | null;
+}
+
 export interface IngestGapResult {
   dateFrom: string;
   dateTo: string;
   windowDays: number;
-  /** Distinct order numbers SoftPro returned for the window. */
+  /** Distinct order numbers SoftPro returned across every slice of the window. */
   vendorCount: number;
   /** How many of those we already hold. */
   heldCount: number;
   /**
    * Orders SoftPro has that we do not.
    *
-   * NULL, never 0, when the vendor list is unusable — a failed call or an empty
-   * response proves nothing about our completeness. Reporting 0 there would
-   * recreate the exact false-green this detector exists to eliminate: a vendor
-   * outage must never read as a clean bill of health.
+   * NULL, never 0, whenever the vendor list is incomplete — a failed call, an
+   * empty response, a slice that came back at the vendor's row cap, or any slice
+   * we could not read. Reporting 0 there would recreate the exact false-green
+   * this detector exists to eliminate: neither a vendor outage nor a silently
+   * truncated list may read as a clean bill of health.
    */
   missingCount: number | null;
   missingSample: string[];
-  /** True when the vendor call failed or returned nothing usable. */
+  /** True when no slice of the window produced a usable list. */
   vendorUnavailable: boolean;
+  /** Every slice and what it returned. A slice that failed is here, never absent. */
+  chunks: IngestGapChunkResult[];
+  /** Slices that were never read. Each is a stretch of the range left unchecked. */
+  chunksFailed: number;
+  /** True when any slice came back sitting exactly on the vendor's row cap. */
+  truncationSuspected: boolean;
   error: string | null;
 }
 
@@ -144,6 +166,13 @@ function spanDays(dateFrom: string, dateTo: string): number {
  * historical loss, which is the only sound way to measure it: file numbers carry
  * branch suffixes and run in parallel series, so sequence scanning both invents
  * phantom gaps and undercounts real ones.
+ *
+ * CHUNKED THE SAME WAY THE SYNC IS. SoftPro's order search truncates silently at
+ * a row cap, so a detector that asked for the whole range in one call would be
+ * comparing our orders against a vendor list that had itself lost rows — and it
+ * would report the shortfall as "nothing missing", because the rows it never saw
+ * cannot appear in a set difference. A detector reading a truncated list is worse
+ * than no detector: it produces a green light nobody has reason to doubt.
  */
 export async function detectIngestGap(
   options: IngestGapOptions | Date = {},
@@ -155,31 +184,63 @@ export async function detectIngestGap(
   const windowDays =
     opts.dateFrom || opts.dateTo ? spanDays(dateFrom, dateTo) : SYNC_LOOKBACK_DAYS;
 
+  const chunks = chunkDateRange(dateFrom, dateTo, SYNC_CHUNK_DAYS);
+  const chunkResults: IngestGapChunkResult[] = [];
+  const vendorNumberSet = new Set<string>();
+
+  for (const chunk of chunks) {
+    const result = await getOrders(chunk).catch((err: unknown) => ({
+      success: false as const,
+      data: null,
+      error: { message: err instanceof Error ? err.message : 'getOrders threw' },
+    }));
+
+    if (!result.success || !result.data) {
+      chunkResults.push({
+        ...chunk,
+        rowCount: null,
+        truncationSuspected: false,
+        error: result.error?.message ?? 'Failed to fetch orders from SoftPro',
+      });
+      continue;
+    }
+
+    for (const o of result.data) {
+      const n = o.OrderNumber?.trim();
+      if (n) vendorNumberSet.add(n);
+    }
+
+    chunkResults.push({
+      ...chunk,
+      rowCount: result.data.length,
+      truncationSuspected: isSuspectedTruncation(result.data.length),
+      error: null,
+    });
+  }
+
+  const chunksFailed = chunkResults.filter((c) => c.error !== null).length;
+  const truncationSuspected = chunkResults.some((c) => c.truncationSuspected);
+  const vendorNumbers = [...vendorNumberSet];
+
   const base = {
     dateFrom,
     dateTo,
     windowDays,
-    vendorCount: 0,
+    vendorCount: vendorNumbers.length,
     heldCount: 0,
     missingCount: null,
     missingSample: [] as string[],
     vendorUnavailable: true,
+    chunks: chunkResults,
+    chunksFailed,
+    truncationSuspected,
     error: null as string | null,
   };
 
-  const result = await getOrders({ dateFrom, dateTo }).catch((err: unknown) => ({
-    success: false as const,
-    data: null,
-    error: { message: err instanceof Error ? err.message : 'getOrders threw' },
-  }));
-
-  if (!result.success || !result.data) {
-    return { ...base, error: result.error?.message ?? 'Failed to fetch orders from SoftPro' };
+  if (chunksFailed === chunkResults.length) {
+    const firstError = chunkResults.find((c) => c.error !== null)?.error;
+    return { ...base, error: firstError ?? 'Failed to fetch orders from SoftPro' };
   }
-
-  const vendorNumbers = [
-    ...new Set(result.data.map((o) => o.OrderNumber?.trim()).filter((n): n is string => !!n)),
-  ];
 
   // An empty vendor list is not a clean result — a real business week always has
   // orders — so it is reported as unavailable rather than as zero gap.
@@ -195,16 +256,38 @@ export async function detectIngestGap(
   const heldSet = new Set(held.map((h) => h.fileNumber));
   const missing = vendorNumbers.filter((n) => !heldSet.has(n));
 
+  // A partial list can prove orders are MISSING but can never prove none are, so
+  // the count is withheld while the sample of what was found is still reported.
+  const listIsComplete = chunksFailed === 0 && !truncationSuspected;
+  const errors: string[] = [];
+  if (chunksFailed > 0) {
+    errors.push(`${chunksFailed} of ${chunkResults.length} date slices could not be read`);
+  }
+  if (truncationSuspected) {
+    const suspect = chunkResults.filter((c) => c.truncationSuspected);
+    errors.push(
+      describeSuspectedTruncation({
+        operation: 'GetOrders',
+        dateFrom: suspect[0]!.dateFrom,
+        dateTo: suspect[suspect.length - 1]!.dateTo,
+        rowCount: suspect[0]!.rowCount!,
+      }),
+    );
+  }
+
   return {
     dateFrom,
     dateTo,
     windowDays,
     vendorCount: vendorNumbers.length,
     heldCount: heldSet.size,
-    missingCount: missing.length,
+    missingCount: listIsComplete ? missing.length : null,
     missingSample: missing.slice(0, MISSING_SAMPLE_LIMIT),
     vendorUnavailable: false,
-    error: null,
+    chunks: chunkResults,
+    chunksFailed,
+    truncationSuspected,
+    error: errors.length > 0 ? errors.join('; ') : null,
   };
 }
 
@@ -278,6 +361,7 @@ export async function handleVerifyOrderSync(
     dateFrom: '', dateTo: '', windowDays: SYNC_LOOKBACK_DAYS,
     vendorCount: 0, heldCount: 0, missingCount: null, missingSample: [],
     vendorUnavailable: true,
+    chunks: [], chunksFailed: 0, truncationSuspected: false,
     error: err instanceof Error ? err.message : 'ingest gap detector threw',
   }) satisfies IngestGapResult);
 

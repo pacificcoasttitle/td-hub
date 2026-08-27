@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { adminActivityLogs } from '@/lib/db/schema';
+import { adminActivityLogs, orders } from '@/lib/db/schema';
 import { getPrelimDeliveryMode } from './prelim-delivery-mode';
 import { resolvePrelimRecipients } from './prelim-recipient-resolution';
 import { PrelimContentCheckFailedError, sendPrelimDeliveryEmail } from './prelim-delivery-send';
@@ -16,7 +16,12 @@ export type PrelimAutoDeliveryOutcome =
    * The document did not read as a preliminary report, so it was NOT sent.
    * Needs a human: never silently skipped, never silently delivered.
    */
-  | 'blocked_content_check';
+  | 'blocked_content_check'
+  /**
+   * The ORDER arrived by backfill, so its prelim is not news to anyone. Held for
+   * a human rather than mailed out. See isBackfilledOrder.
+   */
+  | 'skipped_backfilled_order';
 
 export interface PrelimAutoDeliveryInput {
   orderId: number;
@@ -44,6 +49,72 @@ function parseCutoff(): Date | null {
   if (!raw) return null;
   const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * How far our record of an order may lag the real world before the row is an
+ * import artifact rather than something the sync saw happen.
+ *
+ * WHY A LAG AND NOT AN AGE. Age conflates two opposite cases. A file we have
+ * held since April whose prelim finally lands in October is a real delivery and
+ * must still fire; a row written 40 days after its open date is a backfill and
+ * must not mail anyone, whenever its prelim turns up. Only the gap between
+ * opened_at and created_at separates them, and it is a property of the ORDER,
+ * not of the document — so a late prelim on a long-held file is untouched by
+ * this gate.
+ *
+ * WHY TEN DAYS. Two independent lines agree. Measured: across 5,262 orders
+ * opened since 2026-04 and created before the 2026-08-27 recovery, the lag runs
+ * p50 0.02d, p95 0.10d, p99 1.98d. Beyond that the tail (p99.9 32.8d, max 42.9d)
+ * is prior manual import-orders runs — already the artifact class this catches,
+ * not normal operation. Mechanically: the sync requests a trailing
+ * SYNC_LOOKBACK_DAYS window, so the hourly path cannot write a row more than
+ * that many days after the open date. Ten is that window plus one day for the
+ * UTC/Pacific boundary plus two for a run that hits its deadline and resumes.
+ * Five times p99, three days clear of the artifact tail.
+ */
+export const BACKFILL_LAG_THRESHOLD_DAYS = 10;
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Whether this order reached us by backfill rather than by seeing it happen.
+ *
+ * Fails CLOSED — a missing row or a null open date cannot establish the lag, and
+ * an order with no open date is already anomalous. Holding a prelim for a human
+ * is recoverable; mailing a stale one to an escrow officer is not.
+ *
+ * KNOWN HOLE. An order whose opened_at defaulted to insert time has a lag near
+ * zero and reads as normal here. The 23 such rows from the 2026-08-27 recovery
+ * are out of reach only because they are all closed/canceled/duplicate and
+ * fetch_prelims takes open/in_process/completed — a property of that batch, not
+ * a guarantee. Recording provenance at write time is the durable answer;
+ * inferring it from timestamps is what this is.
+ */
+async function isBackfilledOrder(orderId: number): Promise<{ backfilled: boolean; reason: string }> {
+  const [row] = await db
+    .select({ openedAt: orders.openedAt, createdAt: orders.createdAt })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (!row) {
+    return { backfilled: true, reason: `order ${orderId} not found; cannot establish ingest lag` };
+  }
+  if (!row.openedAt || !row.createdAt) {
+    return { backfilled: true, reason: 'order has no open date; cannot establish ingest lag' };
+  }
+
+  const lagDays = (row.createdAt.getTime() - row.openedAt.getTime()) / DAY_MS;
+  if (lagDays > BACKFILL_LAG_THRESHOLD_DAYS) {
+    return {
+      backfilled: true,
+      reason: `order row written ${lagDays.toFixed(1)}d after its open date `
+        + `(threshold ${BACKFILL_LAG_THRESHOLD_DAYS}d) — backfilled, not observed`,
+    };
+  }
+
+  return { backfilled: false, reason: '' };
 }
 
 async function hasExistingPrelimDelivery(input: PrelimAutoDeliveryInput): Promise<boolean> {
@@ -116,6 +187,19 @@ export async function maybeAutoDeliverPrelim(input: PrelimAutoDeliveryInput): Pr
       sent: false,
       needsManualDelivery: false,
       reason: 'prelim document/version already has a delivery marker',
+    });
+  }
+
+  // Checked after the delivery marker so an already-delivered backfill still
+  // reports the more specific outcome, and before recipient resolution so we do
+  // not resolve an audience we have already decided not to mail.
+  const backfill = await isBackfilledOrder(input.orderId);
+  if (backfill.backfilled) {
+    return finish(input, {
+      outcome: 'skipped_backfilled_order',
+      sent: false,
+      needsManualDelivery: true,
+      reason: backfill.reason,
     });
   }
 

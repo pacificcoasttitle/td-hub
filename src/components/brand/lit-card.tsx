@@ -4,6 +4,15 @@ type LitCardProps<T extends ElementType = 'div'> = {
   as?: T;
   children: ReactNode;
   className?: string;
+  /**
+   * Override the warm glow with a CSS background-image.
+   *
+   * Added for the party wizard header, which has to be comparable to the email
+   * hero by eye — a recipient who suspects phishing scrolls back up to the
+   * email and looks. The base surface gradient was already identical; this lets
+   * the glow be identical too. Everything else keeps the default.
+   */
+  glow?: string;
 } & Omit<ComponentPropsWithoutRef<T>, 'as' | 'children' | 'className'>;
 
 /**
@@ -14,6 +23,7 @@ export function LitCard<T extends ElementType = 'div'>({
   as,
   children,
   className = '',
+  glow,
   ...props
 }: LitCardProps<T>) {
   const Comp = as ?? 'div';
@@ -34,9 +44,10 @@ export function LitCard<T extends ElementType = 'div'>({
       />
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-0
-          bg-[radial-gradient(120%_90%_at_82%_8%,rgba(242,107,43,0.30),transparent_55%)]
-          print:hidden"
+        className={`pointer-events-none absolute inset-0 print:hidden ${
+          glow ? '' : 'bg-[radial-gradient(120%_90%_at_82%_8%,rgba(242,107,43,0.30),transparent_55%)]'
+        }`}
+        style={glow ? { backgroundImage: glow } : undefined}
       />
       <div className="relative px-6 py-[22px]">{children}</div>
     </Comp>

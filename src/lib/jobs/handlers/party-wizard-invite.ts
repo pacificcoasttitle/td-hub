@@ -1,6 +1,7 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/lib/db/client';
-import { contacts, jobs, orderProperties, orders } from '@/lib/db/schema';
+import { contacts, jobs, orderParties, orderProperties, orders } from '@/lib/db/schema';
 import { sendEmail } from '@/lib/integrations/sendgrid/client';
 import { getSetting } from '@/lib/domain/settings/service';
 import { insertNotificationLog } from '@/lib/domain/notifications/dispatch';
@@ -10,6 +11,9 @@ import {
 import { findLiveLink, mintLinkForOrder } from '@/lib/domain/parties/party-wizard-service';
 import { eligibleTransactionTypesFor } from '@/lib/domain/parties/party-wizard-fields';
 import type { PartyRole } from '@/lib/domain/parties/party-wizard-fields';
+import { pickInviteRecipient } from '@/lib/domain/parties/party-wizard-recipient';
+import type { InviteRecipient, InviteRecipientRole } from '@/lib/domain/parties/party-wizard-recipient';
+import type { PartyWizardAudience } from '@/lib/domain/parties/party-wizard-email';
 import {
   ACTIVE_ORDER_STATUSES, statusSqlList, transactionTypeSqlList,
 } from '@/lib/domain/orders/status-map';
@@ -124,6 +128,61 @@ export const PARTY_INVITE_TRANSACTION_TYPES = eligibleTransactionTypesFor(PARTY_
 export const PARTY_INVITE_MAX_PER_RECIPIENT = 2;
 
 /**
+ * TOTAL emails one run may send, across every recipient and every property.
+ *
+ * The per-recipient cap bounds what any ONE person receives; it does nothing to
+ * bound the run. Twenty officers with two files each is 40 emails and no cap is
+ * exceeded. For a first pilot of copy that has never been sent to anyone, the
+ * number that matters is the total.
+ *
+ * Five, because five is a number the owner can actually read. If the wording is
+ * wrong we would rather find out from five replies than from forty.
+ *
+ * DB-backed rather than a constant so widening the pilot is a settings change,
+ * not a deploy. It is the ceiling that is configurable — the per-recipient cap
+ * above stays a constant because it is a permanent property of the feature, not
+ * a pilot dial.
+ *
+ * Held orders are NOT marked in any way: nothing is minted, nothing is logged,
+ * so they are candidates again on the next run. See planSends.
+ *
+ * WHAT FIVE ACTUALLY COSTS, MEASURED 2026-08-26 AGAINST PRODUCTION. The window
+ * holds 21 candidates right now; all 21 resolve to a usable address (the
+ * escrow_company fallback is doing that work), 21 survive the property dedupe
+ * and 19 survive the per-recipient cap. So an uncapped first run sends 19 and
+ * this ceiling holds 14 of them.
+ *
+ * "Held stays eligible" is true of the data and NOT a promise that a held order
+ * eventually sends. Roughly 5 new candidates enter the 3-to-7-day window per
+ * weekday, the cron runs Mon–Fri, and an order is only in-window for about four
+ * days — so at a ceiling of 5 the queue drains at about the rate it fills, and
+ * anything held across a weekend can age past PARTY_INVITE_MAX_AGE_DAYS without
+ * ever being asked. That is the argument for oldest-first in planSends: it spends
+ * the five slots on the orders closest to expiring. It is also the reason this
+ * number should go up once the copy is confirmed, rather than being left at 5.
+ */
+export const PARTY_INVITE_MAX_PER_RUN_SETTING = 'party_wizard_invite_max_per_run';
+export const PARTY_INVITE_DEFAULT_MAX_PER_RUN = 5;
+
+/**
+ * Read the ceiling, and fall back to the pilot default on anything unreadable.
+ *
+ * A garbled settings row must not mean "no ceiling". The failure mode of a
+ * missing cap is a mailbox full of a template nobody has approved yet, so an
+ * unparseable value fails to the smallest sane number rather than to Infinity.
+ * Zero is honoured, because "stop sending but leave the switch alone" is a
+ * thing an operator legitimately wants at 4pm on a Friday.
+ */
+async function resolveRunCap(): Promise<number> {
+  const raw = await getSetting(PARTY_INVITE_MAX_PER_RUN_SETTING);
+  const parsed = Number(raw);
+  if (raw === null || raw.trim() === '' || !Number.isFinite(parsed) || parsed < 0) {
+    return PARTY_INVITE_DEFAULT_MAX_PER_RUN;
+  }
+  return Math.floor(parsed);
+}
+
+/**
  * How far back a prior invite still suppresses a second ask for the same
  * property. Matches the link lifetime — while the first link is usable, asking
  * again for the same property is asking twice.
@@ -176,9 +235,9 @@ export const PARTY_INVITE_ENABLED_SETTING = 'party_wizard_invite_enabled';
  * rows in the same measurement.
  */
 export interface PartyInviteUnreachable {
-  /** No `escrow_officer_id` on the order. This is ~100% of unreachability. */
+  /** No `escrow_officer_id`, and the escrow_company fallback found nobody either. */
   noEscrowOfficer: number;
-  /** FK present but it resolves to nobody with an address. Currently always 0. */
+  /** FK present but unusable, and the fallback found nobody either. */
   escrowOfficerNoEmail: number;
 }
 
@@ -188,6 +247,7 @@ export type PartyInviteOutcome =
   | 'skipped_existing_link'
   | 'skipped_duplicate_property'
   | 'skipped_recipient_cap'
+  | 'skipped_run_cap'
   | 'no_escrow_officer'
   | 'officer_no_email';
 
@@ -202,7 +262,14 @@ export interface PartyInviteReportRow {
   /** The address that would actually be emailed, resolved by the live resolver. */
   recipientEmail: string | null;
   recipientName: string | null;
-  recipientRole: 'escrow_officer';
+  /** Which lookup found them — the officer FK, or the escrow_company fallback. */
+  recipientRole: InviteRecipientRole | null;
+  /**
+   * Which copy variant they would receive. The single most important column in
+   * a dry run now: it is what says whether a stranger is about to be sent
+   * colleague copy.
+   */
+  recipientAudience: PartyWizardAudience | null;
   outcome: PartyInviteOutcome;
   /**
    * The file that owns the single ask for this property, when this row was
@@ -222,6 +289,8 @@ export interface PartyInviteSampleEmail {
   fileNumber: string;
   /** The address this exact email would have gone to. */
   to: string;
+  /** Which variant this body is, so a reviewer knows which copy they approved. */
+  audience: PartyWizardAudience;
   subject: string;
   html: string;
   text: string;
@@ -238,9 +307,28 @@ export interface PartyInviteResult {
   skippedDuplicateProperty: number;
   /** Held back by the per-recipient cap. Eligible again next run. */
   skippedRecipientCap: number;
+  /**
+   * Would have sent, held by the total-per-run ceiling. Eligible again next
+   * run — counted rather than dropped so the operator sees the backlog the cap
+   * is creating instead of a report that just stops.
+   */
+  skippedRunCap: number;
+  /** The ceiling in force on this run, so the report explains its own held rows. */
+  runCap: number;
   unreachable: PartyInviteUnreachable;
   /** Share of candidates we could actually reach. The number to watch. */
   reachablePct: number;
+  /**
+   * Reached only because of the escrow_company fallback. Measures what the
+   * fallback is worth, and is expected to be most of the batch: at the 7-day
+   * window it takes Purchase reachability from 2 of 24 to 24 of 24.
+   */
+  viaEscrowCompanyFallback: number;
+  /**
+   * How the batch splits across the two copy variants. External is the majority
+   * and that is the reviewable fact, not a footnote.
+   */
+  audience: { internal: number; external: number };
   /** Whether sending was permitted on this run. */
   enabled: boolean;
   dryRun: boolean;
@@ -291,6 +379,26 @@ interface CandidateRow {
   escrowOfficerId: number | null;
   escrowOfficerName: string | null;
   escrowOfficerEmail: string | null;
+  /** escrow_company party row — the fallback when the officer FK is absent. */
+  escrowCompanyEmail: string | null;
+  escrowCompanyName: string | null;
+  escrowCompanyCompany: string | null;
+  escrowCompanyContactEmail: string | null;
+  escrowCompanyContactName: string | null;
+}
+
+/** Resolve one candidate's recipient with the shared two-step precedence. */
+function recipientFor(row: CandidateRow): InviteRecipient | null {
+  return pickInviteRecipient({
+    officerId: row.escrowOfficerId,
+    officerName: row.escrowOfficerName,
+    officerEmail: row.escrowOfficerEmail,
+    companyExternalEmail: row.escrowCompanyEmail,
+    companyExternalName: row.escrowCompanyName,
+    companyExternalCompany: row.escrowCompanyCompany,
+    companyContactEmail: row.escrowCompanyContactEmail,
+    companyContactName: row.escrowCompanyContactName,
+  });
 }
 
 /**
@@ -321,6 +429,9 @@ interface CandidateRow {
  * already uses to decide which sibling file carries a shared property.
  */
 async function loadCandidates(limit: number): Promise<CandidateRow[]> {
+  const escrowParty = alias(orderParties, 'escrow_party');
+  const escrowPartyContact = alias(contacts, 'escrow_party_contact');
+
   const rows = await db
     .select({
       orderId: orders.id,
@@ -335,10 +446,20 @@ async function loadCandidates(limit: number): Promise<CandidateRow[]> {
       escrowOfficerId: orders.escrowOfficerId,
       escrowOfficerName: contacts.fullName,
       escrowOfficerEmail: contacts.email,
+      escrowCompanyEmail: escrowParty.externalEmail,
+      escrowCompanyName: escrowParty.externalName,
+      escrowCompanyCompany: escrowParty.externalCompany,
+      escrowCompanyContactEmail: escrowPartyContact.email,
+      escrowCompanyContactName: escrowPartyContact.fullName,
     })
     .from(orders)
     .leftJoin(orderProperties, eq(orderProperties.orderId, orders.id))
     .leftJoin(contacts, eq(contacts.id, orders.escrowOfficerId))
+    .leftJoin(escrowParty, and(
+      eq(escrowParty.orderId, orders.id),
+      eq(escrowParty.role, 'escrow_company'),
+    ))
+    .leftJoin(escrowPartyContact, eq(escrowPartyContact.id, escrowParty.contactId))
     .where(and(
       sql`${orders.operationalStatus} in (${sql.raw(statusSqlList(PARTY_INVITE_STATUSES))})`,
       // Positive list, never a negative test — see PARTY_INVITE_TRANSACTION_TYPES.
@@ -361,7 +482,21 @@ async function loadCandidates(limit: number): Promise<CandidateRow[]> {
     .orderBy(asc(orders.openedAt), asc(orders.id))
     .limit(limit);
 
-  return rows as CandidateRow[];
+  // Production holds exactly one escrow_company party per order (5,880 rows
+  // across 5,880 orders), but nothing in the schema enforces that, and a second
+  // row would turn one order into two candidates — two links minted, two emails
+  // to the same person about the same file. Collapsing here costs one pass and
+  // removes the possibility.
+  return dedupeByOrderId(rows as CandidateRow[]);
+}
+
+function dedupeByOrderId(rows: CandidateRow[]): CandidateRow[] {
+  const seen = new Set<number>();
+  return rows.filter((row) => {
+    if (seen.has(row.orderId)) return false;
+    seen.add(row.orderId);
+    return true;
+  });
 }
 
 function composeAddress(row: CandidateRow): string | null {
@@ -388,13 +523,21 @@ export async function handlePartyWizardInvite(
     );
     const refusal: PartyInviteResult = {
       scanned: 0, sent: 0, failed: 0, skippedExistingLink: 0,
-      skippedDuplicateProperty: 0, skippedRecipientCap: 0,
+      skippedDuplicateProperty: 0, skippedRecipientCap: 0, skippedRunCap: 0,
+      runCap: 0,
       unreachable: { noEscrowOfficer: 0, escrowOfficerNoEmail: 0 },
-      reachablePct: 0, enabled: false, dryRun: false, refused: true,
+      reachablePct: 0, viaEscrowCompanyFallback: 0,
+      audience: { internal: 0, external: 0 },
+      enabled: false, dryRun: false, refused: true,
     };
     await recordRun(payload, refusal);
     return refusal;
   }
+
+  // Read BEFORE the dry-run branch and used by both paths, so a preview and the
+  // live run that follows it plan against the same ceiling. A cap applied only
+  // on the send path would make the dry run a preview of a different run.
+  const runCap = await resolveRunCap();
 
   const candidates = await loadCandidates(PARTY_INVITE_BATCH);
 
@@ -405,8 +548,12 @@ export async function handlePartyWizardInvite(
     skippedExistingLink: 0,
     skippedDuplicateProperty: 0,
     skippedRecipientCap: 0,
+    skippedRunCap: 0,
+    runCap,
     unreachable: { noEscrowOfficer: 0, escrowOfficerNoEmail: 0 },
     reachablePct: 0,
+    viaEscrowCompanyFallback: 0,
+    audience: { internal: 0, external: 0 },
     enabled,
     dryRun,
   };
@@ -420,17 +567,21 @@ export async function handlePartyWizardInvite(
   const reachableRows: Sendable[] = [];
 
   for (const row of candidates) {
+    // Officer FK first, then the escrow_company party row. Both branches are
+    // tried before an order is called unreachable, so the counters below now
+    // mean "nobody at all", not "no officer FK".
+    const recipient = recipientFor(row);
+
     // Count what we cannot reach, by reason, BEFORE doing any work — an
     // unreachable order must never look like a silent success.
-    if (!row.escrowOfficerId) {
-      result.unreachable.noEscrowOfficer++;
-      outcomes.set(row.orderId, { outcome: 'no_escrow_officer', linkAction: 'none' });
-      continue;
-    }
-    const to = row.escrowOfficerEmail?.trim();
-    if (!to) {
-      result.unreachable.escrowOfficerNoEmail++;
-      outcomes.set(row.orderId, { outcome: 'officer_no_email', linkAction: 'none' });
+    if (!recipient) {
+      if (!row.escrowOfficerId) {
+        result.unreachable.noEscrowOfficer++;
+        outcomes.set(row.orderId, { outcome: 'no_escrow_officer', linkAction: 'none' });
+      } else {
+        result.unreachable.escrowOfficerNoEmail++;
+        outcomes.set(row.orderId, { outcome: 'officer_no_email', linkAction: 'none' });
+      }
       continue;
     }
 
@@ -441,11 +592,11 @@ export async function handlePartyWizardInvite(
       continue;
     }
 
-    reachableRows.push({ row, to });
+    reachableRows.push({ row, to: recipient.email, recipient });
   }
 
-  // ── Pass 2: one ask per property, then the per-recipient cap ──
-  const plan = planSends(reachableRows, await loadInvitedProperties());
+  // ── Pass 2: one ask per property, then the per-recipient cap, then the run cap ──
+  const plan = planSends(reachableRows, await loadInvitedProperties(), runCap);
 
   for (const dup of plan.duplicates) {
     result.skippedDuplicateProperty++;
@@ -457,23 +608,36 @@ export async function handlePartyWizardInvite(
     result.skippedRecipientCap++;
     outcomes.set(held.row.orderId, { outcome: 'skipped_recipient_cap', linkAction: 'none' });
   }
+  for (const held of plan.runCapped) {
+    result.skippedRunCap++;
+    outcomes.set(held.row.orderId, { outcome: 'skipped_run_cap', linkAction: 'none' });
+  }
 
   // ── Pass 3: act ──
   const previews = new Map<number, PartyInviteReportRow>();
 
-  for (const { row, to } of plan.sending) {
+  for (const { row, to, recipient } of plan.sending) {
     outcomes.set(row.orderId, { outcome: 'would_send', linkAction: 'would_mint' });
+
+    if (recipient.role === 'escrow_company') result.viaEscrowCompanyFallback++;
+    result.audience[recipient.audience]++;
 
     // A dry run stops here: everything below this line either writes a link row
     // or sends mail. The templates are still rendered against the same input, so
     // a template that throws fails the dry run instead of the first real send.
     if (dryRun) {
-      const preview = renderPreview(row);
+      const preview = renderPreview(row, recipient);
       previews.set(row.orderId, preview.row);
       // Keep the first one whole. One is enough to review the wording, and a
       // hundred full bodies in one response is a payload nobody reads.
       if (!result.sampleEmail && preview.rendered) {
-        result.sampleEmail = { orderId: row.orderId, fileNumber: row.fileNumber, to, ...preview.rendered };
+        result.sampleEmail = {
+          orderId: row.orderId,
+          fileNumber: row.fileNumber,
+          to,
+          audience: recipient.audience,
+          ...preview.rendered,
+        };
       }
       continue;
     }
@@ -484,7 +648,10 @@ export async function handlePartyWizardInvite(
       continue;
     }
 
-    const input = { ...templateInput(row), roleLinks: [{ role: PARTY_INVITE_ROLE, url: minted.url }] };
+    const input = {
+      ...templateInput(row, recipient),
+      roleLinks: [{ role: PARTY_INVITE_ROLE, url: minted.url }],
+    };
 
     const subject = buildPartyWizardSubject(input);
 
@@ -504,8 +671,8 @@ export async function handlePartyWizardInvite(
         orderId: row.orderId,
         channel: 'email',
         recipientEmail: to,
-        recipientName: row.escrowOfficerName ?? undefined,
-        recipientRole: 'escrow_officer',
+        recipientName: recipient.name ?? undefined,
+        recipientRole: recipient.role,
         subject,
         status: ok ? 'sent' : 'failed',
         errorMessage: ok ? undefined : send.error?.message?.slice(0, 500),
@@ -521,7 +688,7 @@ export async function handlePartyWizardInvite(
     result.report = candidates.map((row) => {
       const decided = outcomes.get(row.orderId);
       const built = previews.get(row.orderId)
-        ?? reportRow(row, decided?.outcome ?? 'would_send', decided?.linkAction ?? 'none');
+        ?? reportRow(row, recipientFor(row), decided?.outcome ?? 'would_send', decided?.linkAction ?? 'none');
       if (decided?.duplicateOf !== undefined) built.duplicateOf = decided.duplicateOf;
       return built;
     });
@@ -540,8 +707,11 @@ export async function handlePartyWizardInvite(
     + `skipped_existing=${result.skippedExistingLink} `
     + `skipped_duplicate_property=${result.skippedDuplicateProperty} `
     + `skipped_recipient_cap=${result.skippedRecipientCap} `
+    + `skipped_run_cap=${result.skippedRunCap} run_cap=${result.runCap} `
     + `unreachable_no_officer=${result.unreachable.noEscrowOfficer} `
     + `unreachable_no_email=${result.unreachable.escrowOfficerNoEmail} `
+    + `via_escrow_company=${result.viaEscrowCompanyFallback} `
+    + `internal=${result.audience.internal} external=${result.audience.external} `
     + `reachable=${result.reachablePct}%`,
   );
 
@@ -556,7 +726,9 @@ type LinkAction = PartyInviteReportRow['linkAction'];
 
 export interface Sendable {
   row: CandidateRow;
+  /** `recipient.email`, kept flat because the cap keys on it. */
   to: string;
+  recipient: InviteRecipient;
 }
 
 export interface PartyInvitePlan {
@@ -565,6 +737,8 @@ export interface PartyInvitePlan {
   duplicates: Array<Sendable & { duplicateOf: string | null }>;
   /** Over the per-recipient cap. Still eligible on the next run. */
   capped: Sendable[];
+  /** Would have sent, but the run was already at its ceiling. Eligible next run. */
+  runCapped: Sendable[];
 }
 
 /**
@@ -588,12 +762,47 @@ export function propertyKey(row: CandidateRow): string | null {
   return normalized.length >= 6 ? normalized : null;
 }
 
-export function planSends(reachable: Sendable[], invitedProperties: Set<string>): PartyInvitePlan {
-  const plan: PartyInvitePlan = { sending: [], duplicates: [], capped: [] };
+/**
+ * Sort key for the one decision order this whole plan hangs off.
+ *
+ * Oldest first, id as tie-break — the same total order the candidate query uses,
+ * for the same reason. Once a run has a ceiling, "which ones get held" is a real
+ * decision rather than a formality, and the rows nearest the far edge of the
+ * window are the ones about to age past PARTY_INVITE_MAX_AGE_DAYS and never be
+ * asked again. Holding those to send a fresher file instead would quietly starve
+ * exactly the orders the window is about to close on.
+ *
+ * This replaced a plain id sort. Order id is a proxy for age, not age: a
+ * backdated or re-keyed order sorts by when its row was written rather than by
+ * when the file opened, and the LIMIT upstream already sorts by opened_at, so a
+ * different sort down here could hold a row the query deliberately kept.
+ *
+ * An unusable opened_at sorts last rather than poisoning the comparator with
+ * NaN — one unreadable row must not scramble the order of the other ninety-nine.
+ */
+function planOrder(a: Sendable, b: Sendable): number {
+  const at = ageKey(a.row.openedAt);
+  const bt = ageKey(b.row.openedAt);
+  if (at !== bt) return at - bt;
+  return a.row.orderId - b.row.orderId;
+}
 
-  // Lowest order id first, so which sibling file carries the ask is stable across
-  // runs rather than whatever order the database happened to return.
-  const ordered = [...reachable].sort((a, b) => a.row.orderId - b.row.orderId);
+function ageKey(openedAt: Date | null | undefined): number {
+  const t = openedAt instanceof Date ? openedAt.getTime() : Number.NaN;
+  return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+}
+
+export function planSends(
+  reachable: Sendable[],
+  invitedProperties: Set<string>,
+  runCap: number,
+): PartyInvitePlan {
+  const plan: PartyInvitePlan = { sending: [], duplicates: [], capped: [], runCapped: [] };
+
+  // Deterministic and oldest-first, so both which sibling file carries a shared
+  // property and which orders the run cap holds are stable across runs rather
+  // than whatever order the database happened to return.
+  const ordered = [...reachable].sort(planOrder);
 
   const askedThisRun = new Map<string, string>();
   const perRecipient = new Map<string, number>();
@@ -621,9 +830,19 @@ export function planSends(reachable: Sendable[], invitedProperties: Set<string>)
       continue;
     }
 
-    // Claimed only on an actual send. A capped order has not asked anything, so
+    // The run ceiling is checked LAST, so an order that the per-recipient cap
+    // would have held anyway is reported under that reason. Reading
+    // 'skipped_run_cap' should mean "raise the ceiling and this one goes out",
+    // and for a recipient already at their limit that would not be true.
+    if (plan.sending.length >= runCap) {
+      plan.runCapped.push(item);
+      continue;
+    }
+
+    // Claimed only on an actual send. A held order has not asked anything, so
     // claiming its property here would make its sibling a duplicate of an ask
-    // nobody made — and both would then sit unasked forever.
+    // nobody made — and both would then sit unasked forever. Same for the
+    // recipient tally: a held order must not spend one of anyone's slots.
     if (key) askedThisRun.set(key, item.row.fileNumber);
     perRecipient.set(item.to, alreadySending + 1);
     plan.sending.push(item);
@@ -675,12 +894,14 @@ async function loadInvitedProperties(): Promise<Set<string>> {
 /** Stands in for the URL a real send would carry. Never a working link. */
 const DRY_RUN_LINK_PLACEHOLDER = 'https://example.invalid/party-wizard/DRY-RUN-NO-LINK-MINTED';
 
-function templateInput(row: CandidateRow) {
+function templateInput(row: CandidateRow, recipient: InviteRecipient) {
   return {
     fileNumber: row.fileNumber,
     propertyAddress: composeAddress(row),
     transactionType: row.transactionType,
-    escrowOfficerName: row.escrowOfficerName,
+    recipientName: recipient.name,
+    recipientCompany: recipient.company,
+    audience: recipient.audience,
     openedAt: row.openedAt,
   };
 }
@@ -695,6 +916,7 @@ function usableDate(openedAt: Date | null | undefined): Date | null {
 
 function reportRow(
   row: CandidateRow,
+  recipient: InviteRecipient | null,
   outcome: PartyInviteOutcome,
   linkAction: PartyInviteReportRow['linkAction'],
 ): PartyInviteReportRow {
@@ -706,9 +928,10 @@ function reportRow(
     ageDays: opened ? Math.floor((Date.now() - opened.getTime()) / 86_400_000) : null,
     transactionType: row.transactionType,
     propertyAddress: composeAddress(row),
-    recipientEmail: row.escrowOfficerEmail?.trim() || null,
-    recipientName: row.escrowOfficerName,
-    recipientRole: 'escrow_officer',
+    recipientEmail: recipient?.email ?? null,
+    recipientName: recipient?.name ?? null,
+    recipientRole: recipient?.role ?? null,
+    recipientAudience: recipient?.audience ?? null,
     outcome,
     linkRoles: [PARTY_INVITE_ROLE],
     linkAction,
@@ -722,10 +945,10 @@ interface RenderedPreview {
   rendered: { subject: string; html: string; text: string; linkPlaceholder: string } | null;
 }
 
-function renderPreview(row: CandidateRow): RenderedPreview {
-  const base = reportRow(row, 'would_send', 'would_mint');
+function renderPreview(row: CandidateRow, recipient: InviteRecipient): RenderedPreview {
+  const base = reportRow(row, recipient, 'would_send', 'would_mint');
   const input = {
-    ...templateInput(row),
+    ...templateInput(row, recipient),
     roleLinks: [{ role: PARTY_INVITE_ROLE, url: DRY_RUN_LINK_PLACEHOLDER }],
   };
   try {

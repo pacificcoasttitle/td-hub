@@ -14,6 +14,7 @@ import {
   assertKnownTitleOffice,
   buildSoftProPayload,
   SoftProPayloadError,
+  type ResolvedContact,
   type ResolvedContacts,
 } from './softpro-payload';
 
@@ -26,7 +27,17 @@ const contactSchema = z.object({
   email: z.string().email().optional(),
   phone: z.string().optional(),
   companyName: z.string().optional(),
+  /**
+   * The contacts row behind a typeahead pick. Optional because free text is the
+   * other half of this form, not an error — a party typed by hand simply has no
+   * contact to link. Never trusted as given: it is looked up with the officer
+   * ids and only a row that came back is written.
+   */
+  contactId: z.number().int().positive().optional(),
 });
+
+/** Every party the form collects through the shared contact component. */
+const PARTY_KEYS = ['escrowCompany', 'lender', 'buyerAgent', 'listingAgent', 'mortgageBroker'] as const;
 
 export const createOrderInputSchema = z.object({
   orderType: z.enum(['Title only', 'Title & Escrow', 'Escrow only', 'Sub Escrow', 'Title Search']),
@@ -273,6 +284,12 @@ async function createLocalRecords(
     salesRepId: resolved.salesRep?.id ?? null,
     titleOfficerId: resolved.titleOfficer?.id ?? null,
     escrowOfficerId: resolved.escrowOfficer?.id ?? null,
+    // Same rule for the two transaction parties that have a column of their own.
+    // Until now the only writer was the enrich-orders read-back, which skips
+    // hub-created orders once they have a client and an underwriter — so on a
+    // hub order these stayed NULL for good.
+    lenderId: resolved.parties?.lender?.id ?? null,
+    listingAgentId: resolved.parties?.listingAgent?.id ?? null,
   }).returning({ id: orders.id });
 
   const orderId = newOrder!.id;
@@ -299,7 +316,7 @@ async function createLocalRecords(
     ].filter(Boolean).join(', '),
   });
 
-  const partyInserts = buildPartyInserts(orderId, input);
+  const partyInserts = buildPartyInserts(orderId, input, resolved);
   if (partyInserts.length > 0) {
     await db.insert(orderParties).values(partyInserts);
   }
@@ -321,20 +338,42 @@ function validTxType(v: string) {
 
 type PartyInsert = typeof orderParties.$inferInsert;
 
-function contactParty(orderId: number, role: PartyInsert['role'], c: z.infer<typeof contactSchema>): PartyInsert {
-  return { orderId, role, externalName: c.name ?? null, externalCompany: c.companyName ?? null, externalEmail: c.email ?? null, externalPhone: c.phone ?? null };
+function contactParty(
+  orderId: number,
+  role: PartyInsert['role'],
+  c: z.infer<typeof contactSchema>,
+  contact?: ResolvedContact,
+): PartyInsert {
+  return {
+    orderId,
+    role,
+    // Null on free text. The external_* columns carry the party either way, so a
+    // typed party is still a party — it just has nothing to link to.
+    contactId: contact?.id ?? null,
+    externalName: c.name ?? null,
+    externalCompany: c.companyName ?? null,
+    externalEmail: c.email ?? null,
+    externalPhone: c.phone ?? null,
+  };
 }
 
-function buildPartyInserts(orderId: number, input: CreateOrderInput): PartyInsert[] {
+function buildPartyInserts(orderId: number, input: CreateOrderInput, resolved: ResolvedContacts): PartyInsert[] {
   const p: PartyInsert[] = [
     { orderId, role: 'seller', isPrimary: true, externalName: [input.seller.firstName, input.seller.lastName].join(' ') },
     { orderId, role: 'buyer', isPrimary: true, externalName: [input.buyer.firstName, input.buyer.lastName].join(' ') },
   ];
   const c = input.contacts;
-  if (c?.escrowCompany) p.push(contactParty(orderId, 'escrow_company', c.escrowCompany));
-  if (c?.lender) p.push(contactParty(orderId, 'lender', c.lender));
-  if (c?.buyerAgent) p.push(contactParty(orderId, 'buyer_agent', c.buyerAgent));
-  if (c?.listingAgent) p.push(contactParty(orderId, 'listing_agent', c.listingAgent));
+  const r = resolved.parties;
+  if (c?.escrowCompany) p.push(contactParty(orderId, 'escrow_company', c.escrowCompany, r?.escrowCompany));
+  if (c?.lender) p.push(contactParty(orderId, 'lender', c.lender, r?.lender));
+  if (c?.buyerAgent) p.push(contactParty(orderId, 'buyer_agent', c.buyerAgent, r?.buyerAgent));
+  if (c?.listingAgent) p.push(contactParty(orderId, 'listing_agent', c.listingAgent, r?.listingAgent));
+  // party_role has no mortgage_broker value, so this party had no row at all and
+  // existed locally only inside the SoftPro payload. lender_contact is the role
+  // the SoftPro read-back already files a mortgage broker under
+  // (enrich-orders.ts persistResolvedParties), so using it here means the two
+  // writers agree on one row instead of inventing an enum value.
+  if (c?.mortgageBroker) p.push(contactParty(orderId, 'lender_contact', c.mortgageBroker, r?.mortgageBroker));
   return p;
 }
 
@@ -384,6 +423,7 @@ async function resolveContactIds(input: CreateOrderInput): Promise<ResolvedConta
   push(input.transaction.titleOfficer);
   push(input.transaction.escrowOfficer);
   push(input.onBehalfOfContactId);
+  for (const key of PARTY_KEYS) push(input.contacts?.[key]?.contactId);
 
   if (ids.length === 0) return {};
 
@@ -402,6 +442,13 @@ async function resolveContactIds(input: CreateOrderInput): Promise<ResolvedConta
     escrowOfficer: get(input.transaction.escrowOfficer),
     opener: get(input.onBehalfOfContactId),
   };
+
+  const parties: NonNullable<ResolvedContacts['parties']> = {};
+  for (const key of PARTY_KEYS) {
+    const row = get(input.contacts?.[key]?.contactId);
+    if (row) parties[key] = row;
+  }
+  if (Object.keys(parties).length > 0) result.parties = parties;
 
   const openerRow = result.opener;
   if (openerRow?.flookupCode) {

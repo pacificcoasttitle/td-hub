@@ -143,9 +143,27 @@ const baseInput = {
   },
 };
 
+const LENDER_ID = 7101;
+const LISTING_AGENT_ID = 7102;
+const BUYER_AGENT_ID = 7103;
+const MORTGAGE_BROKER_ID = 7104;
+const ESCROW_COMPANY_CONTACT_ID = 7105;
+
 /** The values handed to the FIRST insert — the orders row. */
 function ordersInsert() {
   return insertValuesMock.mock.calls[0]![0] as Record<string, unknown>;
+}
+
+/**
+ * The values handed to the THIRD insert — the order_parties rows. Order is
+ * orders, order_properties, order_parties, order_status_history.
+ */
+function partyInserts() {
+  return insertValuesMock.mock.calls[2]![0] as Array<Record<string, unknown>>;
+}
+
+function partyByRole(role: string) {
+  return partyInserts().filter((p) => p.role === role);
 }
 
 describe('createLocalRecords persists what the operator entered', () => {
@@ -173,6 +191,8 @@ describe('createLocalRecords persists what the operator entered', () => {
       loanNumber: null,
       escrowNumber: null,
       clientContactId: null,
+      lenderId: null,
+      listingAgentId: null,
     });
   });
 
@@ -248,5 +268,193 @@ describe('createLocalRecords persists what the operator entered', () => {
     const row = ordersInsert();
     expect(row.loanNumber).toBeNull();
     expect(row.escrowNumber).toBeNull();
+  });
+});
+
+// ─── Transaction parties ────────────────────────────────────────────────────
+//
+// The typeahead resolves a real contacts row and sends its lookup codes to
+// SoftPro, so the vendor can identify the party. The id behind that same row was
+// then thrown away, which left orders.lender_id, orders.listing_agent_id and
+// every order_parties.contact_id NULL on hub-created orders — permanently, since
+// the enrich-orders read-back does not reach a hub order that already has a
+// client, an underwriter and party rows.
+//
+// Free text is the other half of this form. A party nobody picked from the
+// typeahead must still be written, with no contact link.
+
+describe('createLocalRecords links the parties the operator picked', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbState.contacts = [];
+    dbState.companies = [];
+    dbState.branches = [];
+    softproCreateMock.mockResolvedValue({ success: true, data: { orderNumber: '20021376-OCT' } });
+    returningMock.mockResolvedValue([{ id: 7308 }]);
+    autoTriggerMock.mockResolvedValue({ initiated: 0, failed: 0, skipped: true });
+    getSettingMock.mockResolvedValue('false');
+  });
+
+  const allPartiesSelected = {
+    ...baseInput,
+    contacts: {
+      lender: {
+        contactId: LENDER_ID,
+        name: 'Lender Person',
+        companyName: 'Barrett Financial Group',
+        clientLookupCode: 'LenPerBarr',
+        companyLookupCode: 'BarrFinaGrou',
+      },
+      listingAgent: {
+        contactId: LISTING_AGENT_ID,
+        name: 'Listing Person',
+        email: 'listing@example.com',
+      },
+      buyerAgent: {
+        contactId: BUYER_AGENT_ID,
+        name: 'Buyer Agent Person',
+        email: 'buyeragent@example.com',
+      },
+      mortgageBroker: {
+        contactId: MORTGAGE_BROKER_ID,
+        name: 'Broker Person',
+        email: 'broker@example.com',
+      },
+      escrowCompany: {
+        contactId: ESCROW_COMPANY_CONTACT_ID,
+        name: 'Escrow Person',
+        companyName: 'Newport Financial Associates, Escrow Division',
+      },
+    },
+  };
+
+  function seedAllParties() {
+    dbState.contacts = [
+      contactRow(LENDER_ID, 'LenPerBarr'),
+      contactRow(LISTING_AGENT_ID, 'LisPer'),
+      contactRow(BUYER_AGENT_ID, 'BuyPer'),
+      contactRow(MORTGAGE_BROKER_ID, 'BroPer'),
+      contactRow(ESCROW_COMPANY_CONTACT_ID, 'EscPer'),
+    ];
+  }
+
+  it('the lender and listing agent picks land in their own columns', async () => {
+    seedAllParties();
+    await createAndSendToSoftPro(allPartiesSelected);
+
+    const row = ordersInsert();
+    expect(row.lenderId).toBe(LENDER_ID);
+    expect(row.listingAgentId).toBe(LISTING_AGENT_ID);
+  });
+
+  it('every picked party row carries the contact id it was picked from', async () => {
+    seedAllParties();
+    await createAndSendToSoftPro(allPartiesSelected);
+
+    expect(partyByRole('lender')[0]).toMatchObject({
+      contactId: LENDER_ID,
+      externalName: 'Lender Person',
+      externalCompany: 'Barrett Financial Group',
+    });
+    expect(partyByRole('listing_agent')[0]!.contactId).toBe(LISTING_AGENT_ID);
+    expect(partyByRole('buyer_agent')[0]!.contactId).toBe(BUYER_AGENT_ID);
+    expect(partyByRole('escrow_company')[0]!.contactId).toBe(ESCROW_COMPANY_CONTACT_ID);
+  });
+
+  // party_role has no mortgage_broker value, so this party had no local row at
+  // all. lender_contact is the role the SoftPro read-back already files a
+  // mortgage broker under, so both writers land on one row.
+  it('the mortgage broker is written as lender_contact rather than dropped', async () => {
+    seedAllParties();
+    await createAndSendToSoftPro(allPartiesSelected);
+
+    const broker = partyByRole('lender_contact');
+    expect(broker).toHaveLength(1);
+    expect(broker[0]).toMatchObject({
+      contactId: MORTGAGE_BROKER_ID,
+      externalName: 'Broker Person',
+      externalEmail: 'broker@example.com',
+    });
+    expect(partyInserts().some((p) => p.role === 'mortgage_broker')).toBe(false);
+  });
+
+  it('a free-text party is written with a null contact id, not dropped', async () => {
+    await createAndSendToSoftPro({
+      ...baseInput,
+      contacts: {
+        lender: { name: 'Typed Lender', companyName: 'Some Bank Nobody Synced' },
+        listingAgent: { name: 'Typed Agent', email: 'typed@example.com' },
+      },
+    });
+
+    const row = ordersInsert();
+    expect(row.lenderId).toBeNull();
+    expect(row.listingAgentId).toBeNull();
+
+    expect(partyByRole('lender')[0]).toMatchObject({
+      contactId: null,
+      externalName: 'Typed Lender',
+      externalCompany: 'Some Bank Nobody Synced',
+    });
+    expect(partyByRole('listing_agent')[0]).toMatchObject({
+      contactId: null,
+      externalName: 'Typed Agent',
+      externalEmail: 'typed@example.com',
+    });
+  });
+
+  // The company-first typeahead (lender, escrow company) mixes companies into
+  // the same suggestion list. A company is not a contact, so picking one leaves
+  // the party with lookup codes and no contact id — it must still persist.
+  it('a company-only pick persists the party without inventing a contact id', async () => {
+    await createAndSendToSoftPro({
+      ...baseInput,
+      contacts: {
+        lender: {
+          name: '',
+          companyName: 'Barrett Financial Group',
+          companyLookupCode: 'BarrFinaGrou',
+        },
+      },
+    });
+
+    expect(ordersInsert().lenderId).toBeNull();
+    expect(partyByRole('lender')[0]).toMatchObject({
+      contactId: null,
+      externalCompany: 'Barrett Financial Group',
+    });
+  });
+
+  // Same rule as the officer FKs: the id must come from a row that came back
+  // from the contacts lookup, never from the number the client sent.
+  it('a contact id that resolves to nothing is dropped, and the party still persists', async () => {
+    dbState.contacts = [contactRow(LISTING_AGENT_ID, 'LisPer')];
+
+    await createAndSendToSoftPro({
+      ...baseInput,
+      contacts: {
+        lender: { contactId: 999999, name: 'Ghost Lender', email: 'ghost@example.com' },
+        listingAgent: { contactId: LISTING_AGENT_ID, name: 'Listing Person', email: 'listing@example.com' },
+      },
+    });
+
+    const row = ordersInsert();
+    expect(row.lenderId).toBeNull();
+    expect(row.listingAgentId).toBe(LISTING_AGENT_ID);
+
+    expect(partyByRole('lender')[0]).toMatchObject({
+      contactId: null,
+      externalName: 'Ghost Lender',
+    });
+  });
+
+  // A party the operator never opened is absent from input.contacts entirely and
+  // must not produce a row, which is how it behaves today.
+  it('an untouched party produces no row at all', async () => {
+    await createAndSendToSoftPro(baseInput);
+
+    const roles = partyInserts().map((p) => p.role);
+    expect(roles).toEqual(['seller', 'buyer']);
+    expect(partyInserts().every((p) => p.contactId === undefined)).toBe(true);
   });
 });

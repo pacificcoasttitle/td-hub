@@ -104,6 +104,7 @@ export function ContactFields({
       [searchField]: value,
       companyLookupCode: '',
       clientLookupCode: '',
+      contactId: undefined,
     });
     setOpen(true);
     clearTimeout(debounceRef.current);

@@ -6,6 +6,7 @@ export interface PartyContact {
   company: string;
   companyLookupCode?: string;
   clientLookupCode?: string;
+  contactId?: number;
 }
 export interface FormOption { value: string; label: string; }
 
@@ -24,6 +25,7 @@ export const EP: Person = { firstName: '', middleName: '', lastName: '' };
 export const EC: PartyContact = {
   name: '', email: '', phone: '', company: '',
   companyLookupCode: '', clientLookupCode: '',
+  contactId: undefined,
 };
 
 export const ORG_TYPES = ['LLC', 'Corporation', 'Partnership', 'Trust', 'Other'];

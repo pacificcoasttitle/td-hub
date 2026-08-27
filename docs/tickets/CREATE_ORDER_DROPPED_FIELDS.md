@@ -51,9 +51,9 @@ These are pure omissions in the insert. No schema change, no product decision.
 | `transaction.titleOfficer` | `orders.title_officer_id` | `TitleOffice` | **fixed** |
 | `transaction.escrowOfficer` | `orders.escrow_officer_id` | `LookUpCodeEscrowOfficer`, `EscrowOfficerName` | **fixed** |
 | `transaction.loanAmount` | `orders.loan_amount` | `LoanAmount` | **fixed** |
-| `contacts.lender` | `orders.lender_id` | `lenderDetails` | blocked — needs a resolved contact id |
-| `contacts.listingAgent` | `orders.listing_agent_id` | `listingAgentDetails` | blocked — same |
-| `contacts.*.clientLookupCode` | `order_parties.contact_id` | party lookup codes | blocked — same |
+| `contacts.lender` | `orders.lender_id` | `lenderDetails` | **fixed** — persisted from the typeahead pick |
+| `contacts.listingAgent` | `orders.listing_agent_id` | `listingAgentDetails` | **fixed** — same |
+| `contacts.*` | `order_parties.contact_id` | party lookup codes | **fixed** — the pick now carries its contact id |
 | `transaction.branchCode` | `orders.branch_id` | `LookUpCodeTitleOffice` | not taken — see below |
 
 ### `escrow_officer_id` is the party wizard's coverage ceiling
@@ -158,6 +158,12 @@ only exists once the operator picks from a typeahead rather than typing free
 text. That is `fix/hub-parties-resolution`. Once it lands, writing these three
 FKs is a small follow-up, and it should be taken as one.
 
+That follow-up is `fix/hub-parties-local-persistence`. The typeahead pick now
+carries its `contacts.id` through to the server, which verifies it against the
+same batched `contacts` lookup the officer FKs use and writes `orders.lender_id`,
+`orders.listing_agent_id` and `order_parties.contact_id`. The gap window it
+opened is measured in `ORDER_PARTIES_CONTACT_BACKFILL.md` — it is zero orders.
+
 `branch_id` is deliberately not taken here. Something already populates it
 (order 7308 has `branch_id = 2` despite create never setting it) and 765 active
 orders have it NULL, so it needs its own look rather than a guess bolted onto
@@ -176,7 +182,7 @@ this change.
 | `seller.isOrganization`, `seller.organizationType` | `sellerDetails.*` | needs a decision |
 | `buyer.middleName`, `buyer.secondary{First,Middle,Last}Name` | `transactionDetails.*Borrower*` | needs a decision |
 | `buyer.isOrganization`, `buyer.organizationType` | `transactionDetails.*` | needs a decision |
-| `contacts.mortgageBroker` | `mortgageDetails` | needs a decision — `party_role` has no `mortgage_broker` value |
+| `contacts.mortgageBroker` | `mortgageDetails` | **fixed without the enum** — written as `party_role = 'lender_contact'`, which is where the SoftPro read-back already files a mortgage broker. Adding `mortgage_broker` to the enum remains an open decision, not a blocker |
 
 The secondary buyer and seller are the largest gap in this group. A second
 borrower is sent to SoftPro and the local order has no idea one exists, which

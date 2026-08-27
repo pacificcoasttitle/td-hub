@@ -74,8 +74,34 @@ UI required querying `profiles` precisely because `roles` does not list it.
 
 Option 1 or 2. Option 3 is a project, not a fix.
 
-## Related
+## Related — and at four instances this is a pattern, not a coincidence
 
-Same class as `order_properties.borrowers_vesting` (0 of 7,381 rows populated) and
-`officer_cc_defaults.cc_email` — declared, wired to nothing, and misleading to a reader.
-Worth handling together.
+Every one of these is the same shape: **a column or table added, never written,
+and silently empty forever.** None fails. None logs. Each one reads to the next
+developer as a feature that exists.
+
+| Field | Measured | What a reader assumes |
+| --- | --- | --- |
+| `roles` table | 4 roles nobody holds, 3 held roles missing | that it governs permissions |
+| `order_properties.borrowers_vesting` | 0 of 7,381 rows populated | that vesting is captured |
+| `officer_cc_defaults.cc_email` | table exists, read by no sending path | that officers have standing CCs |
+| `order_parties.source` | **NULL on all 36,606 rows, every role** | that party provenance is tracked |
+
+`order_parties.source` was found while sizing the hub detail pane. It is worth
+noting precisely because of how it was found: nobody was looking for it, and
+nothing would ever have surfaced it. It records nothing about where a party
+came from — sync, party wizard, manual entry — on any of the 36,606 rows.
+
+### Why this pattern deserves one owner
+
+Individually each is minor. Together they are a reliability problem of a
+specific kind: **the schema is not a trustworthy description of the system.**
+Anyone reasoning from the column list — a new developer, a report author, an
+AI agent reading the schema to answer a question — will conclude these fields
+carry data. Three of the four have already cost investigation time.
+
+The fix per field is one of: delete it, populate it, or comment it as reserved.
+The fix for the pattern is a rule about not landing a column ahead of the code
+that writes it.
+
+Worth handling together, and worth a sweep for the fifth.

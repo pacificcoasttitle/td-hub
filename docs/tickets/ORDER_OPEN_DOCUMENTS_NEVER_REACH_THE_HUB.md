@@ -75,6 +75,42 @@ These fill in once that lands. Two things it changes:
 Until then the hub has nothing to display for these three, and no amount of
 work on the hub side changes that — the documents are not arriving.
 
+## The batching fix is NOT done when the documents arrive
+
+There is a second half, and it is invisible from the SoftPro side.
+
+The API that feeds the hub returns these three categories as a **bare `exists`
+boolean with no document id**:
+
+```ts
+export interface DocCatFull { exists: boolean; count: number; latestId: number | null; latestCreatedAt: string | null }
+interface DocCatBool { exists: boolean }
+
+export interface OrderDocuments {
+  cpl: DocCatFull; prelim: DocCatFull; proposedInsured: DocCatFull;
+  legalVesting: DocCatBool; tax: DocCatBool; grantDeed: DocCatBool;   // ← no id
+}
+```
+
+`cpl`, `prelim` and `proposedInsured` carry `latestId`, so their chips become
+working "view" links the moment a document appears. **`legalVesting`, `tax` and
+`grantDeed` cannot.** With no id there is no `/api/documents/{id}/view` to
+open.
+
+So if only the transmission half lands, those three chips flip from
+"not received" to "on file" — and still go nowhere. The operator learns the
+document exists and gains no way to read it, which is arguably worse than the
+current state: today the chip is honest about having nothing.
+
+The hub renders "on file" without a link rather than a link that 404s, so the
+failure is at least not silent. But **the fix is not complete until those three
+categories return `latestId`** (and ideally `count` and `latestCreatedAt`, so
+they can be promoted to tiles that show a date like the prelim does).
+
+**Acceptance for the batching work should therefore be: open the document from
+the hub.** Not "the document arrives" — arriving is necessary and not
+sufficient.
+
 ## Revisit when it lands
 
 Promote legal & vesting, grant deed and taxes from chips to full tiles once

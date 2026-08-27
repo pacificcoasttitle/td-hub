@@ -4,6 +4,11 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { getLookupTable, getSalesReps } from '@/lib/integrations/softpro';
 import type { SoftProLookupItem } from '@/lib/integrations/softpro';
 import { COMPANY_TYPE_MAP } from '@/lib/domain/contacts/company-constants';
+import {
+  ESCROW_OFFICER_ROW_FIELDS,
+  describeOfficerRowRejection,
+  validateOfficerRowShape,
+} from '@/lib/domain/contacts/officer-row-shape';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -18,6 +23,14 @@ export interface SyncContactsResult {
   updated: number;
   skipped: number;
   errors: Array<{ lookupCode: string; error: string }>;
+  /**
+   * Rows declined by the shape guard, as opposed to rows we tried to write and
+   * failed. Every entry here also appears in `errors`, so it reaches
+   * `jobs.error` and `contact_sync_state.last_error` — this field exists so a
+   * deliberate rejection is not mistaken for the systemic breakage that the
+   * "0 successes" tripwire in handleSyncContactType is watching for.
+   */
+  rejected?: Array<{ lookupCode: string; reasons: string[] }>;
 }
 
 type SyncRow = SoftProLookupItem;
@@ -300,10 +313,32 @@ async function syncTitleOfficers(items: SyncRow[]): Promise<SyncContactsResult> 
 async function syncEscrowOfficers(items: SyncRow[]): Promise<SyncContactsResult> {
   let created = 0, updated = 0, skipped = 0;
   const errors: SyncContactsResult['errors'] = [];
+  const rejected: NonNullable<SyncContactsResult['rejected']> = [];
 
   for (const item of items) {
     const examiner = str(item, 'Escrow officer/Closer');
     if (!examiner) { skipped++; continue; }
+
+    // Shape guard. A column-shifted vendor row has every field in the wrong
+    // place, so it is declined whole — no partial import, no shifting values
+    // back, because inferring the correct alignment is a guess and a wrong
+    // guess writes plausible-looking bad data.
+    //
+    // It is recorded as an error rather than a `skipped++` so that it reaches
+    // jobs.error, jobs.payload and contact_sync_state.last_error. A silently
+    // skipped officer row is how PCT\jgomez went 133 days without anyone
+    // noticing.
+    const shape = validateOfficerRowShape(item, ESCROW_OFFICER_ROW_FIELDS);
+    if (!shape.ok) {
+      const message = describeOfficerRowRejection(examiner, shape.reasons);
+      console.error('[sync-contacts] escrow officer row rejected for shape', {
+        lookupCode: examiner,
+        reasons: shape.reasons,
+      });
+      errors.push({ lookupCode: examiner, error: message });
+      rejected.push({ lookupCode: examiner, reasons: shape.reasons });
+      continue;
+    }
 
     try {
       // Dedupe guard: if this row is a PCT\ login-code entry and a
@@ -368,7 +403,7 @@ async function syncEscrowOfficers(items: SyncRow[]): Promise<SyncContactsResult>
       errors.push({ lookupCode: examiner, error: describeSyncError(err) });
     }
   }
-  return { entityType: 'Escrow Officer', totalFetched: items.length, created, updated, skipped, errors };
+  return { entityType: 'Escrow Officer', totalFetched: items.length, created, updated, skipped, errors, rejected };
 }
 
 // ─── Sync 4: Sales Reps (DIFFERENT ENDPOINT) ────────────────────────────

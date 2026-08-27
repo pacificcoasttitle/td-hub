@@ -347,6 +347,26 @@ function contactParty(
   return {
     orderId,
     role,
+    // The identity all four order_parties writers agree on is
+    // (order_id, role, is_primary) — enrich-orders upsertResolvedParty,
+    // verify-order-sync reconcileParties and the party wizard's
+    // projectToOrderParties all look a party up by that triple, and all three
+    // ask for is_primary = true on every role reachable from this form. The
+    // column default is false, so leaving it out meant the read-back missed the
+    // operator's row and INSERTED its own beside it: two rows for one party,
+    // with the operator's contact_id stranded on the row nothing reads.
+    //
+    // That is not hypothetical. Orders 11, 27 and 42 each carry a lender_contact
+    // row written 11 March holding a raw lookup code (`PatLeeLeeM`) at
+    // is_primary = false, and a second one written 13 June with the resolved name
+    // at is_primary = true, from exactly this mismatch between two writers.
+    //
+    // Every role contactParty is called for is single-instance — production has
+    // one row per (order, role) for all of them — so true is correct for all of
+    // them, and setting it here rather than per call site is what stops the next
+    // role added to the form from reintroducing the same bug. The unique index
+    // added in migration 0035 is the backstop.
+    isPrimary: true,
     // Null on free text. The external_* columns carry the party either way, so a
     // typed party is still a party — it just has nothing to link to.
     contactId: contact?.id ?? null,

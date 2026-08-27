@@ -458,3 +458,140 @@ describe('createLocalRecords links the parties the operator picked', () => {
     expect(partyInserts().every((p) => p.contactId === undefined)).toBe(true);
   });
 });
+
+// ─── is_primary, the key the read-back matches on ───────────────────────────
+//
+// (order_id, role, is_primary) is the party identity every writer uses:
+// enrich-orders upsertResolvedParty, verify-order-sync reconcileParties and the
+// party wizard's projectToOrderParties all SELECT on that triple and then
+// update-or-insert. All three ask for is_primary = true on every role this form
+// collects.
+//
+// create-order omitted the column and took the default of false, so the
+// read-back could not find the operator's row and inserted its own beside it —
+// two rows for one party, with the operator's contact_id on the row the strict
+// is_primary readers skip. Migration 0035 makes the triple unique so this cannot
+// silently drift again; these tests are the code half of the same guarantee.
+//
+// Asserting the VALUE, not merely that a row exists, is the point. The previous
+// party tests all passed while every one of these rows was non-primary.
+
+describe('createLocalRecords writes parties on the key the read-back matches', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbState.contacts = [];
+    dbState.companies = [];
+    dbState.branches = [];
+    softproCreateMock.mockResolvedValue({ success: true, data: { orderNumber: '20021376-OCT' } });
+    returningMock.mockResolvedValue([{ id: 7308 }]);
+    autoTriggerMock.mockResolvedValue({ initiated: 0, failed: 0, skipped: true });
+    getSettingMock.mockResolvedValue('false');
+  });
+
+  const everyRoleSelected = {
+    ...baseInput,
+    contacts: {
+      lender: { contactId: LENDER_ID, name: 'Lender Person', companyName: 'Barrett Financial Group' },
+      listingAgent: { contactId: LISTING_AGENT_ID, name: 'Listing Person' },
+      buyerAgent: { contactId: BUYER_AGENT_ID, name: 'Buyer Agent Person' },
+      mortgageBroker: { contactId: MORTGAGE_BROKER_ID, name: 'Broker Person' },
+      escrowCompany: { contactId: ESCROW_COMPANY_CONTACT_ID, name: 'Escrow Person' },
+    },
+  };
+
+  function seedEveryRole() {
+    dbState.contacts = [
+      contactRow(LENDER_ID, 'LenPerBarr'),
+      contactRow(LISTING_AGENT_ID, 'LisPer'),
+      contactRow(BUYER_AGENT_ID, 'BuyPer'),
+      contactRow(MORTGAGE_BROKER_ID, 'BroPer'),
+      contactRow(ESCROW_COMPANY_CONTACT_ID, 'EscPer'),
+    ];
+  }
+
+  // The four roles the SoftPro read-back files as primary. Each of these was a
+  // guaranteed duplicate row: enrich-orders persistResolvedParties asks for
+  // is_primary = true for all four and inserts when it misses.
+  it.each([
+    ['lender', 'enrich-orders + verify-order-sync'],
+    ['listing_agent', 'enrich-orders + party wizard'],
+    ['escrow_company', 'enrich-orders + verify-order-sync'],
+    ['lender_contact', 'enrich-orders'],
+  ])('the %s row is primary, so %s updates it instead of adding a second row', async (role) => {
+    seedEveryRole();
+    await createAndSendToSoftPro(everyRoleSelected);
+
+    const rows = partyByRole(role);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.isPrimary).toBe(true);
+  });
+
+  // buyer_agent has no reconciler today, so it was not a duplicate — but a
+  // non-primary row is invisible to every reader that filters strictly on the
+  // flag, and it is the obvious next role for the party wizard. It goes primary
+  // with the rest rather than being left as the one exception.
+  it('the buyer agent row is primary too, not left as the odd one out', async () => {
+    seedEveryRole();
+    await createAndSendToSoftPro(everyRoleSelected);
+
+    expect(partyByRole('buyer_agent')[0]!.isPrimary).toBe(true);
+  });
+
+  // Buyer and seller were already correct. Asserted so a future change to
+  // buildPartyInserts cannot quietly take them the other way.
+  it('buyer and seller stay primary, as they already were', async () => {
+    await createAndSendToSoftPro(baseInput);
+
+    expect(partyByRole('buyer')[0]!.isPrimary).toBe(true);
+    expect(partyByRole('seller')[0]!.isPrimary).toBe(true);
+  });
+
+  // The whole-payload assertion: not one row may reach the insert relying on the
+  // column default. This is the check that would have caught the original bug.
+  it('no party row is left to the column default', async () => {
+    seedEveryRole();
+    await createAndSendToSoftPro(everyRoleSelected);
+
+    expect(partyInserts()).toHaveLength(7);
+    for (const row of partyInserts()) {
+      expect(row.isPrimary, `role ${String(row.role)} did not set is_primary`).toBe(true);
+    }
+  });
+
+  // A free-text party is the same party as far as the read-back is concerned —
+  // it matches on role and is_primary, never on contact_id — so it needs the
+  // flag just as much as a typeahead pick does.
+  it('a free-text party is primary as well, and still persists its text', async () => {
+    await createAndSendToSoftPro({
+      ...baseInput,
+      contacts: {
+        lender: { name: 'Typed Lender', companyName: 'Some Bank Nobody Synced' },
+        escrowCompany: { name: 'Typed Escrow', companyName: 'Nobody Synced Escrow' },
+      },
+    });
+
+    expect(partyByRole('lender')[0]).toMatchObject({
+      isPrimary: true,
+      contactId: null,
+      externalName: 'Typed Lender',
+      externalCompany: 'Some Bank Nobody Synced',
+    });
+    expect(partyByRole('escrow_company')[0]).toMatchObject({
+      isPrimary: true,
+      contactId: null,
+      externalName: 'Typed Escrow',
+      externalCompany: 'Nobody Synced Escrow',
+    });
+  });
+
+  // Migration 0035 makes (order_id, role, is_primary) unique. A create that
+  // emitted the same triple twice would now fail the insert outright, so the
+  // batch must be distinct on that triple.
+  it('the insert batch is distinct on (role, is_primary), which migration 0035 requires', async () => {
+    seedEveryRole();
+    await createAndSendToSoftPro(everyRoleSelected);
+
+    const keys = partyInserts().map((p) => `${String(p.role)}:${String(p.isPrimary)}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+});

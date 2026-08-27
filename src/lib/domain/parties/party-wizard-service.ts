@@ -1,7 +1,8 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/lib/db/client';
 import {
-  orderParties, orderProperties, orders, partySubmissions, partyWizardLinks,
+  contacts, orderParties, orderProperties, orders, partySubmissions, partyWizardLinks,
 } from '@/lib/db/schema';
 import { addNotes } from '@/lib/integrations/softpro';
 import {
@@ -11,6 +12,9 @@ import {
   getRoleForm, getSubmissionSchema, toPartyColumns, toSellerColumns,
   type ListingAgentSubmission, type PartyColumns, type PartyRole, type RoleFormDefinition,
 } from './party-wizard-fields';
+import {
+  classifyLinkState, resolveCounterpartName, resolveWizardContact, type WizardContact,
+} from './party-wizard-context';
 import { buildPartyNote } from './party-note';
 
 // ─── Party wizard service ────────────────────────────────────────────────────
@@ -26,10 +30,23 @@ import { buildPartyNote } from './party-note';
 export const SUBMISSION_RATE_LIMIT = 5;
 export const SUBMISSION_RATE_WINDOW_MS = 10 * 60 * 1000;
 
+/**
+ * Everything the public page may render about the order.
+ *
+ * Still deliberately narrow — a link in the wrong inbox must reveal only what
+ * the intended recipient already knows from their own role. What is here was
+ * approved field by field; what is absent (price, loan amount, the lender, any
+ * other party's contact details) is absent on purpose and stays that way.
+ */
 export interface WizardOrderContext {
-  /** Deliberately minimal — a link in the wrong inbox must reveal almost nothing. */
   fileNumber: string;
   propertyAddress: string | null;
+  transactionType: string | null;
+  openedAt: Date | null;
+  /** The recipient's own client, for confirmation. Null far more often than not. */
+  counterpartName: string | null;
+  /** Who to ask about this file. Null when neither officer resolves. */
+  contact: WizardContact | null;
 }
 
 export interface ResolvedLink {
@@ -46,22 +63,31 @@ export interface ResolvedLink {
 
 export type LinkFailure =
   | 'invalid'        // bad signature, malformed, or no such row
-  | 'revoked'
-  | 'expired'
+  | 'inactive'       // revoked OR expired — deliberately indistinguishable
   | 'unsupported'    // role we cannot render a form for
   | 'misconfigured'; // secret unset
 
 export type ResolveResult =
   | { ok: true; link: ResolvedLink }
-  | { ok: false; reason: LinkFailure };
+  /**
+   * `order` is attached only for failures that required a signature-valid token
+   * matching a real row — see the note on probing in resolvePartyWizardLink.
+   */
+  | { ok: false; reason: LinkFailure; order?: WizardOrderContext };
 
 /**
  * Resolve a token to a usable link. Read-only; call recordLinkAccess separately
  * so a HEAD/prefetch does not inflate the access count.
  *
- * Every failure returns the same shape and the caller renders one generic
- * message: distinguishing "no such link" from "revoked" would let someone probe
- * for valid ids.
+ * ON PROBING. Revoked and expired resolve to the same reason — 'inactive' —
+ * and the page renders one message for it, so the outcome cannot tell anyone
+ * which of the two happened, or that a link was ever deliberately withdrawn.
+ *
+ * They do return more than 'invalid' does, and that is deliberate rather than a
+ * gap: reaching this point at all requires an HMAC over `tokenId.secretHalf`
+ * that verifies against PARTY_WIZARD_TOKEN_SECRET, so anyone who gets here is
+ * holding a token we minted and handed out. They already knew the file. What
+ * they need now is a person to ask, which is exactly what the panel gives them.
  */
 export async function resolvePartyWizardLink(token: string): Promise<ResolveResult> {
   const verified = verifyPartyWizardToken(token);
@@ -88,43 +114,85 @@ export async function resolvePartyWizardLink(token: string): Promise<ResolveResu
   if (!row) return { ok: false, reason: 'invalid' };
   // The id alone is not enough — the secret half must match the stored digest.
   if (!matchesStoredHash(secretHalf, row.tokenHash)) return { ok: false, reason: 'invalid' };
-  if (row.revokedAt) return { ok: false, reason: 'revoked' };
-  if (row.expiresAt.getTime() <= Date.now()) return { ok: false, reason: 'expired' };
 
-  const form = getRoleForm(row.role as PartyRole);
-  if (!form) return { ok: false, reason: 'unsupported' };
+  const role = row.role as PartyRole;
+  const order = await loadOrderContext(row.orderId, role);
+  if (!order) return { ok: false, reason: 'invalid' };
 
-  const [orderRow] = await db
-    .select({
-      fileNumber: orders.fileNumber,
-      address: orderProperties.fullAddress,
-      street: orderProperties.address,
-      city: orderProperties.city,
-      state: orderProperties.state,
-      zip: orderProperties.zip,
-    })
-    .from(orders)
-    .leftJoin(orderProperties, eq(orderProperties.orderId, orders.id))
-    .where(eq(orders.id, row.orderId))
-    .limit(1);
+  // One reason for both, so the two cannot be told apart from the outside. The
+  // operational difference stays legible where it belongs: on the row itself.
+  if (classifyLinkState(row) === 'inactive') {
+    return { ok: false, reason: 'inactive', order };
+  }
 
-  if (!orderRow) return { ok: false, reason: 'invalid' };
+  const form = getRoleForm(role);
+  if (!form) return { ok: false, reason: 'unsupported', order };
 
   return {
     ok: true,
     link: {
       linkId: row.id,
       orderId: row.orderId,
-      role: row.role as PartyRole,
+      role,
       tokenId,
       form,
-      order: {
-        fileNumber: orderRow.fileNumber,
-        propertyAddress: composeAddress(orderRow),
-      },
-      previousValues: await loadPreviousValues(row.orderId, row.role as PartyRole),
+      order,
+      previousValues: await loadPreviousValues(row.orderId, role),
       alreadySubmitted: row.usedAt !== null,
     },
+  };
+}
+
+/**
+ * Everything the page renders about the order, in one query.
+ *
+ * Two aliased joins onto contacts because the escrow officer and the title
+ * officer are both contacts rows and the ladder needs whichever it can get.
+ * Note what is NOT selected: sales_price, loan_amount, lender_id, and every
+ * other party. Those are not filtered out downstream — they never leave the
+ * database.
+ */
+async function loadOrderContext(
+  orderId: number,
+  role: PartyRole,
+): Promise<WizardOrderContext | null> {
+  const escrowOfficer = alias(contacts, 'escrow_officer');
+  const titleOfficer = alias(contacts, 'title_officer');
+
+  const [row] = await db
+    .select({
+      fileNumber: orders.fileNumber,
+      transactionType: orders.transactionType,
+      openedAt: orders.openedAt,
+      address: orderProperties.fullAddress,
+      street: orderProperties.address,
+      city: orderProperties.city,
+      state: orderProperties.state,
+      zip: orderProperties.zip,
+      primaryOwner: orderProperties.primaryOwner,
+      escrowOfficerName: escrowOfficer.fullName,
+      escrowOfficerEmail: escrowOfficer.email,
+      escrowOfficerPhone: escrowOfficer.phone,
+      escrowOfficerCompany: escrowOfficer.companyName,
+      titleOfficerName: titleOfficer.fullName,
+      titleOfficerEmail: titleOfficer.email,
+    })
+    .from(orders)
+    .leftJoin(orderProperties, eq(orderProperties.orderId, orders.id))
+    .leftJoin(escrowOfficer, eq(escrowOfficer.id, orders.escrowOfficerId))
+    .leftJoin(titleOfficer, eq(titleOfficer.id, orders.titleOfficerId))
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (!row) return null;
+
+  return {
+    fileNumber: row.fileNumber,
+    propertyAddress: composeAddress(row),
+    transactionType: row.transactionType ?? null,
+    openedAt: row.openedAt ?? null,
+    counterpartName: resolveCounterpartName(role, row.primaryOwner),
+    contact: resolveWizardContact(row),
   };
 }
 
@@ -356,6 +424,10 @@ async function postPartyNote(
     submittedAt,
     seller: values.sellerName || values.sellerEmail || values.sellerPhone
       ? { name: values.sellerName ?? null, email: values.sellerEmail ?? null, phone: values.sellerPhone ?? null }
+      : null,
+    // Only meaningful alongside the name we actually showed them.
+    counterpartDisputed: values.counterpartFlagged === 'true'
+      ? link.order.counterpartName
       : null,
   });
 

@@ -94,6 +94,17 @@ export const listingAgentSubmissionSchema = z.object({
     .optional()
     .transform((v) => (v ? v : undefined)),
   sellerPhone: optionalText(50),
+  /**
+   * The agent told us the seller name we showed them is wrong.
+   *
+   * Carried as the string 'true' because every other value in the form payload
+   * is a string and a lone boolean would be the one field that needed special
+   * handling on both sides. It changes nothing about the party columns — it
+   * only rides into the note, where a human can act on it.
+   */
+  counterpartFlagged: z.string().trim().max(10)
+    .transform((v) => (v === 'true' ? ('true' as const) : undefined))
+    .optional(),
 });
 
 export type ListingAgentSubmission = z.infer<typeof listingAgentSubmissionSchema>;

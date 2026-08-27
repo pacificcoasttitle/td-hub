@@ -14,6 +14,10 @@ piece of bug-hunting. Handled one at a time as they appear, they derail the work
 and none of them get finished. They are collected here so they can be owned,
 prioritised and closed as their own stream, separately from the order-open fixes.
 
+Item 6 was added on 2026-08-27 from a Supabase advisor warning. It is the first
+item here that is a **regression of a control this project already applied** —
+which is why the argument for a single owner is now stronger, not weaker.
+
 **Nothing in this file should be fixed by whoever is working the order-create
 path.** It needs an owner with infrastructure access and a maintenance window.
 
@@ -166,6 +170,186 @@ keeps it regardless.
 
 ---
 
+## 6. Row Level Security is off on the five newest tables, and the anon key is in the browser bundle
+
+**Severity: high, and live. Verified first-hand, including one confirmed
+anonymous read of real rows from production.**
+
+Opened: 2026-08-27. Source: Supabase advisor (`rls_disabled_in_public`).
+
+The advisor names five tables in `public` with RLS disabled:
+
+```
+party_wizard_links
+party_submissions
+concierge_profiles
+concierge_profile_comps
+concierge_profile_transfers
+```
+
+### The anon key is reachable from a browser — this is not latent
+
+Migration `0032_enable_rls_public_lockdown.sql` already asserted this, and it is
+still true. Re-verified against the **live production deployment**, not local
+source:
+
+- `/login` and `/` are client components that call `createBrowserClient(...)`
+  with `NEXT_PUBLIC_SUPABASE_ANON_KEY` (`src/app/(auth)/login/page.tsx:23`,
+  `src/lib/security/sign-out.ts:4`). `NEXT_PUBLIC_*` is inlined at build time.
+- Crawling every JS chunk referenced by those pages on
+  `https://td-hub.vercel.app` (deployment `dpl_3o2muTSchDPkPEbi9wUzRJ71irK8`),
+  the anon key's **exact literal value** appears in
+  `/_next/static/chunks/a98b931760ed386f.js`, served publicly with no auth. It
+  is a JWT (`eyJ…`, 208 chars).
+- The **service-role key is not** in any client chunk. It is
+  `SUPABASE_SERVICE_ROLE_KEY` (no `NEXT_PUBLIC_` prefix, `sb_secret_…` format)
+  and is only read in `src/lib/security/supabase-admin.ts`, server-side. Checked
+  explicitly; no hits in any shipped chunk. **This distinction is the difference
+  between item 6 and an emergency.**
+
+Anon reads were then confirmed to actually work. Using that key against
+PostgREST, `GET /rest/v1/party_wizard_links` returned **HTTP 200 with real
+rows** — both rows currently in the table. The other four returned `HTTP 200`
+with `[]` because they are empty right now, not because anything denied them.
+
+The grants make this worse than read-only. Every one of the 42 tables in
+`public` grants `SELECT, INSERT, UPDATE, DELETE, TRUNCATE` to both `anon` and
+`authenticated`. On the 37 RLS-enabled tables that grant is inert. On these five
+it is not: an anonymous caller can **truncate `party_submissions`**.
+
+### The true scope is exactly five, and that is the interesting part
+
+Queried `pg_class.relrowsecurity` across `public`:
+
+```
+TOTAL public tables: 42    RLS ON: 37    RLS OFF: 5
+FORCE ROW LEVEL SECURITY set on: (none)
+tables with any policy:          (none)
+```
+
+The five RLS-off tables are precisely the five the advisor named. The schema is
+**not** blanket RLS-off — migration 0032 closed the other 37, with no policies,
+as a blanket deny.
+
+**Root cause is drift, not oversight.** 0032 is a hand-written enumeration of
+table names. None of these five has a `CREATE TABLE` migration anywhere in
+`src/lib/db/migrations` — they were pushed straight from the Drizzle schema, so
+they never passed through a migration file and were never appended to 0032's
+list. **Every future table will land RLS-off the same way.** Whoever owns this
+should treat the recurrence as the actual finding; the five tables are only this
+month's instance.
+
+### Enabling RLS is a verified no-op for the application
+
+This was the open question, and it is answered by query rather than inference.
+The app connects via Drizzle over a direct Postgres connection
+(`src/lib/db/client.ts`, `DATABASE_URL`). As that connection:
+
+```
+current_user = postgres    session_user = postgres
+pg_roles: postgres -> rolsuper = false, rolbypassrls = TRUE
+owner of all five tables = postgres
+```
+
+So the app's role bypasses RLS on **two** independent grounds — `BYPASSRLS`, and
+table ownership (owners bypass RLS unless `FORCE ROW LEVEL SECURITY`, which is
+set nowhere). Enabling RLS without policies changes nothing for the app and
+denies `anon`/`authenticated` outright. That is the same shape 0032 already
+proved safe on 37 tables.
+
+Separately, and independently sufficient: **no application code reaches any
+table through PostgREST.** Every Supabase client call in `src/` is
+`supabase.auth.*` — `signInWithPassword`, `signOut`, `getUser`,
+`auth.admin.createUser`, `auth.admin.generateLink`. There is not one
+`.from('<table>')` data call in the codebase. Supabase is the identity provider
+here; it is not a data path.
+
+### What breaks per table: nothing
+
+| Table | Reached by | Runs as | Effect of RLS-on, no policies |
+| --- | --- | --- | --- |
+| `party_wizard_links` | `party-wizard-service.ts` (Drizzle) | `postgres` | none |
+| `party_submissions` | `party-wizard-service.ts` (Drizzle) | `postgres` | none |
+| `concierge_profiles` | `concierge/usage.ts`, SiteX feed (Drizzle) | `postgres` | none |
+| `concierge_profile_comps` | same | `postgres` | none |
+| `concierge_profile_transfers` | same | `postgres` | none |
+
+**The party wizard specifically.** The public page and its POST were the stated
+risk, so they were traced end to end. `src/app/party-wizard/[token]/page.tsx`
+calls `resolvePartyWizardLink` and `recordLinkAccess`; `POST
+/api/party-wizard/[token]` calls `submitPartyWizard`. All three live in
+`party-wizard-service.ts`, which imports `db` from `@/lib/db/client` and touches
+nothing else. Token validation and submission acceptance are Drizzle-only. **The
+public feature does not use the anon key and does not break.**
+
+### Policies versus blanket deny
+
+**Blanket deny — RLS on, no policies — for all five.** Nothing legitimate
+reaches these tables via the anon key, so there is no access pattern for a
+policy to describe. A policy here would be unverifiable by construction: there
+would be no caller to test it against, and it would create the impression of a
+reviewed grant where none exists. This also keeps the five consistent with the
+37 already closed by 0032, so the schema has one rule instead of two.
+
+Per-table reasoning for what is at stake:
+
+- **`party_wizard_links`** — the only one leaking today (2 rows, read
+  anonymously and confirmed). Exposes `order_id`, `role`, `created_by`, and
+  access timestamps. It does **not** hand out usable links: the URL token is
+  `tokenId.secretHalf.hmac`, only `token_hash` (SHA-256 of a 24-byte secret) is
+  stored, and forging a signature needs `PARTY_WIZARD_TOKEN_SECRET`, which is
+  server-side. The token design holds even with the table world-readable —
+  credit where due. The exposure is metadata plus the `UPDATE`/`TRUNCATE` grant.
+- **`party_submissions`** — empty today, so no PII is out yet. The schema is
+  `submitter_email`, `submitted_name`, `submitted_company`, `submitted_email`,
+  `submitted_phone`, `submitted_values`. **This is the one that matters**: it is
+  contact detail collected from people outside PCT via a link forwarded through
+  inboxes we do not control, and it becomes world-readable the moment the first
+  party submits. Highest priority of the five on that basis alone. Mitigating:
+  no background job scans this table, so an anonymous `INSERT` sits inert rather
+  than becoming a SoftPro write — the SoftPro push happens inline during submit.
+- **`concierge_profiles`** — empty; feature not yet in production use. Holds
+  `prepared_for_email`, `presenting_rep_email`, `presenting_rep_phone`, plus
+  SiteX-derived property, tax and valuation data and `sitex_credits_charged`.
+  Externally-sourced licensed vendor data as well as PII.
+- **`concierge_profile_comps` / `concierge_profile_transfers`** — empty; comp
+  and transfer records hanging off the above by `profile_id`. Same licensed-data
+  exposure, no independent access pattern. Close them with the parent.
+
+### Required, in order
+
+1. Extend 0032's pattern to the five: `ENABLE ROW LEVEL SECURITY`, no policies,
+   no `FORCE`. Reversible per table with `DISABLE ROW LEVEL SECURITY`.
+2. Decide whether the anon key belongs in the bundle at all. It is only there
+   for `signInWithPassword` and `signOut`; a server-side sign-in route would
+   remove the browser-reachable credential entirely and make item 6 unable to
+   recur. This is the durable fix and it is application work, not a DDL change.
+3. Fix the drift, or this returns with the next table. Either stop hand-writing
+   the table list (event-trigger or a default-deny convention) or add a CI check
+   that fails when a `public` table has `relrowsecurity = false`.
+4. Consider revoking the blanket `anon`/`authenticated` DML grants across
+   `public`. RLS is sufficient to deny, so this is defence in depth rather than
+   required — but `TRUNCATE` granted to `anon` on 42 tables is not a grant
+   anybody chose.
+
+### What was NOT done, on purpose
+
+No security configuration was changed: no RLS enabled, no policy created, no
+grant altered, no key rotated, no table touched. The only production access was
+`SELECT` against catalog and count queries, and read-only `GET`s to PostgREST.
+
+**No anonymous write was attempted.** The `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE`
+grants above are read from `information_schema.role_table_grants` and are
+reported as *granted*, not as *exercised* — confirming a write by performing one
+would mean writing to production with an anonymous credential, which is the harm
+being reported. The read of `party_wizard_links` was exercised, and is reported
+as verified.
+
+No key value is recorded here — only the chunk path where the anon key can be
+found, its format, and the fact that the service-role key is absent from it.
+
+---
+
 ## Pattern
 
 Three of these five are the same failure: a secret written somewhere convenient
@@ -179,6 +363,15 @@ authenticating its callers. Both of those are projects, which is the argument
 for this file having a single owner rather than being absorbed into whatever
 bug is being worked that day.
 
+Item 6 is a third kind, and it sharpens that argument. It is not a secret left
+somewhere or a service trusting its network — it is a control that **was**
+applied, correctly, to 37 tables, and then did not stay applied. Five tables
+added afterwards missed it because the control is a hand-maintained list. So the
+fix that closes item 6 tonight (five `ALTER TABLE`s) is not the fix that keeps
+it closed, and nobody working a bug will own the second one. That is the owner
+problem: items 1 through 5 need someone to start them, and item 6 needs someone
+to still be watching in a month.
+
 ---
 
 ## Explicitly out of scope for this document
@@ -188,3 +381,5 @@ bug is being worked that day.
   identifies a credential store.
 - No enumeration or retrieval of any customer document.
 - Item 5 is reported only; treat its severity as unestablished.
+- Item 6 changed no security configuration and performed no write of any kind.
+  Its anonymous-write exposure is reported from the grant tables, not exercised.

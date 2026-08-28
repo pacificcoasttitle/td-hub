@@ -17,6 +17,10 @@ import {
 import { QueueRail } from './queue-rail';
 import { OrderList, type SortField } from './order-list';
 import { OrderDetail } from './order-detail';
+import { ConciergeCostGate } from './concierge-cost-gate';
+import { ConciergeCriteriaPanel } from './concierge-criteria-panel';
+import { useConciergeProfile } from './use-concierge-profile';
+import { summariseCriteria } from '@/lib/domain/concierge/criteria-summary';
 import { SplitToolbar } from './split-toolbar';
 import { HubStatusBar } from './hub-status-bar';
 
@@ -57,11 +61,13 @@ function ask(prev: Query, patch: Partial<Query>): Query {
 }
 
 export function OrdersSplitView({
-  userKey, onSwitchToTable,
+  userKey, onSwitchToTable, conciergeAccess = { canGenerate: false, featureOn: false },
 }: {
   /** Scopes the persisted density preference to the signed-in user, not the browser. */
   userKey: string;
   onSwitchToTable: () => void;
+  /** Both conditions resolved server-side. The UI hides what the server would refuse. */
+  conciergeAccess?: { canGenerate: boolean; featureOn: boolean };
 }) {
   // ─── data ───
   const [query, setQuery] = useState<Query>({
@@ -92,6 +98,8 @@ export function OrdersSplitView({
     { type: string; orders: HubOrder[]; current: number; results: BatchResult[] } | null
   >(null);
   const [syncBusy, setSyncBusy] = useState<'resync' | 'retry_tp' | null>(null);
+  const [preparedForName, setPreparedForName] = useState('');
+  const [preparedForCompany, setPreparedForCompany] = useState('');
 
   const filterRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -167,6 +175,11 @@ export function OrdersSplitView({
   );
   const selected: SplitRow | null =
     selectedIndex >= 0 ? rows[selectedIndex]! : outsideOrder;
+
+  // Everything the Property Profile tile needs. The ONLY call in here that can
+  // spend is generate(); adjust and retryRender hit routes that cannot reach
+  // SiteX at all.
+  const concierge = useConciergeProfile(selected?.id ?? null, conciergeAccess);
 
   const select = useCallback((o: HubListOrder) => {
     setSelectedFile(o.fileNumber);
@@ -406,6 +419,25 @@ export function OrdersSplitView({
   const modalAddress = modalOrder ? (fullAddress(modalOrder) ?? '') : '';
   const anyIncomplete = useMemo(() => rows.some(isIncomplete), [rows]);
 
+  // Notes are posted from the pane's footer strip. The strip clears itself
+  // optimistically; a failure surfaces as the note simply not appearing, which
+  // is the same signal a network failure gives anywhere else in this view.
+  const [savingNote, setSavingNote] = useState(false);
+  const addNote = useCallback(async (orderId: number, text: string) => {
+    setSavingNote(true);
+    try {
+      await fetch(`/api/orders/${orderId}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+    } catch {
+      // Deliberately silent — see above.
+    } finally {
+      setSavingNote(false);
+    }
+  }, []);
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-white">
       <SplitToolbar
@@ -458,6 +490,18 @@ export function OrdersSplitView({
           busy={syncBusy}
           onResync={(o) => void runSyncAction(o, 'resync')}
           onRetryTitlePoint={(o) => void runSyncAction(o, 'retry_tp')}
+          documents={selected?.documents}
+          profile={concierge.profile}
+          profileLoading={concierge.loading}
+          profileBusy={concierge.busy}
+          canGenerateProfile={conciergeAccess.canGenerate}
+          profileFeatureOn={conciergeAccess.featureOn}
+          onGenerateProfile={concierge.openGate}
+          onAdjustProfile={concierge.openCriteria}
+          onRetryProfileRender={() => void concierge.retryRender()}
+          onGenerateDocument={fireAction}
+          savingNote={savingNote}
+          onAddNote={addNote}
         />
       </div>
 
@@ -484,6 +528,44 @@ export function OrdersSplitView({
       )}
 
       {batchState && <BatchProcessModal state={batchState} onClose={() => setBatchState(null)} />}
+
+      {/* The cost gate and the criteria panel are MOUNTED ONLY WHILE OPEN, so
+          neither carries state from a previous property into the next one. */}
+      {concierge.gateOpen && selected && (
+        <ConciergeCostGate
+          address={fullAddress(selected) ?? selected.fileNumber}
+          preparedForName={preparedForName}
+          preparedForCompany={preparedForCompany}
+          presentingRepName={concierge.presentingRep?.name ?? ''}
+          presentingRepProblem={concierge.presentingRepProblem}
+          criteriaSummary={summariseCriteria()}
+          spend={concierge.spend}
+          submitting={concierge.busy}
+          error={concierge.error}
+          onPreparedForName={setPreparedForName}
+          onPreparedForCompany={setPreparedForCompany}
+          onCancel={concierge.closeGate}
+          onConfirm={() => void concierge.generate({
+            orderId: selected.id,
+            street: selected.propertyStreet ?? '',
+            city: selected.propertyCity ?? '',
+            state: selected.propertyState ?? 'CA',
+            zip: selected.propertyZip ?? '',
+            preparedForName,
+            preparedForCompany: preparedForCompany || null,
+          })}
+        />
+      )}
+
+      {concierge.criteriaOpen && concierge.profile && (
+        <ConciergeCriteriaPanel
+          profile={concierge.profile}
+          busy={concierge.busy}
+          error={concierge.error}
+          onClose={concierge.closeCriteria}
+          onApply={(c) => void concierge.adjust(c)}
+        />
+      )}
     </div>
   );
 }

@@ -5,25 +5,59 @@ import {
   type HubListOrder,
 } from '@/lib/domain/orders/hub-list-row';
 import { statusBadge } from '@/lib/domain/orders/status-format';
+import { DocumentsPanel, type GenerateKind, type OrderDocuments } from './documents-panel';
+import { PartiesPanel } from './parties-panel';
+import { NotesStrip } from './notes-strip';
+import { useOrderExtras } from './use-order-extras';
+import type { ProfileSummary } from '@/lib/domain/concierge/profiles';
 
-// ─── Read-only detail pane ───────────────────────────────────────────────────
+// ─── The detail pane ─────────────────────────────────────────────────────────
 //
-// Phase 1 scope: sticky header, the two conditional banners, and the Order
-// field grid. Documents, Contacts and Notes are phases 3 and 4 and are absent
-// rather than stubbed — an empty panel outline promises data that is not there.
+// It used to be one order card and two-thirds white space. The sections here
+// are sized by what the data actually supports, measured across all 8,036
+// orders rather than guessed:
 //
-// Everything here is rendered from the list row. There is no per-order fetch,
-// which is what makes j/k feel instant: the pane cannot lag the selection
-// because it is the selection.
+//   Parties   36,606 rows / 7,913 orders — 98.5%, 4.6 per order  → top row
+//   Documents 5,634 orders have a prelim; 5 more types near zero → 2 tiles + chips
+//   Notes     ONE row in the entire database, on one order       → footer strip
+//
+// Notes gets a strip rather than a panel for that reason. A notes SECTION would
+// be an empty rectangle on 8,035 of 8,036 orders — the same wasted third of the
+// pane this layout exists to remove, moved down the page. It costs one line
+// when empty and grows on click.
+//
+// THE ORDER CARD AND DOCUMENTS STILL RENDER FROM THE LIST ROW, with no fetch,
+// which is what makes j/k feel instant. Parties and notes are not on the row,
+// so they load asynchronously behind an already-painted pane rather than
+// holding it up.
 
-export function OrderDetail({
-  order, busy, onResync, onRetryTitlePoint,
-}: {
+export interface OrderDetailProps {
   order: HubListOrder | null;
   busy: 'resync' | 'retry_tp' | null;
   onResync: (o: HubListOrder) => void;
   onRetryTitlePoint: (o: HubListOrder) => void;
-}) {
+  documents?: OrderDocuments;
+  profile: ProfileSummary | null;
+  profileLoading: boolean;
+  profileBusy: boolean;
+  canGenerateProfile: boolean;
+  profileFeatureOn: boolean;
+  onGenerateProfile: () => void;
+  onAdjustProfile: () => void;
+  onRetryProfileRender: () => void;
+  onGenerateDocument: (kind: GenerateKind) => void;
+  /** Posting a note. Owned by the pane's parent so the composer can disable. */
+  savingNote?: boolean;
+  onAddNote?: (orderId: number, text: string) => void;
+}
+
+export function OrderDetail({
+  order, busy, onResync, onRetryTitlePoint, ...d
+}: OrderDetailProps) {
+  // Called before the null check so the hook order is stable across an empty
+  // selection — it no-ops on a null id.
+  const extras = useOrderExtras(order?.id ?? null);
+
   if (!order) {
     return (
       <div className="flex-1 min-w-0 bg-[#FAFAFB] flex items-center justify-center">
@@ -40,11 +74,11 @@ export function OrderDetail({
   return (
     <div className="flex-1 min-w-0 bg-[#FAFAFB] flex flex-col min-h-0">
       {/* header — 62px, sticky by construction: it is outside the scroll area */}
-      <div className="h-[62px] shrink-0 bg-white border-b border-[#E5E5E5] px-5 flex items-center gap-3">
+      <div className="h-[62px] shrink-0 bg-white border-b border-[#EEF0F4] px-5 flex items-center gap-3">
         <div className="min-w-0 flex-1">
           <h1
             className="text-[18px] font-semibold tracking-[-0.015em] leading-[1.2] truncate"
-            style={{ color: '#171717' }}
+            style={{ color: '#1B2A4A' }}
           >
             {address ?? 'Address pending'}
           </h1>
@@ -108,22 +142,53 @@ export function OrderDetail({
           </Banner>
         )}
 
-        <Panel label="Order">
-          <div className="grid grid-cols-4 gap-y-[10px] gap-x-[22px]">
-            <Field label="Client" value={clientLabel(order)} />
-            <Field label="Firm" value={order.clientCompany} />
-            <Field label="APN" value={order.apn} mono />
-            <Field label="County" value={order.county} />
-            <Field label="Order type" value={order.transactionType} />
-            <Field label="Status" value={status.label} />
-            <Field label="Opened" value={fullDateTime(order.openedAtIso)} />
-            <Field
-              label="SoftPro"
-              value={failed ? 'Failed' : 'Synced'}
-              valueColor={failed ? '#B03A2C' : undefined}
-            />
-          </div>
-        </Panel>
+        {/* Top row: the order card and the parties share the width. Parties
+            earn half the row on 98.5% coverage — this is the densest real data
+            the pane has, and it was previously not shown at all. */}
+        <div className="grid grid-cols-2 gap-[10px] items-start">
+          <Panel label="Order">
+            <div className="grid grid-cols-2 gap-y-[10px] gap-x-[18px]">
+              <Field label="Client" value={clientLabel(order)} />
+              <Field label="Firm" value={order.clientCompany} />
+              <Field label="APN" value={order.apn} mono />
+              <Field label="County" value={order.county} />
+              <Field label="Order type" value={order.transactionType} />
+              <Field label="Status" value={status.label} />
+              <Field label="Opened" value={fullDateTime(order.openedAtIso)} />
+              <Field
+                label="SoftPro"
+                value={failed ? 'Failed' : 'Synced'}
+                valueColor={failed ? '#B03A2C' : undefined}
+              />
+            </div>
+          </Panel>
+
+          <PartiesPanel
+            parties={extras.parties}
+            unnamedRoleCount={extras.unnamedRoleCount}
+            loading={extras.loading}
+          />
+        </div>
+
+        <DocumentsPanel
+          documents={d.documents}
+          profile={d.profile}
+          profileLoading={d.profileLoading}
+          canGenerateProfile={d.canGenerateProfile}
+          profileFeatureOn={d.profileFeatureOn}
+          busyProfile={d.profileBusy}
+          onGenerateProfile={d.onGenerateProfile}
+          onAdjustProfile={d.onAdjustProfile}
+          onRetryProfileRender={d.onRetryProfileRender}
+          onGenerate={d.onGenerateDocument}
+        />
+
+        <NotesStrip
+          notes={extras.notes}
+          loading={extras.loading}
+          saving={d.savingNote ?? false}
+          onAdd={(text) => d.onAddNote?.(order.id, text)}
+        />
       </div>
     </div>
   );
@@ -135,9 +200,9 @@ function Sep() {
 
 function Panel({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <section className="bg-white border border-[#E9EAEE] rounded-[9px]">
-      <header className="h-7 flex items-center px-[13px] border-b border-[#F0F1F3]">
-        <h2 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9AA0AA]">{label}</h2>
+    <section className="bg-white border border-[#EEF0F4] rounded-[9px]">
+      <header className="h-7 flex items-center px-[13px] border-b border-[#EEF0F4]">
+        <h2 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#8A94A6]">{label}</h2>
       </header>
       <div className="px-[13px] py-[9px]">{children}</div>
     </section>
@@ -156,10 +221,10 @@ function Field({
   const has = value != null && value.trim() !== '';
   return (
     <div className="min-w-0">
-      <div className="text-[9.5px] font-semibold uppercase tracking-[0.09em] text-[#9AA0AA]">{label}</div>
+      <div className="text-[9.5px] font-semibold uppercase tracking-[0.09em] text-[#8A94A6]">{label}</div>
       <div
         className={`text-[12.5px] truncate ${mono && has ? 'font-mono' : ''}`}
-        style={{ color: valueColor ?? (has ? '#171717' : '#B5B9C0') }}
+        style={{ color: valueColor ?? (has ? '#1B2A4A' : '#B5B9C0') }}
         title={has ? value! : undefined}
       >
         {has ? value : 'Not set'}

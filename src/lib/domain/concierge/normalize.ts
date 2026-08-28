@@ -178,6 +178,47 @@ export function normalizeComps(feed: Raw): Array<CompCandidate & { raw: Raw; add
   }));
 }
 
+/**
+ * SiteX writes this flag as the STRING 'True' — not a boolean, and not the
+ * 'Y'/'N' this parser originally assumed. Every transfer on the reference
+ * parcel carries 'True', so the old parse returned null for all thirteen and
+ * the document's CURRENT column was blank on every row.
+ */
+const boolFlag = (v: unknown): boolean | null => {
+  if (typeof v === 'boolean') return v;
+  const s = str(v)?.toUpperCase();
+  if (s === 'Y' || s === 'YES' || s === 'TRUE') return true;
+  if (s === 'N' || s === 'NO' || s === 'FALSE') return false;
+  return null;
+};
+
+/**
+ * Foreclosure is NOT a flag. It is either null or an OBJECT of foreclosure
+ * detail — auction dates, trustee, delinquent amounts. Comparing it to 'Y'
+ * could never have matched anything.
+ *
+ * The object is present on exactly the two transfers whose TransactionType is
+ * 'Foreclosure' and absent on the other eleven: two independent fields
+ * agreeing on all thirteen rows, and a test that separates 2 from 11 rather
+ * than collapsing them.
+ *
+ * What `true` does NOT mean: one of those two is a foreclosure CANCELLATION.
+ * This records that a foreclosure-related instrument was recorded, not that
+ * the property is in foreclosure. The document deliberately prints the
+ * document type instead of this boolean, so a reader sees "Foreclosure
+ * Cancellation" rather than an alarming Yes.
+ *
+ * An explicit null means SiteX reported no foreclosure on that transfer.
+ * An ABSENT key means it reported nothing at all, which is not the same, and
+ * stays null.
+ */
+const foreclosureFlag = (v: unknown): boolean | null => {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'object' && v !== null) return true;
+  if (v === null) return false;
+  return boolFlag(v);
+};
+
 export function normalizeTransfers(feed: Raw): NormalizedTransfer[] {
   return arr(feed.TransferHistory).map((t, i) => ({
     sourcePosition: i,
@@ -188,10 +229,8 @@ export function normalizeTransfers(feed: Raw): NormalizedTransfer[] {
     documentNumber: str(t.RecorderDocumentNumber),
     bookNumber: str(t.RecorderBookNumber),
     pageNumber: str(t.RecorderPageNumber),
-    currentOwnerFlag: typeof t.CurrentOwnerFlag === 'boolean' ? t.CurrentOwnerFlag
-      : str(t.CurrentOwnerFlag) === 'Y' ? true : str(t.CurrentOwnerFlag) === 'N' ? false : null,
-    isForeclosure: typeof t.Foreclosure === 'boolean' ? t.Foreclosure
-      : str(t.Foreclosure) === 'Y' ? true : str(t.Foreclosure) === 'N' ? false : null,
+    currentOwnerFlag: boolFlag(t.CurrentOwnerFlag),
+    isForeclosure: foreclosureFlag(t.Foreclosure),
     raw: t,
   }));
 }

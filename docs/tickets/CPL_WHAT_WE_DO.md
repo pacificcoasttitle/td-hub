@@ -847,3 +847,75 @@ Recorded here because it settles a design question cheaply: a "refresh from
 SoftPro when the CPL modal opens" would have to complete before the operator
 finishes typing, and on this evidence it would not. The idea was dropped on
 that basis rather than on argument.
+
+---
+
+## 11. `LoanAmount` is on the wire — the comment was stale
+
+Confirmed 2026-08-28 by a direct `GetOrderDetails` call on live refinance
+`20021587-OCT`, opened two days earlier. **23 keys returned:**
+
+```
+Address, City, CompletedDate, Country, LoanAmount, LoanNumber, MarketingRep,
+MarketingSource, ModifiedDate, OrderNumber, OrderStatus, OrderType,
+PrimaryContact, ProductType, ReceivedDate, SalesPrice, SalesRepContact,
+SettlementType, State, TitleOfficer, TitleOfficerContact, TransactionType, Zip
+```
+
+```
+LoanAmount = 950000
+LoanNumber = "26081931"
+SalesPrice = "0"
+```
+
+**The two money fields do not share a type.** `LoanAmount` is a NUMBER,
+`SalesPrice` is a STRING. Passing the number to the old string-only
+`parseSalesPrice` threw on `.trim()`, which is why `parseMoney` accepts both.
+
+### What was actually wrong
+
+Not the vendor. `lookback-diff.ts:131` carried a note saying LoanAmount was
+"not in the GetOrderDetails contract yet (Aashima's team is adding it)". That
+note outlived the fact, and it is the reason nobody revisited this: the sweep
+detected a loanAmount difference on every pass, `process-detail.ts` had no
+mapping for it, and the comment explained the gap away.
+
+A stale "not supported yet" comment is worse than no comment. It converts an
+open question into a settled one.
+
+### The fix
+
+| part | file |
+|---|---|
+| model the field | `softpro/types.ts` — `LoanAmount?: string \| number \| null` |
+| parse both shapes | `process-detail.ts` — `parseMoney` |
+| write it | `process-detail.ts` — `loanAmount: loanAmount ?? undefined` |
+| correct the comment | `lookback-diff.ts` |
+
+`undefined` omits the column, so a response without `LoanAmount` leaves the
+existing value rather than erasing it — the same `preserveExistingOnEmpty`
+contract `salesPrice` already had.
+
+### Measured fill rate
+
+12 refinances currently holding `loan_amount = NULL`, sampled at random and
+queried live:
+
+| | |
+|---|---:|
+| SoftPro has a usable `LoanAmount` | **10 of 12 (83%)** |
+| returned `0`, which normalises to null and will not overwrite | 2 |
+| call failed | 0 |
+
+The active sweep window is 30–90 days (`LOOKBACK_MIN_AGE_DAYS` = 30,
+`LOOKBACK_MAX_AGE_DAYS` = 90). **1,037 refinances sit in it, all 1,037 with
+`loan_amount` NULL**, so at the measured rate roughly **864** gain a value on
+the next full sweep. A further 2,577 refinances fall in the phase-2 window
+(30–180 days) if that is ever run.
+
+**One thing the sample surfaced that the fill rate hides:** two of the ten
+usable values were `LoanAmount = 10`. A ten-dollar loan is not a real figure.
+The field being present does not make it sane, and the CPL price check added in
+§7 blocks zero but not ten. Worth a look before anyone treats
+`orders.loan_amount` as trustworthy for anything beyond "is there a number
+here".

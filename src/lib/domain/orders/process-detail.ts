@@ -201,12 +201,23 @@ export function resolveEscrowOfficerId(escrowOfficer: string | null | undefined,
 
 // ─── Price parsing ───────────────────────────────────────────────────────────
 
+/**
+ * SoftPro is not consistent about money types: SalesPrice arrives as a string
+ * ("0", "430000.00") and LoanAmount as a number (950000). Accepting both is
+ * not defensiveness — passing the number to the old string-only version threw
+ * on `.trim()`.
+ */
+export function parseMoney(raw: string | number | null | undefined): string | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw.toFixed(2) : null;
+  if (!raw.trim()) return null;
+  const num = parseFloat(raw.replace(/[$,\s]/g, ''));
+  return Number.isNaN(num) ? null : num.toFixed(2);
+}
+
+/** @deprecated Use parseMoney — kept because other callers pass strings. */
 export function parseSalesPrice(raw: string | null | undefined): string | null {
-  if (!raw || !raw.trim()) return null;
-  const cleaned = raw.replace(/[$,\s]/g, '');
-  const num = parseFloat(cleaned);
-  if (isNaN(num)) return null;
-  return num.toFixed(2);
+  return parseMoney(raw);
 }
 
 // ─── Single-order processor ──────────────────────────────────────────────────
@@ -262,6 +273,9 @@ export async function processOrderDetail(
     : null;
   const transactionType = mapTransactionType(item.TransactionType);
   const salesPrice = parseSalesPrice(item.SalesPrice);
+  // LoanAmount was detected by the lookback sweep but never written, because
+  // nothing mapped it here. Confirmed present on the wire 2026-08-28.
+  const loanAmount = parseMoney(item.LoanAmount);
   const openedAt = parseSoftProDate(item.ReceivedDate);
   const completedAt = parseSoftProDate(item.CompletedDate);
   const closedAt = mappedStatus === 'closed' ? parseSoftProDate(item.ModifiedDate) : null;
@@ -307,6 +321,9 @@ export async function processOrderDetail(
       productType: item.ProductType || emptyField,
       orderType: item.OrderType || emptyField,
       salesPrice: salesPrice ?? undefined,
+      // undefined omits the column, so a response without LoanAmount leaves
+      // whatever is already there rather than erasing it.
+      loanAmount: loanAmount ?? undefined,
       marketingSource: item.MarketingSource || emptyField,
       salesRepId: salesRepId ?? undefined,
       titleOfficerId: titleOfficerId ?? undefined,

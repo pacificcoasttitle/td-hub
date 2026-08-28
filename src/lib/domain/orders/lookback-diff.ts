@@ -95,7 +95,8 @@ export interface OrderDiff {
   usable: boolean;
 }
 
-function normalizeMoney(v: string | null | undefined): string | null {
+/** Accepts both shapes SoftPro sends: SalesPrice is a string, LoanAmount a number. */
+function normalizeMoney(v: string | number | null | undefined): string | null {
   if (v === null || v === undefined) return null;
   const n = Number(String(v).replace(/[$,\s]/g, ''));
   if (!Number.isFinite(n)) return null;
@@ -129,12 +130,15 @@ export function diffOrder(
   if (incomingPrice !== null && incomingPrice !== normalizeMoney(row.salesPrice)) {
     fieldChanges.push('salesPrice');
   }
-  // LoanAmount is not in the GetOrderDetails contract yet (Aashima's team is
-  // adding it). Reading it defensively means the day it ships, this job starts
-  // reporting it with no code change.
-  const incomingLoan = normalizeMoney(
-    (item as unknown as { LoanAmount?: string | null }).LoanAmount,
-  );
+  // LoanAmount IS in the GetOrderDetails contract — confirmed on the wire
+  // 2026-08-28 against a live refinance (LoanAmount: 950000). It is modelled on
+  // SoftProOrderDetailItem now, so the cast this used to need is gone.
+  //
+  // The previous comment here said it was "not in the contract yet". That note
+  // outlived the fact and is the reason nobody revisited this: the sweep
+  // detected the difference on every pass, process-detail.ts had no mapping for
+  // it, and the stale comment explained the gap away. It does now.
+  const incomingLoan = normalizeMoney(item.LoanAmount);
   if (incomingLoan !== null && incomingLoan !== normalizeMoney(row.loanAmount)) {
     fieldChanges.push('loanAmount');
   }

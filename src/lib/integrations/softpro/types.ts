@@ -40,6 +40,15 @@ export interface SoftProOrderDetailItem {
   TitleOfficer: string;
   EscrowOfficer?: string;
   SalesPrice: string;
+  /**
+   * Confirmed on the wire 2026-08-28 against a live refinance: `LoanAmount:
+   * 950000`. Note the type — SalesPrice comes back as a STRING ("0") and
+   * LoanAmount as a NUMBER, so anything parsing both has to accept either.
+   *
+   * Optional because it is absent from some historical responses; a missing
+   * key must leave the column alone rather than null it.
+   */
+  LoanAmount?: string | number | null;
   TransactionType: string;
   ProductType: string;
   ReceivedDate: string;

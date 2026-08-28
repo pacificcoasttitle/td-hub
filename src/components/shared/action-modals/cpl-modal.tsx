@@ -62,6 +62,54 @@ function detectUnderwriter(order: OrderApiResponse): Underwriter {
   return 'westcor';
 }
 
+
+// ─── Say what actually went wrong ───────────────────────────────────────────
+//
+// Every failure branch of the CPL route returns a GENERIC `error` plus the
+// specific reason in `details`:
+//
+//   { error: 'CPL generation failed', details: result.errors }   // 422
+//   { error: 'Invalid parameters',    details: err.issues }      // 400
+//   { error: 'Internal server error' }                           // 500
+//
+// This read `body.error ?? body.details?.[0]`. `??` only falls through on
+// null/undefined, and `error` is always a non-empty literal — so `details` was
+// unreachable and the operator was told "CPL generation failed" while the real
+// reason ("PolicyProducingAgentNumber is missing, validation failed for the
+// Agency") went to cpl_error_logs and nowhere else. Reading a log table to find
+// out why a button did not work is the loop this whole panel exists to close.
+//
+// The specific reason now wins, with the generic label kept only when there is
+// nothing better.
+
+/** Zod issues are objects; vendor errors are strings. Render either. */
+export function detailStrings(details: unknown): string[] {
+  if (!Array.isArray(details)) return [];
+  return details
+    .map((d) => {
+      if (typeof d === 'string') return d;
+      if (d && typeof d === 'object') {
+        const o = d as { message?: unknown; path?: unknown };
+        if (typeof o.message === 'string') {
+          const path = Array.isArray(o.path) && o.path.length ? `${o.path.join('.')}: ` : '';
+          return path + o.message;
+        }
+      }
+      return '';
+    })
+    .filter((t) => t.trim() !== '');
+}
+
+export function failureMessage(body: unknown): string {
+  const b = (body ?? {}) as { error?: unknown; details?: unknown };
+  const specific = detailStrings(b.details);
+  const generic = typeof b.error === 'string' && b.error.trim() !== '' ? b.error : 'Generation failed';
+  if (specific.length === 0) return generic;
+  // Keep the label as a prefix so the class of failure is still visible, but
+  // lead with what a person can act on.
+  return `${generic}: ${specific.join(' · ')}`;
+}
+
 export function CplModal({ open, onClose, orderId, fileNumber, address, isClient, onSuccess }: {
   open: boolean; onClose: () => void;
   orderId: number; fileNumber: string; address: string;
@@ -98,7 +146,7 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
   const [borrower, setBorrower] = useState('');
 
   const [generating, setGenerating] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; docId?: number; error?: string } | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; docId?: number; error?: string; warnings?: string[] } | null>(null);
 
   const hasLender = !!(lenderCompany);
   const hasProperty = !!(propStreet);
@@ -228,8 +276,10 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
       };
       const res = await fetch(cplUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cplBody) });
       const body = await res.json();
-      if (!res.ok || !body.success) throw new Error(body.error ?? body.details?.[0] ?? 'Generation failed');
-      setResult({ ok: true, docId: body.documentId });
+      if (!res.ok || !body.success) throw new Error(failureMessage(body));
+      // A CPL can succeed WITH complaints. Those must not read as a clean run:
+      // the server returns them as `warnings` and this used to drop them.
+      setResult({ ok: true, docId: body.documentId, warnings: detailStrings(body.warnings) });
       onSuccess?.();
     } catch (err) {
       setResult({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
@@ -342,8 +392,25 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
 
           {/* ── Result ── */}
           {result && (
-            <div className={`px-4 py-3 rounded-lg text-sm ${result.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-              {result.ok ? <span>CPL generated. <a href={`${isClient ? '/api/client' : '/api'}/documents/${result.docId}/download`} target="_blank" rel="noopener noreferrer" className="underline font-semibold text-[#F26B2B]">Download CPL</a></span> : result.error}
+            <div className={`px-4 py-3 rounded-lg text-sm ${
+              result.ok
+                ? (result.warnings && result.warnings.length > 0
+                    ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                    : 'bg-green-50 text-green-700 border border-green-200')
+                : 'bg-red-50 text-red-700 border border-red-200'
+            }`}>
+              {result.ok ? (
+                <>
+                  <span>CPL generated. <a href={`${isClient ? '/api/client' : '/api'}/documents/${result.docId}/download`} target="_blank" rel="noopener noreferrer" className="underline font-semibold text-[#F26B2B]">Download CPL</a></span>
+                  {/* Succeeded, but the vendor complained. Amber, not green —
+                      a CPL issued with warnings must not look like a clean run. */}
+                  {result.warnings && result.warnings.length > 0 && (
+                    <ul className="mt-2 list-disc pl-4 space-y-0.5">
+                      {result.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                    </ul>
+                  )}
+                </>
+              ) : result.error}
             </div>
           )}
 

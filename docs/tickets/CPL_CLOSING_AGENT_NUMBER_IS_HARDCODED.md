@@ -91,6 +91,45 @@ This also supersedes the section below titled "A prior document says legacy did
 the same — and it cannot be verified here". It can be verified now, and it is
 confirmed: `Westcor.php:504`.
 
+## Westcor's own token calls us CA1038
+
+Read from the live `Token` response on 2026-08-28. Sixteen keys; the identity
+ones:
+
+```
+agentNumber            "CA1038"
+agencyName             "Pacific Coast Title Company"
+integrationPartnerCode "7758"
+role                   "Agent"
+userName               "PacificCTProdInt"
+```
+
+**`agentNumber` for the whole login is `CA1038`.** Not Orange's branch code
+that happens to look like an agency code — the agency's own number, returned by
+Westcor at authentication, before any branch is chosen.
+
+The same response carries `groups`, a JSON-encoded string holding seven
+entries, one per branch:
+
+```
+CA1038      CA1038.01   CA1038.02   CA1038.03
+CA1038.04   CA1038.05   CA1038.06
+```
+
+So Westcor's model is exactly what the structure suggested: **`CA1038` is the
+agency, `CA1038.nn` are its offices**, and `CA1038` doubles as the code for the
+first office.
+
+This is as close to settling reading (a) as anything short of asking them.
+`ClosingAgentNumber: 'CA1038'` is the agency's own agent number, per Westcor's
+own token. The value is very likely correct; what remains wrong is only that it
+is expressed as a literal rather than sourced from the token or a named
+constant, so it would silently rot if the agency number ever changed — which,
+per the commented-out `RI1026` in legacy, has happened once already.
+
+**The email to Westcor is now optional.** If sent, it is a confirmation, not a
+question.
+
 ## The code is printed on the letter itself
 
 Read out of the issued PDF on 2026-08-28. `westcor_20016790-GLT_1.pdf`

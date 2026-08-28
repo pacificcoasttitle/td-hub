@@ -15,11 +15,12 @@ vi.mock('@/lib/integrations/s3/client', () => ({
 
 vi.mock('@/lib/integrations/softpro/client', () => ({
   uploadDocument: (...args: unknown[]) => softproUploadMock(...args),
+  getAttachedDocuments: vi.fn(),
 }));
 
 vi.mock('./softpro-fetch-token', () => ({
-  buildSoftProFetchUrl: (documentId: number) =>
-    `https://hub.pctitle.com/api/softpro/fetch-doc/${documentId}/9999999999/testsigabcdefghijklmn`,
+  buildSoftProFetchUrl: (documentId: number, filename: string) =>
+    `https://hub.pctitle.com/api/softpro/fetch-doc/${documentId}/9999999999/testsigabcdefghijklmn/${filename}`,
 }));
 
 const docRow = {
@@ -76,6 +77,8 @@ vi.mock('@/lib/db/schema', () => ({
   },
   documentAudit: {},
   orders: { id: 'orders.id', fileNumber: 'orders.file_number' },
+  titlePointData: { orderId: 'tp.order_id', status: 'tp.status', searchType: 'tp.search_type' },
+  vendorApiLogs: {},
   documentRequests: {},
   eventOutbox: {},
 }));
@@ -84,6 +87,7 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),
   desc: vi.fn((...args: unknown[]) => args),
+  inArray: vi.fn((...args: unknown[]) => args),
 }));
 
 describe('attachToSoftPro', () => {
@@ -115,7 +119,7 @@ describe('attachToSoftPro', () => {
       orderNumber: '20015761-GLT',
       documentName: 'cpl-42.pdf',
       folderName: 'CPL',
-      fileUrl: expect.stringContaining('/api/softpro/fetch-doc/42/'),
+      fileUrl: expect.stringMatching(/\/api\/softpro\/fetch-doc\/42\/.*\/cpl-42\.pdf$/),
     }));
     expect(getSignedUrlMock).not.toHaveBeenCalled();
     expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({

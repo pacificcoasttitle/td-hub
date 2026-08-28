@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { sanitizeSoftProFilename } from '@/lib/domain/documents/softpro-folder';
 import { timingSafeEqualString } from '@/lib/security/softpro-webhook-auth';
 
 /** SoftPro downloads FileURL; keep the absolute URL well under Windows MAX_PATH (260). */
@@ -39,11 +40,18 @@ function signPayload(documentId: number, expUnix: number): string {
 /**
  * Build a short, publicly reachable URL SoftPro can download.
  * SoftPro fails with Windows MAX_PATH when given long pre-signed S3 URLs (~440+ chars).
+ * The last path segment MUST be a legal filename — Path.GetFileName uses it, and a
+ * query string (or a bare HMAC sig) becomes an illegal or useless Windows name.
  */
-export function buildSoftProFetchUrl(documentId: number, ttlSeconds = SOFTPRO_FETCH_TTL_SECONDS): string {
+export function buildSoftProFetchUrl(
+  documentId: number,
+  filename: string,
+  ttlSeconds = SOFTPRO_FETCH_TTL_SECONDS,
+): string {
   const expUnix = Math.floor(Date.now() / 1000) + ttlSeconds;
   const sig = signPayload(documentId, expUnix);
-  return `${getAppBaseUrl()}/api/softpro/fetch-doc/${documentId}/${expUnix}/${sig}`;
+  const safeName = sanitizeSoftProFilename(filename);
+  return `${getAppBaseUrl()}/api/softpro/fetch-doc/${documentId}/${expUnix}/${sig}/${safeName}`;
 }
 
 export function verifySoftProFetchToken(

@@ -670,20 +670,35 @@ export async function getAttachedDocuments(
   });
 }
 
+export interface SoftProUploadFile {
+  folderName: string;
+  fileUrl: string;
+}
+
 export async function uploadDocument(params: {
   documentId: number;
   orderId?: number;
   orderNumber: string;
   documentName: string;
-  folderName: string;
-  fileUrl: string;
+  folderName?: string;
+  fileUrl?: string;
+  /** Legacy batches LV + grant deed + tax into one FileList, one POST. */
+  files?: SoftProUploadFile[];
 }): Promise<VendorResult<Array<{ Status?: number; Message?: string; Id?: string; FileUploadedStatus?: boolean }>>> {
+  const files: SoftProUploadFile[] = params.files
+    ?? (params.folderName && params.fileUrl
+      ? [{ folderName: params.folderName, fileUrl: params.fileUrl }]
+      : []);
+  if (files.length === 0) {
+    return vendorError('softpro', 'VALIDATION', 'AddDocuments FileList is empty');
+  }
+
   // Legacy payload shape: array with Id, OrderNumber, DocumentName, FileList
   const body = [{
     Id: String(params.documentId),
     OrderNumber: params.orderNumber,
     DocumentName: params.documentName,
-    FileList: [{ FolderName: params.folderName, FileURL: params.fileUrl }],
+    FileList: files.map((f) => ({ FolderName: f.folderName, FileURL: f.fileUrl })),
   }];
 
   return makeRequest('POST', SOFTPRO_ENDPOINTS.uploadDocument, {

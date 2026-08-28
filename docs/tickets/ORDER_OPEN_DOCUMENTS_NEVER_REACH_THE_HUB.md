@@ -65,15 +65,19 @@ SoftPro-sourced at all** — `generateProposedInsured` and the FNF CPL path are
 both ours. "None on file" would have implied an upstream system failed to send
 something it was never asked for.
 
-## Owner: the AddDocuments batching fix (Cursor)
+## Owner: the AddDocuments path (landed as `fix/softpro-adddocuments-batch`)
 
-These fill in once that lands. Two things it changes:
+The earlier assumption — "they exist in SoftPro and have never been
+transmitted here" — was wrong on the seven test files. We sent them. SoftPro
+attached nothing. We marked `is_synced`. GetAttachedDocuments on 2026-08-28
+found **zero** of those 13 "synced" documents. See
+`TITLE_DOCS_FALSE_SYNC.md`.
 
-1. **All documents for an order in ONE call**, rather than a call per document.
-2. **No query strings in `FileURL`s.**
-
-Until then the hub has nothing to display for these three, and no amount of
-work on the hub side changes that — the documents are not arriving.
+The write path now batches LV / grant deed / tax into one AddDocuments call,
+sends clean FileURLs, uses legacy folder strings, and **does not mark synced
+until GetAttachedDocuments confirms the names.** Cleanup of the seven is a
+separate ticket. SoftPro orders that AddDocuments will refuse are
+`SOFTPRO_ADDDOCUMENTS_REQUIRED_FIELDS.md`.
 
 ## The batching fix is NOT done when the documents arrive
 

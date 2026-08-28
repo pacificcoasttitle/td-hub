@@ -6,6 +6,7 @@ import {
 } from '@/lib/domain/titlepoint/service';
 import { fetchGrantDeed } from '@/lib/domain/titlepoint/grant-deed';
 import { maybeEnqueueConfirmation } from '@/lib/domain/titlepoint/completion-checker';
+import { maybeAttachTitleDocsToSoftPro } from '@/lib/domain/documents/service';
 
 export interface TitlePointWorkResult {
   status: 'pending' | 'completed' | 'failed';
@@ -144,6 +145,12 @@ async function finishFromResultReady(
     } catch {
       // Grant deed failure must not fail the LV completion
     }
+  }
+
+  try {
+    await maybeAttachTitleDocsToSoftPro(orderId);
+  } catch {
+    // SoftPro attach is retried; do not fail TitlePoint completion
   }
 
   try {

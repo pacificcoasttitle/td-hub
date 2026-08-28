@@ -2,7 +2,7 @@ import { db } from '@/lib/db/client';
 import { titlePointData, orderProperties } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { getOrderByIdSimple } from '@/lib/domain/orders/service';
-import { uploadDocument, attachToSoftPro } from '@/lib/domain/documents/service';
+import { uploadDocument, maybeAttachTitleDocsToSoftPro } from '@/lib/domain/documents/service';
 import {
   createService,
   getRequestSummaries,
@@ -202,6 +202,10 @@ export async function executePipeline(
     // ── Step 4: Post-completion triggers (best-effort, don't fail pipeline) ──
     if (afterResult.searchType === 'legal_vesting') {
       try { await fetchGrantDeed(titlePointDataId); } catch { /* best effort */ }
+    }
+
+    if (afterResult.orderId) {
+      try { await maybeAttachTitleDocsToSoftPro(afterResult.orderId); } catch { /* best effort */ }
     }
 
     try { await maybeEnqueueConfirmation(afterResult.orderId); } catch { /* best effort */ }
@@ -409,9 +413,13 @@ export async function fetchImage(
       })
       .where(eq(titlePointData.id, titlePointDataId));
 
-    // SoftPro write-back is best-effort for TitlePoint completion, but failures
-    // are recorded on the documents row (never silently discarded).
-    await attachToSoftPro(uploadResult.documentId, 'Title Docs');
+    // LV must not flush here — grant deed is kicked off by the caller after
+    // this returns. Flushing now would post LV alone and race the GD post.
+    // Tax (and any other non-LV image) can try the batch; it defers while
+    // siblings are still in flight.
+    if (searchType !== 'legal_vesting') {
+      await maybeAttachTitleDocsToSoftPro(oid);
+    }
 
     return { success: true, documentId: uploadResult.documentId };
   } catch (err) {

@@ -54,6 +54,33 @@ Westcor accepted it. No error was logged. Which tells us the field is either
 not validated against the producing agent, or is expected to be a
 company-level identifier. It does not tell us the document is correct.
 
+## The code is printed on the letter itself
+
+Read out of the issued PDF on 2026-08-28. `westcor_20016790-GLT_1.pdf`
+(document 4464, order 2131) contains, on page 1:
+
+```
+ForAgentVerification Pleaseusecode:9807267-CA1038
+http://www.ewestcor.com/agentValidation/index.html
+```
+
+So `CA1038` is not merely a field in a request body. **It is printed on the
+face of the closing protection letter, as the code a lender uses to verify the
+agent with Westcor**, next to the verification URL.
+
+That is a Glendale order — file number `20016790-GLT`, and the branch codes are
+`CA1038` Orange, `CA1038.01` Glendale. A lender verifying this letter enters a
+code that identifies Orange.
+
+It raises the stakes of the question without answering it. Under reading (a),
+agency-level, the code is correct and verification resolves to the agency —
+which is presumably the point of an agency verification code. Under reading
+(b), it is the wrong agent printed on the instrument and handed to the lender
+as the thing to check.
+
+Either way it is now a visible artefact rather than an internal field, which is
+worth stating in the email: the value does not just travel, it prints.
+
 ## What it SHOULD be — and why this needs Westcor, not a guess
 
 Two readings, and the code cannot distinguish them:

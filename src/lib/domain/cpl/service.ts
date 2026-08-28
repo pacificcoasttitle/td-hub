@@ -74,7 +74,8 @@ export async function generateCpl(
 
   // c. Build order detail for the adapter
   const orderDetail = buildOrderDetail(
-    order, input.lenderOverrides, input.propertyOverrides, input.borrowerNamesOverride,
+    order, input.lenderOverrides, input.propertyOverrides,
+    input.borrowerNamesOverride, input.sellerNamesOverride,
   );
 
   // d. Pick adapter
@@ -200,6 +201,7 @@ function buildOrderDetail(
   lenderOverrides?: CplGenerateInput['lenderOverrides'],
   propertyOverrides?: CplGenerateInput['propertyOverrides'],
   borrowerNamesOverride?: string,
+  sellerNamesOverride?: string,
 ): CplOrderDetail {
   // The borrower follows legacy's chain: what the operator typed, then the
   // order's buyer parties, then the owner of record — except on a purchase,
@@ -220,9 +222,15 @@ function buildOrderDetail(
   });
   const buyers = resolved.names;
 
-  const sellers = order.parties
-    .filter((p) => p.role === 'seller')
-    .map((p) => p.externalName ?? 'Unknown Seller');
+  // Same rule as the borrower: what the operator typed wins, because they can
+  // see the letter. Split on the separator the field's own placeholder uses.
+  const typedSellers = (sellerNamesOverride ?? '')
+    .split(/;|,/).map((n) => n.trim()).filter((n) => n !== '');
+  const sellers = typedSellers.length > 0
+    ? typedSellers
+    : order.parties
+        .filter((p) => p.role === 'seller')
+        .map((p) => p.externalName ?? 'Unknown Seller');
 
   const lenderParty = order.parties.find((p) => p.role === 'lender');
 

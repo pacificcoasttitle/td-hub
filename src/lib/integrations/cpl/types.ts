@@ -31,6 +31,13 @@ export interface CplGenerateInput {
   loanAmountOverride?: string;
   loanNumberOverride?: string;
   borrowerNamesOverride?: string;
+  /**
+   * What the operator typed in the seller field. Needed for the same reason as
+   * the borrower: on a Purchase, 1,359 orders carry no seller row, the letter
+   * names the seller, and without this the typed value would be collected and
+   * discarded exactly as borrowerNames was.
+   */
+  sellerNamesOverride?: string;
   assignmentClause?: string;
   lenderContactName?: string;
 }

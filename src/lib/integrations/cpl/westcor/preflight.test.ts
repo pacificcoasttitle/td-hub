@@ -141,3 +141,18 @@ describe('entity names do not go out as people with the surname "-"', () => {
     }
   });
 });
+
+// ─── The seller the operator types must reach the payload ───────────────────
+
+describe('a typed seller is not discarded', () => {
+  it('reaches the letter on a purchase with no seller row', () => {
+    // The exact borrowerNames bug, one field over: the modal collects a seller,
+    // 1,359 purchases have no seller party, and the letter names the seller.
+    const r = run(
+      { transactionType: 'Purchase', sellers: ['Fiorella Angelica Pozo'] },
+      { salesAmountOverride: '600000' },
+    );
+    expect(r.errors).toEqual([]);
+    expect(r.warnings.join(' ')).not.toContain('No seller');
+  });
+});

@@ -82,6 +82,43 @@ first — under reading (a), "fixing" it to `branch.branchCode` would send
 outright, turning a paperwork question into an outage on the week the team
 starts using it.
 
+## A prior document says legacy did the same — and it cannot be verified here
+
+Found after this ticket was first written, on checking `docs/cpl/legacy/`.
+
+`CPL_WESTCOR_GENERATION.md:430`, in a legacy-vs-ours parity table:
+
+```
+| `ClosingAgentNumber: "CA1038"` | Hardcoded | Same | Matched |
+```
+
+and line 452: "Matches legacy. Could be moved to branch data if PCT gets
+multiple closing agent numbers."
+
+If that is right, this is **inherited behaviour, not a regression we
+introduced**, and legacy has been issuing CPLs this way for as long as it has
+been issuing them — which would make reading (a), the company-level
+identifier, considerably more likely than reading (b).
+
+**But it is not verifiable from anything in the repo.** The legacy Westcor
+source is not in `docs/cpl/legacy/` — that folder holds `Common.php` and
+`Fnf.php`, which are the FNF path, and searching both for `CA1038`,
+`ClosingAgentNumber` or `cpl@pct` returns nothing. `CPL_WESTCOR_GENERATION.md`
+itself declares on line 5 that it "reflects the actual code in
+`src/lib/integrations/cpl/westcor/`" — it is a document about OUR
+implementation, and the provenance of its "Legacy" column is unknown.
+
+The same document, line 285, records legacy sending
+`PolicyProducingAgentAddressID: "CA1038"` as a literal too, where our code now
+uses `branch.branchCode` (`payloads.ts:362`). So on that neighbouring field we
+have already diverged from what it describes as legacy behaviour.
+
+**This does not change the recommendation to ask Westcor.** It changes the
+question put to them: not "are we sending the wrong thing" but "your agency
+`CA1038` has been receiving CPLs with `ClosingAgentNumber: CA1038` for every
+branch — is that the value you expect at agency level, or should it track the
+issuing branch?" That is answerable in one email and settles both readings.
+
 ## Why nobody caught it
 
 Worth understanding, because the shape recurs.

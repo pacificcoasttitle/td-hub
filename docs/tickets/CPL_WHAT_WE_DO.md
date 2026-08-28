@@ -584,3 +584,130 @@ property and sales amount — so only checks 2 and 4 can fail:
 `order_parties` holds **0 rows** with role `'borrower'` across all 8,047 orders.
 
 By origin: `softpro_sync` 3,667 of 8,039 (45.6%); `manual_entry` 8 of 8 (100%).
+
+---
+
+## 8. Checked against `docs/cpl/legacy/`
+
+Added after the fact, on request. Stated separately from the sections above so
+the "what we do" half stays clean.
+
+### What that folder actually contains
+
+| file | what it is |
+|---|---|
+| `Common.php` (4,110 lines) | **legacy source** |
+| `Fnf.php` (669 lines) | **legacy source** |
+| `CPL_WESTCOR_GENERATION.md` | **describes OUR code.** Header, line 5: "Source of truth: This document reflects the actual code in `src/lib/integrations/cpl/westcor/`." Dated 2026-03-26. |
+| `CPL_FNF_COMMONWEALTH_GENERATION.md` | same kind of document |
+| `FNF-Commonwealth CPL Legacy Handoff.md`, `FNF_LIVE_TEST_CHECKLIST.md` | handoff and test notes |
+
+**There is no legacy Westcor source in this repo.** `Common.php` and `Fnf.php`
+are the FNF path. `grep -n "CA1038\|ClosingAgentNumber\|cpl@pct" Common.php
+Fnf.php` returns nothing.
+
+So every statement below about legacy WESTCOR behaviour is unverifiable from
+the files present, and is attributed to `CPL_WESTCOR_GENERATION.md`, which is a
+document about our own code containing a "Legacy" column of unknown provenance.
+Legacy FNF behaviour IS verifiable and is cited to the PHP.
+
+### 8a. Legacy has no preflight
+
+`grep -nE "required|is required|validate|error\[|throw new" Fnf.php` returns
+**no matches**. There is no equivalent of `preflightValidate` on the legacy FNF
+path — no buyer check, no seller check, no lender check, no price check.
+
+All six checks listed above are ours.
+
+### 8b. Legacy's borrower is a form field on the order, not a party row
+
+`Fnf.php:331` and `Fnf.php:510`, in both CPL builders:
+
+```php
+        $borrower = $orderDetails['borrowers_vesting'];
+```
+
+Captured from the submitted form, `Common.php:1688`:
+
+```php
+        $borrowers_vesting = $this->input->post('borrowers_vesting');
+```
+
+and persisted on the order, `Common.php:1753`:
+
+```php
+            'borrowers_vesting' => trim($borrowers_vesting),
+```
+
+With a fallback chain when it is empty, `Common.php:2167-2180`:
+
+```php
+        if (!empty($orderDetails['borrowers_vesting'])) {
+            $orderDetails['borrowers_vesting'] = $orderDetails['borrowers_vesting'];
+        } else {
+            if (!empty($orderDetails['primary_owner_name'])) {
+                $orderDetails['borrowers_vesting'] = $orderDetails['primary_owner_name'];
+            }
+
+            if (!empty($orderDetails['secondary_owner_name'])) {
+                $orderDetails['borrowers_vesting'] .= " " . $orderDetails['secondary_owner_name'];
+            }
+
+            if (!empty($orderDetails['vesting'])) {
+                $orderDetails['borrowers_vesting'] .= " " . $orderDetails['vesting'];
+            }
+        }
+```
+
+Legacy never reads a party table for the borrower. It reads one order column,
+and falls back to the property's owner names plus the vesting string.
+
+### 8c. The same column exists in our schema and is empty
+
+`order_properties.borrowers_vesting` exists. Measured 2026-08-28:
+
+```
+order_properties.borrowers_vesting: 0 populated of 8047 rows
+```
+
+Nothing in `src/` writes it. The only references are in proposed-insured
+prefill code and its tests (`route.ts:78` of
+`src/app/api/orders/batch/proposed-insured/`).
+
+The legacy fallback columns have no equivalent at all: a schema search for
+`%vesting%` and `%owner_name%` across every table in `public` returns exactly
+one column — `order_properties.borrowers_vesting`. There is no
+`primary_owner_name`, no `secondary_owner_name`, no `vesting`.
+
+### 8d. Where our buyer requirement came from
+
+Legacy: one order column, operator-supplied, with a fallback.
+Ours: `order_parties` rows with `role = 'buyer'` (`service.ts:194`), required
+by `payloads.ts:52` on the Westcor path, with no override.
+
+The two systems do not read the same thing, and legacy imposes no requirement.
+
+### 8e. `ClosingAgentNumber` — what the prior document claims
+
+`CPL_WESTCOR_GENERATION.md:291`:
+
+```
+  ClosingAgentNumber: "CA1038",            // Hardcoded PCT closing agent
+```
+
+and its parity table, line 430:
+
+```
+| `ClosingAgentNumber: "CA1038"` | Hardcoded | Same | Matched |
+```
+
+Line 452 adds: "Matches legacy. Could be moved to branch data if PCT gets
+multiple closing agent numbers."
+
+The same document, line 285, records `PolicyProducingAgentAddressID: "CA1038"`
+as a literal, where our current code uses `branch.branchCode`
+(`payloads.ts:362`).
+
+**None of this is verifiable from the files in the folder** — the legacy
+Westcor source is not present. It is recorded here as a claim with its
+citation, not as a fact.

@@ -9,7 +9,6 @@ import { DocumentsPanel, type GenerateKind, type OrderDocuments } from './docume
 import { PartiesPanel } from './parties-panel';
 import { NotesStrip } from './notes-strip';
 import { useOrderExtras } from './use-order-extras';
-import type { ProfileSummary } from '@/lib/domain/concierge/profiles';
 
 // ─── The detail pane ─────────────────────────────────────────────────────────
 //
@@ -37,14 +36,6 @@ export interface OrderDetailProps {
   onResync: (o: HubListOrder) => void;
   onRetryTitlePoint: (o: HubListOrder) => void;
   documents?: OrderDocuments;
-  profile: ProfileSummary | null;
-  profileLoading: boolean;
-  profileBusy: boolean;
-  canGenerateProfile: boolean;
-  profileFeatureOn: boolean;
-  onGenerateProfile: () => void;
-  onAdjustProfile: () => void;
-  onRetryProfileRender: () => void;
   onGenerateDocument: (kind: GenerateKind) => void;
   /** Posting a note. Owned by the pane's parent so the composer can disable. */
   savingNote?: boolean;
@@ -170,18 +161,7 @@ export function OrderDetail({
           />
         </div>
 
-        <DocumentsPanel
-          documents={d.documents}
-          profile={d.profile}
-          profileLoading={d.profileLoading}
-          canGenerateProfile={d.canGenerateProfile}
-          profileFeatureOn={d.profileFeatureOn}
-          busyProfile={d.profileBusy}
-          onGenerateProfile={d.onGenerateProfile}
-          onAdjustProfile={d.onAdjustProfile}
-          onRetryProfileRender={d.onRetryProfileRender}
-          onGenerate={d.onGenerateDocument}
-        />
+        <DocumentsPanel documents={d.documents} onGenerate={d.onGenerateDocument} />
 
         <NotesStrip
           notes={extras.notes}

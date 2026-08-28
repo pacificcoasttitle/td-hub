@@ -17,10 +17,6 @@ import {
 import { QueueRail } from './queue-rail';
 import { OrderList, type SortField } from './order-list';
 import { OrderDetail } from './order-detail';
-import { ConciergeCostGate } from './concierge-cost-gate';
-import { ConciergeCriteriaPanel } from './concierge-criteria-panel';
-import { useConciergeProfile } from './use-concierge-profile';
-import { summariseCriteria } from '@/lib/domain/concierge/criteria-summary';
 import { SplitToolbar } from './split-toolbar';
 import { HubStatusBar } from './hub-status-bar';
 
@@ -61,13 +57,12 @@ function ask(prev: Query, patch: Partial<Query>): Query {
 }
 
 export function OrdersSplitView({
-  userKey, onSwitchToTable, conciergeAccess = { canGenerate: false, featureOn: false },
+  userKey, onSwitchToTable,
 }: {
   /** Scopes the persisted density preference to the signed-in user, not the browser. */
   userKey: string;
   onSwitchToTable: () => void;
   /** Both conditions resolved server-side. The UI hides what the server would refuse. */
-  conciergeAccess?: { canGenerate: boolean; featureOn: boolean };
 }) {
   // ─── data ───
   const [query, setQuery] = useState<Query>({
@@ -179,7 +174,6 @@ export function OrdersSplitView({
   // Everything the Property Profile tile needs. The ONLY call in here that can
   // spend is generate(); adjust and retryRender hit routes that cannot reach
   // SiteX at all.
-  const concierge = useConciergeProfile(selected?.id ?? null, conciergeAccess);
 
   const select = useCallback((o: HubListOrder) => {
     setSelectedFile(o.fileNumber);
@@ -491,14 +485,6 @@ export function OrdersSplitView({
           onResync={(o) => void runSyncAction(o, 'resync')}
           onRetryTitlePoint={(o) => void runSyncAction(o, 'retry_tp')}
           documents={selected?.documents}
-          profile={concierge.profile}
-          profileLoading={concierge.loading}
-          profileBusy={concierge.busy}
-          canGenerateProfile={conciergeAccess.canGenerate}
-          profileFeatureOn={conciergeAccess.featureOn}
-          onGenerateProfile={concierge.openGate}
-          onAdjustProfile={concierge.openCriteria}
-          onRetryProfileRender={() => void concierge.retryRender()}
           onGenerateDocument={fireAction}
           savingNote={savingNote}
           onAddNote={addNote}
@@ -531,41 +517,6 @@ export function OrdersSplitView({
 
       {/* The cost gate and the criteria panel are MOUNTED ONLY WHILE OPEN, so
           neither carries state from a previous property into the next one. */}
-      {concierge.gateOpen && selected && (
-        <ConciergeCostGate
-          address={fullAddress(selected) ?? selected.fileNumber}
-          preparedForName={preparedForName}
-          preparedForCompany={preparedForCompany}
-          presentingRepName={concierge.presentingRep?.name ?? ''}
-          presentingRepProblem={concierge.presentingRepProblem}
-          criteriaSummary={summariseCriteria()}
-          spend={concierge.spend}
-          submitting={concierge.busy}
-          error={concierge.error}
-          onPreparedForName={setPreparedForName}
-          onPreparedForCompany={setPreparedForCompany}
-          onCancel={concierge.closeGate}
-          onConfirm={() => void concierge.generate({
-            orderId: selected.id,
-            street: selected.propertyStreet ?? '',
-            city: selected.propertyCity ?? '',
-            state: selected.propertyState ?? 'CA',
-            zip: selected.propertyZip ?? '',
-            preparedForName,
-            preparedForCompany: preparedForCompany || null,
-          })}
-        />
-      )}
-
-      {concierge.criteriaOpen && concierge.profile && (
-        <ConciergeCriteriaPanel
-          profile={concierge.profile}
-          busy={concierge.busy}
-          error={concierge.error}
-          onClose={concierge.closeCriteria}
-          onApply={(c) => void concierge.adjust(c)}
-        />
-      )}
     </div>
   );
 }

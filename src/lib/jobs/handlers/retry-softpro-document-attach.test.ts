@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const attachToSoftProMock = vi.fn();
+const attachTitleDocsToSoftProMock = vi.fn();
 const selectLimitMock = vi.fn();
 
 vi.mock('@/lib/domain/documents/service', () => ({
   attachToSoftPro: (...args: unknown[]) => attachToSoftProMock(...args),
+  attachTitleDocsToSoftPro: (...args: unknown[]) => attachTitleDocsToSoftProMock(...args),
 }));
 
 vi.mock('@/lib/db/schema', () => ({
   documents: {
     id: 'documents.id',
+    orderId: 'documents.order_id',
     category: 'documents.category',
     status: 'documents.status',
     createdAt: 'documents.created_at',
@@ -53,36 +56,41 @@ describe('handleRetrySoftProDocumentAttach', () => {
     vi.resetModules();
   });
 
-  it('retries unsynced docs and counts synced vs failed', async () => {
+  it('batches title docs per order and posts CPL alone', async () => {
     selectLimitMock.mockResolvedValue([
-      { id: 1, category: 'cpl', softproAttachAttemptCount: 1 },
-      { id: 2, category: 'grant_deed', softproAttachAttemptCount: 2 },
+      { id: 1, orderId: 9, category: 'cpl', softproAttachAttemptCount: 1 },
+      { id: 2, orderId: 9, category: 'grant_deed', softproAttachAttemptCount: 2 },
+      { id: 3, orderId: 9, category: 'legal_vesting', softproAttachAttemptCount: 0 },
     ]);
-    attachToSoftProMock
-      .mockResolvedValueOnce({ success: true, softproDocumentId: 'SP-1' })
-      .mockResolvedValueOnce({ success: false, error: 'still failing' });
+    attachToSoftProMock.mockResolvedValue({ success: true, softproDocumentId: 'SP-1' });
+    attachTitleDocsToSoftProMock.mockResolvedValue({ success: false, error: 'still failing' });
 
     const { handleRetrySoftProDocumentAttach } = await import('./retry-softpro-document-attach');
     const result = await handleRetrySoftProDocumentAttach();
 
+    expect(attachTitleDocsToSoftProMock).toHaveBeenCalledWith(9);
     expect(attachToSoftProMock).toHaveBeenCalledWith(1, 'CPL');
-    expect(attachToSoftProMock).toHaveBeenCalledWith(2, 'Title Docs');
+    expect(attachToSoftProMock).not.toHaveBeenCalledWith(2, expect.anything());
     expect(result).toMatchObject({
-      total: 2,
-      attempted: 2,
+      total: 3,
+      attempted: 3,
       synced: 1,
-      failed: 1,
+      failed: 2,
     });
-    expect(result.errors).toEqual([{ documentId: 2, error: 'still failing' }]);
+    expect(result.errors).toEqual([
+      { documentId: 2, error: 'still failing' },
+      { documentId: 3, error: 'still failing' },
+    ]);
   });
 
   it('restricts selection to TD-Hub-generated categories (never prelim/policy)', async () => {
     selectLimitMock.mockResolvedValue([
-      { id: 10, category: 'proposed_insured', softproAttachAttemptCount: 0 },
-      { id: 11, category: 'legal_vesting', softproAttachAttemptCount: 0 },
-      { id: 12, category: 'tax', softproAttachAttemptCount: 0 },
+      { id: 10, orderId: 1, category: 'proposed_insured', softproAttachAttemptCount: 0 },
+      { id: 11, orderId: 2, category: 'legal_vesting', softproAttachAttemptCount: 0 },
+      { id: 12, orderId: 2, category: 'tax', softproAttachAttemptCount: 0 },
     ]);
     attachToSoftProMock.mockResolvedValue({ success: true, softproDocumentId: 'ok' });
+    attachTitleDocsToSoftProMock.mockResolvedValue({ success: true, sent: 2, attached: 2 });
 
     const {
       handleRetrySoftProDocumentAttach,
@@ -106,15 +114,8 @@ describe('handleRetrySoftProDocumentAttach', () => {
       'documents.category',
       [...SOFTPRO_RETRY_ATTACH_CATEGORIES],
     );
-    const whereArgs = andMock.mock.calls.at(-1) ?? [];
-    expect(whereArgs.some((arg) => (
-      typeof arg === 'object'
-      && arg !== null
-      && (arg as { op?: string }).op === 'inArray'
-    ))).toBe(true);
-
-    // Selection mock never returns prelim — attach must not be invoked for fetched categories.
+    expect(attachToSoftProMock).toHaveBeenCalledWith(10, 'desk-file-upload');
+    expect(attachTitleDocsToSoftProMock).toHaveBeenCalledWith(2);
     expect(attachToSoftProMock).not.toHaveBeenCalledWith(expect.any(Number), 'prelim');
-    expect(attachToSoftProMock.mock.calls.map((c) => c[0])).toEqual([10, 11, 12]);
   });
 });

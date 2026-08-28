@@ -1,14 +1,25 @@
 import { db } from '@/lib/db/client';
-import { documents, documentAudit, orders, documentRequests, eventOutbox } from '@/lib/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { documents, documentAudit, orders, documentRequests, eventOutbox, titlePointData, vendorApiLogs } from '@/lib/db/schema';
+import { eq, and, desc, inArray } from 'drizzle-orm';
 import { uploadFile as s3Upload } from '@/lib/integrations/s3/client';
-import { uploadDocument as softproUpload } from '@/lib/integrations/softpro/client';
+import {
+  getAttachedDocuments,
+  uploadDocument as softproUpload,
+} from '@/lib/integrations/softpro/client';
 import {
   extractSoftProDocumentId,
   softProAttachNextRetryAt,
 } from './softpro-attach-retry';
 import { softProDocumentName } from './softpro-document-name';
 import { buildSoftProFetchUrl } from './softpro-fetch-token';
+import {
+  SOFTPRO_TITLE_DOC_CATEGORIES,
+  attachedNamesFromGetAttached,
+  cleanSoftProFileUrl,
+  countSentAmongAttached,
+  isTitleDocCategory,
+  softProFolderForCategory,
+} from './softpro-folder';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -28,7 +39,12 @@ export interface AttachToSoftProResult {
   success: boolean;
   error?: string;
   softproDocumentId?: string;
+  deferred?: boolean;
+  sent?: number;
+  attached?: number;
 }
+
+const TITLE_POINT_IN_FLIGHT = ['pending', 'processing', 'ready', 'result_ready'] as const;
 
 // ─── Commands ────────────────────────────────────────────────────────────────
 
@@ -131,16 +147,8 @@ export async function attachToSoftPro(
     }
     const { id: orderId, fileNumber } = orderRow[0]!;
 
-    // SoftPro downloads FileURL on a Windows host (MAX_PATH 260).
-    // Long pre-signed S3 URLs (~440+ chars) cause SoftPro to fail with path-too-long.
-    // Use a short HMAC-gated proxy URL that streams the bytes.
-    let fileUrl: string;
-    try {
-      fileUrl = buildSoftProFetchUrl(documentId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to build SoftPro fetch URL';
-      await recordAttachFailure(documentId, message, fileNumber);
-      return { success: false, error: message };
+    if (isTitleDocCategory(doc.category)) {
+      return attachTitleDocsToSoftPro(orderId);
     }
 
     const documentName = softProDocumentName({
@@ -149,12 +157,24 @@ export async function attachToSoftPro(
       filename: doc.filename,
     });
 
+    // SoftPro downloads FileURL on a Windows host (MAX_PATH 260).
+    // Long pre-signed S3 URLs (~440+ chars) cause SoftPro to fail with path-too-long.
+    // Last path segment must be a legal filename — Path.GetFileName uses it.
+    let fileUrl: string;
+    try {
+      fileUrl = cleanSoftProFileUrl(buildSoftProFetchUrl(documentId, documentName));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to build SoftPro fetch URL';
+      await recordAttachFailure(documentId, message, fileNumber);
+      return { success: false, error: message };
+    }
+
     const result = await softproUpload({
       documentId,
       orderId,
       orderNumber: fileNumber,
       documentName,
-      folderName: folderName ?? doc.category,
+      folderName: softProFolderForCategory(doc.category, folderName),
       fileUrl,
     });
 
@@ -203,6 +223,243 @@ export async function attachToSoftPro(
     } catch { /* last-resort: never throw to callers */ }
     return { success: false, error: errorMessage };
   }
+}
+
+async function titlePointTitleDocsInFlight(orderId: number): Promise<boolean> {
+  const rows = await db
+    .select({ status: titlePointData.status, searchType: titlePointData.searchType })
+    .from(titlePointData)
+    .where(and(
+      eq(titlePointData.orderId, orderId),
+      inArray(titlePointData.searchType, [...SOFTPRO_TITLE_DOC_CATEGORIES]),
+    ));
+
+  return rows.some((row) =>
+    TITLE_POINT_IN_FLIGHT.includes(row.status as (typeof TITLE_POINT_IN_FLIGHT)[number]),
+  );
+}
+
+/**
+ * Wait until LV / tax / grant-deed TitlePoint work is terminal, then post every
+ * unsynced title doc for the order in ONE AddDocuments call — legacy's batching.
+ */
+export async function maybeAttachTitleDocsToSoftPro(orderId: number): Promise<AttachToSoftProResult> {
+  if (await titlePointTitleDocsInFlight(orderId)) {
+    return { success: true, deferred: true, sent: 0, attached: 0 };
+  }
+  return attachTitleDocsToSoftPro(orderId);
+}
+
+/**
+ * Accumulate unsynced legal-vesting / grant-deed / tax rows into one FileList
+ * and one AddDocuments POST. Marks synced only after GetAttachedDocuments
+ * shows every sent filename. A 200 with nothing attached stays unsynced.
+ */
+export async function attachTitleDocsToSoftPro(orderId: number): Promise<AttachToSoftProResult> {
+  const [orderRow] = await db
+    .select({ id: orders.id, fileNumber: orders.fileNumber })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+  if (!orderRow) return { success: false, error: 'Order not found' };
+
+  const pending = await db
+    .select()
+    .from(documents)
+    .where(and(
+      eq(documents.orderId, orderId),
+      eq(documents.status, 'active'),
+      eq(documents.isSyncedToSoftpro, false),
+      inArray(documents.category, [...SOFTPRO_TITLE_DOC_CATEGORIES]),
+    ));
+
+  if (pending.length === 0) {
+    return { success: true, sent: 0, attached: 0 };
+  }
+
+  const files: Array<{
+    id: number;
+    documentName: string;
+    folderName: string;
+    fileUrl: string;
+  }> = [];
+
+  try {
+    for (const doc of pending) {
+      const documentName = softProDocumentName({
+        documentId: doc.id,
+        category: doc.category,
+        filename: doc.filename,
+      });
+      files.push({
+        id: doc.id,
+        documentName,
+        folderName: softProFolderForCategory(doc.category),
+        fileUrl: cleanSoftProFileUrl(buildSoftProFetchUrl(doc.id, documentName)),
+      });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to build SoftPro fetch URL';
+    for (const doc of pending) {
+      await recordAttachFailure(doc.id, message, orderRow.fileNumber);
+    }
+    return { success: false, error: message, sent: pending.length, attached: 0 };
+  }
+
+  const result = await softproUpload({
+    documentId: files[0]!.id,
+    orderId,
+    orderNumber: orderRow.fileNumber,
+    documentName: orderRow.fileNumber,
+    files: files.map((f) => ({ folderName: f.folderName, fileUrl: f.fileUrl })),
+  });
+
+  if (!result.success) {
+    const errorMessage = result.error?.message ?? 'SoftPro upload failed';
+    for (const file of files) {
+      await recordAttachFailure(file.id, errorMessage, orderRow.fileNumber, {
+        fileUrl: file.fileUrl,
+        documentName: file.documentName,
+        requestId: result.requestId,
+        batched: true,
+      });
+    }
+    return { success: false, error: errorMessage, sent: files.length, attached: 0 };
+  }
+
+  const listed = await getAttachedDocuments(orderRow.fileNumber);
+  const attachedNames = listed.success
+    ? attachedNamesFromGetAttached(listed.data)
+    : [];
+  const sentNames = files.map((f) => f.documentName);
+  const attachedCount = countSentAmongAttached(sentNames, attachedNames);
+  const folders = [...new Set(files.map((f) => f.folderName))];
+
+  await logTitleDocsAttachVerified({
+    orderId,
+    fileNumber: orderRow.fileNumber,
+    requestId: result.requestId,
+    sent: files.map((f) => ({
+      documentId: f.id,
+      documentName: f.documentName,
+      folderName: f.folderName,
+    })),
+    attachedCount,
+    attachedNames,
+    folders,
+    getAttachedOk: listed.success,
+    verified: listed.success && attachedCount === sentNames.length,
+    error: listed.success
+      ? (attachedCount === sentNames.length
+        ? null
+        : `matched ${attachedCount}/${sentNames.length}`)
+      : (listed.error?.message ?? 'GetAttachedDocuments failed'),
+  });
+
+  if (!listed.success || attachedCount !== sentNames.length) {
+    const errorMessage = listed.success
+      ? `AddDocuments returned 200 but GetAttachedDocuments matched ${attachedCount}/${sentNames.length} sent names`
+      : `GetAttachedDocuments failed after AddDocuments: ${listed.error?.message ?? 'unknown'}`;
+    for (const file of files) {
+      const landed = attachedNames.some((n) => n.toLowerCase() === file.documentName.toLowerCase());
+      if (landed) {
+        const softproDocumentId = extractSoftProDocumentId(result.data, file.id);
+        await markTitleDocSynced(file, orderRow.fileNumber, softproDocumentId, result.requestId, attachedCount);
+      } else {
+        await recordAttachFailure(file.id, errorMessage, orderRow.fileNumber, {
+          fileUrl: file.fileUrl,
+          documentName: file.documentName,
+          requestId: result.requestId,
+          batched: true,
+          sent: sentNames.length,
+          attached: attachedCount,
+        });
+      }
+    }
+    return { success: false, error: errorMessage, sent: sentNames.length, attached: attachedCount };
+  }
+
+  const softproDocumentId = extractSoftProDocumentId(result.data, files[0]!.id);
+  for (const file of files) {
+    await markTitleDocSynced(file, orderRow.fileNumber, softproDocumentId, result.requestId, attachedCount);
+  }
+  return { success: true, softproDocumentId, sent: sentNames.length, attached: attachedCount };
+}
+
+async function logTitleDocsAttachVerified(params: {
+  orderId: number;
+  fileNumber: string;
+  requestId?: string;
+  sent: Array<{ documentId: number; documentName: string; folderName: string }>;
+  attachedCount: number;
+  attachedNames: string[];
+  folders: string[];
+  getAttachedOk: boolean;
+  verified: boolean;
+  error: string | null;
+}): Promise<void> {
+  const sentCount = params.sent.length;
+  console.info(
+    `[title-docs-attach] file=${params.fileNumber} sent=${sentCount} confirmed=${params.attachedCount} folders=${params.folders.join(',')} verified=${params.verified}`,
+  );
+  try {
+    await db.insert(vendorApiLogs).values({
+      vendor: 'softpro',
+      operation: 'title_docs_attach_verified',
+      orderId: params.orderId,
+      requestId: params.requestId ?? crypto.randomUUID(),
+      startedAt: new Date(),
+      endedAt: new Date(),
+      success: params.verified,
+      requestMeta: {
+        fileNumber: params.fileNumber,
+        sentCount,
+        sent: params.sent,
+        folders: params.folders,
+      } as Record<string, unknown>,
+      responseMeta: {
+        attachedCount: params.attachedCount,
+        attachedNames: params.attachedNames,
+        getAttachedOk: params.getAttachedOk,
+        verified: params.verified,
+        error: params.error,
+      } as Record<string, unknown>,
+    });
+  } catch { /* observability must not fail the attach */ }
+}
+
+async function markTitleDocSynced(
+  file: { id: number; fileUrl: string; documentName: string; folderName: string },
+  fileNumber: string,
+  softproDocumentId: string,
+  requestId: string | undefined,
+  attachedCount: number,
+): Promise<void> {
+  const existing = await getDocumentById(file.id);
+  await db.update(documents).set({
+    isSyncedToSoftpro: true,
+    softproSyncedAt: new Date(),
+    softproSyncError: null,
+    softproDocumentId,
+    softproAttachAttemptCount: (existing?.softproAttachAttemptCount ?? 0) + 1,
+    softproAttachNextRetryAt: null,
+    updatedAt: new Date(),
+  }).where(eq(documents.id, file.id));
+
+  await db.insert(documentAudit).values({
+    documentId: file.id,
+    action: 'attached_to_softpro',
+    meta: {
+      fileNumber,
+      fileUrl: file.fileUrl,
+      documentName: file.documentName,
+      folderName: file.folderName,
+      softproDocumentId,
+      requestId: requestId ?? null,
+      batched: true,
+      verifiedAttached: attachedCount,
+    } as Record<string, unknown>,
+  });
 }
 
 async function recordAttachFailure(

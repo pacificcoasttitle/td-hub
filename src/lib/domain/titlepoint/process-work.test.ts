@@ -7,6 +7,7 @@ const {
   fetchImageMock,
   fetchGrantDeedMock,
   maybeEnqueueConfirmationMock,
+  maybeAttachTitleDocsMock,
 } = vi.hoisted(() => ({
   getTitlePointRecordMock: vi.fn(),
   pollSearchMock: vi.fn(),
@@ -14,6 +15,7 @@ const {
   fetchImageMock: vi.fn(),
   fetchGrantDeedMock: vi.fn(),
   maybeEnqueueConfirmationMock: vi.fn(),
+  maybeAttachTitleDocsMock: vi.fn(),
 }));
 
 vi.mock('@/lib/domain/titlepoint/service', () => ({
@@ -31,6 +33,10 @@ vi.mock('@/lib/domain/titlepoint/completion-checker', () => ({
   maybeEnqueueConfirmation: (...a: unknown[]) => maybeEnqueueConfirmationMock(...a),
 }));
 
+vi.mock('@/lib/domain/documents/service', () => ({
+  maybeAttachTitleDocsToSoftPro: (...a: unknown[]) => maybeAttachTitleDocsMock(...a),
+}));
+
 import { processTitlePointWork } from './process-work';
 
 describe('processTitlePointWork', () => {
@@ -38,6 +44,7 @@ describe('processTitlePointWork', () => {
     vi.clearAllMocks();
     maybeEnqueueConfirmationMock.mockResolvedValue(true);
     fetchGrantDeedMock.mockResolvedValue({ success: true });
+    maybeAttachTitleDocsMock.mockResolvedValue({ success: true, deferred: true });
   });
 
   it('does not re-generate a completed row (idempotent)', async () => {
@@ -77,6 +84,7 @@ describe('processTitlePointWork', () => {
     expect(result).toMatchObject({ status: 'completed', documentId: 99 });
     expect(fetchImageMock).toHaveBeenCalledWith(11);
     expect(fetchGrantDeedMock).not.toHaveBeenCalled();
+    expect(maybeAttachTitleDocsMock).toHaveBeenCalledWith(60);
     expect(maybeEnqueueConfirmationMock).toHaveBeenCalledWith(60);
   });
 
@@ -100,6 +108,7 @@ describe('processTitlePointWork', () => {
 
     expect(fetchImageMock).toHaveBeenCalledWith(12);
     expect(fetchGrantDeedMock).toHaveBeenCalledWith(12);
+    expect(maybeAttachTitleDocsMock).toHaveBeenCalledWith(70);
   });
 
   it('does not run grant-deed when LV fetchImage fails', async () => {

@@ -55,12 +55,16 @@ describe('softPro fetch token', () => {
     process.env.SOFTPRO_DOC_FETCH_SECRET = 'test-secret';
     process.env.NEXT_PUBLIC_APP_URL = 'https://hub.pctitle.com';
 
-    const url = buildSoftProFetchUrl(3346);
+    const url = buildSoftProFetchUrl(3346, 'gd-3346.pdf');
     expect(url.length).toBeLessThan(200);
+    expect(url.endsWith('/gd-3346.pdf')).toBe(true);
+    expect(url.includes('?')).toBe(false);
     const parts = url.split('/');
+    const filename = parts.pop()!;
     const sig = parts.pop()!;
     const exp = Number(parts.pop());
     const documentId = Number(parts.pop());
+    expect(filename).toBe('gd-3346.pdf');
     expect(verifySoftProFetchToken(documentId, exp, sig)).toEqual({ ok: true });
     expect(verifySoftProFetchToken(documentId, exp, 'bad-signature-value!!!!').ok).toBe(false);
   });
@@ -71,8 +75,9 @@ describe('softPro fetch token', () => {
     process.env.NEXT_PUBLIC_APP_URL = 'https://hub.pctitle.com';
 
     expect(getSoftProDocFetchSecret()).toBe('runner-only-secret');
-    const url = buildSoftProFetchUrl(10);
+    const url = buildSoftProFetchUrl(10, 'vest-10.pdf');
     const parts = url.split('/');
+    parts.pop(); // filename
     const sig = parts.pop()!;
     const exp = Number(parts.pop());
     expect(verifySoftProFetchToken(10, exp, sig)).toEqual({ ok: true });
@@ -84,7 +89,7 @@ describe('softPro fetch token', () => {
     process.env.NEXT_PUBLIC_APP_URL = 'https://hub.pctitle.com';
 
     expect(() => getSoftProDocFetchSecret()).toThrow(/SOFTPRO_DOC_FETCH_SECRET/);
-    expect(() => buildSoftProFetchUrl(42)).toThrow(/fail-closed/i);
+    expect(() => buildSoftProFetchUrl(42, 'doc-42.pdf')).toThrow(/fail-closed/i);
 
     // Even if an attacker presents a token shaped like a valid sig, verify fails closed
     // because no allowed signing secret is configured (webhook alone is ignored).

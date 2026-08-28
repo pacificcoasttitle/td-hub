@@ -1,7 +1,7 @@
 import { db } from '@/lib/db/client';
 import { titlePointData } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { uploadDocument, attachToSoftPro } from '@/lib/domain/documents/service';
+import { uploadDocument, maybeAttachTitleDocsToSoftPro } from '@/lib/domain/documents/service';
 import { getDocumentsByParameters3 } from '@/lib/integrations/titlepoint/client-image';
 import { getSetting } from '@/lib/domain/settings/service';
 
@@ -169,9 +169,8 @@ export async function fetchGrantDeed(
       updatedAt: new Date(),
     }).where(eq(titlePointData.id, gdId));
 
-    // SoftPro write-back is best-effort for grant-deed completion, but failures
-    // are recorded on the documents row (never silently discarded).
-    await attachToSoftPro(uploadResult.documentId, 'Title Docs');
+    // SoftPro write-back waits for sibling LV/tax work, then posts one FileList.
+    await maybeAttachTitleDocsToSoftPro(oid);
 
     return { success: true, titlePointDataId: gdId, documentId: uploadResult.documentId };
   } catch (err) {

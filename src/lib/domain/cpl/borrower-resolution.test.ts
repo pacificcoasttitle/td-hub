@@ -145,3 +145,21 @@ describe('an entity is never run through the person parser', () => {
     }
   });
 });
+
+// ─── A note on the price check, which is the OPPOSITE kind of check ─────────
+//
+// The tests for it are in
+// src/lib/integrations/cpl/westcor/preflight.test.ts. The pointer is here
+// because the two changes only make sense read together: the borrower check
+// was RELAXED and the price check was TIGHTENED, in the same change, for
+// opposite reasons.
+//
+//   Borrower — we were REFUSING TO SEND over a value we could resolve
+//              ourselves. The letter was fine; we were withholding it.
+//              -> warning
+//
+//   Price    — zero is a WRONG VALUE on a legal instrument. The CPL is the
+//              underwriter's indemnity to the lender and the amount is what is
+//              indemnified. Westcor accepts zero, so nothing downstream
+//              catches it.
+//              -> blocking, on every transaction type

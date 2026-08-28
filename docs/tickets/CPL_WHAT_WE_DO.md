@@ -751,3 +751,73 @@ as a literal, where our current code uses `branch.branchCode`
 **None of this is verifiable from the files in the folder** — the legacy
 Westcor source is not present. It is recorded here as a claim with its
 citation, not as a fact.
+
+---
+
+## 9. `loan_amount`: a drift detector that sees the drift and does not correct it
+
+Measured 2026-08-28, all 8,062 orders.
+
+| | |
+|---|---:|
+| `orders.loan_amount > 0` | **2** |
+| of which `softpro_sync` (8,054 orders) | 1 |
+| of which `manual_entry` (8 orders) | 1 |
+
+One of the two is order 51, the March test order, carrying `2322323.00`.
+
+### Nothing in the sync path writes it
+
+The only writer is the hub's own create path,
+`src/lib/domain/orders/create-order.ts:281`:
+
+```ts
+    loanAmount: input.transaction.loanAmount > 0 ? String(input.transaction.loanAmount) : null,
+```
+
+That fires for hub-created orders only, and there are 8 of those in total.
+Every one of the 15 orders created on 2026-08-28 — 7 of them refinances —
+carries `loan_amount = NULL`, because all 15 arrived through `softpro_sync`.
+
+`src/lib/integrations/softpro/types.ts` models no loan field at all; searching
+it for `Loan` returns nothing.
+
+### The detector
+
+`src/lib/domain/orders/lookback-diff.ts:138-139` notices when the incoming
+loan amount differs from the stored one:
+
+```ts
+  if (incomingLoan !== null && incomingLoan !== normalizeMoney(row.loanAmount)) {
+    fieldChanges.push('loanAmount');
+  }
+```
+
+and `lookback-diff.ts:186-188` does this with the result:
+
+```ts
+  for (const f of diff.fieldChanges) {
+    counts.fieldsChanged[f] = (counts.fieldsChanged[f] ?? 0) + 1;
+  }
+```
+
+**`fieldChanges` is counted for reporting and never applied.** No `update` in
+`lookback-sync.ts` sets `loanAmount`. The sweep detects the drift on every pass,
+tallies it into a report, and leaves the column as it was.
+
+That is its own entry in the watch-outs: a drift detector that sees the drift
+and does not correct it is worse than no detector, because the tally is
+evidence the system *noticed* — which reads, to anyone looking at the report,
+as though something acted on it.
+
+### What it costs on the CPL path
+
+`resolvePurchasePrice` for a refinance (`payloads.ts:97-99`) reads
+`loanOverride || dbLoan || salesOverride || dbSales`. Of 3,841 refinances,
+**1** has `loan_amount > 0` and **2** have `sales_price > 0` — so on 3,839 of
+them every database term is empty and the amount is whatever the operator
+types.
+
+Until 2026-08-28 the preflight's price check applied to Purchase only, so a
+refinance with nothing typed sent `purchase_price: 0` and nothing stopped it.
+That check is now unconditional; see §7.

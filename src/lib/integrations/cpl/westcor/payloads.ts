@@ -96,12 +96,36 @@ export function preflightValidate(ctx: PreflightContext): PreflightResult {
     if (orderDetail.sellers.length === 0) {
       warnings.push('No seller is named on this purchase.');
     }
+  }
 
-    // BLOCKING. Westcor rejects a zero purchase price on a purchase.
-    const price = resolvePurchasePrice(orderDetail, ctx.input);
-    if (price <= 0) {
-      errors.push('Purchase transactions require a sales amount greater than zero.');
-    }
+  // BLOCKING, ON EVERY TRANSACTION TYPE.
+  //
+  // This one is deliberately NOT treated like the borrower check we just
+  // relaxed, and the difference is worth stating because the two look alike
+  // from a distance.
+  //
+  //   The borrower block refused to SEND over a value we could resolve
+  //   ourselves. Nothing was wrong with the letter; we were withholding it.
+  //
+  //   A zero coverage amount is a WRONG VALUE ON A LEGAL INSTRUMENT. The CPL
+  //   is the underwriter's indemnity to the lender, and the amount is what is
+  //   being indemnified. Sending zero does not produce a thinner letter, it
+  //   produces an incorrect one — and Westcor accepts it, so nothing
+  //   downstream catches it either.
+  //
+  // Refinance was previously exempt from this check, and on the current book
+  // that exemption is the whole exposure: of 3,841 refinances, ONE has
+  // loan_amount > 0 and TWO have sales_price > 0. resolvePurchasePrice reads
+  // loanOverride || dbLoan || salesOverride || dbSales, so on 3,839 of them
+  // every database term is empty and the value comes only from what the
+  // operator types. With no check, typing nothing sent purchase_price: 0.
+  const price = resolvePurchasePrice(orderDetail, ctx.input);
+  if (price <= 0) {
+    errors.push(
+      txType === 'Purchase'
+        ? 'Purchase transactions require a sales amount greater than zero.'
+        : 'A loan amount is required — a CPL cannot be issued for a zero amount.',
+    );
   }
 
   // BLOCKING. LenderID 0 means the lender was never registered with Westcor;

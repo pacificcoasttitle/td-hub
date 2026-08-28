@@ -99,3 +99,78 @@ is one claim, not two data points.
 
 When the check costs under a minute — a timestamped print, a row count, a
 single call — run it before anyone agrees with anything.
+
+---
+
+# Companion trap: A Cached Read Is Not A Fresh Read
+
+Same night, same investigation, and the reason it belongs here is that it
+produces the same artefact: **an absence that looks like a fact about the
+vendor.**
+
+## The Trap
+
+You call a vendor client, read a value, get null, and conclude the vendor did
+not send it. But the client returned a **cached** response and never made the
+call. The null describes your cache, not the vendor.
+
+## Real Incident — 2026-08-28
+
+`getToken()` populates a module-level `cachedGroups` when it fetches a token.
+It also short-circuits: `if (cached) return cached;` — where `cached` is a row
+in `vendor_tokens` with a live expiry.
+
+A test read `cachedGroups` after calling `getToken()`, saw `null`, and I
+reported:
+
+> "`mapGroupsToBranches` is dead code in practice on this account — the token
+> supplies no groups, so the operator's branch list comes entirely from our
+> seeded table."
+
+Both halves false. The token supplies **seven** groups, as a JSON-encoded
+string. `auth.ts` parses that string correctly. The parsed groups are persisted
+— `vendor_tokens` carries `groups=7` on every Westcor row back to March.
+
+`cachedGroups` was null because the token came from the database cache, so the
+fetch-and-parse path never ran in that process. The module-level variable is
+only ever populated on a *fresh* fetch.
+
+The check that would have caught it was one query:
+
+```sql
+SELECT jsonb_array_length(metadata->'groups') FROM vendor_tokens
+WHERE vendor='westcor' ORDER BY id DESC LIMIT 1;
+```
+
+It returned 7, and it settled a claim that had already been written down and
+was about to be relied on.
+
+## Why this shape is dangerous
+
+A cached path returns **successfully**. There is no error, no warning, no
+timeout — just a value that is stale, partial, or absent because it was
+assembled somewhere other than where you think. Every instinct that would fire
+on a failure stays quiet.
+
+It also inverts the usual reasoning. Normally "I called it and got nothing" is
+weak evidence about the vendor. Here it was not even that: **the call never
+happened.**
+
+## How to catch it
+
+- Before concluding anything about a vendor from a client's output, ask
+  **did this actually make a request?** Look for a cache check at the top of
+  the function.
+- Check the **persisted** artefact rather than the in-process variable. Tokens,
+  responses and payloads that get written to a table can be queried directly,
+  and the table does not lie about what the vendor sent.
+- In-process module state (`let cached…` at module scope) is populated only on
+  the path that sets it. A short-circuit return leaves it at its initial value,
+  which is usually `null` — indistinguishable from "the vendor sent nothing".
+- If a measurement depends on a fresh call, **force one** — clear the cache,
+  use a fresh process against an expired token, or call the endpoint directly.
+
+## The rule
+
+**A null from a cache says nothing about the vendor.** Before reading absence
+as a finding, establish that a request was made at all.

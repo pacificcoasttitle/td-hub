@@ -1,7 +1,8 @@
 # Every CPL names Orange as the closing agent, whatever branch issued it
 
-**Status: reported, NOT fixed.** Deliberately not fixed — resolving it needs
-Westcor's definition of the field, not a code change we can reason our way to.
+**Status: reported, NOT fixed. DOWNGRADED from urgent on 2026-08-28** — see
+"Inherited, not introduced". Resolving it needs Westcor's definition of the
+field, not a code change we can reason our way to.
 Opened: 2026-08-28
 Found: while tracing the March CPL failures for the hub detail pane work.
 
@@ -33,10 +34,17 @@ codes are:
 | `CA1038.01` | Glendale |
 | `CA1038.02` | Oxnard |
 | `CA1038.03` | Concord |
-| … | 20 configured in total |
+| `CA1038.04` | Westlake |
+| `CA1038.05` | San Diego |
+| `CA1038.06` | Gold River |
 
-So for 19 of the 20 branches, the CPL goes out naming a closing agent that is
-not the branch that issued it.
+So for **6 of the 7** Westcor branches, the CPL goes out naming a closing agent
+that is not the branch that issued it.
+
+*(Corrected 2026-08-28. This previously read "20 configured in total" and "19
+of the 20". `cpl_branches` holds 20 rows across BOTH underwriters — 13 FNF and
+7 Westcor — and only the Westcor rows are relevant. The error came from
+counting the whole table.)*
 
 ## This is not hypothetical — it has already happened once
 
@@ -53,6 +61,35 @@ second, smaller gap — see below.)
 Westcor accepted it. No error was logged. Which tells us the field is either
 not validated against the producing agent, or is expected to be a
 company-level identifier. It does not tell us the document is correct.
+
+## Inherited, not introduced — and why this is no longer urgent
+
+Legacy's Westcor path hardcodes **the same literal**, `CA1038`, at
+`Westcor.php:504`, on every branch, and has for years. Above it sits a
+commented-out `RI1026`.
+
+That commented-out predecessor is the detail that matters. An identifier
+changed once, wholesale, with the old value left behind as a comment, is what an
+**agency-level** identifier looks like when the agency changes. It is not what a
+per-branch value looks like — a per-branch value would have been parameterised,
+not swapped.
+
+So:
+
+- **We copied this. We did not introduce it.** Earlier versions of this ticket
+  treated it as ours and asked why nobody caught it. The answer is that it was
+  never new.
+- Reading (a), company-level and correct, is now the more likely of the two.
+- **Downgraded from urgent.** Nothing needs to happen before the team starts
+  issuing letters.
+
+It is not dismissed, for one reason: the code prints on the letter. Asking
+Westcor stays worthwhile as housekeeping, and the question is unchanged — it is
+just no longer blocking anything.
+
+This also supersedes the section below titled "A prior document says legacy did
+the same — and it cannot be verified here". It can be verified now, and it is
+confirmed: `Westcor.php:504`.
 
 ## The code is printed on the letter itself
 
@@ -174,8 +211,12 @@ sweep is needed, that inference is the only thing available to identify
 affected documents. Recording `branch_id` on the document at generation would
 cost nothing and remove the guesswork.
 
-## Not urgent today, urgent the week it is adopted
+## Priority, as of 2026-08-28
 
 Three CPLs exist. One is real. The hub's detail pane now puts a **Create CPL**
-button in front of the open-order team, so volume is about to change — which is
-the entire reason for filing this before that happens rather than after.
+button in front of the open-order team, so volume is about to change.
+
+That was the original argument for urgency, and it no longer holds: the value
+is inherited from a system that has issued letters this way for years, so
+volume increasing does not make a new problem. **Housekeeping.** Ask Westcor
+when convenient; nothing waits on the answer.

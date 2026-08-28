@@ -754,61 +754,69 @@ citation, not as a fact.
 
 ---
 
-## 9. `loan_amount`: a drift detector that sees the drift and does not correct it
+## 9. `loan_amount` is the one field the sweep detects and does not apply
 
-Measured 2026-08-28, all 8,062 orders.
+**A correction to an earlier version of this section, which claimed the
+lookback sweep was observational. It is not.** `lookback-sync.ts:284` calls
+`processOrderDetail`, which writes four tables. The claim was made from
+`fieldChanges` being tallied and never applied, without checking whether a
+different writer existed. One did.
+
+### What the detector watches — the whole list is two fields
+
+`diffOrder` (`lookback-diff.ts:124-141`) records exactly two non-status
+changes, plus the status itself:
+
+| field | detected | applied | where |
+|---|---|---|---|
+| `operationalStatus` | yes | **yes** | `process-detail.ts:304` |
+| `salesPrice` | yes | **yes** | `process-detail.ts:309` |
+| `loanAmount` | yes | **no** | `loanAmount` appears **0 times** in `process-detail.ts` |
+
+`fieldChanges` is reporting-only *by design*, and says so at
+`lookback-diff.ts:87-88`: "Reporting only — the actual write is
+processOrderDetail's, and it may legitimately update more." That is accurate.
+`processOrderDetail` also writes `transactionType`, `productType`, `orderType`,
+`marketingSource`, `salesRepId`, `titleOfficerId`, `escrowOfficerId`,
+`openedAt` and `completedAt`.
+
+So this is **one unapplied field, not a design gap.**
+
+### Why that one is unapplied, in its own words
+
+`lookback-diff.ts:131-133`:
+
+```ts
+  // LoanAmount is not in the GetOrderDetails contract yet (Aashima's team is
+  // adding it). Reading it defensively means the day it ships, this job starts
+  // reporting it with no code change.
+```
+
+The detector reads a field the vendor does not send yet. It is a placeholder
+waiting on a contract change, not a dropped write — which is why
+`process-detail.ts` has no mapping for it either.
+
+**This makes the vendor-side question decisive.** If `LoanAmount` is on the
+wire today, the comment is stale and the work is: model it in
+`softpro/types.ts`, map it in `processOrderDetail`, done — the detector already
+watches it. If it is genuinely absent, there is nothing to sync and
+`orders.loan_amount` can only ever be populated by the hub's own create path.
+
+### The measured state either way
 
 | | |
 |---|---:|
-| `orders.loan_amount > 0` | **2** |
+| `orders.loan_amount > 0` | **2** of 8,062 |
 | of which `softpro_sync` (8,054 orders) | 1 |
 | of which `manual_entry` (8 orders) | 1 |
 
-One of the two is order 51, the March test order, carrying `2322323.00`.
+One of the two is order 51, the March test order, carrying `2322323.00`. Every
+one of the 15 orders created on 2026-08-28 — 7 of them refinances — carries
+`loan_amount = NULL`, because all 15 arrived through `softpro_sync`.
 
-### Nothing in the sync path writes it
-
-The only writer is the hub's own create path,
-`src/lib/domain/orders/create-order.ts:281`:
-
-```ts
-    loanAmount: input.transaction.loanAmount > 0 ? String(input.transaction.loanAmount) : null,
-```
-
-That fires for hub-created orders only, and there are 8 of those in total.
-Every one of the 15 orders created on 2026-08-28 — 7 of them refinances —
-carries `loan_amount = NULL`, because all 15 arrived through `softpro_sync`.
-
-`src/lib/integrations/softpro/types.ts` models no loan field at all; searching
-it for `Loan` returns nothing.
-
-### The detector
-
-`src/lib/domain/orders/lookback-diff.ts:138-139` notices when the incoming
-loan amount differs from the stored one:
-
-```ts
-  if (incomingLoan !== null && incomingLoan !== normalizeMoney(row.loanAmount)) {
-    fieldChanges.push('loanAmount');
-  }
-```
-
-and `lookback-diff.ts:186-188` does this with the result:
-
-```ts
-  for (const f of diff.fieldChanges) {
-    counts.fieldsChanged[f] = (counts.fieldsChanged[f] ?? 0) + 1;
-  }
-```
-
-**`fieldChanges` is counted for reporting and never applied.** No `update` in
-`lookback-sync.ts` sets `loanAmount`. The sweep detects the drift on every pass,
-tallies it into a report, and leaves the column as it was.
-
-That is its own entry in the watch-outs: a drift detector that sees the drift
-and does not correct it is worse than no detector, because the tally is
-evidence the system *noticed* — which reads, to anyone looking at the report,
-as though something acted on it.
+Corroborating that `salesPrice` really is applied: purchase orders carrying a
+non-zero sales price rise from 64% at 0-1 days old to 98% at 121+ days. The
+sweep is doing its job on the field it maps.
 
 ### What it costs on the CPL path
 
@@ -821,3 +829,21 @@ types.
 Until 2026-08-28 the preflight's price check applied to Purchase only, so a
 refinance with nothing typed sent `purchase_price: 0` and nothing stopped it.
 That check is now unconditional; see §7.
+
+---
+
+## 10. SoftPro read latency, measured incidentally
+
+Two read-only sampling runs against SoftPro were made on 2026-08-28 while
+investigating the above: `GetOrderContacts` on 6 orders, and `GetOrderDetails`
+on 1. **Both exceeded a ten-minute foreground timeout and had to be moved to
+the background.**
+
+An earlier 8-order `GetOrderContacts` run did complete, so the calls succeed —
+they are simply slow, and slow enough that a handful of sequential reads is a
+multi-minute operation.
+
+Recorded here because it settles a design question cheaply: a "refresh from
+SoftPro when the CPL modal opens" would have to complete before the operator
+finishes typing, and on this evidence it would not. The idea was dropped on
+that basis rather than on argument.

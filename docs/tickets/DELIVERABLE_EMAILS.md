@@ -1,7 +1,8 @@
 # `deliverableEmails`: what the operator asks for, and who actually gets the email
 
 **Status: the field is removed from both forms** (`fix/remove-deliverable-emails-field`).
-The feature is not built. This document holds the investigation and the approved
+**BUILT 2026-08-28 — confirmation only.** See "What shipped" at the end. The
+rest of this document is the investigation and the approved
 design for when it is.
 
 The field was removed rather than left in place because it accepted a delivery
@@ -227,3 +228,48 @@ next, not the individual field.
 - **`companies.deliverableEmails`.** Declared on the companies page type with no
   column behind it, so it was always `undefined`. Removed alongside the form
   field.
+
+---
+
+## What shipped — 2026-08-28
+
+Confirmation only, and the UI says exactly that: **"Copied on the order
+confirmation."**
+
+An earlier draft of that line read "and on documents sent for this order",
+which would have been a promise the code does not keep — the same defect this
+field was removed for on 25 Aug, where the form collected addresses and nothing
+read them. The wording was narrowed rather than the scope widened.
+
+| piece | where |
+|---|---|
+| table | `order_deliverable_emails`, migration `docs/migration-deliverable-emails.sql` + RLS in `0040` |
+| domain | `deliverable-emails.ts` (DB) and `deliverable-emails-validation.ts` (pure, browser-safe) |
+| confirmation | `confirmation-recipients.ts` — appended to CC candidates |
+| create form | `DeliverableEmailsField` on the hub quick-entry parties section |
+| after open | `DeliverableEmailsPanel` on the hub detail pane |
+| API | `GET/POST/DELETE /api/orders/[id]/deliverable-emails` |
+
+### Widening it later is a text change plus one resolver call
+
+Recorded so nobody rediscovers the design:
+
+1. In `resolvePrelimRecipients`, call
+   `deliverableEmailsForSend(orderId)` and merge the result into CC. The
+   loader already exists and takes an order id.
+2. Change the helper text in `deliverable-emails-field.tsx` and the footer line
+   in `deliverable-emails-panel.tsx` in the same commit, so the promise and the
+   behaviour move together.
+
+That is the whole change. The storage decision — a table rather than an array
+column — was made specifically so this would be wiring rather than a migration.
+
+The natural companion is `officer_cc_defaults.cc_email`, the other place
+standing CC instructions go nowhere. Both land in the prelim CC and should be
+wired in one change.
+
+### Not done deliberately
+
+The prelim path was **not** wired on day one. It is a live document-delivery
+route to real clients, and wiring it the same night without the team exercising
+it was more risk than the first test needed.

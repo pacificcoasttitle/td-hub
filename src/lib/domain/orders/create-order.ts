@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts, branches } from '@/lib/db/schema';
+import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts, branches, orderDeliverableEmails } from '@/lib/db/schema';
+import { validateDeliverableEmails } from '@/lib/domain/notifications/deliverable-emails';
 import { eq, and, inArray } from 'drizzle-orm';
 import { createOrder as softproCreateOrder } from '@/lib/integrations/softpro';
 import { propertyLookup } from '@/lib/integrations/sitex/client';
@@ -101,6 +102,12 @@ export const createOrderInputSchema = z.object({
     primaryOwner: z.string().nullable().optional(),
     secondaryOwner: z.string().nullable().optional(),
   }).optional(),
+  /**
+   * Addresses to copy on the order confirmation. Stored in
+   * order_deliverable_emails, one row each, never as an array on `orders` —
+   * the list is editable for the life of the order and wants provenance.
+   */
+  deliverableEmails: z.array(z.string()).max(5).optional(),
 });
 
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>;
@@ -305,6 +312,18 @@ async function createLocalRecords(
   }).returning({ id: orders.id });
 
   const orderId = newOrder!.id;
+
+  // Deliverable emails, one row each. Validated here as well as in the browser
+  // — a create can arrive from the client wizard or a stale bundle, and the
+  // form is not the boundary.
+  if (input.deliverableEmails?.length) {
+    const { valid } = validateDeliverableEmails(input.deliverableEmails);
+    if (valid.length > 0) {
+      await db.insert(orderDeliverableEmails).values(
+        valid.map((email) => ({ orderId, email, addedBy: userId ?? null })),
+      );
+    }
+  }
 
   await db.insert(orderProperties).values({
     orderId,

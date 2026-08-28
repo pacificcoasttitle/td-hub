@@ -880,11 +880,36 @@ that actually supports it: buyer presence is flat with order age (53.9% at 0–1
 days, 54.9% at 61+), and per the table above SoftPro has no buyer to give. A
 refresh would be fast and would find nothing.
 
-There is a separate, real finding buried in that mistake: **something in the
-typed SoftPro client hangs indefinitely on these read paths** where a plain
-`fetch` to the same URL returns immediately. Not chased here, and worth its own
-look — a client that hangs rather than timing out will eventually hang a
-request path that matters.
+**Recorded deliberately: this claim survived a round of agreement.** It was
+offered as evidence, endorsed on the reasoning that it was "cheaper evidence
+than an argument", and written into this document — and it was neither
+evidence nor cheap. Two people looked at "no output" and both read a mechanism
+into it that no one had tested.
+
+The check that would have caught it took one command and under fifteen seconds:
+call the two endpoints and print a timestamped line before and after each. It
+was not run because the conclusion already had agreement behind it, which is
+the specific way a wrong finding becomes durable. Endorsement is not
+corroboration; it is the same claim held by two people.
+
+### And a correction to the correction
+
+The paragraph that stood here said *"something in the typed SoftPro client
+hangs indefinitely on these read paths."* **Also false.** Tested directly, the
+typed client returns in about three seconds per call and never stalls.
+
+What actually happened: the client writes a `vendor_api_logs` row through the
+shared database pool on every request, that pool holds the Node event loop
+open, and a standalone script therefore finishes its work and then never exits.
+Killed later with a block-buffered stdout redirected to a file, it loses its
+entire output — exit 0, empty file. See
+`docs/tickets/SOFTPRO_CLIENT_KEEPS_THE_PROCESS_ALIVE.md`.
+
+**Three readings of the same two empty files, in order: "SoftPro is slow",
+"our client hangs", and finally the measured answer.** The first two were
+guesses at a mechanism from an absence of output. Neither was tested before
+being written down, and the first one was endorsed and filed before anyone
+checked it — see the note below.
 
 ## 11. `LoanAmount` is on the wire — the comment was stale
 

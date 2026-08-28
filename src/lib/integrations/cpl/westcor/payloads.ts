@@ -1,4 +1,5 @@
 import type { CplOrderDetail, CplGenerateInput, CplForm, TransactionType } from '../types';
+import { countyFipsFrom } from '../county-fips';
 
 const TIMEOUT_MS = 15_000;
 const CPL_TIMEOUT_MS = 30_000;
@@ -192,6 +193,14 @@ function buildProperty(
     PropertyID: ids?.PropertyID ?? 0,
     tvid: Number(ids?.tvid ?? 0) || 0,
     CountyName: suffixed,
+    // Conditional in the spec — "We do validate this and do send it back."
+    // Held on 5,983 of 8,063 order_properties rows; empty string where absent,
+    // matching the spec's example for the other blank property fields.
+    ParcelID: (prop?.apn ?? '').trim(),
+    // REQUIRED per the spec, and never sent until now. Empty string rather than
+    // null when unresolvable, matching how the spec's example leaves other
+    // blank property fields.
+    CountyFips: countyFipsFrom(prop?.fips, prop?.county, prop?.state) ?? '',
     ShortLegal: null as string | null,
     StreetAddress: prop?.address ?? '',
     City: prop?.city ?? '',
@@ -427,7 +436,21 @@ function buildCplEntry(
     PolicyProducingAgentState: branch.state,
     PolicyProducingAgentZip: branch.zip,
     ProtectLender: true,
-    ClosingAgentNumber: 'CA1038',
+    // NULL, NOT 'CA1038'. The spec marks ClosingAgentNumber "Required: No,
+    // unless issuing a Dual/National CPL", and its single-agent request example
+    // sends null. We set IsDualCPL: false on every letter, so this field does
+    // not apply to anything we issue.
+    //
+    // It previously carried the literal 'CA1038' — Westcor's number for the
+    // AGENCY, which is also the branch code for the Orange office. That is why
+    // the one real production CPL, a Glendale file, printed Orange as the
+    // closing agent. Inherited from legacy (Westcor.php:504), not introduced
+    // here.
+    //
+    // The question was never "is CA1038 the right value". It is "should this
+    // field be set at all on a single-agent CPL", and the spec says no.
+    // See docs/tickets/CPL_CLOSING_AGENT_NUMBER_IS_HARDCODED.md
+    ClosingAgentNumber: null as string | null,
     IsDualCPL: false,
   };
 }

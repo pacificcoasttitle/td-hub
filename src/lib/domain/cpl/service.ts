@@ -255,6 +255,10 @@ function buildOrderDetail(
         state: propertyOverrides.state ?? dbProp?.state ?? null,
         zip: propertyOverrides.zip ?? dbProp?.zip ?? null,
         county: propertyOverrides.county ?? dbProp?.county ?? null,
+        // Not overridable from the modal — there is no field for either, and
+        // both are identifiers rather than things an operator retypes.
+        apn: dbProp?.apn ?? null,
+        fips: dbProp?.fips ?? null,
       }
     : dbProp
       ? {
@@ -263,6 +267,8 @@ function buildOrderDetail(
           state: dbProp.state,
           zip: dbProp.zip,
           county: dbProp.county,
+          apn: dbProp.apn,
+          fips: dbProp.fips,
         }
       : null;
 

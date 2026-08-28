@@ -73,6 +73,10 @@ export interface CplOrderDetail {
     state: string | null;
     zip: string | null;
     county: string | null;
+    /** Westcor `ParcelID`. Conditional in the spec, and they validate it. */
+    apn: string | null;
+    /** Westcor `CountyFips`. Marked REQUIRED in the spec; we have never sent it. */
+    fips: string | null;
   } | null;
   buyers: string[];
   /** How the borrower was resolved, when it was not the operator's own entry. */

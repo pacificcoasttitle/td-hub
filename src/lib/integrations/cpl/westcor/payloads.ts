@@ -1,5 +1,6 @@
 import type { CplOrderDetail, CplGenerateInput, CplForm, TransactionType } from '../types';
 import { countyFipsFrom } from '../county-fips';
+import { classifyPartyName } from '@/lib/domain/cpl/borrower-resolution';
 
 const TIMEOUT_MS = 15_000;
 const CPL_TIMEOUT_MS = 30_000;
@@ -210,14 +211,48 @@ function buildProperty(
   }];
 }
 
+/**
+ * Split one name across Westcor's name fields.
+ *
+ * The spec is conditional, not free-text:
+ *
+ *   CompanyName  Required if first name and last name are not provided
+ *   Trust        If the name has been determined to be a trust, it goes here
+ *   First/Last   Required if company name is not provided
+ *
+ * Everything used to go into `First` with `Last: '-'`, so a family trust
+ * appeared on a closing protection letter as a person with the surname "-".
+ *
+ * THE PERSON PATH IS UNCHANGED. When the classifier abstains, the name takes
+ * exactly the shape it takes today — persons render correctly on issued
+ * letters and that is not being altered on the strength of a marker list.
+ */
+function nameFields(fullName: string): Record<string, unknown> {
+  const name = fullName.trim();
+  const kind = classifyPartyName(name);
+
+  if (kind === 'trust') {
+    return { Last: '', First: '', CompanyName: '', Trust: name };
+  }
+  if (kind === 'company') {
+    return { Last: '', First: '', CompanyName: name, Trust: '' };
+  }
+  // Person — byte-for-byte what we sent before.
+  return { Last: '-', First: name, CompanyName: '', Trust: '' };
+}
+
+/** Test seam: the name half of one buyer entry, which is what varies. */
+export function buildOrderBodyForTest(names: string[]): Record<string, unknown> {
+  return buildBuyers(names)[0] as unknown as Record<string, unknown>;
+}
+
 function buildBuyers(
   names: string[],
   ids?: Array<{ NameID?: number; tvid?: number | string }>,
 ) {
   return names.map((fullName, i) => ({
     NameID: ids?.[i]?.NameID ?? 0,
-    Last: '-',
-    First: fullName.trim(),
+    ...nameFields(fullName),
     NameType: 1,
     JoiningPhrase: 'single',
     tvid: Number(ids?.[i]?.tvid ?? 0) || 0,
@@ -241,8 +276,7 @@ function buildSellers(
 
   return filtered.map((fullName, i) => ({
     NameID: ids?.[i]?.NameID ?? 0,
-    Last: '-',
-    First: fullName.trim(),
+    ...nameFields(fullName),
     NameType: 2,
     JoiningPhrase: 'single',
     tvid: Number(ids?.[i]?.tvid ?? 0) || 0,

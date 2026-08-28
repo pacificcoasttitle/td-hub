@@ -76,6 +76,11 @@ const ENTITY_MARKERS = [
 ];
 
 /** Word-boundary test. `includes()` matches CO inside CONNOR. */
+export function hasEntityMarker(name: string): boolean {
+  return hasMarker(name);
+}
+
+/** Word-boundary test. `includes()` matches CO inside CONNOR. */
 function hasMarker(name: string): boolean {
   const tokens = name.toUpperCase().replace(/[^A-Z ]+/g, ' ').split(/\s+/).filter(Boolean);
   return tokens.some((t) => ENTITY_MARKERS.includes(t));
@@ -153,4 +158,55 @@ export function resolveBorrowers(i: BorrowerInputs): BorrowerResolution {
     source: 'none',
     note: 'No borrower on this order and no owner of record to fall back to.',
   };
+}
+
+// ─── Which name field does this belong in? ──────────────────────────────────
+//
+// Westcor's name object is not a free-text box. The spec:
+//
+//   CompanyName  CONDITIONAL: Required if first name and last name are not
+//                provided
+//   Trust        If the name has been determined to be a trust, then it goes
+//                into this field
+//   First/Last   CONDITIONAL: Required if company name is not provided
+//
+// We put every name into `First` with `Last: '-'`, entities included. So a
+// family trust goes onto a closing protection letter as a person whose surname
+// is a hyphen — the same shape as the surname "6607" defect.
+//
+// THE MARKER LIST STILL ONLY ADDS A ROUTE. When it abstains, the name takes
+// exactly the path it takes today, unchanged. It never reassigns a person's
+// tokens between First and Last, and it never removes a route that currently
+// works — persons render correctly on issued letters today and that behaviour
+// is untouched.
+
+export type NameKind = 'person' | 'trust' | 'company';
+
+/**
+ * WORD BOUNDARIES, and no TRUSTEE.
+ *
+ * The first version of this line was written through a shell heredoc and the
+ * \b escapes became literal backspace bytes, producing a regex that matched
+ * nothing. Third time that escaping trap has bitten in this session.
+ *
+ * Without real word boundaries it would match "TRUSTWORTHY REALTY", "TRUSTED
+ * HOME LOANS" and a person named "TRUSTINGHAM" — the exact defect class it
+ * exists to prevent.
+ *
+ * TRUSTEE is deliberately absent. Measured earlier: of 998 abstentions, 11
+ * matched TRUSTEE and nothing else, and all 11 were people —
+ * "DANNA MICHAEL A (TRUSTEE)". A trustee is a person acting for a trust.
+ */
+const TRUST_MARKER = /\bTRUST\b|\bLIVING TR\b|\bFAMILY TR\b/i;
+
+/**
+ * `trust` is tested before `company` because a trust name almost always also
+ * carries a generic entity marker, and the spec gives trusts their own field.
+ */
+export function classifyPartyName(raw: string): NameKind {
+  const name = (raw ?? '').trim();
+  if (!name) return 'person';
+  if (TRUST_MARKER.test(name)) return 'trust';
+  if (hasMarker(name)) return 'company';
+  return 'person';
 }

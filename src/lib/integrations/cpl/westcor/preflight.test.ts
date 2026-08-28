@@ -94,3 +94,50 @@ describe('what still blocks, and why each earns it', () => {
     expect(r.warnings).toEqual([]);
   });
 });
+
+// ─── Names land in the right Westcor fields ─────────────────────────────────
+
+import { buildOrderBodyForTest } from './payloads';
+
+describe('entity names do not go out as people with the surname "-"', () => {
+  const namesOf = (n: string) => buildOrderBodyForTest([n]);
+
+  it('a trust uses the Trust field', () => {
+    const b = namesOf('WERNER AND DONNA STEFFEN FAMILY TRUST');
+    expect(b.Trust).toBe('WERNER AND DONNA STEFFEN FAMILY TRUST');
+    expect(b.First).toBe('');
+    expect(b.Last).toBe('');
+    expect(b.CompanyName).toBe('');
+  });
+
+  it('a company uses CompanyName', () => {
+    const b = namesOf('V M G INVESTMENT LLC');
+    expect(b.CompanyName).toBe('V M G INVESTMENT LLC');
+    expect(b.First).toBe('');
+    expect(b.Last).toBe('');
+  });
+
+  it('a person is BYTE-FOR-BYTE what we sent before', () => {
+    // The classifier only adds a route. Persons render correctly on issued
+    // letters today and that behaviour must not move on a marker list.
+    const b = namesOf('Monica C Sarmiento');
+    expect(b.Last).toBe('-');
+    expect(b.First).toBe('Monica C Sarmiento');
+    expect(b.CompanyName).toBe('');
+    expect(b.Trust).toBe('');
+  });
+
+  it('a trustee is a person, so the old shape is kept', () => {
+    const b = namesOf('DANNA MICHAEL A (TRUSTEE)');
+    expect(b.Last).toBe('-');
+    expect(b.First).toBe('DANNA MICHAEL A (TRUSTEE)');
+  });
+
+  it('never sends a name with no field populated at all', () => {
+    for (const n of ['Kevin Dell', 'LUCHSHEYE CORP', 'SMITH FAMILY TRUST', 'TRUSTWORTHY REALTY']) {
+      const b = namesOf(n);
+      const filled = [b.First, b.Last, b.CompanyName, b.Trust].filter((v) => v !== '' && v !== null);
+      expect(filled.length, n).toBeGreaterThan(0);
+    }
+  });
+});

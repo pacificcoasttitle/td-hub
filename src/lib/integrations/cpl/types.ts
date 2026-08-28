@@ -39,6 +39,12 @@ export interface CplGenerateResult {
   pdfBase64: string;
   cplId: string;
   vendorRefs: Record<string, string>;
+  /**
+   * Non-blocking findings from the vendor adapter's preflight. The CPL was
+   * issued; these say what was thin about it. Surfaced to the operator on the
+   * success response — a letter generated with complaints must not look clean.
+   */
+  warnings?: string[];
 }
 
 // ─── CPL Branch (vendor-returned) ─────────────────────────────────────────────
@@ -69,6 +75,8 @@ export interface CplOrderDetail {
     county: string | null;
   } | null;
   buyers: string[];
+  /** How the borrower was resolved, when it was not the operator's own entry. */
+  borrowerNote?: string | null;
   sellers: string[];
   lender: {
     name: string | null;

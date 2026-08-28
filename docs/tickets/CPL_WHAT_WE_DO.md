@@ -662,6 +662,46 @@ With a fallback chain when it is empty, `Common.php:2167-2180`:
 Legacy never reads a party table for the borrower. It reads one order column,
 and falls back to the property's owner names plus the vesting string.
 
+### 8b-2. Legacy has the same defect, unguarded, in two places
+
+Checked because we were about to copy the chain. We did not.
+
+The fallback at `Common.php:2167-2180` has **no transaction-type guard**. It
+falls back to `primary_owner_name` whatever kind of transaction the order is.
+The identical block appears a second time at `Common.php:2903-2918`.
+
+And nothing requires the operator to fill the field first: searching
+`Common.php` for a required-rule on `borrowers_vesting` returns none, and
+searching `Fnf.php` for `required|validate|throw new` returns nothing at all.
+So the fallback is reachable in ordinary use, not a dead branch.
+
+**On a purchase the owner of record is the seller.** Measured on our book,
+comparing `order_properties.primary_owner` against the order's parties by token
+set, over every order carrying both:
+
+| | comparable | matches SELLER | matches BUYER |
+|---|---:|---:|---:|
+| Refinance | 2,057 | 0% | 74% |
+| Purchase | 2,298 | **39%** | 21% |
+
+On a refinance the owner is the borrower and legacy's fallback is right. On a
+purchase it is the seller — nearly two to one against being the buyer.
+
+So legacy has been capable of printing **the seller's name as the borrower on a
+closing protection letter** for as long as that code has run. A CPL is the
+underwriter's indemnity to the lender for a named party; the borrower is not a
+label.
+
+This is recorded because it is the one place where copying legacy exactly would
+have carried a defect across. The chain shipped here is type-dependent: the
+owner fallback applies to everything EXCEPT a purchase, and on a purchase an
+absent borrower is reported rather than substituted. See
+`src/lib/domain/cpl/borrower-resolution.ts`.
+
+Order 8051 — the first real CPL attempt — is the case in miniature: seller
+"Kevin Dell", `primary_owner` "DELL KEVIN", no buyer party. Legacy's chain
+would have named the seller.
+
 ### 8c. The same column exists in our schema and is empty
 
 `order_properties.borrowers_vesting` exists. Measured 2026-08-28:

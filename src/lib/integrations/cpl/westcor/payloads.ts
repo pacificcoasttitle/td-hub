@@ -35,44 +35,82 @@ export interface PrepareAddCplResult {
 
 // ─── Preflight validation ───────────────────────────────────────────────────
 
+export interface PreflightResult {
+  /** Blocking. The request cannot be built or will certainly be rejected. */
+  errors: string[];
+  /** Non-blocking. Surfaced to the operator, who decides whether to proceed. */
+  warnings: string[];
+}
+
 export interface PreflightContext {
   orderDetail: CplOrderDetail;
   input: CplGenerateInput;
   westcorLenderId: number;
 }
 
-export function preflightValidate(ctx: PreflightContext): string[] {
+/**
+ * LEGACY RUNS NONE OF THIS. Grepping the legacy FNF source for
+ * required/validate/throw returns nothing — it assembles the payload and lets
+ * the underwriter reject it. Every check here is ours, so each one has to earn
+ * a hard stop rather than inherit one.
+ *
+ * Two categories:
+ *
+ *   errors   — the request cannot be built, or the vendor will reject it in a
+ *              way we can predict exactly. Blocking.
+ *   warnings — the letter would be thinner than ideal but the request is
+ *              well-formed. Shown to the operator, who decides. Never silent.
+ *
+ * The buyer check moved to `warnings`: it demanded an order_parties row legacy
+ * never read, and it passes on 51.8% of orders.
+ */
+export function preflightValidate(ctx: PreflightContext): PreflightResult {
   const errors: string[] = [];
+  const warnings: string[] = [];
   const { orderDetail, westcorLenderId } = ctx;
   const txType = orderDetail.transactionType;
 
+  // BLOCKING. Westcor's Order/Update rejects a property with no street:
+  // "Property #1: Street address is a required field! Property has not been
+  // Added." — logged against order 49 on 2026-03-26.
   if (!orderDetail.property?.address) {
     errors.push('Property address is required.');
   }
-  if (orderDetail.buyers.length === 0) {
-    errors.push('At least one buyer/borrower is required.');
-  }
+
+  // BLOCKING. buildLenders returns [] with no lender, and the CPL entry needs
+  // a LenderID from the Step A response. Without one there is nothing to
+  // protect and the request cannot be assembled.
   if (!orderDetail.lender?.name) {
     errors.push('Lender company name is required to generate a CPL.');
   }
 
+  // WARNING, not blocking. See the module note: legacy sent the letter with
+  // whatever borrower it had, including none.
+  if (orderDetail.buyers.length === 0) {
+    warnings.push('No borrower is named on this CPL.');
+  }
+
   if (txType === 'Purchase') {
+    // WARNING. A purchase with no seller on file is unusual, but the letter
+    // protects the lender and does not depend on the seller being named.
     if (orderDetail.sellers.length === 0) {
-      errors.push('Purchase transactions require at least one seller.');
+      warnings.push('No seller is named on this purchase.');
     }
+
+    // BLOCKING. Westcor rejects a zero purchase price on a purchase.
     const price = resolvePurchasePrice(orderDetail, ctx.input);
     if (price <= 0) {
       errors.push('Purchase transactions require a sales amount greater than zero.');
     }
   }
 
-  if (txType === 'Refinance') {
-    if (westcorLenderId === 0) {
-      errors.push('Refinance transactions require a valid Westcor lender ID. Lender may not have been registered in Westcor.');
-    }
+  // BLOCKING. LenderID 0 means the lender was never registered with Westcor;
+  // the CPL entry would carry a dangling reference.
+  if (txType === 'Refinance' && westcorLenderId === 0) {
+    errors.push('Refinance transactions require a valid Westcor lender ID. Lender may not have been registered in Westcor.');
   }
 
-  return errors;
+  return { errors, warnings };
 }
 
 // ─── Amount resolution (transaction-aware) ──────────────────────────────────

@@ -103,9 +103,16 @@ try {
 }
 ```
 
-If a script also opens its own `postgres()` handle for queries, close **both** —
-closing one does not close the other, which is why an earlier script that ended
-with `await sql.end()` still failed to exit.
+If a script also opens its own `postgres()` handle for queries, close **both**.
+Closing one does not close the other.
+
+**Not yet explained:** one earlier script did close its own handle with
+`await sql.end()` and *did* exit cleanly, printing its full output, despite also
+making SoftPro calls that should have left the shared pool open. That
+contradicts the mechanism above and has not been investigated. It may be
+timing, a failed log insert leaving no live handle, or something else. Recorded
+as an open loose end rather than smoothed over — the whole point of this ticket
+is that three mechanisms were asserted before one was measured.
 
 **And flush stdout before any hard exit.** `process.exit()` discards a buffered
 non-TTY stdout. If a script must exit hard:

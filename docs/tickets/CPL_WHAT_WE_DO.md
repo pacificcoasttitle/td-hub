@@ -832,23 +832,59 @@ That check is now unconditional; see §7.
 
 ---
 
-## 10. SoftPro read latency, measured incidentally
+## 10. SoftPro does not have the buyer on a purchase, at any age
 
-Two read-only sampling runs against SoftPro were made on 2026-08-28 while
-investigating the above: `GetOrderContacts` on 6 orders, and `GetOrderDetails`
-on 1. **Both exceeded a ten-minute foreground timeout and had to be moved to
-the background.**
+The question was whether the 41% borrower resolution on purchases is a sync gap
+(SoftPro holds a buyer we fail to store) or a SoftPro gap (nobody has it).
 
-An earlier 8-order `GetOrderContacts` run did complete, so the calls succeed —
-they are simply slow, and slow enough that a handful of sequential reads is a
-multi-minute operation.
+`GetOrderContacts`, live, on purchases carrying no buyer party:
 
-Recorded here because it settles a design question cheaply: a "refresh from
-SoftPro when the CPL modal opens" would have to complete before the operator
-finishes typing, and on this evidence it would not. The idea was dropped on
-that basis rather than on argument.
+| sample | orders | SoftPro HAS a buyer | SoftPro has none | failed |
+|---|---:|---:|---:|---:|
+| fresh, 0–1 days old | 8 | 0 | 8 | 0 |
+| aged, 45–200 days old | 10 | 0 | **10** | 0 |
+| **combined** | **18** | **0** | **18** | **0** |
 
----
+The aged sample is the one that settles it. A brand-new purchase having no
+buyer proves nothing — that is simply too early. A 186-day-old purchase with no
+buyer in SoftPro means **the buyer is not recorded there and never becomes
+recorded there.**
+
+`buyer` came back absent on 10 of the 18 and present-but-blank on 8. Either way
+there is no name.
+
+**So this is a SoftPro gap, not a sync gap.** No amount of syncing, enriching or
+refreshing will produce a buyer on a purchase, because the data does not exist
+upstream to fetch. The 41% is a form design problem: the operator is the only
+source, and the interface has to be built around that rather than around
+retrieving something that is not there.
+
+This is also why the owner-of-record fallback stays refused on purchases (§8b-2)
+— with no buyer anywhere, substituting the seller would be the only thing that
+ever filled the field.
+
+### A correction on read latency
+
+An earlier version of this section reported that SoftPro reads are slow enough
+to rule out refreshing on modal open, citing two sampling runs that outlived a
+ten-minute timeout.
+
+**That was wrong, and the diagnosis was wrong.** Those two runs were hung in our
+own client path — they never emitted their first line, before any vendor call.
+Re-run as direct `fetch` calls, the same endpoints answer in seconds: ten
+`GetOrderContacts` reads and twelve `GetOrderDetails` reads each completed well
+inside a single foreground timeout, with zero failures.
+
+The decision to drop refresh-on-modal-open still stands, but on the measurement
+that actually supports it: buyer presence is flat with order age (53.9% at 0–1
+days, 54.9% at 61+), and per the table above SoftPro has no buyer to give. A
+refresh would be fast and would find nothing.
+
+There is a separate, real finding buried in that mistake: **something in the
+typed SoftPro client hangs indefinitely on these read paths** where a plain
+`fetch` to the same URL returns immediately. Not chased here, and worth its own
+look — a client that hangs rather than timing out will eventually hang a
+request path that matters.
 
 ## 11. `LoanAmount` is on the wire — the comment was stale
 

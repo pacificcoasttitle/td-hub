@@ -83,17 +83,50 @@ The client returns correctly in every case. What is broken is process
 lifecycle, not the request path. Nothing in production is currently hanging
 because of this — every production caller is a request handler.
 
-## What a fix would involve
+## The fix for scripts — do this one now
 
-Not attempted. Sketched only:
+**Any standalone script that makes a SoftPro call must close the pool or exit
+explicitly.** It is one line, and its absence has now cost three
+investigations, one destroyed measurement sample, and two wrong mechanisms.
 
-- Give standalone entry points an explicit teardown that closes the shared pool
-  (`db.$client.end()` or equivalent) in a `finally`.
-- Or have scripts call `process.exit()` once their work is done, accepting that
-  it discards buffered output unless flushed first.
-- Either way, **anything writing stdout to a file should flush before exiting**,
-  otherwise a killed process silently loses its entire output — which is the
-  part that actually cost time here.
+```ts
+// At the end of any standalone script that touches the SoftPro client.
+// The client logs every request through the shared pool; the pool holds the
+// event loop open; without this the process finishes its work and then sits
+// there until something kills it — losing block-buffered stdout with it.
+import { db } from '@/lib/db/client';
+
+try {
+  // … work …
+} finally {
+  await db.$client.end();
+}
+```
+
+If a script also opens its own `postgres()` handle for queries, close **both** —
+closing one does not close the other, which is why an earlier script that ended
+with `await sql.end()` still failed to exit.
+
+**And flush stdout before any hard exit.** `process.exit()` discards a buffered
+non-TTY stdout. If a script must exit hard:
+
+```ts
+process.stdout.write('', () => process.exit(0));
+```
+
+That flush is the part that actually cost the time here: the runs did their
+work correctly and then lost every line of it.
+
+## What a fix for the library would involve
+
+Not attempted, and lower priority than the script rule above, because nothing
+in production is affected.
+
+- An explicit `closeSoftProClient()` / pool teardown export, so callers do not
+  have to know that a logging side effect owns a socket.
+- Or make `logRequest` fire-and-forget onto a queue that does not hold a handle.
+- Neither is urgent: request handlers want the pool to persist, and they are
+  every production caller.
 
 ## Why it is worth a ticket rather than a note
 

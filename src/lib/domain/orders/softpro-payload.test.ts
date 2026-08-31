@@ -343,6 +343,32 @@ describe('escrow officer fields', () => {
   });
 });
 
+describe('propertyDetails shape', () => {
+  it('sends a JSON object, not an array — SoftPro drops the array silently', () => {
+    const payload = buildSoftProPayload(
+      baseInput,
+      { apn: '123-456-789', legal: 'Lot 1', county: 'Orange' },
+      { titleOfficer: officer({}) },
+    );
+    const pd = payload.propertyDetails as Record<string, unknown>;
+
+    expect(Array.isArray(payload.propertyDetails)).toBe(false);
+    expect(pd).toEqual({
+      Address1: '123 Main St',
+      Address2: '',
+      APNNumberParcelID: '123-456-789',
+      Country: 'Orange',
+      Description: 'Lot 1',
+      IsPrimaryResidence: true,
+      City: 'Glendale',
+      Zip: '91203',
+      State: 'CA',
+      EscrowBriefLegalLookupCode: null,
+      EscrowBriefLegal: 'Lot 1',
+    });
+  });
+});
+
 describe('assertKnownTitleOffice', () => {
   const KNOWN = ['GLT', 'OCT', 'TSG'];
   const withOffice = (code: unknown) => ({ transactionDetails: { LookUpCodeTitleOffice: code } });

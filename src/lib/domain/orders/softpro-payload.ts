@@ -293,7 +293,12 @@ export function buildSoftProPayload(
       EmailNotifications: true,
       SalesRep: salesRepLookup,
     },
-    propertyDetails: [{
+    // Object, not array. Staging 2026-08-31: identical payload, minutes apart —
+    // array → 200 and empty Address; object → 200 and the address stored.
+    // Legacy and the vendor's Staging/Production Postman examples send an object.
+    // An array is accepted, the rest of the order is saved, and the property is
+    // silently dropped.
+    propertyDetails: {
       Address1: input.property.address,
       Address2: input.property.unitNumber ?? '',
       APNNumberParcelID: enriched.apn,
@@ -305,7 +310,7 @@ export function buildSoftProPayload(
       State: input.property.state,
       EscrowBriefLegalLookupCode: null,
       EscrowBriefLegal: enriched.legal,
-    }],
+    },
     sellerDetails: buildSellerDetails(input),
     transactionDetails: {
       // Both halves come from one title-officer row; TitleOffice is the examiner

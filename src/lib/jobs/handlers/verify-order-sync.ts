@@ -11,6 +11,7 @@ import {
   isSuspectedTruncation,
 } from '@/lib/integrations/softpro/vendor-limits';
 import type { DriftCounts } from '@/lib/domain/ops/status-drift';
+import { protectConfirmedPartyFields } from '@/lib/domain/parties/party-confirmation';
 
 type ExistingParty = typeof orderParties.$inferSelect;
 
@@ -551,10 +552,12 @@ async function reconcileParties(orderId: number, mapped: MappedOrderContacts): P
       const nameChanged = u.name && match.externalName !== u.name;
       const companyChanged = u.company && match.externalCompany !== u.company;
       if (nameChanged || companyChanged) {
-        await db.update(orderParties).set({
+        const next = protectConfirmedPartyFields(match, {
           ...(nameChanged ? { externalName: u.name } : {}),
           ...(companyChanged ? { externalCompany: u.company } : {}),
-        }).where(eq(orderParties.id, match.id));
+        });
+        if (Object.keys(next).length === 0) continue;
+        await db.update(orderParties).set(next).where(eq(orderParties.id, match.id));
         changeCount++;
       }
     } else {

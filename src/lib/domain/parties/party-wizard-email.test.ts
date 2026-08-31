@@ -283,4 +283,43 @@ describe('party wizard invite email', () => {
       expect(text).toContain(URL_B);
     });
   });
+
+  describe('confirm-axis copy — built, not sent', () => {
+    const confirmInternal = { ...base, axis: 'confirm' as const };
+    const confirmExternal = { ...external, axis: 'confirm' as const };
+
+    it('uses the confirm subjects and leaves collect subjects alone when axis is omitted', () => {
+      expect(buildPartyWizardSubject(confirmInternal))
+        .toBe('Please confirm listing agent details — file 20020625-OCT');
+      expect(buildPartyWizardSubject(confirmExternal))
+        .toBe('Pacific Coast Title — please confirm listing agent details on file 20020625-OCT');
+      expect(buildPartyWizardSubject(base)).toBe('Missing listing agent details — file 20020625-OCT');
+    });
+
+    it('drops “we cannot contact them” and asks them to confirm or correct', () => {
+      const ask = 'We have listing agent details on file for this order. Please forward the '
+        + 'secure link below so they can confirm or correct them.';
+      expect(buildPartyWizardEmail(confirmInternal)).toContain(ask);
+      expect(buildPartyWizardText(confirmInternal)).toContain(ask);
+      expect(buildPartyWizardEmail(confirmInternal)).not.toContain('we cannot contact them');
+      expect(buildPartyWizardEmail(confirmInternal)).not.toContain('One detail is still missing.');
+    });
+
+    it('keeps PCT intro and disregard on the external confirm, with wrong-names consequence', () => {
+      const ask = 'Pacific Coast Title is handling the title work on this file, which you are '
+        + 'holding escrow on. We have listing agent details on file. If this is your file, please '
+        + 'forward the secure link below so they can confirm or correct what we have.';
+      expect(buildPartyWizardEmail(confirmExternal)).toContain(ask);
+      expect(buildPartyWizardText(confirmExternal)).toContain(ask);
+      expect(buildPartyWizardEmail(confirmExternal)).toContain('please disregard this message');
+      expect(buildPartyWizardEmail(confirmExternal)).toContain('the names we have stay on the file');
+      expect(buildPartyWizardEmail(confirmExternal)).not.toContain('we have no way to contact them');
+    });
+
+    it('labels the CTA as confirm, not enter', () => {
+      expect(buildPartyWizardEmail(confirmInternal)).toContain('Listing agent — confirm details');
+      expect(buildPartyWizardEmail(confirmInternal)).not.toContain('Listing agent — enter details');
+      expect(buildPartyWizardEmail(base)).toContain('Listing agent — enter details');
+    });
+  });
 });

@@ -1,4 +1,5 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
+import { submissionSnapshot } from './party-confirmation';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/lib/db/client';
 import {
@@ -148,7 +149,7 @@ export async function resolvePartyWizardLink(token: string): Promise<ResolveResu
       tokenId,
       form,
       order,
-      previousValues: await loadPreviousValues(row.orderId, role),
+      previousValues: await loadPrefillValues(row.orderId, role),
       alreadySubmitted: row.usedAt !== null,
     },
   };
@@ -218,8 +219,44 @@ function composeAddress(row: {
   return parts.length ? parts.join(', ') : null;
 }
 
+function nonEmptyFormValues(values: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(values)) {
+    if (v.trim()) out[k] = v.trim();
+  }
+  return out;
+}
+
+function partyRowToFormValues(
+  role: string,
+  row: {
+    externalName: string | null;
+    externalEmail: string | null;
+    externalPhone: string | null;
+    externalCompany: string | null;
+  },
+): Record<string, string> {
+  const clean = (v: string | null | undefined) => v?.trim() ?? '';
+  if (role === 'listing_agent') {
+    return nonEmptyFormValues({
+      agentName: clean(row.externalName),
+      agentEmail: clean(row.externalEmail),
+      agentPhone: clean(row.externalPhone),
+      agentCompany: clean(row.externalCompany),
+    });
+  }
+  if (role === 'seller') {
+    return nonEmptyFormValues({
+      sellerName: clean(row.externalName),
+      sellerEmail: clean(row.externalEmail),
+      sellerPhone: clean(row.externalPhone),
+    });
+  }
+  return {};
+}
+
 /** Latest submission for this order+role, so a reopened link is pre-filled. */
-async function loadPreviousValues(
+async function loadPreviousSubmissionValues(
   orderId: number,
   role: PartyRole,
 ): Promise<Record<string, string> | null> {
@@ -234,8 +271,41 @@ async function loadPreviousValues(
 
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(prev.values as Record<string, unknown>)) {
-    if (typeof v === 'string') out[k] = v;
+    if (typeof v === 'string' && v.trim()) out[k] = v;
   }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * What the form shows: order_parties first (confirm-axis prefill), then the
+ * last submission on top (resume). Empty result is a collect-axis blank form.
+ */
+export async function loadPrefillValues(
+  orderId: number,
+  role: PartyRole,
+): Promise<Record<string, string> | null> {
+  const rows = await db
+    .select({
+      role: orderParties.role,
+      externalName: orderParties.externalName,
+      externalEmail: orderParties.externalEmail,
+      externalPhone: orderParties.externalPhone,
+      externalCompany: orderParties.externalCompany,
+    })
+    .from(orderParties)
+    .where(and(
+      eq(orderParties.orderId, orderId),
+      eq(orderParties.isPrimary, true),
+    ));
+
+  const out: Record<string, string> = {};
+  for (const row of rows) {
+    Object.assign(out, partyRowToFormValues(row.role, row));
+  }
+
+  const prev = await loadPreviousSubmissionValues(orderId, role);
+  if (prev) Object.assign(out, prev);
+
   return Object.keys(out).length ? out : null;
 }
 
@@ -295,6 +365,8 @@ export async function submitPartyWizard(
   const partyCols = toPartyColumns(link.role, values);
   const sellerCols = toSellerColumns(values);
   const submittedAt = new Date();
+  const prefilled = (await loadPrefillValues(link.orderId, link.role)) ?? {};
+  const snap = submissionSnapshot(prefilled, values as Record<string, unknown>);
 
   const [submission] = await db
     .insert(partySubmissions)
@@ -306,9 +378,15 @@ export async function submitPartyWizard(
       submitterEmail: values.agentEmail ?? null,
       ...partyCols,
       submittedValues: values as Record<string, unknown>,
+      prefilledValues: snap.prefilledValues,
+      changedKeys: snap.changedKeys,
       submittedAt,
     })
     .returning({ id: partySubmissions.id });
+
+  if (!submission) {
+    return { ok: false, reason: 'validation' };
+  }
 
   // A named seller replays through the same path, so it gets its own row.
   if (sellerCols) {
@@ -335,8 +413,9 @@ export async function submitPartyWizard(
     })
     .where(eq(partyWizardLinks.id, link.linkId));
 
-  await projectToOrderParties(link.orderId, link.role, partyCols);
-  if (sellerCols) await projectToOrderParties(link.orderId, 'seller', sellerCols);
+  const confirmation = { submissionId: submission.id, confirmedAt: submittedAt };
+  await projectToOrderParties(link.orderId, link.role, partyCols, confirmation);
+  if (sellerCols) await projectToOrderParties(link.orderId, 'seller', sellerCols, confirmation);
 
   const noteStatus = await postPartyNote(submission.id, link, values, partyCols, submittedAt);
 
@@ -383,13 +462,21 @@ export async function projectToOrderParties(
   orderId: number,
   role: PartyRole,
   cols: PartyColumns,
+  confirmation?: { submissionId: number; confirmedAt: Date },
 ): Promise<void> {
   const values: Record<string, string> = {};
   if (cols.submittedName) values.externalName = cols.submittedName;
   if (cols.submittedCompany) values.externalCompany = cols.submittedCompany;
   if (cols.submittedEmail) values.externalEmail = cols.submittedEmail;
   if (cols.submittedPhone) values.externalPhone = cols.submittedPhone;
-  if (Object.keys(values).length === 0) return;
+  if (Object.keys(values).length === 0 && !confirmation) return;
+
+  const latch = confirmation
+    ? {
+      partyConfirmedAt: confirmation.confirmedAt,
+      partyConfirmedSubmissionId: confirmation.submissionId,
+    }
+    : {};
 
   const [existing] = await db
     .select({ id: orderParties.id })
@@ -404,7 +491,7 @@ export async function projectToOrderParties(
   if (existing) {
     await db
       .update(orderParties)
-      .set({ ...values, source: 'party_wizard' })
+      .set({ ...values, source: 'party_wizard', ...latch })
       .where(eq(orderParties.id, existing.id));
   } else {
     await db.insert(orderParties).values({
@@ -413,6 +500,7 @@ export async function projectToOrderParties(
       isPrimary: true,
       source: 'party_wizard',
       ...values,
+      ...latch,
     });
   }
 }

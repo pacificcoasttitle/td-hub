@@ -77,6 +77,13 @@ export const partySubmissions = pgTable('party_submissions', {
   /** Complete validated payload; superset of the columns above. */
   submittedValues: jsonb('submitted_values').notNull(),
 
+  /**
+   * What the form showed on this submit, and which keys the human changed.
+   * Written even when every value matches — a confirm-as-shown is a submission.
+   */
+  prefilledValues: jsonb('prefilled_values'),
+  changedKeys: jsonb('changed_keys'),
+
   submittedAt: timestamp('submitted_at').notNull().defaultNow(),
 
   // v1 write path — the structured note. AddNotes works on both deployed builds.

@@ -35,6 +35,12 @@ export interface RoleLinkBlock {
  */
 export type PartyWizardAudience = 'internal' | 'external';
 
+/**
+ * Collect = party absent, current job. Confirm = we hold values and want them
+ * checked. The job stays collect-only; confirm is built for review, not sent.
+ */
+export type PartyWizardEmailAxis = 'collect' | 'confirm';
+
 export interface PartyWizardEmailInput {
   fileNumber: string;
   propertyAddress: string | null;
@@ -44,8 +50,17 @@ export interface PartyWizardEmailInput {
   /** The outside firm, when we have it. Shown to external readers only. */
   recipientCompany?: string | null;
   audience: PartyWizardAudience;
+  /**
+   * Default collect so every existing caller — including the invite job —
+   * keeps the shipped missing-axis copy. Do not wire confirm into the job.
+   */
+  axis?: PartyWizardEmailAxis;
   openedAt: Date;
   roleLinks: RoleLinkBlock[];
+}
+
+function emailAxis(input: PartyWizardEmailInput): PartyWizardEmailAxis {
+  return input.axis === 'confirm' ? 'confirm' : 'collect';
 }
 
 function missingRoles(input: PartyWizardEmailInput): string {
@@ -58,6 +73,12 @@ function missingRoles(input: PartyWizardEmailInput): string {
  * company writing about a file they hold.
  */
 export function buildPartyWizardSubject(input: PartyWizardEmailInput): string {
+  if (emailAxis(input) === 'confirm') {
+    if (input.audience === 'external') {
+      return `Pacific Coast Title — please confirm ${missingRoles(input)} details on file ${input.fileNumber}`;
+    }
+    return `Please confirm ${missingRoles(input)} details — file ${input.fileNumber}`;
+  }
   if (input.audience === 'external') {
     return `Pacific Coast Title — ${missingRoles(input)} details needed on file ${input.fileNumber}`;
   }
@@ -73,6 +94,15 @@ export function buildPartyWizardSubject(input: PartyWizardEmailInput): string {
 
 function askSentence(input: PartyWizardEmailInput): string {
   const plural = input.roleLinks.length > 1;
+  if (emailAxis(input) === 'confirm') {
+    if (input.audience === 'external') {
+      return `Pacific Coast Title is handling the title work on this file, which you are holding `
+        + `escrow on. We have ${missingRoles(input)} details on file. If this is your file, please `
+        + `forward the secure link${plural ? 's' : ''} below so they can confirm or correct what we have.`;
+    }
+    return `We have ${missingRoles(input)} details on file for this order. Please forward the `
+      + `secure link${plural ? 's' : ''} below so they can confirm or correct them.`;
+  }
   if (input.audience === 'external') {
     return `Pacific Coast Title is handling the title work on this file, which you are holding `
       + `escrow on. We do not have the ${missingRoles(input)} details, so we cannot contact them `
@@ -121,6 +151,14 @@ function misdirectedSentence(input: PartyWizardEmailInput): string | null {
  * they are doing us a favour, and copy that implies otherwise earns a delete.
  */
 function consequenceSentence(input: PartyWizardEmailInput): string {
+  if (emailAxis(input) === 'confirm') {
+    const namesStay = `This is the only reminder we send for this file. Until they confirm, `
+      + `the names we have stay on the file`;
+    if (input.audience === 'external') {
+      return `${namesStay}.`;
+    }
+    return `${namesStay}, so anything they need keeps coming back to you.`;
+  }
   const opening = `This is the only reminder we send for this file. Until the ${missingRoles(input)} `
     + `details are on the order we have no way to contact them ourselves, so `;
   if (input.audience === 'external') {
@@ -129,12 +167,17 @@ function consequenceSentence(input: PartyWizardEmailInput): string {
   return `${opening}anything they need keeps coming back to you.`;
 }
 
-function roleBlock(block: RoleLinkBlock): string {
+function roleBlock(block: RoleLinkBlock, axis: PartyWizardEmailAxis): string {
   const label = roleLabel(block.role);
+  const confirm = axis === 'confirm';
+  const action = confirm ? 'confirm details' : 'enter details';
+  const how = confirm
+    ? 'They can confirm or correct their details using this file-specific link. It expires in 60 days.'
+    : 'They can enter their own details using this file-specific link. It expires in 60 days.';
   return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:24px 0 0;background:${ORANGE_TINT};border-radius:14px;"><tr><td style="padding:20px;">
 <p style="margin:0 0 7px;color:${PCT_ORANGE};font-size:11px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;">Forward this to the ${esc(label.toLowerCase())}</p>
-<p style="margin:0 0 16px;color:${TEXT_PRIMARY};font-size:14px;line-height:1.55;">They can enter their own details using this file-specific link. It expires in 60 days.</p>
-${ctaButton(`${label} — enter details`, block.url)}
+<p style="margin:0 0 16px;color:${TEXT_PRIMARY};font-size:14px;line-height:1.55;">${esc(how)}</p>
+${ctaButton(`${label} — ${action}`, block.url)}
 <p style="margin:13px 0 0;color:${TEXT_BODY};font-size:10px;line-height:1.5;word-break:break-all;">${esc(block.url)}</p>
 </td></tr></table>`;
 }
@@ -180,7 +223,7 @@ export function buildPartyWizardEmail(input: PartyWizardEmailInput): string {
   const body = `<p style="margin:0 0 18px;color:${TEXT_PRIMARY};">${greeting}</p>
 <p style="margin:0 0 22px;">${esc(askSentence(input))}</p>
 ${fieldTable(detailRows)}
-${input.roleLinks.map(roleBlock).join('')}
+${input.roleLinks.map((block) => roleBlock(block, emailAxis(input))).join('')}
 <p style="margin:22px 0 0;color:${TEXT_PRIMARY};font-size:14px;line-height:1.6;font-weight:bold;">${esc(consequenceSentence(input))}</p>
 <p style="margin:14px 0 0;font-size:13px;line-height:1.6;">Submitted details are recorded against the file and posted to the order notes. ${esc(senderWord)} will not contact the ${partyWord}—the forward remains yours to make.</p>${
   misdirected ? `\n<p style="margin:14px 0 0;color:${TEXT_BODY};font-size:12px;line-height:1.6;">${esc(misdirected)}</p>` : ''
@@ -193,17 +236,30 @@ ${input.roleLinks.map(roleBlock).join('')}
     // us a favour on a file we have no claim over, it is an instruction we are
     // not entitled to give.
     badge: external ? 'Request' : 'Action required',
-    preheader: external
-      ? `Pacific Coast Title needs the ${missing} details for file ${input.fileNumber}.`
-      : `Please help us collect the ${missing} information for this file.`,
-    hero: {
-      icon: '!',
-      eyebrow: external ? 'Title file — party information' : 'Party information',
-      headline: plural ? 'A few details are still missing.' : 'One detail is still missing.',
-      subcopy: external
-        ? `We are handling the title work on this file and cannot reach the ${missing}.`
-        : `Please help us collect the ${missing} information for this file.`,
-    },
+    preheader: emailAxis(input) === 'confirm'
+      ? (external
+        ? `Pacific Coast Title — please confirm ${missing} details on file ${input.fileNumber}.`
+        : `Please confirm ${missing} details for file ${input.fileNumber}.`)
+      : (external
+        ? `Pacific Coast Title needs the ${missing} details for file ${input.fileNumber}.`
+        : `Please help us collect the ${missing} information for this file.`),
+    hero: emailAxis(input) === 'confirm'
+      ? {
+        icon: '!',
+        eyebrow: external ? 'Title file — party information' : 'Party information',
+        headline: plural ? 'Please confirm these details.' : `Please confirm ${missing} details.`,
+        subcopy: external
+          ? `We are handling the title work on this file and have ${missing} details on record.`
+          : `We have details on file for this order. Please forward so they can check or correct them.`,
+      }
+      : {
+        icon: '!',
+        eyebrow: external ? 'Title file — party information' : 'Party information',
+        headline: plural ? 'A few details are still missing.' : 'One detail is still missing.',
+        subcopy: external
+          ? `We are handling the title work on this file and cannot reach the ${missing}.`
+          : `Please help us collect the ${missing} information for this file.`,
+      },
     bodyHtml: body,
   });
 }

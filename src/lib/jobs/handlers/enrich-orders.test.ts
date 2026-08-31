@@ -462,3 +462,76 @@ describe('enrichSingleOrder party upsert', () => {
     expect(partyInserts()[0]).toMatchObject({ role: 'lender', isPrimary: true });
   });
 });
+
+let existingPartiesForLatch: Array<Record<string, unknown>> = [];
+
+const softProListingAgentPayload: SoftProOrderContactsData = {
+  ...softProEmptyContactsPayload,
+  ListingAgentBrokers: {
+    Person: { LookupCode: null, Name: 'J SMITH FROM SOFTPRO', Email: 'other@softpro.example', Phone: '555-9999' },
+    Company: {
+      LookupCode: null, Name: 'Vendor Brokerage', Email: null, Phone: null,
+      Address: null, City: null, State: null, Zip: null,
+    },
+    CompanyLookUpCode: null,
+    PersonLookupCode: null,
+  },
+};
+
+describe('confirmed listing agent outranks SoftPro enrich', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    existingPartiesForLatch = [];
+    updateSetMock.mockReturnValue({ where: updateWhereMock });
+    updateWhereMock.mockResolvedValue(undefined);
+    insertValuesMock.mockResolvedValue(undefined);
+    resolveClientContactIdMock.mockResolvedValue(null);
+    getOrderContactsMock.mockResolvedValue({ success: true, data: softProListingAgentPayload });
+  });
+
+  it('does not clobber a confirmed name or email; empty phone/company may still fill', async () => {
+    existingPartiesForLatch = [{
+      id: 88,
+      orderId: ORDER_ID,
+      role: 'listing_agent',
+      isPrimary: true,
+      partyConfirmedAt: new Date('2026-08-31T17:00:00Z'),
+      externalName: 'Jane Smith',
+      externalEmail: 'jane@coastrealty.com',
+      externalPhone: null,
+      externalCompany: null,
+    }];
+    selectLimitMock.mockImplementation(async (
+      _limit: number | undefined,
+      table: { __table?: string } | undefined,
+      condition: unknown,
+    ) => {
+      if (table?.__table === 'orders') {
+        return [{ id: ORDER_ID, fileNumber: 'CONFIRMED-LA', orderType: 'Sale' }];
+      }
+      if (table?.__table === 'order_parties') {
+        const want = conditionFields(condition);
+        return existingPartiesForLatch.filter((row) => (
+          row.orderId === want['order_parties.order_id']
+          && row.role === want['order_parties.role']
+          && row.isPrimary === want['order_parties.is_primary']
+        ));
+      }
+      return [];
+    });
+
+    const { enrichSingleOrder } = await import('./enrich-orders');
+    await enrichSingleOrder(ORDER_ID);
+
+    const written = updateSetMock.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .filter((v) => 'externalName' in v || 'externalEmail' in v || 'externalPhone' in v || 'externalCompany' in v);
+    expect(written).toHaveLength(1);
+    expect(written[0]).toEqual({
+      externalPhone: '555-9999',
+      externalCompany: 'Vendor Brokerage',
+    });
+    expect(written[0]).not.toHaveProperty('externalName');
+    expect(written[0]).not.toHaveProperty('externalEmail');
+  });
+});

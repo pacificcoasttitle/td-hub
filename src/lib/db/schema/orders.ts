@@ -168,10 +168,17 @@ export const orderParties = pgTable('order_parties', {
   /**
    * Provenance of the row that created this party. NULL on everything that
    * predates the wizard, which is all existing rows. Records origin only — it
-   * does NOT protect the value: both writers merge per field, so a non-empty
-   * SoftPro value still wins field by field. party_submissions is the record.
+   * does NOT protect the value. The latch is party_confirmed_at.
    */
   source: varchar('source', { length: 20 }),
+
+  /**
+   * A named human confirmed the identity fields on this row. Parsers may fill
+   * empty fields after this; they must not overwrite a populated confirmed
+   * value. See protectConfirmedPartyFields.
+   */
+  partyConfirmedAt: timestamp('party_confirmed_at'),
+  partyConfirmedSubmissionId: integer('party_confirmed_submission_id'),
 
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (table) => ({

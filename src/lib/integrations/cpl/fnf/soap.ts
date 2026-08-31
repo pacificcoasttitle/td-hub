@@ -73,6 +73,34 @@ export interface FnfGenerateCplParams {
   documentId?: string | null; // null → CreateCPL; present → EditCPL
 }
 
+/**
+ * FNF asks for the agent telephone "format[ted] with mask (999) 999-9999"
+ * (CPL Integration Guide, form-specific data item 20).
+ *
+ * FORMATTED AT SEND TIME, never written back to cpl_branches. That table is
+ * owned by the vendor feed and anything we edit there is overwritten on the
+ * next sync — so a stored "fix" would silently revert and nobody would notice.
+ *
+ * Measured 2026-08-31: 0 of 13 FNF branch rows are already in the mask. They
+ * hold "925.942.4040", "818.662-6700" and similar.
+ *
+ * Anything that is not a recognisable 10-digit US number is passed through
+ * unchanged rather than mangled into the mask. A wrong-but-plausible phone
+ * number on a closing protection letter is worse than an oddly formatted one,
+ * and the field is optional per the live metadata.
+ */
+export function formatAgentPhone(raw: string | null | undefined): string {
+  const s = (raw ?? '').trim();
+  if (s === '') return '';
+
+  const digits = s.replace(/[^0-9]/g, '');
+  // Strip a leading country code only when it leaves exactly 10 digits.
+  const ten = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+  if (ten.length !== 10) return s;
+
+  return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`;
+}
+
 export function escapeXml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -145,7 +173,7 @@ function buildFormFields(p: FnfGenerateCplParams): string {
   );
 
   if (p.branch.phone) {
-    fields.push(nv('[Agent/Company Telephone]', p.branch.phone));
+    fields.push(nv('[Agent/Company Telephone]', formatAgentPhone(p.branch.phone)));
   }
 
   fields.push(nv('[Agent/Company Zip Code]', p.branch.zip));

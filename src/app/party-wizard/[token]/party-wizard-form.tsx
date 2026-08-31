@@ -82,6 +82,61 @@ function askScope(form: RoleFormDefinition): string {
   return `${word} field${required === 1 ? '' : 's'}, about a minute.`;
 }
 
+function fieldValue(values: Values, key: string): string {
+  return (values[key] ?? '').trim();
+}
+
+function requiredFields(form: RoleFormDefinition) {
+  return form.sections[0]?.fields.filter((f) => f.required) ?? [];
+}
+
+/**
+ * Copy for the two purposes this form now has: collect what we lack, or
+ * confirm what we already hold. One submit does either — if everything is
+ * prefilled and untouched, that click still confirms.
+ */
+export function listingFormCopy(form: RoleFormDefinition, values: Values): {
+  intro: string;
+  ask: string;
+  submitLabel: string;
+} {
+  const required = requiredFields(form);
+  const filledRequired = required.filter((f) => fieldValue(values, f.key));
+  const anyHeld = form.sections
+    .flatMap((s) => s.fields)
+    .some((f) => fieldValue(values, f.key));
+
+  if (required.length > 0 && filledRequired.length === required.length) {
+    return {
+      intro: 'Please confirm the details we have on file. Change anything that is wrong — submitting without changes confirms them.',
+      ask: 'Confirm what is on file, or change anything that is wrong.',
+      submitLabel: 'Confirm details',
+    };
+  }
+
+  if (anyHeld) {
+    return {
+      intro: 'Please confirm the details we have and fill in anything still missing. Confirming keeps escrow and closing documents flowing to the right place.',
+      ask: askScope(form),
+      submitLabel: 'Submit details',
+    };
+  }
+
+  return {
+    intro: form.intro,
+    ask: askScope(form),
+    submitLabel: 'Submit details',
+  };
+}
+
+/** Empty required field — same " · needed" + emphasise treatment as CPL Purchase borrower. */
+export function fieldNeedsValue(
+  field: RoleFormDefinition['sections'][number]['fields'][number],
+  values: Values,
+): boolean {
+  return Boolean(field.required && !fieldValue(values, field.key));
+}
+
 function draftKey(tokenId: string): string {
   return `pw-draft:${tokenId}`;
 }
@@ -191,12 +246,14 @@ export function PartyWizardForm({
     );
   }
 
+  const copy = listingFormCopy(form, values);
+
   return (
     <>
     {header}
     <form onSubmit={onSubmit} className={`${LIGHT_CARD} mt-4 px-5 py-6 sm:px-7`} noValidate>
-      <p className="text-sm leading-relaxed text-[#4B5563]">{form.intro}</p>
-      <p className="mt-2 text-sm font-semibold text-[#10213A]">{askScope(form)}</p>
+      <p className="text-sm leading-relaxed text-[#4B5563]">{copy.intro}</p>
+      <p className="mt-2 text-sm font-semibold text-[#10213A]">{copy.ask}</p>
 
       <div className="my-5 h-px w-full bg-[#10213A]/[0.07]" />
 
@@ -219,6 +276,7 @@ export function PartyWizardForm({
           <div className="flex flex-col gap-4">
             {section.fields.map((field) => {
               const error = fieldErrors[field.key];
+              const needed = fieldNeedsValue(field, values);
               return (
                 <div key={field.key}>
                   <label
@@ -226,6 +284,7 @@ export function PartyWizardForm({
                     className="mb-1.5 block text-sm font-medium text-[#1A1A2E]"
                   >
                     {field.label}
+                    {needed && <span className="text-[#F26B2B]">  · needed</span>}
                     {field.required && <span className="ml-1 text-[#F26B2B]">*</span>}
                   </label>
                   <input
@@ -241,7 +300,11 @@ export function PartyWizardForm({
                     aria-describedby={error ? `${field.key}-error` : undefined}
                     /* text-base = 16px; anything smaller makes iOS zoom on focus */
                     className={`${INPUT_BASE} ${
-                      error ? 'border-red-400' : 'border-[#10213A]/15 focus:border-[#F26B2B]'
+                      error
+                        ? 'border-red-400'
+                        : needed
+                          ? 'border-[#F26B2B]/60 bg-[#FFF8F4] focus:border-[#F26B2B]'
+                          : 'border-[#10213A]/15 focus:border-[#F26B2B]'
                     }`}
                   />
                   {field.hint && !error && (
@@ -268,7 +331,7 @@ export function PartyWizardForm({
         disabled={submitting}
         className="min-h-[48px] w-full rounded-lg bg-[#F26B2B] px-4 py-3 text-base font-semibold text-white transition hover:bg-[#E05A1A] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {submitting ? 'Submitting…' : 'Submit details'}
+        {submitting ? 'Submitting…' : copy.submitLabel}
       </button>
 
       {/* Naming what we will never ask for is the cheapest signal on the page,

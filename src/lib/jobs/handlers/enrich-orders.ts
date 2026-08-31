@@ -6,6 +6,7 @@ import { budgetMsFor } from '@/lib/jobs/time-budget';
 import type { MappedOrderContacts, MappedResolvedParty } from '@/lib/integrations/softpro';
 import type { SoftProOrderContactsData } from '@/lib/integrations/softpro/types';
 import { resolveClientContactId } from '@/lib/domain/orders/client-resolver';
+import { protectConfirmedPartyFields } from '@/lib/domain/parties/party-confirmation';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -1083,7 +1084,14 @@ async function upsertResolvedParty(orderId: number, row: PartyUpsert): Promise<b
   const contactId = identity.contactId ?? row.contactId ?? null;
 
   const [existing] = await db
-    .select({ id: orderParties.id })
+    .select({
+      id: orderParties.id,
+      partyConfirmedAt: orderParties.partyConfirmedAt,
+      externalName: orderParties.externalName,
+      externalCompany: orderParties.externalCompany,
+      externalEmail: orderParties.externalEmail,
+      externalPhone: orderParties.externalPhone,
+    })
     .from(orderParties)
     .where(and(
       eq(orderParties.orderId, orderId),
@@ -1092,15 +1100,20 @@ async function upsertResolvedParty(orderId: number, row: PartyUpsert): Promise<b
     ))
     .limit(1);
 
-  const values: Partial<typeof orderParties.$inferInsert> = {
-    ...(contactId ? { contactId } : {}),
+  const identityPatch = protectConfirmedPartyFields(existing, {
     ...(externalName ? { externalName } : {}),
     ...(externalCompany ? { externalCompany } : {}),
     ...(externalEmail ? { externalEmail } : {}),
     ...(externalPhone ? { externalPhone } : {}),
+  });
+
+  const values: Partial<typeof orderParties.$inferInsert> = {
+    ...(contactId ? { contactId } : {}),
+    ...identityPatch,
   };
 
   if (existing) {
+    if (Object.keys(values).length === 0) return false;
     await db.update(orderParties).set(values).where(eq(orderParties.id, existing.id));
     return true;
   }

@@ -390,4 +390,33 @@ describe('reconcileParties over an operator-entered party', () => {
     expect(partyWrites.inserts).toHaveLength(0);
     expect(partyWrites.updates).toHaveLength(0);
   });
+
+  it('does not clobber a confirmed seller name when SoftPro reports a different one', async () => {
+    seedOrder(true);
+    partyTable.rows = [
+      {
+        id: 31,
+        orderId: ORDER_ID,
+        role: 'seller',
+        isPrimary: true,
+        contactId: null,
+        externalName: 'Sam Seller',
+        externalCompany: null,
+        externalEmail: null,
+        externalPhone: null,
+        partyConfirmedAt: new Date('2026-08-31T17:00:00Z'),
+      },
+      { id: 32, orderId: ORDER_ID, role: 'buyer', isPrimary: true, contactId: null, externalName: 'C D', externalCompany: null, externalEmail: null, externalPhone: null },
+      operatorLenderRow(true),
+    ];
+    mapOrderContactsMock.mockReturnValue(vendorContacts({
+      primarySeller: 'SOFTPRO SELLER',
+      parties: { ...vendorContacts().parties, seller: { name: 'SOFTPRO SELLER', companyName: null } },
+    }));
+
+    await verifySingleOrder(ORDER_ID, '20021376-OCT');
+
+    const sellerUpdates = partyWrites.updates.filter((u) => u.id === 31);
+    expect(sellerUpdates).toHaveLength(0);
+  });
 });

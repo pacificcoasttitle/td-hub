@@ -61,7 +61,7 @@ const LISTING_AGENT_FORM: RoleFormDefinition = {
   role: 'listing_agent',
   eligibleTransactionTypes: ['Purchase'],
   heading: 'Listing agent details',
-  intro: 'We are handling the title work for this property. Confirming your details keeps escrow and closing documents flowing to the right place.',
+  intro: 'We are handling the title work for this property. Entering your details keeps escrow and closing documents flowing to the right place.',
   sections: [
     {
       title: 'Your details',

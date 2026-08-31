@@ -130,4 +130,19 @@ describe('projecting a submission onto order_parties', () => {
       role: 'seller', source: 'party_wizard', externalName: 'Sam Seller',
     }));
   });
+
+  it('latches the row when the wizard confirms — even if values already matched', async () => {
+    selectLimitMock.mockResolvedValue([{ id: 99 }]);
+    const confirmedAt = new Date('2026-08-31T18:00:00Z');
+    await projectToOrderParties(1, 'listing_agent', FULL, {
+      submissionId: 44,
+      confirmedAt,
+    });
+    expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({
+      externalName: 'Jane Smith',
+      source: 'party_wizard',
+      partyConfirmedAt: confirmedAt,
+      partyConfirmedSubmissionId: 44,
+    }));
+  });
 });

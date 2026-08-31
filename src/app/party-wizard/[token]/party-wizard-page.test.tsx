@@ -242,6 +242,61 @@ describe('returning to a link that was already used', () => {
   });
 });
 
+const CONFIRM: ResolveResult = {
+  ok: true,
+  link: link({
+    previousValues: {
+      agentName: 'Jane Smith',
+      agentEmail: 'jane@coastrealty.com',
+      agentPhone: '(555) 555-5555',
+      agentCompany: 'Coast Realty',
+    },
+  }),
+};
+
+const PARTIAL: ResolveResult = {
+  ok: true,
+  link: link({
+    previousValues: { agentName: 'Jane Smith' },
+  }),
+};
+
+describe('two-purpose listing form — confirm what we hold', () => {
+  it('prefills every held field and one-click confirms when nothing is missing', () => {
+    const html = render(CONFIRM);
+    const body = text(html);
+    expect(html).toContain('value="Jane Smith"');
+    expect(html).toContain('value="jane@coastrealty.com"');
+    expect(html).toContain('value="Coast Realty"');
+    expect(body).toContain('Please confirm the details we have on file');
+    expect(body).toContain('Confirm details');
+    expect(body).not.toContain('Four fields, about a minute.');
+    expect(body).not.toContain('One detail is still missing');
+    expect(body).not.toContain('· needed');
+  });
+
+  it('marks empty required fields as needed, same treatment as the CPL borrower', () => {
+    const html = render(PARTIAL);
+    const body = text(html);
+    expect(html).toContain('value="Jane Smith"');
+    expect(body).toContain('Email · needed');
+    expect(body).toContain('Please confirm the details we have and fill in anything still missing');
+    expect(body).toContain('Submit details');
+    expect(html).toContain('border-[#F26B2B]/60');
+    expect(html).toContain('bg-[#FFF8F4]');
+  });
+
+  it('on a blank collect form, needed is on the required empties and the ask is still four fields', () => {
+    const html = render(FRESH);
+    const body = text(html);
+    expect(body).toContain('Your name · needed');
+    expect(body).toContain('Email · needed');
+    expect(body).toContain('Four fields, about a minute.');
+    expect(body).toContain('Submit details');
+    expect(body).toContain('Entering your details');
+  });
+});
+
 describe('just submitted', () => {
   const body = text(renderToStaticMarkup(<SubmittedPanel />));
 

@@ -19,6 +19,7 @@ import {
   OPEN_ORDERS_CONFIRMATION_CC,
   buildConfirmationRecipients,
 } from './confirmation-recipients';
+import { deliverableEmailsForSend } from './deliverable-emails';
 import { parseTaxResultData } from './tax-result-data';
 import { EMAIL_STATUS_SENT_NO_CLIENT, hasConfirmationEmailStatus } from './confirmation-send-guard';
 import { isBuyerAgentRecipientEnabled } from './buyer-agent-recipient-gate';
@@ -276,7 +277,7 @@ async function loadClientAndOrderNumbers(orderId: number): Promise<{
   return { client, loanNumber: row.loanNumber, escrowNumber: row.escrowNumber };
 }
 
-async function loadRecipientEmails(
+export async function loadRecipientEmails(
   orderId: number,
   row: {
     escrowOfficerId: number | null;
@@ -321,6 +322,10 @@ async function loadRecipientEmails(
     ? buyerAgent?.cEmail ?? buyerAgent?.externalEmail ?? null
     : null;
 
+  // Loaded by ORDER ID from the stored list. The loader takes no address
+  // parameter, so nothing a caller passes can introduce a recipient here.
+  const deliverableEmails = await deliverableEmailsForSend(orderId);
+
   return buildConfirmationRecipients({
     clientEmail,
     escrowOfficerEmail,
@@ -328,6 +333,7 @@ async function loadRecipientEmails(
     buyerAgentEmail,
     salesRepEmail: row.srEmail,
     internalCcEmails: process.env.PCT_INTERNAL_CC_EMAILS ?? null,
+    deliverableEmails,
   });
 }
 

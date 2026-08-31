@@ -1,4 +1,5 @@
 import { db } from '@/lib/db/client';
+import { resolveBorrowers } from './borrower-resolution';
 import {
   cplBranches,
   orderExternalRefs,
@@ -6,6 +7,7 @@ import {
   documents,
   orders,
   orderParties,
+  orderProperties,
 } from '@/lib/db/schema';
 import { eq, and, asc, sql } from 'drizzle-orm';
 import { getOrderById } from '@/lib/domain/orders/service';
@@ -71,7 +73,10 @@ export async function generateCpl(
   }
 
   // c. Build order detail for the adapter
-  const orderDetail = buildOrderDetail(order, input.lenderOverrides, input.propertyOverrides);
+  const orderDetail = buildOrderDetail(
+    order, input.lenderOverrides, input.propertyOverrides,
+    input.borrowerNamesOverride, input.sellerNamesOverride,
+  );
 
   // d. Pick adapter
   const adapter = ADAPTERS[input.underwriter];
@@ -88,6 +93,11 @@ export async function generateCpl(
   }
 
   const cplResult = result.data!;
+
+  // Non-blocking findings ride the `errors` array, which the route returns as
+  // `warnings` on a success. The letter exists; these say what was thin.
+  if (cplResult.warnings?.length) errors.push(...cplResult.warnings);
+  if (orderDetail.borrowerNote) errors.push(orderDetail.borrowerNote);
 
   // f. Decode base64 PDF → upload to S3
   const pdfBuffer = Buffer.from(cplResult.pdfBase64, 'base64');
@@ -190,14 +200,37 @@ function buildOrderDetail(
   order: OrderWithDetail,
   lenderOverrides?: CplGenerateInput['lenderOverrides'],
   propertyOverrides?: CplGenerateInput['propertyOverrides'],
+  borrowerNamesOverride?: string,
+  sellerNamesOverride?: string,
 ): CplOrderDetail {
-  const buyers = order.parties
-    .filter((p) => p.role === 'buyer')
-    .map((p) => p.externalName ?? 'Unknown Buyer');
+  // The borrower follows legacy's chain: what the operator typed, then the
+  // order's buyer parties, then the owner of record — except on a purchase,
+  // where the owner of record is the seller. See borrower-resolution.ts.
+  //
+  // Until now the operator's entry was collected by the modal, carried all the
+  // way here as borrowerNamesOverride, and then never passed to this function,
+  // so the preflight rejected orders on a value it was holding.
+  const resolved = resolveBorrowers({
+    override: borrowerNamesOverride,
+    buyerParties: order.parties
+      .filter((p) => p.role === 'buyer')
+      .map((p) => p.externalName ?? '')
+      .filter((n) => n.trim() !== ''),
+    primaryOwner: order.property?.primaryOwner ?? null,
+    secondaryOwner: order.property?.secondaryOwner ?? null,
+    transactionType: order.transactionType ?? null,
+  });
+  const buyers = resolved.names;
 
-  const sellers = order.parties
-    .filter((p) => p.role === 'seller')
-    .map((p) => p.externalName ?? 'Unknown Seller');
+  // Same rule as the borrower: what the operator typed wins, because they can
+  // see the letter. Split on the separator the field's own placeholder uses.
+  const typedSellers = (sellerNamesOverride ?? '')
+    .split(/;|,/).map((n) => n.trim()).filter((n) => n !== '');
+  const sellers = typedSellers.length > 0
+    ? typedSellers
+    : order.parties
+        .filter((p) => p.role === 'seller')
+        .map((p) => p.externalName ?? 'Unknown Seller');
 
   const lenderParty = order.parties.find((p) => p.role === 'lender');
 
@@ -230,6 +263,10 @@ function buildOrderDetail(
         state: propertyOverrides.state ?? dbProp?.state ?? null,
         zip: propertyOverrides.zip ?? dbProp?.zip ?? null,
         county: propertyOverrides.county ?? dbProp?.county ?? null,
+        // Not overridable from the modal — there is no field for either, and
+        // both are identifiers rather than things an operator retypes.
+        apn: dbProp?.apn ?? null,
+        fips: dbProp?.fips ?? null,
       }
     : dbProp
       ? {
@@ -238,6 +275,8 @@ function buildOrderDetail(
           state: dbProp.state,
           zip: dbProp.zip,
           county: dbProp.county,
+          apn: dbProp.apn,
+          fips: dbProp.fips,
         }
       : null;
 
@@ -247,6 +286,7 @@ function buildOrderDetail(
     transactionType: order.transactionType ?? null,
     property,
     buyers,
+    borrowerNote: resolved.note,
     sellers,
     lender,
     salesPrice: order.salesPrice,
@@ -312,6 +352,19 @@ async function persistCplInputToOrder(
   }
   if (Object.keys(orderUpdates).length > 0) {
     await db.update(orders).set(orderUpdates).where(eq(orders.id, input.orderId));
+  }
+
+  // Persist the borrower the operator typed, into the column legacy actually
+  // used for it. order_properties.borrowers_vesting has existed all along and
+  // is populated on 0 of 8,047 rows because nothing has ever written it.
+  //
+  // COALESCE-style like the two above: only fill it when it is empty, so a
+  // regenerated CPL never quietly rewrites a borrower somebody set earlier.
+  if (input.borrowerNamesOverride?.trim() && !order.property?.borrowersVesting) {
+    await db
+      .update(orderProperties)
+      .set({ borrowersVesting: input.borrowerNamesOverride.trim() })
+      .where(eq(orderProperties.orderId, input.orderId));
   }
 
   // Upsert lender party (company name + contact name)

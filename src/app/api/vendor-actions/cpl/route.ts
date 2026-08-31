@@ -43,6 +43,7 @@ const bodySchema = z.object({
   loanAmount: z.string().optional(),
   salesAmount: z.string().optional(),
   borrowerNames: z.string().optional(),
+  sellerNames: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -89,6 +90,7 @@ export async function POST(req: NextRequest) {
       loanAmountOverride: parsed.loanAmount || undefined,
       loanNumberOverride: parsed.loanNumber || undefined,
       borrowerNamesOverride: parsed.borrowerNames || undefined,
+      sellerNamesOverride: parsed.sellerNames || undefined,
       assignmentClause: parsed.assignmentClause || undefined,
       lenderContactName: parsed.lenderContact || undefined,
     };

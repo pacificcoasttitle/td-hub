@@ -1,4 +1,6 @@
 import type { CplOrderDetail, CplGenerateInput, CplForm, TransactionType } from '../types';
+import { countyFipsFrom } from '../county-fips';
+import { classifyPartyName } from '@/lib/domain/cpl/borrower-resolution';
 
 const TIMEOUT_MS = 15_000;
 const CPL_TIMEOUT_MS = 30_000;
@@ -35,44 +37,106 @@ export interface PrepareAddCplResult {
 
 // ─── Preflight validation ───────────────────────────────────────────────────
 
+export interface PreflightResult {
+  /** Blocking. The request cannot be built or will certainly be rejected. */
+  errors: string[];
+  /** Non-blocking. Surfaced to the operator, who decides whether to proceed. */
+  warnings: string[];
+}
+
 export interface PreflightContext {
   orderDetail: CplOrderDetail;
   input: CplGenerateInput;
   westcorLenderId: number;
 }
 
-export function preflightValidate(ctx: PreflightContext): string[] {
+/**
+ * LEGACY RUNS NONE OF THIS. Grepping the legacy FNF source for
+ * required/validate/throw returns nothing — it assembles the payload and lets
+ * the underwriter reject it. Every check here is ours, so each one has to earn
+ * a hard stop rather than inherit one.
+ *
+ * Two categories:
+ *
+ *   errors   — the request cannot be built, or the vendor will reject it in a
+ *              way we can predict exactly. Blocking.
+ *   warnings — the letter would be thinner than ideal but the request is
+ *              well-formed. Shown to the operator, who decides. Never silent.
+ *
+ * The buyer check moved to `warnings`: it demanded an order_parties row legacy
+ * never read, and it passes on 51.8% of orders.
+ */
+export function preflightValidate(ctx: PreflightContext): PreflightResult {
   const errors: string[] = [];
+  const warnings: string[] = [];
   const { orderDetail, westcorLenderId } = ctx;
   const txType = orderDetail.transactionType;
 
+  // BLOCKING. Westcor's Order/Update rejects a property with no street:
+  // "Property #1: Street address is a required field! Property has not been
+  // Added." — logged against order 49 on 2026-03-26.
   if (!orderDetail.property?.address) {
     errors.push('Property address is required.');
   }
-  if (orderDetail.buyers.length === 0) {
-    errors.push('At least one buyer/borrower is required.');
-  }
+
+  // BLOCKING. buildLenders returns [] with no lender, and the CPL entry needs
+  // a LenderID from the Step A response. Without one there is nothing to
+  // protect and the request cannot be assembled.
   if (!orderDetail.lender?.name) {
     errors.push('Lender company name is required to generate a CPL.');
   }
 
+  // WARNING, not blocking. See the module note: legacy sent the letter with
+  // whatever borrower it had, including none.
+  if (orderDetail.buyers.length === 0) {
+    warnings.push('No borrower is named on this CPL.');
+  }
+
   if (txType === 'Purchase') {
+    // WARNING. A purchase with no seller on file is unusual, but the letter
+    // protects the lender and does not depend on the seller being named.
     if (orderDetail.sellers.length === 0) {
-      errors.push('Purchase transactions require at least one seller.');
-    }
-    const price = resolvePurchasePrice(orderDetail, ctx.input);
-    if (price <= 0) {
-      errors.push('Purchase transactions require a sales amount greater than zero.');
+      warnings.push('No seller is named on this purchase.');
     }
   }
 
-  if (txType === 'Refinance') {
-    if (westcorLenderId === 0) {
-      errors.push('Refinance transactions require a valid Westcor lender ID. Lender may not have been registered in Westcor.');
-    }
+  // BLOCKING, ON EVERY TRANSACTION TYPE.
+  //
+  // This one is deliberately NOT treated like the borrower check we just
+  // relaxed, and the difference is worth stating because the two look alike
+  // from a distance.
+  //
+  //   The borrower block refused to SEND over a value we could resolve
+  //   ourselves. Nothing was wrong with the letter; we were withholding it.
+  //
+  //   A zero coverage amount is a WRONG VALUE ON A LEGAL INSTRUMENT. The CPL
+  //   is the underwriter's indemnity to the lender, and the amount is what is
+  //   being indemnified. Sending zero does not produce a thinner letter, it
+  //   produces an incorrect one — and Westcor accepts it, so nothing
+  //   downstream catches it either.
+  //
+  // Refinance was previously exempt from this check, and on the current book
+  // that exemption is the whole exposure: of 3,841 refinances, ONE has
+  // loan_amount > 0 and TWO have sales_price > 0. resolvePurchasePrice reads
+  // loanOverride || dbLoan || salesOverride || dbSales, so on 3,839 of them
+  // every database term is empty and the value comes only from what the
+  // operator types. With no check, typing nothing sent purchase_price: 0.
+  const price = resolvePurchasePrice(orderDetail, ctx.input);
+  if (price <= 0) {
+    errors.push(
+      txType === 'Purchase'
+        ? 'Purchase transactions require a sales amount greater than zero.'
+        : 'A loan amount is required — a CPL cannot be issued for a zero amount.',
+    );
   }
 
-  return errors;
+  // BLOCKING. LenderID 0 means the lender was never registered with Westcor;
+  // the CPL entry would carry a dangling reference.
+  if (txType === 'Refinance' && westcorLenderId === 0) {
+    errors.push('Refinance transactions require a valid Westcor lender ID. Lender may not have been registered in Westcor.');
+  }
+
+  return { errors, warnings };
 }
 
 // ─── Amount resolution (transaction-aware) ──────────────────────────────────
@@ -130,6 +194,14 @@ function buildProperty(
     PropertyID: ids?.PropertyID ?? 0,
     tvid: Number(ids?.tvid ?? 0) || 0,
     CountyName: suffixed,
+    // Conditional in the spec — "We do validate this and do send it back."
+    // Held on 5,983 of 8,063 order_properties rows; empty string where absent,
+    // matching the spec's example for the other blank property fields.
+    ParcelID: (prop?.apn ?? '').trim(),
+    // REQUIRED per the spec, and never sent until now. Empty string rather than
+    // null when unresolvable, matching how the spec's example leaves other
+    // blank property fields.
+    CountyFips: countyFipsFrom(prop?.fips, prop?.county, prop?.state) ?? '',
     ShortLegal: null as string | null,
     StreetAddress: prop?.address ?? '',
     City: prop?.city ?? '',
@@ -139,14 +211,48 @@ function buildProperty(
   }];
 }
 
+/**
+ * Split one name across Westcor's name fields.
+ *
+ * The spec is conditional, not free-text:
+ *
+ *   CompanyName  Required if first name and last name are not provided
+ *   Trust        If the name has been determined to be a trust, it goes here
+ *   First/Last   Required if company name is not provided
+ *
+ * Everything used to go into `First` with `Last: '-'`, so a family trust
+ * appeared on a closing protection letter as a person with the surname "-".
+ *
+ * THE PERSON PATH IS UNCHANGED. When the classifier abstains, the name takes
+ * exactly the shape it takes today — persons render correctly on issued
+ * letters and that is not being altered on the strength of a marker list.
+ */
+function nameFields(fullName: string): Record<string, unknown> {
+  const name = fullName.trim();
+  const kind = classifyPartyName(name);
+
+  if (kind === 'trust') {
+    return { Last: '', First: '', CompanyName: '', Trust: name };
+  }
+  if (kind === 'company') {
+    return { Last: '', First: '', CompanyName: name, Trust: '' };
+  }
+  // Person — byte-for-byte what we sent before.
+  return { Last: '-', First: name, CompanyName: '', Trust: '' };
+}
+
+/** Test seam: the name half of one buyer entry, which is what varies. */
+export function buildOrderBodyForTest(names: string[]): Record<string, unknown> {
+  return buildBuyers(names)[0] as unknown as Record<string, unknown>;
+}
+
 function buildBuyers(
   names: string[],
   ids?: Array<{ NameID?: number; tvid?: number | string }>,
 ) {
   return names.map((fullName, i) => ({
     NameID: ids?.[i]?.NameID ?? 0,
-    Last: '-',
-    First: fullName.trim(),
+    ...nameFields(fullName),
     NameType: 1,
     JoiningPhrase: 'single',
     tvid: Number(ids?.[i]?.tvid ?? 0) || 0,
@@ -170,8 +276,7 @@ function buildSellers(
 
   return filtered.map((fullName, i) => ({
     NameID: ids?.[i]?.NameID ?? 0,
-    Last: '-',
-    First: fullName.trim(),
+    ...nameFields(fullName),
     NameType: 2,
     JoiningPhrase: 'single',
     tvid: Number(ids?.[i]?.tvid ?? 0) || 0,
@@ -365,7 +470,21 @@ function buildCplEntry(
     PolicyProducingAgentState: branch.state,
     PolicyProducingAgentZip: branch.zip,
     ProtectLender: true,
-    ClosingAgentNumber: 'CA1038',
+    // NULL, NOT 'CA1038'. The spec marks ClosingAgentNumber "Required: No,
+    // unless issuing a Dual/National CPL", and its single-agent request example
+    // sends null. We set IsDualCPL: false on every letter, so this field does
+    // not apply to anything we issue.
+    //
+    // It previously carried the literal 'CA1038' — Westcor's number for the
+    // AGENCY, which is also the branch code for the Orange office. That is why
+    // the one real production CPL, a Glendale file, printed Orange as the
+    // closing agent. Inherited from legacy (Westcor.php:504), not introduced
+    // here.
+    //
+    // The question was never "is CA1038 the right value". It is "should this
+    // field be set at all on a single-agent CPL", and the spec says no.
+    // See docs/tickets/CPL_CLOSING_AGENT_NUMBER_IS_HARDCODED.md
+    ClosingAgentNumber: null as string | null,
     IsDualCPL: false,
   };
 }

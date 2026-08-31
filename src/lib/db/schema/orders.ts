@@ -271,3 +271,27 @@ export const orderPartiesRelations = relations(orderParties, ({ one }) => ({
 export const orderNotesRelations = relations(orderNotes, ({ one }) => ({
   order: one(orders, { fields: [orderNotes.orderId], references: [orders.id] }),
 }));
+
+// ─── Deliverable emails ──────────────────────────────────────────────────────
+//
+// Addresses the operator asks to be copied on documents for this order.
+//
+// A TABLE, NOT AN ARRAY COLUMN, because the approved decisions are "every
+// document for the life of the order" and "editable after open" — which
+// together want per-address provenance. An address that starts receiving a
+// client's documents mid-transaction should be attributable to whoever added
+// it. See docs/tickets/DELIVERABLE_EMAILS.md.
+//
+// Soft delete: removing an address must not erase that it was there.
+// No unique index on (order_id, email): add/remove/re-add is legitimate
+// history, and dedupe belongs at send time where TO and CC are reconciled.
+export const orderDeliverableEmails = pgTable('order_deliverable_emails', {
+  id: serial('id').primaryKey(),
+  orderId: integer('order_id').notNull().references(() => orders.id, { onDelete: 'cascade' }),
+  /** Lowercased and trimmed by the application before it ever reaches here. */
+  email: varchar('email', { length: 320 }).notNull(),
+  addedBy: varchar('added_by', { length: 64 }),
+  addedAt: timestamp('added_at').notNull().defaultNow(),
+  removedBy: varchar('removed_by', { length: 64 }),
+  removedAt: timestamp('removed_at'),
+});

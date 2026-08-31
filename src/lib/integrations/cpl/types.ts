@@ -31,6 +31,13 @@ export interface CplGenerateInput {
   loanAmountOverride?: string;
   loanNumberOverride?: string;
   borrowerNamesOverride?: string;
+  /**
+   * What the operator typed in the seller field. Needed for the same reason as
+   * the borrower: on a Purchase, 1,359 orders carry no seller row, the letter
+   * names the seller, and without this the typed value would be collected and
+   * discarded exactly as borrowerNames was.
+   */
+  sellerNamesOverride?: string;
   assignmentClause?: string;
   lenderContactName?: string;
 }
@@ -39,6 +46,12 @@ export interface CplGenerateResult {
   pdfBase64: string;
   cplId: string;
   vendorRefs: Record<string, string>;
+  /**
+   * Non-blocking findings from the vendor adapter's preflight. The CPL was
+   * issued; these say what was thin about it. Surfaced to the operator on the
+   * success response — a letter generated with complaints must not look clean.
+   */
+  warnings?: string[];
 }
 
 // ─── CPL Branch (vendor-returned) ─────────────────────────────────────────────
@@ -67,8 +80,14 @@ export interface CplOrderDetail {
     state: string | null;
     zip: string | null;
     county: string | null;
+    /** Westcor `ParcelID`. Conditional in the spec, and they validate it. */
+    apn: string | null;
+    /** Westcor `CountyFips`. Marked REQUIRED in the spec; we have never sent it. */
+    fips: string | null;
   } | null;
   buyers: string[];
+  /** How the borrower was resolved, when it was not the operator's own entry. */
+  borrowerNote?: string | null;
   sellers: string[];
   lender: {
     name: string | null;

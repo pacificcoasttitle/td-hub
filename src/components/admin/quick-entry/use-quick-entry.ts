@@ -18,6 +18,7 @@ function deriveUW(product: string): string {
 
 export function useQuickEntry() {
   const [client, setClientRaw] = useState<ClientContact | null>(null);
+  const [deliverableEmails, setDeliverableEmails] = useState<string[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingAddress, setPendingAddress] = useState<ParsedAddress | null>(null);
   const [noMatchMsg, setNoMatchMsg] = useState('');
@@ -297,6 +298,9 @@ export function useQuickEntry() {
       const payload = {
         orderType: orderType || 'Title only',
         isRushOrder: false,
+        // Blank rows are how the operator adds the next one; they are not
+        // addresses. Server validates again — the form is not the boundary.
+        deliverableEmails: deliverableEmails.filter((e) => e.trim() !== ''),
         property: {
           address: street, city: city || 'Unknown', state: state || 'CA', zip: zip || '00000',
           apn: apn || undefined, legalDescription: legalDesc || undefined, county: county || undefined,
@@ -353,6 +357,7 @@ export function useQuickEntry() {
 
   return {
     client, setClient,
+    deliverableEmails, setDeliverableEmails,
     showConfirmModal, setShowConfirmModal,
     pendingAddress, noMatchMsg, setNoMatchMsg,
     apnSearching, searchMode, setSearchMode,

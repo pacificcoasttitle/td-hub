@@ -17,6 +17,8 @@ interface OrderApiResponse {
   property?: {
     address?: string | null; city?: string | null;
     state?: string | null; zip?: string | null;
+    /** The owner of record. On a Purchase this is the SELLER, not the buyer. */
+    primaryOwner?: string | null; secondaryOwner?: string | null;
   } | null;
   parties?: Array<{
     role: string; externalName?: string | null;
@@ -110,6 +112,49 @@ export function failureMessage(body: unknown): string {
   return `${generic}: ${specific.join(' · ')}`;
 }
 
+/**
+ * The line under a name field.
+ *
+ * On a Purchase an empty field is the NORMAL path, not a failure: SoftPro does
+ * not hold the buyer on a purchase at any age — 18 of 18 orders sampled, up to
+ * 186 days old. So it explains rather than warns, and it says so from the
+ * moment the modal opens rather than turning red after Generate is pressed.
+ *
+ * When a value was prefilled, the note says where it came from — and
+ * disappears as soon as the operator edits, because once they have typed, they
+ * are the provenance.
+ */
+function NameNote({
+  purchase, empty, from, purchaseWhy, sellerOfRecord,
+}: {
+  purchase: boolean;
+  empty: boolean;
+  from: 'party' | 'record_owner' | null;
+  purchaseWhy: string;
+  sellerOfRecord: string;
+}) {
+  if (empty && purchase) {
+    return (
+      <div className="mt-1.5 text-[11.5px] text-[#6B7280] leading-snug">
+        {purchaseWhy}
+        {sellerOfRecord && (
+          <div className="mt-0.5 text-[#1B2A4A]">
+            Seller of record: <span className="font-medium">{sellerOfRecord}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (from === 'record_owner') {
+    return (
+      <p className="mt-1.5 text-[11.5px] text-[#6B7280]">
+        From the owner of record. Edit if the letter should read differently.
+      </p>
+    );
+  }
+  return null;
+}
+
 export function CplModal({ open, onClose, orderId, fileNumber, address, isClient, onSuccess }: {
   open: boolean; onClose: () => void;
   orderId: number; fileNumber: string; address: string;
@@ -144,6 +189,12 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
   const [loanAmount, setLoanAmount] = useState('');
   const [salesAmount, setSalesAmount] = useState('');
   const [borrower, setBorrower] = useState('');
+  const [seller, setSeller] = useState('');
+  // Where the prefilled value came from. Cleared the moment the operator edits
+  // the field — once they have typed, they are the provenance.
+  const [borrowerFrom, setBorrowerFrom] = useState<'party' | 'record_owner' | null>(null);
+  const [sellerFrom, setSellerFrom] = useState<'party' | 'record_owner' | null>(null);
+  const [sellerOfRecord, setSellerOfRecord] = useState('');
 
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; docId?: number; error?: string; warnings?: string[] } | null>(null);
@@ -181,6 +232,7 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
       setLenderAddr(''); setLenderCity(''); setLenderState(''); setLenderZip('');
       setPropStreet(''); setPropCity(''); setPropState(''); setPropZip('');
       setLoanNumber(''); setLoanAmount(''); setSalesAmount(''); setBorrower('');
+      setSeller(''); setBorrowerFrom(null); setSellerFrom(null); setSellerOfRecord('');
       setLenderExpanded(true); setPropertyExpanded(true);
     });
     const base = isClient ? `/api/client/orders/${orderId}` : `/api/orders/${orderId}`;
@@ -227,12 +279,38 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
         setLenderZip(cpd.cpl_lender_zip ?? lc?.zip ?? '');
         setAssignmentClause(cpd.cpl_assignment_clause ?? lc?.assignmentClause ?? '');
 
-        const buyers = (o.parties ?? [])
-          .filter((p) => p.role === 'buyer')
+        // ─── Borrower and seller ────────────────────────────────────────
+        //
+        // Mirrors the server's resolution (borrower-resolution.ts) so the box
+        // shows what the letter would say. The operator's own edit always wins;
+        // this only decides what the field STARTS as.
+        //
+        // On a Purchase the record owner is the SELLER, measured 39% vs 21%
+        // against the buyer, so it never seeds the borrower there — but it is
+        // exactly the right source for the seller confirmation line.
+        const isPurchase = (o.transactionType ?? '') === 'Purchase';
+        const nameList = (role: string) => (o.parties ?? [])
+          .filter((p) => p.role === role)
           .map((p) => p.externalName)
           .filter(Boolean)
           .join(', ');
-        setBorrower(buyers);
+
+        const buyers = nameList('buyer');
+        const owner = [o.property?.primaryOwner, o.property?.secondaryOwner]
+          .filter(Boolean).join('; ');
+
+        if (buyers) { setBorrower(buyers); setBorrowerFrom('party'); }
+        else if (!isPurchase && owner) { setBorrower(owner); setBorrowerFrom('record_owner'); }
+        else { setBorrower(''); setBorrowerFrom(null); }
+
+        const sellers = nameList('seller');
+        if (sellers) { setSeller(sellers); setSellerFrom('party'); }
+        else if (isPurchase && owner) { setSeller(owner); setSellerFrom('record_owner'); }
+        else { setSeller(''); setSellerFrom(null); }
+
+        // Shown as a fact under the Purchase explanation. Confirms they are on
+        // the right file and makes the reason self-evident.
+        setSellerOfRecord(o.property?.primaryOwner ?? '');
 
         setLenderExpanded(!(lc?.companyName ?? lenderParty?.externalCompany));
         setPropertyExpanded(!prop?.address);
@@ -272,7 +350,7 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
         orderId, underwriter, branchId, lenderCompany, lenderContact, assignmentClause,
         lenderAddress: lenderAddr, lenderCity, lenderState, lenderZip,
         propertyAddress: propStreet, propertyCity: propCity, propertyState: propState, propertyZip: propZip,
-        loanNumber, loanAmount, salesAmount, borrowerNames: borrower,
+        loanNumber, loanAmount, salesAmount, borrowerNames: borrower, sellerNames: seller,
       };
       const res = await fetch(cplUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cplBody) });
       const body = await res.json();
@@ -362,7 +440,39 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
                   <F label="Sales Amount" value={salesAmount} onChange={setSalesAmount} prefix="$" />
                 </>
               )}
-              <F label="Primary Borrower / Vesting" value={borrower} onChange={setBorrower} className="sm:col-span-2" />
+              <div className="sm:col-span-2">
+                <F
+                  label={`Primary Borrower / Vesting${isPurchase && !borrower.trim() ? '  · needed' : ''}`}
+                  value={borrower}
+                  onChange={(v) => { setBorrower(v); setBorrowerFrom(null); }}
+                  placeholder={isPurchase ? 'Name of the buyer' : undefined}
+                  emphasise={isPurchase && !borrower.trim()}
+                />
+                <NameNote
+                  purchase={isPurchase}
+                  empty={!borrower.trim()}
+                  from={borrowerFrom}
+                  purchaseWhy="On a purchase the buyer isn't in SoftPro — the record owner is the seller. Enter the buyer as it should read on the letter."
+                  sellerOfRecord={isPurchase ? sellerOfRecord : ''}
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <F
+                  label={`Seller${isPurchase && !seller.trim() ? '  · needed' : ''}`}
+                  value={seller}
+                  onChange={(v) => { setSeller(v); setSellerFrom(null); }}
+                  placeholder={isPurchase ? 'Name of the seller' : undefined}
+                  emphasise={isPurchase && !seller.trim()}
+                />
+                <NameNote
+                  purchase={isPurchase}
+                  empty={!seller.trim()}
+                  from={sellerFrom}
+                  purchaseWhy="The letter names the seller. 1,359 purchases have no seller on file, so it often has to be entered."
+                  sellerOfRecord=""
+                />
+              </div>
             </div>
           </Section>
 
@@ -471,8 +581,15 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   return <div><p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2">{label}</p>{children}</div>;
 }
 
-function F({ label, value, onChange, prefix, className = '', placeholder }: {
-  label: string; value: string; onChange: (v: string) => void; prefix?: string; className?: string; placeholder?: string;
+function F({ label, value, onChange, prefix, className = '', placeholder, emphasise }: {
+  label: string; value: string; onChange: (v: string) => void; prefix?: string;
+  className?: string; placeholder?: string;
+  /**
+   * Draws the field as wanted-and-empty. NOT an error state — it renders from
+   * first paint, never after a failed submit, because on a Purchase an empty
+   * borrower is the normal path rather than a mistake the operator made.
+   */
+  emphasise?: boolean;
 }) {
   return (
     <div className={className}>
@@ -480,7 +597,11 @@ function F({ label, value, onChange, prefix, className = '', placeholder }: {
       <div className="relative">
         {prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#9CA3AF]">{prefix}</span>}
         <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-          className={`w-full h-10 ${prefix ? 'pl-7' : 'pl-3'} pr-3 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20`} />
+          className={`w-full h-10 ${prefix ? 'pl-7' : 'pl-3'} pr-3 rounded-lg text-sm outline-none border ${
+            emphasise
+              ? 'border-[#F26B2B]/60 bg-[#FFF8F4] focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20'
+              : 'border-gray-200 bg-white focus:border-[#F26B2B] focus:ring-1 focus:ring-[#F26B2B]/20'
+          }`} />
       </div>
     </div>
   );

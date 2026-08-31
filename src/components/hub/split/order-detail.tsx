@@ -8,6 +8,7 @@ import { statusBadge } from '@/lib/domain/orders/status-format';
 import { DocumentsPanel, type GenerateKind, type OrderDocuments } from './documents-panel';
 import { PartiesPanel } from './parties-panel';
 import { NotesStrip } from './notes-strip';
+import { DeliverableEmailsPanel } from './deliverable-emails-panel';
 import { useOrderExtras } from './use-order-extras';
 
 // ─── The detail pane ─────────────────────────────────────────────────────────
@@ -162,6 +163,10 @@ export function OrderDetail({
         </div>
 
         <DocumentsPanel documents={d.documents} onGenerate={d.onGenerateDocument} />
+
+        {/* Editable for the life of the order — the common case is adding
+            somebody after the order is already open. */}
+        <DeliverableEmailsPanel orderId={order.id} />
 
         <NotesStrip
           notes={extras.notes}

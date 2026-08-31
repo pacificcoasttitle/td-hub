@@ -1,7 +1,8 @@
 # Every CPL names Orange as the closing agent, whatever branch issued it
 
-**Status: reported, NOT fixed.** Deliberately not fixed — resolving it needs
-Westcor's definition of the field, not a code change we can reason our way to.
+**Status: reported, NOT fixed. DOWNGRADED from urgent on 2026-08-28** — see
+"Inherited, not introduced". Resolving it needs Westcor's definition of the
+field, not a code change we can reason our way to.
 Opened: 2026-08-28
 Found: while tracing the March CPL failures for the hub detail pane work.
 
@@ -33,10 +34,17 @@ codes are:
 | `CA1038.01` | Glendale |
 | `CA1038.02` | Oxnard |
 | `CA1038.03` | Concord |
-| … | 20 configured in total |
+| `CA1038.04` | Westlake |
+| `CA1038.05` | San Diego |
+| `CA1038.06` | Gold River |
 
-So for 19 of the 20 branches, the CPL goes out naming a closing agent that is
-not the branch that issued it.
+So for **6 of the 7** Westcor branches, the CPL goes out naming a closing agent
+that is not the branch that issued it.
+
+*(Corrected 2026-08-28. This previously read "20 configured in total" and "19
+of the 20". `cpl_branches` holds 20 rows across BOTH underwriters — 13 FNF and
+7 Westcor — and only the Westcor rows are relevant. The error came from
+counting the whole table.)*
 
 ## This is not hypothetical — it has already happened once
 
@@ -53,6 +61,101 @@ second, smaller gap — see below.)
 Westcor accepted it. No error was logged. Which tells us the field is either
 not validated against the producing agent, or is expected to be a
 company-level identifier. It does not tell us the document is correct.
+
+## Inherited, not introduced — and why this is no longer urgent
+
+Legacy's Westcor path hardcodes **the same literal**, `CA1038`, at
+`Westcor.php:504`, on every branch, and has for years. Above it sits a
+commented-out `RI1026`.
+
+That commented-out predecessor is the detail that matters. An identifier
+changed once, wholesale, with the old value left behind as a comment, is what an
+**agency-level** identifier looks like when the agency changes. It is not what a
+per-branch value looks like — a per-branch value would have been parameterised,
+not swapped.
+
+So:
+
+- **We copied this. We did not introduce it.** Earlier versions of this ticket
+  treated it as ours and asked why nobody caught it. The answer is that it was
+  never new.
+- Reading (a), company-level and correct, is now the more likely of the two.
+- **Downgraded from urgent.** Nothing needs to happen before the team starts
+  issuing letters.
+
+It is not dismissed, for one reason: the code prints on the letter. Asking
+Westcor stays worthwhile as housekeeping, and the question is unchanged — it is
+just no longer blocking anything.
+
+This also supersedes the section below titled "A prior document says legacy did
+the same — and it cannot be verified here". It can be verified now, and it is
+confirmed: `Westcor.php:504`.
+
+## Westcor's own token calls us CA1038
+
+Read from the live `Token` response on 2026-08-28. Sixteen keys; the identity
+ones:
+
+```
+agentNumber            "CA1038"
+agencyName             "Pacific Coast Title Company"
+integrationPartnerCode "7758"
+role                   "Agent"
+userName               "PacificCTProdInt"
+```
+
+**`agentNumber` for the whole login is `CA1038`.** Not Orange's branch code
+that happens to look like an agency code — the agency's own number, returned by
+Westcor at authentication, before any branch is chosen.
+
+The same response carries `groups`, a JSON-encoded string holding seven
+entries, one per branch:
+
+```
+CA1038      CA1038.01   CA1038.02   CA1038.03
+CA1038.04   CA1038.05   CA1038.06
+```
+
+So Westcor's model is exactly what the structure suggested: **`CA1038` is the
+agency, `CA1038.nn` are its offices**, and `CA1038` doubles as the code for the
+first office.
+
+This is as close to settling reading (a) as anything short of asking them.
+`ClosingAgentNumber: 'CA1038'` is the agency's own agent number, per Westcor's
+own token. The value is very likely correct; what remains wrong is only that it
+is expressed as a literal rather than sourced from the token or a named
+constant, so it would silently rot if the agency number ever changed — which,
+per the commented-out `RI1026` in legacy, has happened once already.
+
+**The email to Westcor is now optional.** If sent, it is a confirmation, not a
+question.
+
+## The code is printed on the letter itself
+
+Read out of the issued PDF on 2026-08-28. `westcor_20016790-GLT_1.pdf`
+(document 4464, order 2131) contains, on page 1:
+
+```
+ForAgentVerification Pleaseusecode:9807267-CA1038
+http://www.ewestcor.com/agentValidation/index.html
+```
+
+So `CA1038` is not merely a field in a request body. **It is printed on the
+face of the closing protection letter, as the code a lender uses to verify the
+agent with Westcor**, next to the verification URL.
+
+That is a Glendale order — file number `20016790-GLT`, and the branch codes are
+`CA1038` Orange, `CA1038.01` Glendale. A lender verifying this letter enters a
+code that identifies Orange.
+
+It raises the stakes of the question without answering it. Under reading (a),
+agency-level, the code is correct and verification resolves to the agency —
+which is presumably the point of an agency verification code. Under reading
+(b), it is the wrong agent printed on the instrument and handed to the lender
+as the thing to check.
+
+Either way it is now a visible artefact rather than an internal field, which is
+worth stating in the email: the value does not just travel, it prints.
 
 ## What it SHOULD be — and why this needs Westcor, not a guess
 
@@ -82,6 +185,43 @@ first — under reading (a), "fixing" it to `branch.branchCode` would send
 outright, turning a paperwork question into an outage on the week the team
 starts using it.
 
+## A prior document says legacy did the same — and it cannot be verified here
+
+Found after this ticket was first written, on checking `docs/cpl/legacy/`.
+
+`CPL_WESTCOR_GENERATION.md:430`, in a legacy-vs-ours parity table:
+
+```
+| `ClosingAgentNumber: "CA1038"` | Hardcoded | Same | Matched |
+```
+
+and line 452: "Matches legacy. Could be moved to branch data if PCT gets
+multiple closing agent numbers."
+
+If that is right, this is **inherited behaviour, not a regression we
+introduced**, and legacy has been issuing CPLs this way for as long as it has
+been issuing them — which would make reading (a), the company-level
+identifier, considerably more likely than reading (b).
+
+**But it is not verifiable from anything in the repo.** The legacy Westcor
+source is not in `docs/cpl/legacy/` — that folder holds `Common.php` and
+`Fnf.php`, which are the FNF path, and searching both for `CA1038`,
+`ClosingAgentNumber` or `cpl@pct` returns nothing. `CPL_WESTCOR_GENERATION.md`
+itself declares on line 5 that it "reflects the actual code in
+`src/lib/integrations/cpl/westcor/`" — it is a document about OUR
+implementation, and the provenance of its "Legacy" column is unknown.
+
+The same document, line 285, records legacy sending
+`PolicyProducingAgentAddressID: "CA1038"` as a literal too, where our code now
+uses `branch.branchCode` (`payloads.ts:362`). So on that neighbouring field we
+have already diverged from what it describes as legacy behaviour.
+
+**This does not change the recommendation to ask Westcor.** It changes the
+question put to them: not "are we sending the wrong thing" but "your agency
+`CA1038` has been receiving CPLs with `ClosingAgentNumber: CA1038` for every
+branch — is that the value you expect at agency level, or should it track the
+issuing branch?" That is answerable in one email and settles both readings.
+
 ## Why nobody caught it
 
 Worth understanding, because the shape recurs.
@@ -110,8 +250,12 @@ sweep is needed, that inference is the only thing available to identify
 affected documents. Recording `branch_id` on the document at generation would
 cost nothing and remove the guesswork.
 
-## Not urgent today, urgent the week it is adopted
+## Priority, as of 2026-08-28
 
 Three CPLs exist. One is real. The hub's detail pane now puts a **Create CPL**
-button in front of the open-order team, so volume is about to change — which is
-the entire reason for filing this before that happens rather than after.
+button in front of the open-order team, so volume is about to change.
+
+That was the original argument for urgency, and it no longer holds: the value
+is inherited from a system that has issued letters this way for years, so
+volume increasing does not make a new problem. **Housekeeping.** Ask Westcor
+when convenient; nothing waits on the answer.

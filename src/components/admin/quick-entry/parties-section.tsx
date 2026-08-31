@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { DeliverableEmailsField } from '@/components/shared/deliverable-emails-field';
 import { partyHasInput } from '@/lib/domain/orders/party-contact';
 import { ContactNotice } from '@/components/admin/contact-picker';
 import { PartySelector } from './party-selector';
@@ -160,9 +161,16 @@ export function PartiesSection({ s }: { s: QuickEntryState }) {
         </div>
       </Expand>
 
-      {/* Deliverable Emails removed — the addresses were never persisted, never sent
-          to SoftPro, and read by no recipient resolver. See
-          docs/tickets/DELIVERABLE_EMAILS.md for the design when it is built. */}
+      {/* Deliverable Emails — restored 2026-08-28, now wired.
+          Stored one row per address in order_deliverable_emails and read by the
+          confirmation resolver at send time. It was removed on 2026-08-25
+          because nothing consumed it. */}
+      <div className="border-t border-gray-100 pt-4">
+        <DeliverableEmailsField
+          value={s.deliverableEmails}
+          onChange={s.setDeliverableEmails}
+        />
+      </div>
     </div>
   );
 }

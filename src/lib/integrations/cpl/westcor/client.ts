@@ -179,11 +179,13 @@ export const westcorAdapter: CplAdapter = {
       const resolvedLenderId = stepALenderId ?? stepBLenderId ?? 0;
 
       // Preflight validation (transaction-aware)
-      const preflightErrors = preflightValidate({
+      const preflight = preflightValidate({
         orderDetail, input, westcorLenderId: resolvedLenderId,
       });
-      if (preflightErrors.length > 0) {
-        throw new Error(`CPL preflight failed: ${preflightErrors.join(' ')}`);
+      // Only errors stop the request. Warnings ride along to the operator on
+      // the success response, so a thin letter is visible rather than silent.
+      if (preflight.errors.length > 0) {
+        throw new Error(`CPL preflight failed: ${preflight.errors.join(' ')}`);
       }
 
       // Step C: PrepareAddCPL
@@ -243,7 +245,7 @@ export const westcorAdapter: CplAdapter = {
       });
 
       return vendorSuccess<CplGenerateResult>(
-        { pdfBase64: pdf, cplId, vendorRefs: { westcor_order_id: westcorOrderId, westcor_cpl_id: cplId, westcor_form_id: form.id, westcor_form_name: form.name } },
+        { pdfBase64: pdf, cplId, warnings: preflight.warnings, vendorRefs: { westcor_order_id: westcorOrderId, westcor_cpl_id: cplId, westcor_form_id: form.id, westcor_form_name: form.name } },
         { requestId, durationMs }
       );
     } catch (err) {

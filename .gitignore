@@ -52,3 +52,9 @@ next-env.d.ts
 
 # audit run logs
 scripts/audit/*.log
+
+# Ad-hoc measurement scripts run from the repo root (they need node_modules
+# resolution, so they cannot live in a scratch dir). Never part of a commit.
+/*.mts
+/*.mjs
+/*.py

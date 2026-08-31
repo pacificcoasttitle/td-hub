@@ -1,0 +1,36 @@
+-- 0040 — SECURITY: enable RLS on order_deliverable_emails.
+--
+-- WHY
+--   The table was created by docs/migration-deliverable-emails.sql, applied by
+--   hand ahead of the code per convention. That file did not enable RLS, so the
+--   table went live RLS-off — reachable with the public anon key that is inlined
+--   into the browser bundle by NEXT_PUBLIC_*.
+--
+--   It held zero rows for the whole window, so nothing was exposed. The gap is
+--   the point: this is EXACTLY the drift 0038 was written to stop, reproduced
+--   within days by the same route — a table created outside the numbered
+--   migration sequence and therefore never appended to the RLS list.
+--
+--   It was caught by the guard 0038 shipped with (rls-lockdown.test.ts), on the
+--   first full test run after the table was created, before any UI could write
+--   to it. The guard works. The hand-applied-migration convention is what keeps
+--   handing it work.
+--
+--   The content is not incidental either: this table holds email addresses that
+--   receive a client's documents. World-readable would disclose who is copied
+--   on a transaction; world-writable would let an attacker add a recipient to
+--   any order in the system — which is precisely the delivery defect the
+--   feature was designed to make unrepresentable.
+--
+-- WHAT
+--   ENABLE, not FORCE. The application connects as the table owner and relies
+--   on the owner bypass, exactly as 0038 does. No policy is added: there is no
+--   anon or authenticated caller for this table, and a policy with no caller to
+--   test it against is a guess.
+
+ALTER TABLE public.order_deliverable_emails ENABLE ROW LEVEL SECURITY;
+
+-- VERIFY
+--   SELECT relname, relrowsecurity, relforcerowsecurity
+--     FROM pg_class WHERE relname = 'order_deliverable_emails';
+--   Expected: relrowsecurity = true, relforcerowsecurity = false

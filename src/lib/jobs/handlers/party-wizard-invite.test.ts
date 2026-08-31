@@ -114,7 +114,7 @@ import {
   PARTY_INVITE_ROLE, PARTY_INVITE_TRANSACTION_TYPES,
   PARTY_INVITE_MAX_PER_RUN_SETTING, PARTY_INVITE_DEFAULT_MAX_PER_RUN,
 } from './party-wizard-invite';
-import { eligibleTransactionTypesFor } from '@/lib/domain/parties/party-wizard-fields';
+import { eligibleTransactionTypesFor, SUPPORTED_WIZARD_ROLES } from '@/lib/domain/parties/party-wizard-fields';
 import { SETTINGS_REGISTRY } from '@/lib/domain/settings/service';
 
 /**
@@ -413,6 +413,10 @@ describe('candidate query', () => {
   it('takes its eligible transaction types from the role definition', () => {
     expect(PARTY_INVITE_TRANSACTION_TYPES).toEqual(eligibleTransactionTypesFor(PARTY_INVITE_ROLE));
     expect(PARTY_INVITE_TRANSACTION_TYPES.length).toBeGreaterThan(0);
+  });
+
+  it('asks only for a role the wizard can actually collect', () => {
+    expect(SUPPORTED_WIZARD_ROLES).toContain(PARTY_INVITE_ROLE);
   });
 });
 

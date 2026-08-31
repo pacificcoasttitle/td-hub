@@ -10,6 +10,7 @@ import {
 } from './party-wizard-token';
 import {
   getRoleForm, getSubmissionSchema, toPartyColumns, toSellerColumns,
+  SUPPORTED_WIZARD_ROLES,
   type ListingAgentSubmission, type PartyColumns, type PartyRole, type RoleFormDefinition,
 } from './party-wizard-fields';
 import {
@@ -481,12 +482,22 @@ export interface MintedLink {
  *
  * Callers that must not hand out a second URL for the same request are
  * responsible for calling findLiveLink first; the invite job does exactly that.
+ *
+ * Refuses roles with no form BEFORE insert. A minted URL that opens to
+ * "unsupported" is a dead end we handed someone; that must not be creatable.
  */
 export async function mintLinkForOrder(
   orderId: number,
   role: PartyRole,
   createdBy = 'party_wizard_invite',
 ): Promise<MintedLink | null> {
+  if (!getRoleForm(role)) {
+    throw new Error(
+      `Cannot mint a party-wizard link for role "${role}": no form is defined. `
+      + `Supported: ${SUPPORTED_WIZARD_ROLES.join(', ')}.`,
+    );
+  }
+
   const minted = mintPartyWizardToken();
 
   const [row] = await db

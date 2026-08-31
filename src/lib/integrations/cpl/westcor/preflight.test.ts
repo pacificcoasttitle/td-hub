@@ -102,12 +102,16 @@ import { buildOrderBodyForTest } from './payloads';
 describe('entity names do not go out as people with the surname "-"', () => {
   const namesOf = (n: string) => buildOrderBodyForTest([n]);
 
-  it('a trust uses the Trust field', () => {
+  it('a trust uses the Trust field AND CompanyName', () => {
+    // CompanyName is not decoration. Spec §2.3.3.3: CompanyName is "Required if
+    // first name and last name are not provided", and the Trust row grants no
+    // exemption from it. Sending Trust alone is what Westcor rejected on order
+    // 6142 with "Seller #2: Not Added."
     const b = namesOf('WERNER AND DONNA STEFFEN FAMILY TRUST');
     expect(b.Trust).toBe('WERNER AND DONNA STEFFEN FAMILY TRUST');
+    expect(b.CompanyName).toBe('WERNER AND DONNA STEFFEN FAMILY TRUST');
     expect(b.First).toBe('');
     expect(b.Last).toBe('');
-    expect(b.CompanyName).toBe('');
   });
 
   it('a company uses CompanyName', () => {
@@ -154,5 +158,78 @@ describe('a typed seller is not discarded', () => {
     );
     expect(r.errors).toEqual([]);
     expect(r.warnings.join(' ')).not.toContain('No seller');
+  });
+});
+
+// ─── The order 6142 regression ──────────────────────────────────────────────
+//
+// Live failure, 2026-09-01 03:58 UTC, order 6142 / 20020090-GLT:
+//
+//   "Seller #2: Not Added. Please provide at least a Company Name and/or First
+//    and Last Name of the individual."
+//
+// A Purchase with no seller party, so the modal prefilled the seller field from
+// the record owners as "MCCLENTON MARIE S; MARIE S MCCLENTON TRUST". The server
+// split that on ";" and the second name classified as a trust — which, before
+// this fix, meant Trust populated and CompanyName, First and Last all empty.
+
+describe('order 6142: a trust seller reaches Westcor with an identity', () => {
+  const OWNERS = ['MCCLENTON MARIE S', 'MARIE S MCCLENTON TRUST'];
+
+  it('the exact name Westcor rejected now carries a CompanyName', () => {
+    const b = buildOrderBodyForTest(['MARIE S MCCLENTON TRUST']);
+    expect(b.CompanyName).toBe('MARIE S MCCLENTON TRUST');
+    expect(b.Trust).toBe('MARIE S MCCLENTON TRUST');
+  });
+
+  it('the whole prefilled seller list passes preflight', () => {
+    const r = run(
+      { transactionType: 'Purchase', sellers: OWNERS, buyers: ['Iris Caceras'] },
+      { salesAmountOverride: '1000000' },
+    );
+    expect(r.errors).toEqual([]);
+  });
+
+  it('and it is the SECOND seller that used to fail, not the first', () => {
+    // Position matters: Westcor numbers positionally and said "#2".
+    expect(buildOrderBodyForTest([OWNERS[0]!]).First).toBe('MCCLENTON MARIE S');
+    expect(buildOrderBodyForTest([OWNERS[0]!]).Last).toBe('-');
+  });
+});
+
+describe('the identity rule blocks before the vendor does', () => {
+  // A name that survives to the payload with nothing in it cannot come from
+  // nameFields any more, so this drives the guard with the empty string that
+  // still reaches it — the shape of any future regression in that function.
+  it('an empty seller name blocks, and the message says what to supply', () => {
+    const r = run(
+      { transactionType: 'Purchase', sellers: ['A Real Seller', '   '], buyers: ['A Buyer'] },
+      { salesAmountOverride: '1000000' },
+    );
+    const msg = r.errors.join(' ');
+    expect(msg).toContain('Seller #2');
+    expect(msg).toContain('first and a last name');
+  });
+
+  it('it blocks — it is not a warning the operator can click past', () => {
+    const r = run(
+      { transactionType: 'Purchase', sellers: ['Fine Seller', ''], buyers: ['A Buyer'] },
+      { salesAmountOverride: '1000000' },
+    );
+    expect(r.errors.length).toBeGreaterThan(0);
+    expect(r.warnings.join(' ')).not.toContain('#2');
+  });
+
+  it('borrowers are checked too, not just sellers', () => {
+    const r = run({ transactionType: 'Refinance', buyers: [''] }, { loanAmountOverride: '450000' });
+    expect(r.errors.join(' ')).toContain('Borrower #1');
+  });
+
+  it('a well-formed order is untouched by the new check', () => {
+    const r = run(
+      { transactionType: 'Purchase', buyers: ['Iris Caceras'], sellers: ['VNE GROUP LLC'] },
+      { salesAmountOverride: '1000000' },
+    );
+    expect(r.errors).toEqual([]);
   });
 });

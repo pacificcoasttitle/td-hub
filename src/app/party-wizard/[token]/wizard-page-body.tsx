@@ -42,14 +42,21 @@ export function WizardPageBody({
       );
     }
 
+    // Inactive (expired/revoked) can be re-sent. Unsupported cannot — a new
+    // link for the same role is the same dead end, so the heading and mailto
+    // must not offer one. The contact block itself is the same ladder.
+    const canResend = resolved.reason !== 'unsupported';
+
     return (
       <>
         <LegitimacyHeader context={order} headline={copy.title} eyebrow="Link status" />
         <ContactBlock
           contact={order.contact}
           lead={copy.body}
-          heading="Ask for a new link"
-          emailSubject={`New link for file ${order.fileNumber}`}
+          heading={canResend ? 'Ask for a new link' : undefined}
+          emailSubject={canResend
+            ? `New link for file ${order.fileNumber}`
+            : `File ${order.fileNumber}`}
         />
       </>
     );

@@ -335,6 +335,31 @@ describe('revoked and expired are indistinguishable', () => {
   });
 });
 
+describe('unsupported role — a live link that has no form', () => {
+  const html = render(UNSUPPORTED);
+  const body = text(html);
+
+  it('says we cannot collect this online yet', () => {
+    expect(body).toContain('We cannot collect this detail online yet');
+    expect(body).toContain('cannot be entered through an online form');
+  });
+
+  it('does not offer a new link — a re-mint of the same role is the same dead end', () => {
+    expect(body).not.toContain('Ask for a new link');
+    expect(body).not.toMatch(/new link/i);
+    expect(html).not.toContain('New%20link');
+  });
+
+  it('keeps the named contact and a mailto that is not a re-mint request', () => {
+    expect(body).toContain('Rose Lucero');
+    expect(html).toContain('mailto:rose@powerhouseescrow.com?subject=File%2020021227-OCT');
+  });
+
+  it('tells them to reply to the person below', () => {
+    expect(body).toContain('Reply to the person below and they will take your details.');
+  });
+});
+
 describe('invalid link', () => {
   const html = render(INVALID);
   const body = text(html);

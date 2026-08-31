@@ -19,7 +19,7 @@ const FAILURE_MESSAGES: Record<string, { status: number; message: string }> = {
   // Revoked and expired share one reason and one message on purpose — telling
   // them apart would confirm that a link had been deliberately withdrawn.
   inactive: { status: 410, message: 'This link is no longer active. Please contact your escrow officer.' },
-  unsupported: { status: 400, message: 'This link cannot be completed online.' },
+  unsupported: { status: 400, message: 'We cannot collect this detail online yet. Please reply to the person who sent this link.' },
   misconfigured: { status: 503, message: 'This form is temporarily unavailable.' },
   rate_limited: { status: 429, message: 'Too many submissions. Please wait a few minutes and try again.' },
   validation: { status: 400, message: 'Please check the highlighted fields.' },

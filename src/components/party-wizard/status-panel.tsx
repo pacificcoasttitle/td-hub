@@ -88,9 +88,16 @@ export const FAILURE_PANEL: Record<LinkFailure, { title: string; body: string }>
     title: 'This link is no longer active',
     body: 'Links stay open for 60 days. The person below can send you a new one.',
   },
+  /**
+   * A live, signature-valid link for a role that has no form.
+   *
+   * A new link for the same role fails identically, so this must not share
+   * the inactive-state remedy ("ask for a new one"). The contact ladder is
+   * the way out — they reply to the named person, who takes the details.
+   */
   unsupported: {
-    title: 'This link cannot be completed online',
-    body: 'Please reply directly to the person below and they will take your details.',
+    title: 'We cannot collect this detail online yet',
+    body: 'This information cannot be entered through an online form. Reply to the person below and they will take your details.',
   },
   misconfigured: {
     title: 'This form is temporarily unavailable',

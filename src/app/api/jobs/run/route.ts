@@ -33,6 +33,7 @@ import { handleJobsWatchdog } from '@/lib/jobs/handlers/jobs-watchdog';
 import { handleOpsDailyReport } from '@/lib/jobs/handlers/ops-daily-report';
 import { handleRetrySoftProDocumentAttach } from '@/lib/jobs/handlers/retry-softpro-document-attach';
 import { handlePartyWizardInvite } from '@/lib/jobs/handlers/party-wizard-invite';
+import { summariseFailures } from '@/lib/jobs/summarise-failures';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 
 function formatTodayForImport(): string {
@@ -234,7 +235,17 @@ async function executeJob(req: NextRequest, payload: Record<string, unknown>) {
       ? { ...payload, __jobId: jobId }
       : payload;
     const result = await handler(handlerPayload);
-    try { await db.update(jobs).set({ status: 'completed', endedAt: new Date() }).where(eq(jobs.id, jobId)); } catch { /* tracking */ }
+    // A handler that RETURNS is not the same as a handler that SUCCEEDED.
+    // See summariseFailures: a run whose every call failed is recorded as
+    // failed, and a partial run keeps `completed` but carries the reason.
+    const outcome = summariseFailures(result);
+    try {
+      await db.update(jobs).set({
+        status: outcome.status,
+        error: outcome.error,
+        endedAt: new Date(),
+      }).where(eq(jobs.id, jobId));
+    } catch { /* tracking */ }
     return NextResponse.json({ success: true, job: jobName, jobId, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Job execution failed';

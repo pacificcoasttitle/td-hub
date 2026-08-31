@@ -12,7 +12,7 @@ import { getToken, cachedGroups, mapGroupsToBranches } from './auth';
 import type { WestcorGroup } from './auth';
 import {
   createOrUpdateOrder, getOrder, prepareAddCpl, generateCplPdf, selectCplForm,
-  resolvePurchasePrice, preflightValidate,
+  resolvePurchasePrice, preflightValidate, describeNamesForDiagnostics,
 } from './payloads';
 import type { WestcorBranchInfo } from './payloads';
 
@@ -251,9 +251,23 @@ export const westcorAdapter: CplAdapter = {
     } catch (err) {
       const durationMs = Date.now() - start;
       const errDiag = (err as { diagnostics?: Record<string, unknown> }).diagnostics ?? {};
+      // THE NAMES WE SENT, ON EVERY FAILURE.
+      //
+      // Until now a failed generate_cpl logged `{ error }` and nothing else, so
+      // "Seller #2: Not Added" could not be answered from the logs at all — the
+      // array it referred to had to be reconstructed by re-running the builder
+      // and hoping the order had not changed since. Westcor's rejections are
+      // POSITIONAL ("#2"), which makes them unreadable without the array.
+      //
+      // No new disclosure: these names come from order_parties and
+      // order_properties on the same order_id this row already carries.
       await logRequest({
         operation: 'generate_cpl', orderId: input.orderId, requestId, startedAt, success: false, errorCategory: 'CPL_ERROR',
-        meta: { error: err instanceof Error ? err.message : 'unknown', ...errDiag },
+        meta: {
+          error: err instanceof Error ? err.message : 'unknown',
+          names: describeNamesForDiagnostics(orderDetail),
+          ...errDiag,
+        },
       });
       return vendorError<CplGenerateResult>(VENDOR, 'CPL_GENERATION_FAILED', err instanceof Error ? err.message : 'Unknown Westcor error', { requestId, durationMs });
     }

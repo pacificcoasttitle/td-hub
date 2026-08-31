@@ -130,6 +130,56 @@ export function preflightValidate(ctx: PreflightContext): PreflightResult {
     );
   }
 
+  // BLOCKING. Every name we send must satisfy Westcor's identity rule:
+  // a CompanyName, or BOTH a First and a Last.
+  //
+  // WHY THIS BLOCKS. Same reasoning as the zero-price check above, and NOT the
+  // reasoning of the borrower check we relaxed. A name failing this rule is not
+  // a thinner letter — the send is GUARANTEED to fail, because Westcor's
+  // Order/Update validates it and returns "Please provide at least a Company
+  // Name and/or First and Last Name of the individual." Blocking early costs
+  // the operator one screen; blocking late costs a vendor round trip and gives
+  // them a message with our field names nowhere in it.
+  //
+  // WHAT THIS IS REALLY FOR. Post-fix, `nameFields` cannot emit a failing shape
+  // for any non-empty name: persons get First plus Last "-", companies and
+  // trusts get CompanyName. So this check should never fire in normal use — it
+  // is a REGRESSION GUARD, and it is here because the defect it now catches was
+  // shipped and found by an operator rather than by us. c82dfff routed trusts
+  // to `Trust` alone, which silently produced exactly this shape, and nothing
+  // between the modal and the vendor had an opinion about it.
+  //
+  // It is evaluated on the built payload, through the same `nameFields` the
+  // request uses, so it cannot drift from what we actually send.
+  //
+  // SCOPE. Buyers and sellers are the parties sent as Westcor "Name" nested
+  // objects, so the rule is theirs. Lenders use a flat `name` string and have
+  // their own blocking check above; attorneys are sent as null. Adding a name
+  // party later puts it here.
+  const identityFailures: string[] = [];
+  const checkNames = (label: string, built: Array<Record<string, unknown>>) => {
+    built.forEach((entry, i) => {
+      if (!namePassesWestcorIdentityRule(entry)) {
+        const shown = String(entry.Trust ?? entry.CompanyName ?? entry.First ?? '').trim();
+        identityFailures.push(`${label} #${i + 1}${shown ? ` (${shown})` : ''}`);
+      }
+    });
+  };
+  checkNames('Borrower', buildBuyers(orderDetail.buyers));
+  checkNames('Seller', buildSellers(orderDetail.sellers, txType));
+
+  if (identityFailures.length > 0) {
+    // The message names the party AND says what to supply. An operator who
+    // reads "Seller #2" alone has six fields and no way to know which is wrong.
+    errors.push(
+      `${identityFailures.join(', ')} ${identityFailures.length === 1 ? 'needs' : 'need'} ` +
+      'a full name. Westcor requires either a company name, or both a first and ' +
+      'a last name, for every party on the letter. Enter the name as it should ' +
+      'read on the CPL — for a person use their first and last name, and for a ' +
+      'company or trust use the full entity name.',
+    );
+  }
+
   // BLOCKING. LenderID 0 means the lender was never registered with Westcor;
   // the CPL entry would carry a dangling reference.
   if (txType === 'Refinance' && westcorLenderId === 0) {
@@ -223,6 +273,29 @@ function buildProperty(
  * Everything used to go into `First` with `Last: '-'`, so a family trust
  * appeared on a closing protection letter as a person with the surname "-".
  *
+ * ─── `Trust` IS ADDITIVE, NOT A SUBSTITUTE ─────────────────────────────────
+ *
+ * Read the four rows of the spec table together (§2.3.3.3, Name Nested Object
+ * Mapping) and only one shape is legal for a name with no first and last:
+ *
+ *   CompanyName  "CONDITIONAL: Required if first name and last name are not
+ *                 provided"
+ *   Trust        "If the name has been determined to be a trust, then it goes
+ *                 into this field."
+ *   Last         "CONDITIONAL: Required if company name is not provided"
+ *   First        "CONDITIONAL: Required if company name is not provided"
+ *
+ * `Trust` carries NO clause excusing the CompanyName requirement — it says
+ * where a trust name goes, not that it satisfies the identity requirement. So
+ * a trust needs BOTH: `Trust` so the letter renders it as a trust, and
+ * `CompanyName` so the name passes validation at all.
+ *
+ * Sending `Trust` alone is what this function did between c82dfff and now, and
+ * Westcor rejected it in production on order 6142:
+ *
+ *   "Seller #2: Not Added. Please provide at least a Company Name and/or First
+ *    and Last Name of the individual."
+ *
  * THE PERSON PATH IS UNCHANGED. When the classifier abstains, the name takes
  * exactly the shape it takes today — persons render correctly on issued
  * letters and that is not being altered on the strength of a marker list.
@@ -232,13 +305,48 @@ function nameFields(fullName: string): Record<string, unknown> {
   const kind = classifyPartyName(name);
 
   if (kind === 'trust') {
-    return { Last: '', First: '', CompanyName: '', Trust: name };
+    // CompanyName carries the identity; Trust carries the classification.
+    return { Last: '', First: '', CompanyName: name, Trust: name };
   }
   if (kind === 'company') {
     return { Last: '', First: '', CompanyName: name, Trust: '' };
   }
   // Person — byte-for-byte what we sent before.
   return { Last: '-', First: name, CompanyName: '', Trust: '' };
+}
+
+/**
+ * Westcor's identity rule for one name, from the spec rows quoted above:
+ * a CompanyName, or BOTH a First and a Last. Anything else is rejected by
+ * Order/Update with "Please provide at least a Company Name and/or First and
+ * Last Name of the individual."
+ *
+ * Exported so the preflight can apply exactly the rule the payload obeys,
+ * rather than a second description of it that can drift.
+ */
+export function namePassesWestcorIdentityRule(fields: Record<string, unknown>): boolean {
+  const s = (v: unknown) => String(v ?? '').trim();
+  return s(fields.CompanyName) !== '' || (s(fields.First) !== '' && s(fields.Last) !== '');
+}
+
+/**
+ * The buyer and seller name objects exactly as the request carries them, for
+ * the failure log. Positions are 1-based to match Westcor's own "Seller #2"
+ * numbering, and `passes` marks the entries that fail the identity rule so the
+ * offending one is obvious without re-deriving it.
+ */
+export function describeNamesForDiagnostics(orderDetail: CplOrderDetail) {
+  const describe = (built: Array<Record<string, unknown>>) =>
+    built.map((e, i) => ({
+      position: i + 1,
+      Last: e.Last, First: e.First, CompanyName: e.CompanyName, Trust: e.Trust,
+      passes: namePassesWestcorIdentityRule(e),
+    }));
+
+  return {
+    buyers: describe(buildBuyers(orderDetail.buyers)),
+    sellers: describe(buildSellers(orderDetail.sellers, orderDetail.transactionType)),
+  };
 }
 
 /** Test seam: the name half of one buyer entry, which is what varies. */

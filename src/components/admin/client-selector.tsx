@@ -11,6 +11,7 @@ import {
   formatContactAddress,
   joinIdentity,
 } from './contact-picker';
+import { CreatePartyWizard, type CreatedPartyContact } from './create-party-wizard';
 
 export interface ClientContact {
   id: number;
@@ -63,6 +64,7 @@ export function ClientSelector({ selected, onSelect, onClear, orderType }: Clien
   const [results, setResults] = useState<ClientContact[]>([]);
   const [searching, setSearching] = useState(false);
   const [open, setOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -85,6 +87,25 @@ export function ClientSelector({ selected, onSelect, onClear, orderType }: Clien
 
   function handleSelect(c: ClientContact) {
     onSelect(c);
+    setQuery('');
+    setResults([]);
+    setOpen(false);
+  }
+
+  function handleCreated(c: CreatedPartyContact) {
+    onSelect({
+      id: c.id,
+      fullName: c.fullName,
+      companyName: c.companyName,
+      email: c.email,
+      phone: c.phone,
+      role: 'realtor',
+      contactType: 'realtor',
+      clientLookupCode: c.clientLookupCode,
+      companyLookupCode: c.companyLookupCode,
+      address: c.address,
+      city: c.city,
+    });
     setQuery('');
     setResults([]);
     setOpen(false);
@@ -147,7 +168,8 @@ export function ClientSelector({ selected, onSelect, onClear, orderType }: Clien
           {searching ? (
             <ContactDropdownMessage>Searching…</ContactDropdownMessage>
           ) : results.length > 0 ? (
-            results.map((c) => {
+            <>
+            {results.map((c) => {
               const disabled = restricted && isEscrowClient(c);
               return (
                 <ContactResultButton
@@ -161,14 +183,42 @@ export function ClientSelector({ selected, onSelect, onClear, orderType }: Clien
                   onClick={() => handleSelect(c)}
                 />
               );
-            })
+            })}
+            <div className="px-3 py-2 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => { setOpen(false); setCreateOpen(true); }}
+                className="w-full h-8 text-xs font-medium text-[#1B2A4A] hover:underline"
+              >
+                None of these — create new client
+              </button>
+            </div>
+            </>
           ) : (
-            <ContactDropdownMessage>
-              No clients found for &ldquo;{query}&rdquo;
-            </ContactDropdownMessage>
+            <div className="px-3 py-3">
+              <ContactDropdownMessage>
+                No clients found for &ldquo;{query}&rdquo;
+              </ContactDropdownMessage>
+              <button
+                type="button"
+                onClick={() => { setOpen(false); setCreateOpen(true); }}
+                className="mt-2 w-full h-9 text-sm font-medium text-white bg-[#1B2A4A] rounded-lg hover:bg-[#243658]"
+              >
+                Create new client
+              </button>
+            </div>
           )}
         </ContactDropdown>
       )}
+
+      <CreatePartyWizard
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={handleCreated}
+        userType="realtor"
+        label="client"
+        initialQuery={query}
+      />
     </div>
   );
 }

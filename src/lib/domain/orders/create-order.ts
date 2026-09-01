@@ -428,7 +428,53 @@ async function createLocalRecords(
     }
   }
 
-  await db.insert(orderProperties).values({
+  await db.insert(orderProperties).values(
+    buildOrderPropertyValues(orderId, input, sitex, enriched),
+  );
+
+  const partyInserts = buildPartyInserts(orderId, input, resolved);
+  if (partyInserts.length > 0) {
+    await db.insert(orderParties).values(partyInserts);
+  }
+
+  await db.insert(orderStatusHistory).values({
+    orderId,
+    status: 'open',
+    source: 'manual',
+    notes: `Order created and sent to SoftPro (${fileNumber})`,
+  });
+
+  return { orderId };
+}
+
+export type SoftProCreatePropertyDetails = {
+  Address1?: string;
+  City?: string;
+  State?: string;
+  Zip?: string;
+  /** Hub create sends county in SoftPro's Country field. */
+  Country?: string;
+  APNNumberParcelID?: string;
+  Description?: string;
+  EscrowBriefLegal?: string;
+};
+
+export type OrderPropertyValues = typeof orderProperties.$inferInsert;
+
+/**
+ * The property row createLocalRecords writes. Repair of a SoftPro-200-then-
+ * hub-property-fail uses this same builder so the backfill cannot invent a
+ * second column set.
+ */
+type PropertyWriteInput = Pick<CreateOrderInput, 'property'>;
+
+export function buildOrderPropertyValues(
+  orderId: number,
+  input: PropertyWriteInput,
+  sitex: SiteXPropertyData | null,
+  enriched: { apn: string; legal: string; county: string; fips: string | null },
+): OrderPropertyValues {
+  return {
     orderId,
     address: input.property.address,
     city: input.property.city,
@@ -448,21 +494,67 @@ async function createLocalRecords(
       input.property.city,
       input.property.state,
     ].filter(Boolean).join(', '),
-  });
+  };
+}
 
-  const partyInserts = buildPartyInserts(orderId, input, resolved);
-  if (partyInserts.length > 0) {
-    await db.insert(orderParties).values(partyInserts);
+/**
+ * Rebuild the createLocalRecords property arguments from the SoftPro create
+ * payload we already logged. Country is county. No SiteX re-fetch — that is
+ * the overflow we already hit.
+ */
+export function propertyFromSoftProCreatePayload(pd: SoftProCreatePropertyDetails): {
+  property: CreateOrderInput['property'];
+  enriched: { apn: string; legal: string; county: string; fips: string | null };
+} {
+  const address = (pd.Address1 ?? '').trim();
+  const city = (pd.City ?? '').trim();
+  const zip = (pd.Zip ?? '').trim();
+  if (!address || !city || zip.length < 3) {
+    throw new Error('SoftPro create payload is missing address, city, or zip');
   }
+  const county = (pd.Country ?? '').trim();
+  const apn = (pd.APNNumberParcelID ?? '').trim();
+  const legal = (pd.Description ?? pd.EscrowBriefLegal ?? '').trim();
+  return {
+    property: {
+      address,
+      city,
+      state: (pd.State ?? 'CA').trim() || 'CA',
+      zip,
+      apn: apn || undefined,
+      legalDescription: legal || undefined,
+      county: county || undefined,
+    },
+    enriched: {
+      apn,
+      legal,
+      county,
+      fips: resolveCaliforniaFips(county) ?? null,
+    },
+  };
+}
 
-  await db.insert(orderStatusHistory).values({
-    orderId,
-    status: 'open',
-    source: 'manual',
-    notes: `Order created and sent to SoftPro (${fileNumber})`,
-  });
-
-  return { orderId };
+/**
+ * Insert the missing property row on a hub order that already exists.
+ * No-op if a property row is already there. Does not write parties, invite,
+ * or SoftPro.
+ */
+export async function attachMissingOrderProperty(
+  orderId: number,
+  input: PropertyWriteInput,
+  sitex: SiteXPropertyData | null,
+  enriched: { apn: string; legal: string; county: string; fips: string | null },
+): Promise<'inserted' | 'already_present'> {
+  const [existing] = await db
+    .select({ id: orderProperties.id })
+    .from(orderProperties)
+    .where(eq(orderProperties.orderId, orderId))
+    .limit(1);
+  if (existing) return 'already_present';
+  await db.insert(orderProperties).values(
+    buildOrderPropertyValues(orderId, input, sitex, enriched),
+  );
+  return 'inserted';
 }
 
 const VALID_TX = ['Purchase', 'Refinance', 'Equity', 'Other'] as const;

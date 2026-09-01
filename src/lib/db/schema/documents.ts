@@ -38,6 +38,8 @@ export const documents = pgTable('documents', {
   softproDocumentId: varchar('softpro_document_id', { length: 128 }),
   softproAttachAttemptCount: integer('softpro_attach_attempt_count').notNull().default(0),
   softproAttachNextRetryAt: timestamp('softpro_attach_next_retry_at'),
+  /** True only when GetAttachedDocuments listed the sent name. False + is_synced = accepted (listing-blind). */
+  softproListingConfirmed: boolean('softpro_listing_confirmed').notNull().default(false),
 
   createdBy: varchar('created_by', { length: 64 }),
   createdAt: timestamp('created_at').notNull().defaultNow(),

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getSignedUrlMock = vi.fn();
 const softproUploadMock = vi.fn();
+const getAttachedMock = vi.fn();
 const selectLimitMock = vi.fn();
 const updateSetMock = vi.fn();
 const updateWhereMock = vi.fn();
@@ -15,7 +16,7 @@ vi.mock('@/lib/integrations/s3/client', () => ({
 
 vi.mock('@/lib/integrations/softpro/client', () => ({
   uploadDocument: (...args: unknown[]) => softproUploadMock(...args),
-  getAttachedDocuments: vi.fn(),
+  getAttachedDocuments: (...args: unknown[]) => getAttachedMock(...args),
 }));
 
 vi.mock('./softpro-fetch-token', () => ({
@@ -38,7 +39,12 @@ const docRow = {
 
 function mockSelectChain(rows: unknown[]) {
   const limit = vi.fn().mockResolvedValue(rows);
-  const where = vi.fn(() => ({ limit }));
+  const whereResult = {
+    limit,
+    then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+      Promise.resolve(rows).then(resolve, reject),
+  };
+  const where = vi.fn(() => whereResult);
   const from = vi.fn(() => ({ where, limit, orderBy: vi.fn(() => Promise.resolve(rows)) }));
   return { from, where, limit };
 }
@@ -72,6 +78,7 @@ vi.mock('@/lib/db/schema', () => ({
     status: 'documents.status',
     createdAt: 'documents.created_at',
     isSyncedToSoftpro: 'documents.is_synced',
+    softproListingConfirmed: 'documents.softpro_listing_confirmed',
     softproAttachAttemptCount: 'documents.softpro_attach_attempt_count',
     softproAttachNextRetryAt: 'documents.softpro_attach_next_retry_at',
   },
@@ -102,12 +109,13 @@ describe('attachToSoftPro', () => {
       .mockReturnValueOnce(mockSelectChain([{ id: 7, fileNumber: '20015761-GLT' }]));
   });
 
-  it('persists SoftPro document id on success and uses short fetch URL + short DocumentName', async () => {
+  it('200 + empty list → accepted, not listing-confirmed', async () => {
     softproUploadMock.mockResolvedValue({
       success: true,
       requestId: 'req-1',
       data: [{ Status: 200, FileUploadedStatus: true, Id: 'SP-99', Message: 'ok' }],
     });
+    getAttachedMock.mockResolvedValue({ success: true, data: [] });
 
     const { attachToSoftPro } = await import('./service');
     const result = await attachToSoftPro(42, 'CPL');
@@ -121,12 +129,62 @@ describe('attachToSoftPro', () => {
       folderName: 'CPL',
       fileUrl: expect.stringMatching(/\/api\/softpro\/fetch-doc\/42\/.*\/cpl-42\.pdf$/),
     }));
+    expect(getAttachedMock).toHaveBeenCalledWith('20015761-GLT');
     expect(getSignedUrlMock).not.toHaveBeenCalled();
     expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({
       isSyncedToSoftpro: true,
+      softproListingConfirmed: false,
       softproDocumentId: 'SP-99',
       softproSyncError: null,
       softproAttachNextRetryAt: null,
+    }));
+  });
+
+  it('200 + name on listing → confirmed', async () => {
+    softproUploadMock.mockResolvedValue({
+      success: true,
+      requestId: 'req-listed',
+      data: [{ Status: 200, FileUploadedStatus: true, Id: 'SP-99', Message: 'ok' }],
+    });
+    getAttachedMock.mockResolvedValue({
+      success: true,
+      data: ['https://softpro.example/files/cpl-42.pdf'],
+    });
+
+    const { attachToSoftPro } = await import('./service');
+    const result = await attachToSoftPro(42, 'CPL');
+
+    expect(result.success).toBe(true);
+    expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({
+      isSyncedToSoftpro: true,
+      softproListingConfirmed: true,
+    }));
+    expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'attached_to_softpro',
+      meta: expect.objectContaining({ acceptSource: 'listed', verifyState: 'confirmed' }),
+    }));
+  });
+
+  it('already-exists + empty list → accepted, not failed', async () => {
+    softproUploadMock.mockResolvedValue({
+      success: false,
+      requestId: 'req-exists',
+      error: { message: 'An item already exists by that name.', code: 'SOFTPRO', vendor: 'softpro', retryable: false },
+    });
+    getAttachedMock.mockResolvedValue({ success: true, data: [] });
+
+    const { attachToSoftPro } = await import('./service');
+    const result = await attachToSoftPro(42, 'CPL');
+
+    expect(result.success).toBe(true);
+    expect(getAttachedMock).toHaveBeenCalled();
+    expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({
+      isSyncedToSoftpro: true,
+      softproListingConfirmed: false,
+    }));
+    expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'attached_to_softpro',
+      meta: expect.objectContaining({ acceptSource: 'already_exists', verifyState: 'accepted' }),
     }));
   });
 
@@ -171,7 +229,138 @@ describe('softProAttachNextRetryAt / extractSoftProDocumentId', () => {
 
     expect(softProAttachNextRetryAt(SOFTPRO_ATTACH_MAX_ATTEMPTS)).toBeNull();
     expect(softProAttachNextRetryAt(1)).toBeInstanceOf(Date);
+    const { softProAlreadyExistsByName } = await import('./softpro-attach-retry');
+    expect(softProAlreadyExistsByName('An item already exists by that name.')).toBe(true);
+    expect(softProAlreadyExistsByName('Property Address is required.')).toBe(false);
     expect(extractSoftProDocumentId([{ Id: 'ABC' }], 1)).toBe('ABC');
     expect(extractSoftProDocumentId([], 42)).toBe('42');
+  });
+});
+
+const vestRow = {
+  id: 5744,
+  orderId: 8123,
+  category: 'legal_vesting' as const,
+  filename: 'tp_vest.pdf',
+  status: 'active' as const,
+  storageKey: 'legal_vesting/tp_vest.pdf',
+  isSyncedToSoftpro: false,
+  softproDocumentId: null,
+  softproAttachAttemptCount: 0,
+  softproSyncError: null,
+};
+
+function queueTitleDocSelects() {
+  selectLimitMock
+    .mockReturnValueOnce(mockSelectChain([{ id: 8123, fileNumber: '20021642-OCT' }]))
+    .mockReturnValueOnce(mockSelectChain([vestRow]))
+    .mockReturnValueOnce(mockSelectChain([vestRow]));
+}
+
+describe('attachTitleDocsToSoftPro verify states', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.SOFTPRO_DOC_FETCH_SECRET = 'test-secret';
+    process.env.NEXT_PUBLIC_APP_URL = 'https://hub.pctitle.com';
+    queueTitleDocSelects();
+  });
+
+  it('200 + empty list → accepted, no retry', async () => {
+    softproUploadMock.mockResolvedValue({
+      success: true,
+      requestId: 'req-200',
+      data: [{ Status: 200, FileUploadedStatus: true, Id: 'SP-1', Message: 'Success' }],
+    });
+    getAttachedMock.mockResolvedValue({ success: true, data: [] });
+
+    const { attachTitleDocsToSoftPro } = await import('./service');
+    const result = await attachTitleDocsToSoftPro(8123);
+
+    expect(result.success).toBe(true);
+    expect(result.attached).toBe(0);
+    expect(getAttachedMock).toHaveBeenCalledWith('20021642-OCT');
+    expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({
+      isSyncedToSoftpro: true,
+      softproListingConfirmed: false,
+      softproAttachNextRetryAt: null,
+    }));
+    expect(updateSetMock).not.toHaveBeenCalledWith(expect.objectContaining({
+      isSyncedToSoftpro: false,
+    }));
+  });
+
+  it('already-exists → accepted, higher confidence, no retry', async () => {
+    softproUploadMock.mockResolvedValue({
+      success: false,
+      requestId: 'req-exists',
+      error: { message: 'An item already exists by that name.', code: 'SOFTPRO', vendor: 'softpro', retryable: false },
+    });
+    getAttachedMock.mockResolvedValue({ success: true, data: [] });
+
+    const { attachTitleDocsToSoftPro } = await import('./service');
+    const result = await attachTitleDocsToSoftPro(8123);
+
+    expect(result.success).toBe(true);
+    expect(getAttachedMock).toHaveBeenCalled();
+    expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({
+      isSyncedToSoftpro: true,
+      softproListingConfirmed: false,
+      softproAttachNextRetryAt: null,
+    }));
+    expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'attached_to_softpro',
+      meta: expect.objectContaining({ acceptSource: 'already_exists', verifyState: 'accepted' }),
+    }));
+  });
+
+  it('address 400 → failed, not accepted', async () => {
+    softproUploadMock.mockResolvedValue({
+      success: false,
+      requestId: 'req-addr',
+      error: { message: 'Property Address is required.', code: 'SOFTPRO', vendor: 'softpro', retryable: false },
+    });
+
+    selectLimitMock
+      .mockReset()
+      .mockReturnValueOnce(mockSelectChain([{ id: 8123, fileNumber: '20021642-OCT' }]))
+      .mockReturnValueOnce(mockSelectChain([vestRow]))
+      .mockReturnValueOnce(mockSelectChain([vestRow]));
+
+    const { attachTitleDocsToSoftPro } = await import('./service');
+    const result = await attachTitleDocsToSoftPro(8123);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Property Address is required');
+    expect(getAttachedMock).not.toHaveBeenCalled();
+    expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({
+      isSyncedToSoftpro: false,
+      softproSyncError: expect.stringContaining('Property Address is required'),
+    }));
+  });
+
+  it('listed names → confirmed', async () => {
+    softproUploadMock.mockResolvedValue({
+      success: true,
+      requestId: 'req-listed',
+      data: [{ Status: 200, FileUploadedStatus: true, Id: 'SP-9', Message: 'Success' }],
+    });
+    getAttachedMock.mockResolvedValue({
+      success: true,
+      data: ['https://softpro.example/files/vest-5744.pdf'],
+    });
+
+    const { attachTitleDocsToSoftPro } = await import('./service');
+    const result = await attachTitleDocsToSoftPro(8123);
+
+    expect(result.success).toBe(true);
+    expect(result.attached).toBe(1);
+    expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({
+      isSyncedToSoftpro: true,
+      softproListingConfirmed: true,
+    }));
+    expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'attached_to_softpro',
+      meta: expect.objectContaining({ acceptSource: 'listed', verifyState: 'confirmed' }),
+    }));
   });
 });

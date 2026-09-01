@@ -27,3 +27,7 @@ If you have several questions, send them in one message with a recommendation on
 Test when unsure: would a wrong answer send an email, cost money, or need a database restore? If no to all three, decide it and report it.
 
 You have CI, branch protection, and required checks; use them. Confirm app + scripts green on the rebased head, then merge. Confirm `/api/health` SHA after each merge. Health host is `https://td-hub.vercel.app/api/health` (not hub.pacificcoasttitle.com).
+
+## Production writes
+
+Nothing that writes to production runs from uncommitted code. Not a one-shot, not a backfill, not a repair script. If it touches production it goes through a branch and a review first, even when the change is obviously right.

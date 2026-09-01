@@ -68,14 +68,18 @@ something it was never asked for.
 ## Owner: the AddDocuments path (landed as `fix/softpro-adddocuments-batch`)
 
 The earlier assumption — "they exist in SoftPro and have never been
-transmitted here" — was wrong on the seven test files. We sent them. SoftPro
+transmitted here" — was wrong on the seven test files. We sent them. ~~SoftPro
 attached nothing. We marked `is_synced`. GetAttachedDocuments on 2026-08-28
-found **zero** of those 13 "synced" documents. See
-`TITLE_DOCS_FALSE_SYNC.md`.
+found **zero** of those 13 "synced" documents.~~ **Void — 2026-08-31.** Empty
+GetAttachedDocuments is not "attached nothing." That GET does not list
+Production Documents / LV / Grant Deed / Taxes. See `TITLE_DOCS_FALSE_SYNC.md`.
 
 The write path now batches LV / grant deed / tax into one AddDocuments call,
-sends clean FileURLs, uses legacy folder strings, and **does not mark synced
-until GetAttachedDocuments confirms the names.** Cleanup of the seven is a
+sends clean FileURLs, uses legacy folder strings, and ~~**does not mark synced
+until GetAttachedDocuments confirms the names.**~~ **Void as a hard rule —
+2026-08-31.** Write-accepted (AddDocuments 200 or already-exists) marks
+`is_synced_to_softpro` and leaves `softpro_listing_confirmed` false when the
+listing is empty. Do not retry an accept. Cleanup of the seven is a
 separate ticket. SoftPro orders that AddDocuments will refuse are
 `SOFTPRO_ADDDOCUMENTS_REQUIRED_FIELDS.md`.
 
@@ -148,3 +152,15 @@ T&E is 98% empty as reported — but it is 10% of the book. Title only is 85% of
 all orders and 83% of those have a prelim on file. The prelim is therefore a
 full tile, not a chip, and it reads from our own S3 (`prelim-upload-doc/`), so
 it does not depend on `GetAttachedDocuments` succeeding at view time.
+
+T&E emptiness is a **fetch-endpoint** problem, not a missing document:
+`GetAttachedDocuments` is empty on T&E files that `GetAttachedDocumentsPrelim`
+returns. That ingest is a one-shot (`backfillTePrelimsWithoutDelivery`), not
+the live cron. Title-only / `softpro.fetch_prelims` stays on
+`GetAttachedDocuments`.
+
+Landing those historical prelims on normally-synced orders (import lag ~0)
+is **document fetch lag**. The Aug 27 `isBackfilledOrder` gate does not cover
+it — 371 of 548 T&E-without-prelim would still send. See
+`PRELIM_GATE_MISSES_DOCUMENT_FETCH_LAG.md`. Do not add a suppression to the
+live delivery path to fix a backfill.

@@ -198,6 +198,7 @@ describe('ingestPrelimFromSoftPro', () => {
 
     const inserted = insertValuesMock.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(inserted.isSyncedToSoftpro).toBe(true);
+    expect(inserted.softproListingConfirmed).toBe(true);
     expect(inserted.category).toBe('prelim');
     expect(inserted.checksum).toBe(checksumBuffer(PDF));
   });
@@ -296,6 +297,7 @@ describe('ingestPrelimFromSoftPro', () => {
 
     const inserted = insertValuesMock.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(inserted.isSyncedToSoftpro).toBe(true);
+    expect(inserted.softproListingConfirmed).toBe(true);
     expect(maybeAutoDeliverMock).not.toHaveBeenCalled();
   });
 });

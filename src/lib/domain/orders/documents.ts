@@ -48,6 +48,7 @@ export interface OrderDocument {
   softproDocumentId?: string | null;
   softproAttachAttemptCount?: number | null;
   softproAttachNextRetryAt?: Date | string | null;
+  softproListingConfirmed?: boolean | null;
   createdBy?: string | null;
   updatedAt?: Date | string | null;
 }

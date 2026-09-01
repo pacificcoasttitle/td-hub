@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { formatFileSize } from './document-upload-form';
 import { createdByVariant, formatCreatedBy } from '@/lib/domain/orders/created-by-display';
+import { softProSyncDisplay, softProSyncLabel } from '@/lib/domain/documents/softpro-attach-verify';
 
 interface Document {
   id: number;
@@ -18,6 +19,7 @@ interface Document {
   softproSyncError?: string | null;
   softproDocumentId?: string | null;
   softproAttachAttemptCount?: number | null;
+  softproListingConfirmed?: boolean | null;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -78,7 +80,9 @@ export function DocumentRow({ doc, onRefresh }: { doc: Document; onRefresh: () =
         <td className="px-4 py-3 whitespace-nowrap">
           {doc.isSyncedToSoftpro ? (
             <span
-              className="inline-flex items-center gap-1 text-xs font-medium text-green-700"
+              className={`inline-flex items-center gap-1 text-xs font-medium ${
+                softProSyncDisplay(doc) === 'accepted' ? 'text-amber-800' : 'text-green-700'
+              }`}
               title={
                 [
                   doc.softproSyncedAt ? `Synced ${formatDate(doc.softproSyncedAt)}` : 'Synced',
@@ -89,7 +93,7 @@ export function DocumentRow({ doc, onRefresh }: { doc: Document; onRefresh: () =
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
-              In SoftPro
+              {softProSyncLabel(doc)}
             </span>
           ) : (
             <div className="flex flex-col gap-1 items-start">

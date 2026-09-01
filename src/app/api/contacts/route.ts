@@ -5,10 +5,12 @@ import { getContacts } from '@/lib/domain/contacts/service';
 import { db } from '@/lib/db/client';
 import { contacts, profiles } from '@/lib/db/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
-import { createUser } from '@/lib/integrations/softpro';
 import { ALL_CONTACT_TYPES, INTERNAL_TYPES } from '@/lib/domain/contacts/contact-constants';
-
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin'];
+import { canCreateSoftProRecords } from '@/lib/domain/contacts/create-roles';
+import {
+  CREATE_PERSON_USER_TYPES,
+  createContactInSoftPro,
+} from '@/lib/domain/contacts/create-contact';
 
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
@@ -47,15 +49,6 @@ const createSchema = z.object({
   userType: z.enum(ALL_CONTACT_TYPES).optional(),
   contactType: z.enum(ALL_CONTACT_TYPES).optional(),
 }).transform(d => ({ ...d, userType: d.userType ?? d.contactType ?? 'realtor' }));
-
-function generateLookupCode(firstName: string, lastName: string, companyName?: string | null): string {
-  const clean = (s: string) => s.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-  const base = clean(lastName).slice(0, 6) + clean(firstName).slice(0, 4);
-  const companySuffix = companyName ? clean(companyName).slice(0, 4) : '';
-  const ts = Date.now().toString(36).slice(-4);
-  const code = (base + companySuffix + ts).slice(0, 20);
-  return code.length >= 10 ? code : code.padEnd(10, '0');
-}
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -121,7 +114,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
-  if (!session || !ADMIN_ROLES.includes(session.role)) {
+  if (!session || !canCreateSoftProRecords(session.role)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -132,60 +125,77 @@ export async function POST(req: NextRequest) {
   }
 
   const data = parsed.data;
-  const lookupCode = generateLookupCode(data.firstName, data.lastName, data.companyName);
-  const fullName = `${data.lastName}, ${data.firstName}`;
   const isInternal = INTERNAL_TYPES.has(data.userType);
 
-  try {
-    if (!isInternal) {
-      const spPayload = {
-        FirstName: data.firstName,
-        LastName: data.lastName,
-        Phone: data.phone ?? '',
-        Email: data.email ?? '',
-        ClientLookupCode: lookupCode,
-        CompanyLookupCode: data.companyLookupCode ?? '',
-        Address1: data.address ?? '',
-        City: data.city ?? '',
-        State: data.state ?? '',
-        Zip: data.zip ?? '',
-      };
-
-      const spResult = await createUser(spPayload);
-      if (!spResult.success) {
-        return NextResponse.json(
-          { error: 'SoftPro CreateUser failed', detail: spResult.error?.message },
-          { status: 502 },
-        );
-      }
-    }
-
+  if (isInternal) {
+    const fullName = `${data.lastName}, ${data.firstName}`;
     const roles = USER_TYPE_ROLES[data.userType] ?? [data.userType];
-
-    const [row] = await db.insert(contacts).values({
-      sourceSystem: isInternal ? 'manual' : 'softpro',
-      sourceId: lookupCode,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      fullName,
-      companyName: data.companyName ?? null,
-      email: (data.email && data.email !== '') ? data.email : null,
-      phone: data.phone ?? null,
-      cell: data.cell ?? null,
-      address1: data.address ?? null,
-      city: data.city ?? null,
-      state: data.state ?? null,
-      zip: data.zip ?? null,
-      licenseNo: data.licenseNo ?? null,
-      softproLookupCode: lookupCode,
-      softproUserType: data.userType,
-      roles,
-      isRealEstateAgent: data.userType === 'realtor' || data.userType === 'agent' || data.userType === 'real_estate_agent',
-      isActive: data.isActive ?? true,
-    }).returning({ id: contacts.id });
-
-    return NextResponse.json({ id: row!.id, lookupCode, fullName }, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    try {
+      const [row] = await db.insert(contacts).values({
+        sourceSystem: 'manual',
+        firstName: data.firstName,
+        lastName: data.lastName,
+        fullName,
+        companyName: data.companyName ?? null,
+        email: (data.email && data.email !== '') ? data.email : null,
+        phone: data.phone ?? null,
+        cell: data.cell ?? null,
+        address1: data.address ?? null,
+        city: data.city ?? null,
+        state: data.state ?? null,
+        zip: data.zip ?? null,
+        licenseNo: data.licenseNo ?? null,
+        softproUserType: data.userType,
+        roles,
+        isTitleOfficer: data.userType === 'title_officer',
+        isEscrowOfficer: data.userType === 'escrow_officer',
+        isSalesRep: data.userType === 'sales_rep',
+        isActive: data.isActive ?? true,
+      }).returning({ id: contacts.id });
+      return NextResponse.json({ id: row!.id, fullName }, { status: 201 });
+    } catch {
+      return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    }
   }
+
+  const personType = (CREATE_PERSON_USER_TYPES as readonly string[]).includes(data.userType)
+    ? data.userType as (typeof CREATE_PERSON_USER_TYPES)[number]
+    : data.userType === 'agent' || data.userType === 'real_estate_agent'
+      ? 'realtor' as const
+      : null;
+  if (!personType) {
+    return NextResponse.json({ error: 'Contact type cannot be created through SoftPro' }, { status: 400 });
+  }
+
+  const result = await createContactInSoftPro({
+    firstName: data.firstName,
+    lastName: data.lastName,
+    companyLookupCode: data.companyLookupCode ?? '',
+    phone: data.phone,
+    email: data.email,
+    address: data.address,
+    city: data.city,
+    state: data.state,
+    zip: data.zip,
+    userType: personType,
+  });
+
+  if (result.ok) {
+    return NextResponse.json(result.contact, { status: 201 });
+  }
+  if (result.code === 'COMPANY_REQUIRED' || result.code === 'COMPANY_NOT_FOUND' || result.code === 'VALIDATION') {
+    return NextResponse.json({ error: result.error, code: result.code }, { status: 400 });
+  }
+  if (result.code === 'SOFTPRO') {
+    return NextResponse.json({
+      error: 'SoftPro CreateUser failed',
+      detail: result.error,
+      companyKept: result.companyKept,
+    }, { status: 502 });
+  }
+  return NextResponse.json({
+    error: result.error,
+    lookupCode: result.lookupCode,
+    companyKept: result.companyKept,
+  }, { status: 500 });
 }

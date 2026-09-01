@@ -25,13 +25,48 @@ async function logSoapExchange(params: {
       errorCategory: params.errorCategory ?? null,
       requestMeta: {
         soapAction: params.soapAction,
-        requestEnvelope: params.requestEnvelope.slice(0, 1000),
+        requestEnvelope: params.requestEnvelope.slice(0, SOAP_LOG_LIMIT),
+        requestEnvelopeBytes: params.requestEnvelope.length,
+        requestEnvelopeTruncated: params.requestEnvelope.length > SOAP_LOG_LIMIT,
       } as Record<string, unknown>,
       responseMeta: params.responseBody
-        ? { responseBody: params.responseBody.slice(0, 1000) } as Record<string, unknown>
+        ? {
+            responseBody: clampSoapBody(params.responseBody),
+            responseBodyBytes: params.responseBody.length,
+            responseBodyTruncated: params.responseBody.length > SOAP_LOG_LIMIT,
+          } as Record<string, unknown>
         : null,
     });
   } catch { /* logging must not break the main flow */ }
+}
+
+// ─── How much of a SOAP exchange we keep ────────────────────────────────────
+//
+// This was 1,000 characters, which truncated exactly the part worth having. A
+// SOAP fault or a .NET exception puts boilerplate first and the specific cause
+// last, so a 1,000-character cap reliably kept the useless half — "a fault that
+// loses its tail is the same problem with better manners".
+//
+// WHY IT WAS SET LOW, AND WHY THAT REASON DOES NOT APPLY TO THE WHOLE BODY.
+// A successful GenerateCPL returns the letter as base64 inside the envelope, so
+// an uncapped log would write a PDF into jsonb on every success. That is a real
+// concern and the cap was right to exist — it was just applied to everything
+// rather than to the thing that is actually huge.
+//
+// So: strip the base64 payload, keep everything else up to a generous ceiling.
+// The stored meta records the original length and whether it was cut, so a
+// reader never has to guess whether they are looking at all of it.
+const SOAP_LOG_LIMIT = 64_000;
+
+/** Replace base64 document blobs with a marker, then clamp. */
+function clampSoapBody(body: string): string {
+  // The PDF arrives as a long base64 run inside an element. Anything over 512
+  // unbroken base64 characters is a document, not a message.
+  const stripped = body.replace(
+    /[A-Za-z0-9+/=]{512,}/g,
+    (m) => `[base64 omitted, ${m.length} chars]`,
+  );
+  return stripped.slice(0, SOAP_LOG_LIMIT);
 }
 
 // Namespaces — exact match to legacy Fnf.php

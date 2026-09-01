@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { SyncButton } from './sync-button';
 import { ContactFormModal, type ContactRecord } from './contact-form-modal';
 import { ManagerAssignModal } from './manager-assign-modal';
+import { CreatePartyWizard } from '@/components/admin/create-party-wizard';
+import type { CreatePersonUserType } from '@/lib/domain/contacts/create-contact';
 
 interface Contact {
   id: number;
@@ -45,6 +47,15 @@ const SYNC_USER_TYPE: Record<string, string> = {
 };
 
 const PAGE_SIZE = 25;
+
+const WIZARD_TYPES = new Set(['escrow', 'lender', 'mortgage_broker', 'realtor', 'agent', 'real_estate_agent']);
+
+function toPersonType(typeFilter: string): CreatePersonUserType {
+  if (typeFilter === 'escrow') return 'escrow';
+  if (typeFilter === 'lender') return 'lender';
+  if (typeFilter === 'mortgage_broker') return 'mortgage_broker';
+  return 'realtor';
+}
 
 function cName(c: Contact) {
   return c.fullName || [c.firstName, c.lastName].filter(Boolean).join(' ') || '—';
@@ -301,9 +312,22 @@ export function ContactListPage({
         )}
       </div>
 
-      {!readOnly && (
+      {!readOnly && editContact && (
         <ContactFormModal open={modalOpen} onClose={() => setModalOpen(false)} onSuccess={fetchContacts}
           contact={editContact} defaultType={typeFilter} />
+      )}
+      {!readOnly && !editContact && WIZARD_TYPES.has(typeFilter) && (
+        <CreatePartyWizard
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+          onCreated={() => fetchContacts()}
+          userType={toPersonType(typeFilter)}
+          label={title}
+        />
+      )}
+      {!readOnly && !editContact && !WIZARD_TYPES.has(typeFilter) && (
+        <ContactFormModal open={modalOpen} onClose={() => setModalOpen(false)} onSuccess={fetchContacts}
+          contact={null} defaultType={typeFilter} />
       )}
       {showManagerColumn && mgrTarget && (
         <ManagerAssignModal open={mgrModalOpen} managerId={mgrTarget.id} managerName={mgrTarget.name}

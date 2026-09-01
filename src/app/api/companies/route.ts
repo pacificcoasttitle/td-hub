@@ -2,12 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { getCompanies } from '@/lib/domain/contacts/service';
-import { db } from '@/lib/db/client';
-import { companies } from '@/lib/db/schema';
-import { addCompany } from '@/lib/integrations/softpro';
-import { COMPANY_TYPE_MAP, DISPLAY_TO_TYPE } from '@/lib/domain/contacts/company-constants';
-
-const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin'];
+import { ADD_COMPANY_USER_TYPES, DISPLAY_TO_TYPE } from '@/lib/domain/contacts/company-constants';
+import { canCreateSoftProRecords } from '@/lib/domain/contacts/create-roles';
+import { createCompanyInSoftPro } from '@/lib/domain/contacts/create-company';
 
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
@@ -23,25 +20,26 @@ const createSchema = z.object({
   name: z.string().min(1).max(200),
   email: z.string().email().max(200).optional().nullable().or(z.literal('')),
   phone: z.string().max(50).optional().nullable(),
-  address: z.string().max(200).optional().nullable(),
+  address1: z.string().max(200).optional(),
+  address: z.string().max(200).optional(),
   city: z.string().max(100).optional().nullable(),
   state: z.string().max(10).optional().nullable(),
   zip: z.string().max(20).optional().nullable(),
-  lookupCode: z.string().max(100).optional(),
-  isActive: z.boolean().optional(),
-  userType: z.enum(['escrow', 'lender', 'mortgage_broker', 'realtor']).optional(),
+  userType: z.enum(ADD_COMPANY_USER_TYPES).optional(),
   companyType: z.string().optional(),
-}).transform(d => ({
-  ...d,
-  userType: d.userType ?? DISPLAY_TO_TYPE[d.companyType ?? ''] ?? 'escrow',
-}));
-
-function generateCompanyLookupCode(name: string): string {
-  const clean = name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 10);
-  const ts = Date.now().toString(36).slice(-4);
-  const code = clean + ts;
-  return code.length >= 10 ? code : code.padEnd(10, '0');
-}
+  confirmCreate: z.boolean().optional(),
+}).transform((d) => {
+  const mapped = d.userType ?? DISPLAY_TO_TYPE[d.companyType ?? ''];
+  const userType = (ADD_COMPANY_USER_TYPES as readonly string[]).includes(mapped ?? '')
+    ? mapped as (typeof ADD_COMPANY_USER_TYPES)[number]
+    : undefined;
+  return {
+    ...d,
+    address1: (d.address1 || d.address || '').trim(),
+    userType,
+  };
+}).refine((d) => !!d.userType, { message: 'UserType must be Escrow Company, Lender, Mortgage Broker, or Selling Agent/Broker' })
+  .refine((d) => d.address1.length > 0, { message: 'Address1 is required' });
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -69,7 +67,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
-  if (!session || !ADMIN_ROLES.includes(session.role)) {
+  if (!session || !canCreateSoftProRecords(session.role)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -80,48 +78,29 @@ export async function POST(req: NextRequest) {
   }
 
   const data = parsed.data;
-  const lookupCode = generateCompanyLookupCode(data.name);
-  const spUserType = COMPANY_TYPE_MAP[data.userType] ?? data.userType;
+  const result = await createCompanyInSoftPro({
+    name: data.name,
+    address1: data.address1,
+    city: data.city,
+    state: data.state,
+    zip: data.zip,
+    phone: data.phone,
+    email: data.email,
+    userType: data.userType!,
+    confirmCreate: data.confirmCreate,
+  });
 
-  const spPayload = {
-    Name: data.name,
-    Phone: data.phone ?? '',
-    Email: data.email ?? '',
-    LookupCode: lookupCode,
-    Address1: data.address ?? '',
-    City: data.city ?? '',
-    State: data.state ?? '',
-    Zip: data.zip ?? '',
-    UserType: spUserType,
-  };
-
-  try {
-    const spResult = await addCompany(spPayload);
-    if (!spResult.success) {
-      return NextResponse.json(
-        { error: 'SoftPro AddCompany failed', detail: spResult.error?.message },
-        { status: 502 },
-      );
-    }
-
-    const [row] = await db.insert(companies).values({
-      sourceSystem: 'softpro',
-      sourceId: lookupCode,
-      name: data.name,
-      companyType: data.userType,
-      lookupCode,
-      email: data.email ?? null,
-      phone: data.phone ?? null,
-      address1: data.address ?? null,
-      city: data.city ?? null,
-      state: data.state ?? null,
-      zip: data.zip ?? null,
-      isRealEstateCompany: data.userType === 'realtor',
-      isActive: true,
-    }).returning({ id: companies.id });
-
-    return NextResponse.json({ id: row!.id, lookupCode, name: data.name }, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  if (result.ok) {
+    return NextResponse.json(result.company, { status: 201 });
   }
+  if (result.code === 'VALIDATION') {
+    return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+  if (result.code === 'EXACT_DUPLICATE' || result.code === 'NEAR_MATCH') {
+    return NextResponse.json({ error: result.error, matches: result.matches, code: result.code }, { status: 409 });
+  }
+  if (result.code === 'SOFTPRO') {
+    return NextResponse.json({ error: 'SoftPro AddCompany failed', detail: result.error }, { status: 502 });
+  }
+  return NextResponse.json({ error: result.error, lookupCode: result.lookupCode }, { status: 500 });
 }

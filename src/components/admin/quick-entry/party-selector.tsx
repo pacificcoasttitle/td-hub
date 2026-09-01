@@ -19,6 +19,8 @@ import {
   type ContactSearchHit,
 } from '@/lib/domain/orders/party-contact';
 import { EC, FL, type PartyContact } from './types';
+import { CreatePartyWizard, type CreatedPartyContact } from '@/components/admin/create-party-wizard';
+import type { CreatePersonUserType } from '@/lib/domain/contacts/create-contact';
 
 export type PartySearchRole = 'buyer_agent' | 'listing_agent' | 'lender' | 'mortgage_broker' | 'escrow';
 
@@ -36,6 +38,14 @@ const COMPANY_TYPE: Partial<Record<PartySearchRole, string>> = {
   escrow: 'escrow_company',
   buyer_agent: 'realtor',
   listing_agent: 'realtor',
+};
+
+const CREATE_TYPE: Record<PartySearchRole, CreatePersonUserType> = {
+  buyer_agent: 'realtor',
+  listing_agent: 'realtor',
+  lender: 'lender',
+  mortgage_broker: 'mortgage_broker',
+  escrow: 'escrow',
 };
 
 interface SearchHit extends ContactSearchHit {
@@ -84,6 +94,7 @@ export function PartySelector({
   const [suggestions, setSuggestions] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [open, setOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -148,6 +159,26 @@ export function PartySelector({
     setOpen(false);
   }
 
+  function selectCreated(c: CreatedPartyContact) {
+    set(applyContactSelection({
+      id: c.id,
+      fullName: c.fullName,
+      firstName: c.firstName,
+      lastName: c.lastName,
+      companyName: c.companyName,
+      email: c.email,
+      phone: c.phone,
+      lookupCode: c.lookupCode,
+      clientLookupCode: c.clientLookupCode,
+      companyLookupCode: c.companyLookupCode,
+      address: c.address,
+      city: c.city,
+    }));
+    setQuery('');
+    setSuggestions([]);
+    setOpen(false);
+  }
+
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
@@ -201,7 +232,8 @@ export function PartySelector({
           {searching ? (
             <ContactDropdownMessage>Searching…</ContactDropdownMessage>
           ) : suggestions.length > 0 ? (
-            suggestions.map((hit) => (
+            <>
+            {suggestions.map((hit) => (
               <ContactResultButton
                 key={hit.id}
                 initial={contactInitial(partyDisplayName(hit), hit.companyName)}
@@ -214,14 +246,42 @@ export function PartySelector({
                 subDetail={formatContactAddress(hit)}
                 onClick={() => selectHit(hit)}
               />
-            ))
+            ))}
+            <div className="px-3 py-2 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => { setOpen(false); setCreateOpen(true); }}
+                className="w-full h-8 text-xs font-medium text-[#1B2A4A] hover:underline"
+              >
+                None of these — create new {label.toLowerCase()}
+              </button>
+            </div>
+            </>
           ) : (
-            <ContactDropdownMessage>
-              No {label.toLowerCase()} found for &ldquo;{query.trim()}&rdquo;
-            </ContactDropdownMessage>
+            <div className="px-3 py-3">
+              <ContactDropdownMessage>
+                No {label.toLowerCase()} found for &ldquo;{query.trim()}&rdquo;
+              </ContactDropdownMessage>
+              <button
+                type="button"
+                onClick={() => { setOpen(false); setCreateOpen(true); }}
+                className="mt-2 w-full h-9 text-sm font-medium text-white bg-[#1B2A4A] rounded-lg hover:bg-[#243658]"
+              >
+                Create new {label.toLowerCase()}
+              </button>
+            </div>
           )}
         </ContactDropdown>
       )}
+
+      <CreatePartyWizard
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={selectCreated}
+        userType={CREATE_TYPE[searchRole]}
+        label={label}
+        initialQuery={query}
+      />
     </div>
   );
 }

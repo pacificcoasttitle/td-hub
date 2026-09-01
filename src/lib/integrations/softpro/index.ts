@@ -63,6 +63,15 @@ export async function getAttachedDocuments(orderNumber: string) {
   return client.getAttachedDocuments(orderNumber);
 }
 
+export async function getAttachedDocumentsPrelim(orderNumber: string) {
+  if (useMock) {
+    const mock = await import('./mock');
+    return mock.getAttachedDocumentsPrelim(orderNumber);
+  }
+  const client = await import('./client');
+  return client.getAttachedDocumentsPrelim(orderNumber);
+}
+
 export async function getLookupTable(userType: string): Promise<VendorResult<SoftProLookupItem[]>>;
 export async function getLookupTable(params: SoftProLookupTableRequest): Promise<VendorResult<SoftProLookupTablePage>>;
 export async function getLookupTable(

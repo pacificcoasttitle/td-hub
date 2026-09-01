@@ -290,6 +290,14 @@ function buildProperty(
  * a trust needs BOTH: `Trust` so the letter renders it as a trust, and
  * `CompanyName` so the name passes validation at all.
  *
+ * THE INFERENCE THAT BROKE THIS IS AN EASY ONE TO MAKE AGAIN. c82dfff read the
+ * `Trust` row correctly — a trust name really does belong in that field — and
+ * then took one step too far, assuming a field that ACCEPTS the name also
+ * SATISFIES the requirement to identify the party. Placement and identity are
+ * separate questions in this table, and only `CompanyName` and `First`+`Last`
+ * answer the second one. Anyone reading §2.3.3.3 fresh will be tempted by the
+ * same step; the four rows only rule it out when read together.
+ *
  * Sending `Trust` alone is what this function did between c82dfff and now, and
  * Westcor rejected it in production on order 6142:
  *
@@ -491,7 +499,31 @@ export async function createOrUpdateOrder(
   const data = (await res.json()) as WestcorOrderResponse;
 
   if (data.messages?.error && data.messages.error.length > 0) {
-    throw new Error(data.messages.error[0]);
+    // ─── WESTCOR CAN PARTLY SUCCEED, AND THE TVID IS IN THIS BODY ───────────
+    //
+    // A 200 carrying `messages.error` means Westcor CREATED THE ORDER and then
+    // rejected something inside it — one bad name, say. `data.tvid` is the
+    // order it just made, sitting in the same object as the error.
+    //
+    // Throwing without it strands the file permanently: nothing on our side
+    // records the tvid, so the next attempt issues a CREATE and Westcor
+    // refuses it as "Agent Number - Order Number Must be Unique" forever. That
+    // is what happened to orders 48, 49 and 6142 — see
+    // docs/tickets/WESTCOR_PARTIAL_CREATE_STRANDS_THE_ORDER.md.
+    //
+    // So the tvid rides on the error. The caller persists it before rethrowing,
+    // which turns the next attempt into an UPDATE and lets the file recover by
+    // itself once whatever Westcor objected to is fixed.
+    const err = new Error(data.messages.error[0]) as Error & {
+      diagnostics?: Record<string, unknown>;
+      westcorTvid?: string;
+    };
+    const tvid = String(data.tvid ?? 0);
+    if (tvid !== '0' && tvid !== 'undefined' && tvid !== 'null') {
+      err.westcorTvid = tvid;
+      err.diagnostics = { ...(err.diagnostics ?? {}), partialCreateTvid: tvid };
+    }
+    throw err;
   }
 
   const westcorOrderId = String(data.tvid ?? 0);

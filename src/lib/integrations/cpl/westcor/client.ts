@@ -7,7 +7,7 @@ import type {
 import { MOCK_PDF_BASE64 } from '../types';
 import { db } from '@/lib/db/client';
 import { vendorApiLogs, vendorTokens, cplBranches } from '@/lib/db/schema';
-import { and, eq, gt, desc } from 'drizzle-orm';
+import { and, eq, gt, desc, sql } from 'drizzle-orm';
 import { getToken, cachedGroups, mapGroupsToBranches } from './auth';
 import type { WestcorGroup } from './auth';
 import {
@@ -73,6 +73,15 @@ const MOCK_BRANCHES: CplBranch[] = [
 
 // ─── Tvid lookup (reuse Westcor order on retry) ─────────────────────────────
 
+// DELIBERATELY NOT FILTERED ON success = true.
+//
+// A tvid from a PARTIAL create is just as real as one from a clean create —
+// Westcor assigned the order either way, and reusing it is the only thing that
+// turns the next attempt into an UPDATE. Requiring success here is what left
+// orders 48, 49 and 6142 unable to retry: the only record of their Westcor
+// order sat on a failed call, so this lookup could not see it.
+//
+// The tvid itself is the validity test. A row without one is skipped.
 async function lookupExistingTvid(orderId: number): Promise<string | null> {
   try {
     const [row] = await db
@@ -82,8 +91,9 @@ async function lookupExistingTvid(orderId: number): Promise<string | null> {
         and(
           eq(vendorApiLogs.vendor, VENDOR),
           eq(vendorApiLogs.operation, 'create_order'),
-          eq(vendorApiLogs.success, true),
           eq(vendorApiLogs.orderId, orderId),
+          sql`${vendorApiLogs.responseMeta}->>'tvid' IS NOT NULL`,
+          sql`${vendorApiLogs.responseMeta}->>'tvid' <> '0'`,
         ),
       )
       .orderBy(desc(vendorApiLogs.createdAt))
@@ -251,6 +261,28 @@ export const westcorAdapter: CplAdapter = {
     } catch (err) {
       const durationMs = Date.now() - start;
       const errDiag = (err as { diagnostics?: Record<string, unknown> }).diagnostics ?? {};
+
+      // ─── PERSIST A TVID FROM A PARTIAL STEP A, BEFORE ANYTHING ELSE ────────
+      //
+      // Westcor can create the order and still return an error in the same 200
+      // body. createOrUpdateOrder attaches the tvid to the error for exactly
+      // this moment: if we do not write it here, the order exists at Westcor
+      // with nothing on our side pointing at it, and every future attempt is
+      // refused as a duplicate agent file number. Stranded, permanently.
+      //
+      // Logged with success:false, because Step A did NOT succeed — the row
+      // records a tvid we now know about, not a call that worked. The lookup
+      // keys on the tvid rather than on success for the same reason: Westcor
+      // assigned it either way.
+      const partialTvid = (err as { westcorTvid?: string }).westcorTvid;
+      if (partialTvid) {
+        await logRequest({
+          operation: 'create_order', orderId: input.orderId, requestId,
+          startedAt: new Date(), success: false, errorCategory: 'PARTIAL_CREATE',
+          meta: { step: 'partial', reason: 'Westcor created the order and rejected its contents', tvid: partialTvid },
+          responseMeta: { tvid: partialTvid, partial: true },
+        });
+      }
       // THE NAMES WE SENT, ON EVERY FAILURE.
       //
       // Until now a failed generate_cpl logged `{ error }` and nothing else, so

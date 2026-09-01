@@ -1,7 +1,7 @@
 # Where else do we throw on a vendor error and discard the body?
 
-**Status: SURVEY. Nothing fixed here beyond the Westcor site already
-addressed.**
+**Status: ALL THREE GAPS CLOSED. Survey retained as the record of how they
+were found and what was checked.**
 Opened: 2026-09-01
 Prompted by: the Westcor partial-create bug, where a 200 carried both the
 `tvid` and the error and we kept only the error.
@@ -98,6 +98,21 @@ Westcor's `generateCplPdf` (line 769, 781) does keep `diagnostics.rawResponse =
 text.slice(0, 500)`, and those diagnostics reach the failure log — which is why
 CPL PDF failures have historically been easier to read than Step A failures.
 
+## All three are now fixed
+
+- `westcor/payloads.ts` non-200 — `westcorOrderError` persists the whole body
+  and extracts a tvid if one is present, before throwing.
+- `fnf/auth.ts:77, 135` — a 200 whose body lacks the token field now logs the
+  body with `errorCategory: 'AUTH_SHAPE'` before throwing.
+- The 1,000-character SOAP cap is raised to 64 KB, with base64 document blobs
+  stripped rather than the message truncated. That cap existed for a real
+  reason — a successful GenerateCPL returns the PDF inside the envelope — but
+  it was applied to the whole body rather than to the part that is actually
+  huge.
+
+Every stored body now records its original length and whether it was cut, so a
+reader never has to guess whether they are looking at all of it.
+
 ## What this suggests, without proposing it
 
 The safe sites share one shape: **persist first, throw second.** The unsafe
@@ -106,7 +121,9 @@ be read except through a function that stores it" would make the difference
 structural rather than remembered, in the same way `deliverableEmailsForSend`
 takes an order id and nothing else.
 
-Not proposed here. Reported, per the ask.
+Designed in `docs/tickets/PERSIST_THEN_THROW_AS_A_STRUCTURE.md`: a helper now,
+a lint rule alongside it, and a full fetch wrapper only once the shape of the
+exceptions is known rather than guessed.
 
 ## Related
 

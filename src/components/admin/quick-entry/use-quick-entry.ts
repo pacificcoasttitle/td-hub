@@ -7,6 +7,7 @@ import type { SiteXPropertyResult } from '@/components/shared/property-confirm-m
 import { buildPreInitAddressKey, usePreInitOnSiteX } from '@/lib/orders/use-pre-init-on-sitex';
 import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
 import { toCreateOrderContact } from '@/lib/domain/orders/party-contact';
+import { claimCreateInFlight, releaseCreateInFlight } from '@/lib/orders/claim-create-in-flight';
 import { EP, EC, type Person, type FormOptions } from './types';
 import { classifySiteXOwners } from '@/lib/domain/orders/names/classify-owners';
 import { legacyToTitleCase } from '@/lib/domain/orders/names/title-case';
@@ -75,6 +76,7 @@ export function useQuickEntry() {
   const [formOptsStatus, setFormOptsStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
 
   const [submitting, setSubmitting] = useState(false);
+  const createInFlightRef = useRef(false);
   const [result, setResult] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -306,6 +308,8 @@ export function useQuickEntry() {
 
   async function handleSubmit() {
     if (result?.submitLocked) return;
+    if (submitting) return;
+    if (!claimCreateInFlight(createInFlightRef)) return;
     setResult(null);
     setSubmitting(true);
     try {
@@ -383,6 +387,7 @@ export function useQuickEntry() {
     } catch (err) {
       setResult({ type: 'error', message: err instanceof Error ? err.message : 'Order creation failed' });
     } finally {
+      releaseCreateInFlight(createInFlightRef);
       setSubmitting(false);
     }
   }

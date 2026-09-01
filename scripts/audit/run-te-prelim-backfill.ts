@@ -23,34 +23,34 @@ function parseLimit(argv: string[]): number {
 }
 
 async function deliveryCounts(sql: ReturnType<typeof postgres>, batchStart: Date) {
-  const [delivered] = await sql<{ n: number }>`
+  const deliveredRows = await sql`
     select count(*)::int as n from admin_activity_logs
     where action = 'prelim_auto_delivery'
       and meta->>'outcome' = 'delivered'
       and created_at > ${batchStart}
-  `;
-  const [prelimDelivered] = await sql<{ n: number }>`
+  ` as unknown as Array<{ n: number }>;
+  const prelimDeliveredRows = await sql`
     select count(*)::int as n from admin_activity_logs
     where action = 'prelim_delivered'
       and created_at > ${batchStart}
-  `;
-  const outcomes = await sql<{ outcome: string | null; n: number }>`
+  ` as unknown as Array<{ n: number }>;
+  const outcomes = await sql`
     select meta->>'outcome' as outcome, count(*)::int as n
     from admin_activity_logs
     where action = 'prelim_auto_delivery'
       and created_at > ${batchStart}
     group by 1
     order by 1
-  `;
+  ` as unknown as Array<{ outcome: string | null; n: number }>;
   return {
-    autoDelivered: delivered?.n ?? 0,
-    prelimDelivered: prelimDelivered?.n ?? 0,
+    autoDelivered: deliveredRows[0]?.n ?? 0,
+    prelimDelivered: prelimDeliveredRows[0]?.n ?? 0,
     outcomes,
   };
 }
 
 async function remainingTeWithoutPrelim(sql: ReturnType<typeof postgres>): Promise<number> {
-  const [row] = await sql<{ n: number }>`
+  const rows = await sql`
     select count(*)::int as n
     from orders o
     where o.order_type = 'Title & Escrow'
@@ -59,8 +59,8 @@ async function remainingTeWithoutPrelim(sql: ReturnType<typeof postgres>): Promi
         select 1 from documents d
         where d.order_id = o.id and d.category = 'prelim' and d.status = 'active'
       )
-  `;
-  return row?.n ?? 0;
+  ` as unknown as Array<{ n: number }>;
+  return rows[0]?.n ?? 0;
 }
 
 async function main() {

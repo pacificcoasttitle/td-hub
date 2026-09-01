@@ -28,7 +28,7 @@ describe('the T&E prelim backfill cannot reach maybeAutoDeliverPrelim', () => {
     expect(sig, 'backfillTePrelimsWithoutDelivery not found').not.toBeNull();
     expect(sig![1].replace(/\s+/g, ' ').trim().replace(/,$/, '')).toBe('input: BackfillTePrelimsInput');
 
-    const input = src.match(/export interface BackfillTePrelimsInput \{([^}]*)\}/s);
+    const input = src.match(/export interface BackfillTePrelimsInput \{([^}]*)\}/);
     expect(input, 'BackfillTePrelimsInput not found').not.toBeNull();
     expect(input![1].replace(/\s+/g, ' ').trim()).toBe('limit: number;');
   });
@@ -41,7 +41,7 @@ describe('the T&E prelim backfill cannot reach maybeAutoDeliverPrelim', () => {
   });
 
   it('ingest only calls maybeAutoDeliverPrelim when deliver is true', () => {
-    expect(ingestSrc).toMatch(/if \(input\.deliver\) \{\s*delivery = await maybeAutoDeliverPrelim/s);
+    expect(ingestSrc).toMatch(/if \(input\.deliver\) \{\s*delivery = await maybeAutoDeliverPrelim/);
   });
 
   it('does not call TESSA and is not handleFetchPrelims', () => {

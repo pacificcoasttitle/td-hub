@@ -27,25 +27,26 @@ import { autoTriggerTitlePoint } from '@/lib/domain/titlepoint/auto-trigger';
 
 const APPLY = process.argv.includes('--apply');
 
-/** Keep / repair only. Cancelled duplicates are not in this list. */
+/** Keep / repair only. Matches Select, not the original first-of-set list. */
 export const KEEP_FILES = [
   '20021662-OCT', // varchar — 18556 Rex Ln (first of set)
-  '20021669-OCT', // varchar — 15181 Jackson St (first of set; 683 is a later timeout dupe)
   '20021675-GLT', // varchar — 6154 Whittier Blvd (single)
   '20021676-GLT', // timeout single — 2570 Rudder Avenue
+  '20021681-GLT', // Josephine survivor — Select kept 681, cancelled 680
+  '20021683-OCT', // Jackson survivor — Select kept 683, cancelled 669 and 679
   '20021684-OCT', // timeout keep — 21975 Trailway Ln
   '20021695-GLT', // timeout keep — 82639 Crest Ave
   '20021701-GLT', // timeout keep — 56320 Bonanza Dr
 ] as const;
 
-/** Named so a --apply typo cannot widen the blast. */
+/** Named so a --apply typo cannot widen the blast. Do not un-cancel these. */
 const CANCEL_FILES = [
   '20021663-OCT',
+  '20021669-OCT', // Jackson original first; cancelled in Select
   '20021677-OCT',
   '20021678-OCT',
-  '20021679-OCT',
-  '20021681-GLT',
-  '20021683-OCT', // later Jackson timeout; keep is 669
+  '20021679-OCT', // Jackson; confirmed cancelled in Select
+  '20021680-GLT', // Josephine original first; cancelled in Select
   '20021685-OCT',
   '20021686-OCT',
   '20021687-OCT',
@@ -125,7 +126,7 @@ async function repairOne(fileNumber: KeepFile): Promise<Report> {
       status: order.operationalStatus,
       property: 'canceled',
       titlePoint: 'canceled',
-      note: 'hub already canceled — operator must un-cancel in SoftPro Select before repair',
+      note: 'hub already canceled — do not un-cancel, do not repair',
     };
   }
 

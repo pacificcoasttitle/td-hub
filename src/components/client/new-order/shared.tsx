@@ -35,7 +35,29 @@ export function Nav({ onPrev, onNext, nextDisabled, nextLabel }: { onPrev?: () =
   );
 }
 
-export function PF({ person, onChange }: { person: Person; onChange: (f: string, v: string) => void }) {
+export function PF({ person, onChange, asOrganization, onReplace }: {
+  person: Person;
+  onChange: (f: string, v: string) => void;
+  asOrganization?: boolean;
+  onReplace?: (p: Person) => void;
+}) {
+  if (asOrganization) {
+    return (
+      <div>
+        <FL>Organization</FL>
+        <input
+          className={IN}
+          value={person.firstName || [person.middleName, person.lastName].filter(Boolean).join(' ')}
+          onChange={(e) => {
+            const next = { firstName: e.target.value, middleName: '', lastName: '' };
+            if (onReplace) onReplace(next);
+            else onChange('firstName', e.target.value);
+          }}
+          placeholder="Organization name"
+        />
+      </div>
+    );
+  }
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <div><FL>First Name</FL><input className={IN} value={person.firstName} onChange={(e) => onChange('firstName', e.target.value)} placeholder="First" /></div>

@@ -8,7 +8,7 @@ import { buildPreInitAddressKey, usePreInitOnSiteX } from '@/lib/orders/use-pre-
 import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
 import { toCreateOrderContact } from '@/lib/domain/orders/party-contact';
 import { EP, EC, type Person, type FormOptions } from './types';
-import { parseSiteXOwners } from '@/lib/domain/orders/names/sitex-owner-names';
+import { classifySiteXOwners } from '@/lib/domain/orders/names/classify-owners';
 import { legacyToTitleCase } from '@/lib/domain/orders/names/title-case';
 import { ownerTarget } from '@/lib/domain/orders/names/owner-routing';
 
@@ -75,7 +75,13 @@ export function useQuickEntry() {
   const [formOptsStatus, setFormOptsStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
 
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ type: 'success' | 'error'; message: string; orderId?: number; fileNumber?: string } | null>(null);
+  const [result, setResult] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    orderId?: number;
+    fileNumber?: string;
+    submitLocked?: boolean;
+  } | null>(null);
 
   // Auto-fill tracking
   const [repAutoFilled, setRepAutoFilled] = useState(false);
@@ -164,16 +170,28 @@ export function useQuickEntry() {
    * and overwrite that field.
    */
   function fillOwners(p: SiteXPropertyResult) {
-    const owners = parseSiteXOwners(p.primaryOwner, p.secondaryOwner);
+    const owners = classifySiteXOwners(p.primaryOwner, p.secondaryOwner);
     setOwnerWarnings(owners.warnings);
     if (!owners.primary) return;
 
     if (ownerTarget(txType) === 'seller') {
-      setSellerPrimary(owners.primary); setSellerSiteX(true);
-      if (owners.secondary) { setSellerSecondary(owners.secondary); setHasSecondarySeller(true); }
+      setSellerPrimary(owners.primary.person);
+      setSellerIsOrg(owners.primary.isOrg);
+      setSellerOrgType(owners.primary.isOrg ? owners.primary.orgType : '');
+      setSellerSiteX(true);
+      if (owners.secondary) {
+        setSellerSecondary(owners.secondary.person);
+        setHasSecondarySeller(true);
+      }
     } else {
-      setBorrower(owners.primary); setBorrowerSiteX(true);
-      if (owners.secondary) { setSecBorrower(owners.secondary); setHasSecBorrower(true); }
+      setBorrower(owners.primary.person);
+      setBorrowerIsOrg(owners.primary.isOrg);
+      setBorrowerOrgType(owners.primary.isOrg ? owners.primary.orgType : '');
+      setBorrowerSiteX(true);
+      if (owners.secondary) {
+        setSecBorrower(owners.secondary.person);
+        setHasSecBorrower(true);
+      }
     }
   }
 
@@ -287,6 +305,7 @@ export function useQuickEntry() {
   // ─── Submit ──────────────────────────────────────────────────────────────
 
   async function handleSubmit() {
+    if (result?.submitLocked) return;
     setResult(null);
     setSubmitting(true);
     try {
@@ -306,14 +325,18 @@ export function useQuickEntry() {
           apn: apn || undefined, legalDescription: legalDesc || undefined, county: county || undefined,
         },
         seller: {
-          firstName: sellerPrimary.firstName || 'TBD', middleName: sellerPrimary.middleName || undefined, lastName: sellerPrimary.lastName || 'TBD',
+          firstName: sellerPrimary.firstName || (sellerIsOrg ? sellerPrimary.lastName : '') || 'TBD',
+          middleName: sellerPrimary.middleName || undefined,
+          lastName: sellerIsOrg ? (sellerPrimary.lastName || '-') : (sellerPrimary.lastName || 'TBD'),
           secondaryFirstName: hasSecondarySeller ? sellerSecondary.firstName || undefined : undefined,
           secondaryMiddleName: hasSecondarySeller ? sellerSecondary.middleName || undefined : undefined,
           secondaryLastName: hasSecondarySeller ? sellerSecondary.lastName || undefined : undefined,
           isOrganization: sellerIsOrg, organizationType: sellerIsOrg ? (sellerOrgType || undefined) : undefined,
         },
         buyer: {
-          firstName: borrower.firstName || 'TBD', middleName: borrower.middleName || undefined, lastName: borrower.lastName || 'TBD',
+          firstName: borrower.firstName || (borrowerIsOrg ? borrower.lastName : '') || 'TBD',
+          middleName: borrower.middleName || undefined,
+          lastName: borrowerIsOrg ? (borrower.lastName || '-') : (borrower.lastName || 'TBD'),
           secondaryFirstName: hasSecBorrower ? secBorrower.firstName || undefined : undefined,
           secondaryMiddleName: hasSecBorrower ? secBorrower.middleName || undefined : undefined,
           secondaryLastName: hasSecBorrower ? secBorrower.lastName || undefined : undefined,
@@ -346,8 +369,17 @@ export function useQuickEntry() {
         body: JSON.stringify(payload),
       });
       const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error ?? `Creation failed (${res.status})`);
-      setResult({ type: 'success', message: `Order ${body.fileNumber ?? body.orderId ?? ''} created.`, orderId: body.orderId ?? body.id, fileNumber: body.fileNumber ?? undefined });
+      if (!res.ok) {
+        setResult({
+          type: 'error',
+          message: body?.error ?? `Creation failed (${res.status})`,
+          fileNumber: body?.fileNumber ?? undefined,
+          orderId: body?.orderId ?? undefined,
+          submitLocked: body?.submitLocked === true || body?.createdInSoftPro === true,
+        });
+        return;
+      }
+      setResult({ type: 'success', message: `Order ${body.fileNumber ?? body.orderId ?? ''} created.`, orderId: body.orderId ?? body.id, fileNumber: body.fileNumber ?? undefined, submitLocked: body?.submitLocked === true });
     } catch (err) {
       setResult({ type: 'error', message: err instanceof Error ? err.message : 'Order creation failed' });
     } finally {

@@ -26,6 +26,7 @@ vi.mock('@/lib/integrations/sitex/client', () => ({
 
 vi.mock('@/lib/integrations/softpro', () => ({
   createOrder: (...args: unknown[]) => softproCreateMock(...args),
+  getOrderDetails: vi.fn(),
 }));
 
 vi.mock('@/lib/domain/titlepoint/pre-initiate', () => ({

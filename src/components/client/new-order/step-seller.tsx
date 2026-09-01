@@ -50,7 +50,12 @@ export function SellerFieldsForm({ data, onChange }: {
             </select>
           </div>
         )}
-        <PF person={data.primary} onChange={upPrimary} />
+        <PF
+          person={data.primary}
+          onChange={upPrimary}
+          asOrganization={data.isOrg}
+          onReplace={(p) => onChange({ ...data, primary: p })}
+        />
       </div>
 
       {!data.hasSecondary ? (

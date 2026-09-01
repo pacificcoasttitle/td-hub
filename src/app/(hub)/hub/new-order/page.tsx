@@ -81,11 +81,11 @@ export default function HubNewOrderPage() {
         </div>
         <button
           onClick={s.handleSubmit}
-          disabled={s.submitting || s.preInitSubmitBlocked}
+          disabled={s.submitting || s.preInitSubmitBlocked || s.result?.submitLocked === true}
           data-testid="create-order-submit"
           className="px-8 py-3 text-sm font-semibold bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors h-11 inline-flex items-center gap-2"
         >
-          {s.submitting ? 'Creating Order…' : s.preInitSubmitBlocked ? 'Preparing…' : 'Create Order'}
+          {s.result?.submitLocked ? 'Do not re-enter' : s.submitting ? 'Creating Order…' : s.preInitSubmitBlocked ? 'Preparing…' : 'Create Order'}
         </button>
       </div>
 

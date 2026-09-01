@@ -25,13 +25,21 @@ export async function POST(req: NextRequest) {
     const result = await clientCreateOrder(body as Record<string, unknown>, session, session.id);
 
     if (!result.success) {
-      return NextResponse.json({ error: sanitizeCreateOrderError(result.error) }, { status: 422 });
+      return NextResponse.json({
+        error: sanitizeCreateOrderError(result.error),
+        fileNumber: result.fileNumber,
+        orderId: result.orderId,
+        createdInSoftPro: result.createdInSoftPro,
+        submitLocked: result.submitLocked,
+      }, { status: 422 });
     }
 
     return NextResponse.json({
       success: true,
       orderId: result.orderId,
       fileNumber: result.fileNumber,
+      createdInSoftPro: result.createdInSoftPro,
+      submitLocked: result.submitLocked,
     }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

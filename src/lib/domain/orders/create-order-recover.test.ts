@@ -1,0 +1,196 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  ORDER_NOT_CREATED_SAFE_TO_RETRY,
+  softProCreatedDoNotReenter,
+} from './recover-created-file';
+
+const {
+  propertyLookupMock,
+  softproCreateMock,
+  getOrderDetailsMock,
+  autoTriggerMock,
+  getSettingMock,
+  insertValuesMock,
+  returningMock,
+} = vi.hoisted(() => ({
+  propertyLookupMock: vi.fn(),
+  softproCreateMock: vi.fn(),
+  getOrderDetailsMock: vi.fn(),
+  autoTriggerMock: vi.fn(),
+  getSettingMock: vi.fn(),
+  insertValuesMock: vi.fn(),
+  returningMock: vi.fn(),
+}));
+
+vi.mock('@/lib/integrations/sitex/client', () => ({
+  propertyLookup: (...args: unknown[]) => propertyLookupMock(...args),
+}));
+vi.mock('@/lib/integrations/softpro', () => ({
+  createOrder: (...args: unknown[]) => softproCreateMock(...args),
+  getOrderDetails: (...args: unknown[]) => getOrderDetailsMock(...args),
+}));
+vi.mock('@/lib/domain/titlepoint/pre-initiate', () => ({ linkSessionToOrder: vi.fn() }));
+vi.mock('@/lib/domain/titlepoint/service', () => ({ initiateSearch: vi.fn() }));
+vi.mock('@/lib/domain/titlepoint/auto-trigger', () => ({
+  autoTriggerTitlePoint: (...args: unknown[]) => autoTriggerMock(...args),
+}));
+vi.mock('@/lib/domain/settings/service', () => ({
+  getSetting: (...args: unknown[]) => getSettingMock(...args),
+}));
+vi.mock('@/lib/integrations/titlepoint/fips', () => ({ resolveCaliforniaFips: () => '06037' }));
+vi.mock('./softpro-payload', () => ({
+  buildSoftProPayload: vi.fn(() => ({})),
+  assertKnownTitleOffice: vi.fn(),
+  SoftProPayloadError: class extends Error {},
+}));
+vi.mock('drizzle-orm', () => ({
+  eq: vi.fn((...a: unknown[]) => a),
+  and: vi.fn((...a: unknown[]) => a),
+  inArray: vi.fn((...a: unknown[]) => a),
+}));
+vi.mock('@/lib/db/schema', () => ({
+  orders: { id: 'orders.id', fileNumber: 'orders.file_number' },
+  orderProperties: {},
+  orderParties: {},
+  orderStatusHistory: {},
+  eventOutbox: {},
+  companies: { id: 'companies.id', lookupCode: 'c.lookup_code', isUnderwriter: 'c.is_underwriter' },
+  contacts: { id: 'contacts.id', isTitleOfficer: 'c.is_title_officer', officeLookupCode: 'c.office_lookup_code' },
+  branches: {},
+  orderDeliverableEmails: {},
+}));
+
+vi.mock('@/lib/db/client', () => {
+  const query = (rows: unknown[]) => {
+    const self: Record<string, unknown> = {};
+    self.where = () => self;
+    self.limit = async () => rows;
+    self.then = (ok: (v: unknown) => unknown, err?: (e: unknown) => unknown) =>
+      Promise.resolve(rows).then(ok, err);
+    return self;
+  };
+  return {
+    db: {
+      select: vi.fn(() => ({ from: () => query([]) })),
+      insert: vi.fn(() => ({
+        values: (...args: unknown[]) => {
+          insertValuesMock(...args);
+          return { returning: returningMock };
+        },
+      })),
+    },
+  };
+});
+
+import { createAndSendToSoftPro } from './create-order';
+
+const input = {
+  orderType: 'Title only' as const,
+  isRushOrder: false,
+  property: {
+    address: '15181 Jackson St', city: 'Midway City', state: 'CA', zip: '92655',
+  },
+  seller: { firstName: 'A', lastName: 'B' },
+  buyer: { firstName: 'C', lastName: 'D' },
+  transaction: {
+    type: 'Purchase', product: 'Residential Resale',
+    salesAmount: 0, loanAmount: 0, coverageAmount: 0,
+  },
+};
+
+describe('create recover — timeout and post-200 share one treatment', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    propertyLookupMock.mockResolvedValue({ success: false });
+    getSettingMock.mockResolvedValue('false');
+    autoTriggerMock.mockResolvedValue({ skipped: true });
+    returningMock.mockResolvedValue([{ id: 42 }]);
+    getOrderDetailsMock.mockResolvedValue({ success: true, data: [] });
+  });
+
+  it('timeout + Found + persist attaches the hub row and does not create again', async () => {
+    softproCreateMock.mockResolvedValue({
+      success: false,
+      error: { code: 'TIMEOUT', message: 'The operation was aborted due to timeout' },
+    });
+    getOrderDetailsMock.mockResolvedValue({
+      success: true,
+      data: [{
+        OrderNumber: '20021683-OCT',
+        Address: '15181 Jackson St',
+        City: 'Midway City',
+        ReceivedDate: '2026-09-01T01:43:37',
+      }],
+    });
+
+    const result = await createAndSendToSoftPro(input, 'manual_entry');
+
+    expect(softproCreateMock).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+    expect(result.fileNumber).toBe('20021683-OCT');
+    expect(result.orderId).toBe(42);
+    expect(result.createdInSoftPro).toBe(true);
+    expect(result.submitLocked).toBe(true);
+  });
+
+  it('timeout + Found + persist fail returns Gerard\'s copy and locks submit', async () => {
+    softproCreateMock.mockResolvedValue({
+      success: false,
+      error: { code: 'TIMEOUT', message: 'The operation was aborted due to timeout' },
+    });
+    getOrderDetailsMock.mockResolvedValue({
+      success: true,
+      data: [{
+        OrderNumber: '20021683-OCT',
+        Address: '15181 Jackson St',
+        City: 'Midway City',
+        ReceivedDate: '2026-09-01T01:43:37',
+      }],
+    });
+    returningMock.mockRejectedValue(new Error('value too long for type character varying(50)'));
+
+    const result = await createAndSendToSoftPro(input, 'manual_entry');
+
+    expect(softproCreateMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      success: false,
+      fileNumber: '20021683-OCT',
+      createdInSoftPro: true,
+      submitLocked: true,
+      error: softProCreatedDoNotReenter('20021683-OCT'),
+    });
+  });
+
+  it('timeout + Not found is safe to try again and does not lock', async () => {
+    softproCreateMock.mockResolvedValue({
+      success: false,
+      error: { code: 'TIMEOUT', message: 'The operation was aborted due to timeout' },
+    });
+    getOrderDetailsMock.mockResolvedValue({ success: true, data: [] });
+
+    const result = await createAndSendToSoftPro(input, 'manual_entry');
+
+    expect(result).toEqual({
+      success: false,
+      error: ORDER_NOT_CREATED_SAFE_TO_RETRY,
+      submitLocked: false,
+    });
+    expect(result.error).not.toMatch(/abort/i);
+  });
+
+  it('SoftPro 200 then hub insert fail uses the same Found copy — no second create', async () => {
+    softproCreateMock.mockResolvedValue({ success: true, data: { orderNumber: '20021683-OCT' } });
+    returningMock.mockRejectedValue(new Error('value too long for type character varying(50)'));
+
+    const result = await createAndSendToSoftPro(input, 'manual_entry');
+
+    expect(softproCreateMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      success: false,
+      fileNumber: '20021683-OCT',
+      createdInSoftPro: true,
+      submitLocked: true,
+      error: softProCreatedDoNotReenter('20021683-OCT'),
+    });
+  });
+});

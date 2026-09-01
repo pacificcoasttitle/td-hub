@@ -13,6 +13,10 @@ import {
 import { propertyLookup } from '@/lib/integrations/sitex/client';
 import type { SiteXPropertyData } from '@/lib/integrations/sitex/types';
 import { autoTriggerTitlePoint } from '@/lib/domain/titlepoint/auto-trigger';
+import {
+  missingTitlePointInputs,
+  describeMissingTitlePointInputs,
+} from './titlepoint-preconditions';
 import { linkSessionToOrder } from '@/lib/domain/titlepoint/pre-initiate';
 import { initiateSearch } from '@/lib/domain/titlepoint/service';
 import { getSetting } from '@/lib/domain/settings/service';
@@ -337,7 +341,9 @@ export async function createAndSendToSoftPro(raw: unknown, origin: OrderOrigin, 
     try {
       await initiateSearch(orderId, 'geo_address', 'system:auto');
     } catch { /* geo failure never blocks order creation */ }
-  } else if (input.property.address && input.property.state && county) {
+  } else if (missingTitlePointInputs({
+    address: input.property.address, state: input.property.state, county,
+  }).length === 0) {
     try {
       const tpResult = await autoTriggerTitlePoint(orderId, {
         address: input.property.address,
@@ -361,6 +367,45 @@ export async function createAndSendToSoftPro(raw: unknown, origin: OrderOrigin, 
         } catch { /* outbox insert failure never blocks order creation */ }
       }
     } catch { /* TitlePoint failures never block order creation */ }
+  } else {
+    // ─── THE BRANCH THAT USED NOT TO EXIST ────────────────────────────────
+    //
+    // Reaching here means TitlePoint could not run because an input was
+    // missing. Until now this was a silent fall-through: the order was
+    // created, no searches ran, no document was generated, and nothing said
+    // why. Four of 27 live hub orders in the last seven days ended here.
+    //
+    // Recording the reason is the durable half of the fix. The required
+    // county field on the form closes the common entrance; this closes the
+    // question "why does this order have no documents", including for the
+    // doors the form does not guard — a SiteX outage, a no-match, a blank
+    // state.
+    const missing = missingTitlePointInputs({
+      address: input.property.address, state: input.property.state, county,
+    });
+    try {
+      await db.insert(orderStatusHistory).values({
+        orderId,
+        status: 'open',
+        source: 'system',
+        notes: describeMissingTitlePointInputs(missing),
+      });
+    } catch { /* recording the reason must never block order creation */ }
+
+    // Same treatment the skipped path already gets: the operator still gets a
+    // confirmation, and it still says there are no documents. Without this an
+    // order with a missing county got no email at all, which is how the gap
+    // stayed invisible.
+    try {
+      const emailEnabled = await getSetting('open_order_confirmation_enabled');
+      if (emailEnabled !== 'false') {
+        await db.insert(eventOutbox).values({
+          eventType: 'order.confirmation',
+          orderId,
+          payload: { noDocuments: true, missingTitlePointInputs: missing } as Record<string, unknown>,
+        });
+      }
+    } catch { /* outbox insert failure never blocks order creation */ }
   }
 
   return { success: true, orderId, fileNumber };

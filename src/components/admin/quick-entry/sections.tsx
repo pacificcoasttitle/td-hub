@@ -66,7 +66,15 @@ export function PropertySection({ s }: { s: QuickEntryState }) {
         <div><label className={FL}>City</label><input className={IN} value={s.city} onChange={(e) => s.setCity(e.target.value)} /></div>
         <div><label className={FL}>State</label><input className={IN} value={s.state} onChange={(e) => s.setState(e.target.value)} /></div>
         <div><label className={FL}>ZIP</label><input className={IN} value={s.zip} onChange={(e) => s.setZip(e.target.value)} /></div>
-        <div><label className={FL}>County</label><input className={IN} value={s.county} onChange={(e) => s.setCounty(e.target.value)} /></div>
+        <div>
+          <label className={FL}>County <span className="text-[#F26B2B]">*</span></label>
+          <input
+            className={`${IN} ${s.county.trim() === '' ? 'border-red-300 bg-red-50' : ''}`}
+            value={s.county}
+            onChange={(e) => s.setCounty(e.target.value)}
+            placeholder="Required for title documents"
+          />
+        </div>
         <div><label className={FL}>Property Type</label><input className={IN} value={s.propType} onChange={(e) => s.setPropType(e.target.value)} /></div>
         <div><label className={FL}>APN</label><input className={IN} value={s.apn} onChange={(e) => s.setApn(e.target.value)} /></div>
       </div>

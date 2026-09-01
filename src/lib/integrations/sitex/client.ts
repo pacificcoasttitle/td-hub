@@ -2,6 +2,7 @@ import { vendorSuccess, vendorError } from '../types';
 import type { VendorResult } from '../types';
 import type { SiteXPropertyData, SiteXSearchResponse, PropertyLookupParams, ApnLookupParams } from './types';
 import { VENDOR, TIMEOUT_MS, getConfig, getAccessToken, logRequest } from './auth';
+import { fips5From } from '@/lib/integrations/cpl/county-fips';
 import { truncateZip, mapProfile, emptyResult } from './parsers';
 import type { PropertySearchResult } from './parsers';
 
@@ -234,10 +235,27 @@ export async function apnLookup(
     return vendorError<SiteXPropertyData>(VENDOR, 'NOT_CONFIGURED', 'SiteX is not configured (SITEX_BASE_URL missing).', { retryable: false, requestId, durationMs: 0 });
   }
 
+  // ─── APN search takes `fips`, not `county` + `state` ──────────────────────
+  //
+  // SiteXPro's own OpenAPI, from the free, non-billable
+  // GET /realestatedata/search/schema/{feedId}, documents exactly twelve query
+  // parameters on /search:
+  //
+  //   addr, lastLine, owner, fips, apn, zip, clientReference, options,
+  //   feedId, isMailingAddress, latitude, longitude
+  //
+  // `county` and `state` are NOT among them. They were silently ignored,
+  // leaving apn + feedId — a search with no locality — which SiteX rejected as
+  // "Missing required fields" on all 13 attempts this endpoint has ever made.
+  // Zero of them succeeded.
+  //
+  // The APN is trimmed because an operator retrying by hand pasted one with a
+  // leading space. That was NOT the cause — 1 of 13 calls, and 0 of 6,061
+  // stored APNs — but a space would break a search that otherwise works.
+  const fips = fips5From(params.fips, params.county, params.state);
   const searchUrl = new URL(`${config.baseUrl}/realestatedata/search`);
-  searchUrl.searchParams.set('apn', params.apn);
-  searchUrl.searchParams.set('county', params.county);
-  searchUrl.searchParams.set('state', params.state ?? 'CA');
+  searchUrl.searchParams.set('apn', params.apn.trim());
+  if (fips) searchUrl.searchParams.set('fips', fips);
   searchUrl.searchParams.set('feedId', config.feedId);
 
   try {

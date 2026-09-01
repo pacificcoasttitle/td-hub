@@ -1,7 +1,7 @@
 # SiteX APN lookup has never returned a result
 
-**Status: OPEN. Cause not established. Do not fix from the reasoning below —
-it is unverified.**
+**Status: FIXED. Cause established from the vendor's own OpenAPI spec, at no
+cost — no billable call was needed.**
 Opened: 2026-09-01
 
 ## The measurement
@@ -62,14 +62,56 @@ searchUrl.searchParams.set('feedId', config.feedId);
 
 The working `property_lookup` sends `addr`, `lastLine`, `feedId`.
 
-## The leading hypothesis, and why it is NOT yet evidence
+## Resolved: the vendor's own spec
+
+`GET /realestatedata/search/schema/{feedId}` — free, non-billable — returns
+SiteXPro's OpenAPI document. `GET /search` takes exactly twelve query
+parameters:
+
+```
+addr, lastLine, owner, fips, apn, zip, clientReference, options,
+feedId, isMailingAddress, latitude, longitude
+```
+
+with `fips` = "property fips code" and `apn` = "assessor's parcel number".
+
+**`county` and `state` are not parameters.** They were silently ignored,
+leaving `apn` + `feedId` — a search with no locality — which is why every call
+was rejected as "Missing required fields".
+
+The fix sends `fips` (5-digit state+county) instead. `fips5From` derives it
+from the county table already built for Westcor, preferring a stored SiteX code
+when one exists. The APN is also trimmed — not the cause, but a pasted space
+would break a search that otherwise works.
+
+### A free UAT environment, found in the same document
+
+The spec lists three servers:
+
+```
+https://api.bkiconnect.com/realestatedata          (production, billable)
+https://api.uat.bkitest.com/realestatedata         (UAT)
+https://api-co-dev.dev.bkitest.com/realestatedata  (dev)
+```
+
+Worth pursuing separately: a UAT host would let SiteX changes be exercised
+without spending production credits, which has been the constraint on every
+SiteX change so far.
+
+## The hypothesis before it was checked, and why it was NOT evidence
 
 Gerard's reading: `/realestatedata/search` wants `fips`, and `county` + `state`
 are not parameters it recognises — so the request reduces to `apn` + `feedId`,
 has no locality, and is rejected as incomplete.
 
-That is plausible and it fits every observation. **It is not confirmed, and an
-earlier version of this ticket wrongly presented it as documented.**
+That was plausible and it fitted every observation. It also turned out to be
+right. **But at the time it was stated it was a recollection, not a citation,
+and an earlier version of this ticket presented it as "the documented parameter
+set".**
+
+Being right is not the same as being evidenced. The recollection was correct
+and the promotion of it to a citation was still wrong — and had it been wrong,
+nothing in the chain would have caught it.
 
 **Our documentation does not settle it.**
 `docs/cannon/SiteX-and-TitlePoint-Complete-Reference.md`, "Property Search
@@ -94,19 +136,16 @@ So our documentation does not describe an APN search mode at all. It neither
 supports nor contradicts the `fips` hypothesis — it is silent, and "(stub)"
 suggests this was never a finished path.
 
-## What would settle it
+## What settled it
 
-One of:
+Route 1, and it cost nothing: the vendor publishes its own spec at
+`/realestatedata/search/schema/{feedId}`, and `/realestatedata/search/options/{feedId}`
+returns the feed's option list. Both are free. Neither was known to us before
+this ticket.
 
-1. **Vendor documentation we do not currently hold.** The BKI/SiteX Pro API
-   reference for `/realestatedata/search`. Cheapest if someone has it.
-2. **One billable call.** A successful `/search` costs one credit. Sending
-   `apn` + `fips` + `feedId` for a known-good parcel would confirm or refute in
-   a single request. **Requires explicit approval — not yet given for this
-   specific call.**
-3. **Asking SiteX** what an APN-mode search requires.
-
-Route 1 is free and should be tried first.
+**The lesson is cheaper than the credit was going to be**: before paying a
+vendor to answer a question about its own contract, check whether the vendor
+publishes the contract. Two endpoints, one round trip, no charge.
 
 ## Blast radius while unfixed
 
@@ -120,3 +159,14 @@ today.
 - `docs/claude-skills/claude-skills/watch-outs/writing-from-the-shape-of-the-problem.md`
   — instance 3 is this ticket's first draft, where the user's hypothesis was
   restated back as "the documented parameter set".
+
+## Still unverified
+
+The fix has NOT been exercised against SiteX. The parameter set is the
+vendor's, the FIPS derivation is unit-tested against the real failing APNs
+(Los Angeles 06037, San Bernardino 06071), but no search has been run — a
+successful one costs a credit.
+
+The next genuine operator APN search will confirm or refute it at no extra
+cost, since that call would have been made anyway. If it fails, the response
+body now tells us why.

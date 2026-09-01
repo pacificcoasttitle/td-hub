@@ -110,3 +110,37 @@ export function countyFipsFrom(
   if (raw.length === 5 || raw.length === 3) return raw.slice(-3);
   return countyFips(county, state);
 }
+
+// ─── The 5-digit form, for SiteX ────────────────────────────────────────────
+//
+// Westcor wants the 3-digit county portion; SiteX wants the full state+county
+// code. Same table, two consumers, two shapes — so the state prefix lives here
+// rather than being reassembled at each call site.
+const STATE_FIPS: Record<string, string> = { CA: '06', AZ: '04', NV: '32' };
+
+/**
+ * The 5-digit state+county FIPS, or null when it cannot be determined.
+ *
+ * SiteXPro's OpenAPI (`GET /realestatedata/search/schema/{feedId}`) documents
+ * `fips` as "property fips code" and accepts no `county` or `state` parameter
+ * at all — which is why an APN search sending county+state was rejected as
+ * "Missing required fields" on every one of its 13 attempts.
+ *
+ * A stored SiteX code is already 5-digit ("06037") and is preferred; otherwise
+ * the county table supplies it.
+ */
+export function fips5From(
+  storedFips: string | null | undefined,
+  county: string | null | undefined,
+  state: string | null | undefined,
+): string | null {
+  const raw = (storedFips ?? '').replace(/[^0-9]/g, '');
+  if (raw.length === 5) return raw;
+
+  const st = (state ?? '').trim().toUpperCase();
+  const prefix = STATE_FIPS[st];
+  const countyCode = raw.length === 3 ? raw : countyFips(county, state);
+  if (!prefix || !countyCode) return null;
+
+  return `${prefix}${countyCode}`;
+}

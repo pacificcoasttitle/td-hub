@@ -122,6 +122,9 @@ export interface PropertyLookupParams {
 
 export interface ApnLookupParams {
   apn: string;
+  /** Used only to derive `fips`. SiteX's /search takes no county parameter. */
   county: string;
   state?: string;
+  /** A stored 5-digit SiteX FIPS, preferred over deriving one from the county. */
+  fips?: string | null;
 }

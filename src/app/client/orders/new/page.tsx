@@ -12,6 +12,7 @@ import { StepReview } from '@/components/client/new-order/step-review';
 import type { SiteXPropertyResult } from '@/components/shared/property-confirm-modal';
 import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
 import { buildPreInitAddressKey, usePreInitOnSiteX } from '@/lib/orders/use-pre-init-on-sitex';
+import { claimCreateInFlight, releaseCreateInFlight } from '@/lib/orders/claim-create-in-flight';
 import { classifySiteXOwners } from '@/lib/domain/orders/names/classify-owners';
 
 export default function ClientNewOrderPage() {
@@ -44,6 +45,7 @@ export default function ClientNewOrderPage() {
   });
   const [, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const createInFlightRef = useRef(false);
   const [result, setResult] = useState<{ type: 'success' | 'error'; message: string; orderId?: number; submitLocked?: boolean } | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const prevTxType = useRef<string>('');
@@ -142,6 +144,8 @@ export default function ClientNewOrderPage() {
 
   async function handleSubmit() {
     if (preInit.submitBlocked || result?.submitLocked) return;
+    if (submitting) return;
+    if (!claimCreateInFlight(createInFlightRef)) return;
     setSubmitting(true);
     setResult(null);
     try {
@@ -172,6 +176,7 @@ export default function ClientNewOrderPage() {
     } catch (err) {
       setResult({ type: 'error', message: err instanceof Error ? err.message : 'Order creation failed' });
     } finally {
+      releaseCreateInFlight(createInFlightRef);
       setSubmitting(false);
     }
   }

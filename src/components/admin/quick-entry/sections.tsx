@@ -129,7 +129,7 @@ function OwnerFields({ s }: { s: QuickEntryState }) {
               </select>
             )}
           </div>
-          <PersonFields person={s.sellerPrimary} onChange={s.setSellerPrimary} label="Primary seller" highlight={s.sellerSiteX ? 'bg-green-50' : ''} />
+          <PersonFields person={s.sellerPrimary} onChange={s.setSellerPrimary} label="Primary seller" highlight={s.sellerSiteX ? 'bg-green-50' : ''} asOrganization={s.sellerIsOrg} />
           {!s.hasSecondarySeller ? (
             <button type="button" onClick={() => s.setHasSecondarySeller(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">+ Add secondary seller</button>
           ) : (
@@ -138,7 +138,7 @@ function OwnerFields({ s }: { s: QuickEntryState }) {
                 <span className="text-xs text-[#6B7280]">Secondary seller</span>
                 <button type="button" onClick={() => { s.setHasSecondarySeller(false); s.setSellerSecondary({ ...EP }); }} className="text-xs text-red-500 min-h-[36px]">Remove</button>
               </div>
-              <PersonFields person={s.sellerSecondary} onChange={s.setSellerSecondary} label="" highlight={s.sellerSiteX ? 'bg-green-50' : ''} />
+              <PersonFields person={s.sellerSecondary} onChange={s.setSellerSecondary} label="" highlight={s.sellerSiteX ? 'bg-green-50' : ''} asOrganization={s.sellerIsOrg} />
             </>
           )}
         </div>
@@ -156,6 +156,7 @@ function OwnerFields({ s }: { s: QuickEntryState }) {
           onChange={s.setBorrower}
           label={`Primary ${partyLabelLower}`}
           highlight={!isPurchase && s.borrowerSiteX ? 'bg-green-50' : ''}
+          asOrganization={s.borrowerIsOrg}
         />
         {!s.hasSecBorrower ? (
           <button type="button" onClick={() => s.setHasSecBorrower(true)} className="text-xs font-medium text-[#1A1A2E] flex items-center gap-1 min-h-[36px]">

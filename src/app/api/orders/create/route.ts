@@ -23,13 +23,21 @@ export async function POST(req: NextRequest) {
     const result = await createAndSendToSoftPro(body, 'manual_entry', session.id);
 
     if (!result.success) {
-      return NextResponse.json({ error: sanitizeCreateOrderError(result.error) }, { status: 422 });
+      return NextResponse.json({
+        error: sanitizeCreateOrderError(result.error),
+        fileNumber: result.fileNumber,
+        orderId: result.orderId,
+        createdInSoftPro: result.createdInSoftPro,
+        submitLocked: result.submitLocked,
+      }, { status: 422 });
     }
 
     return NextResponse.json({
       success: true,
       orderId: result.orderId,
       fileNumber: result.fileNumber,
+      createdInSoftPro: result.createdInSoftPro,
+      submitLocked: result.submitLocked,
     }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Order creation failed' }, { status: 500 });

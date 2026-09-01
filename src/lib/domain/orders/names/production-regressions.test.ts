@@ -133,7 +133,8 @@ describe('the old parser is gone', () => {
       'utf8',
     );
     expect(src).not.toContain('parseOwnerName');
-    expect(src).toContain('parseSiteXOwners');
+    expect(src).toContain('classifySiteXOwners');
+    expect(src).not.toContain('parseSiteXOwners');
   });
 
   it('the form surfaces owner warnings rather than swallowing them', () => {

@@ -8,7 +8,7 @@ import { SH, RS, RF } from './shared';
 export function StepReview({
   clientDetails, property, seller, transaction, parties,
   submitting, submitBlocked = false, preparingLabel = null, preInitPhase,
-  error, duplicateWarning, onSubmit, onPrev, onGoTo, onFilesChange,
+  error, duplicateWarning, submitLocked = false, onSubmit, onPrev, onGoTo, onFilesChange,
 }: {
   clientDetails: ClientDetails;
   property: PropertyData;
@@ -22,6 +22,7 @@ export function StepReview({
   preInitPhase?: string;
   error: string | null;
   duplicateWarning: string | null;
+  submitLocked?: boolean;
   onSubmit: () => void;
   onPrev: () => void;
   onGoTo: (s: Step) => void;
@@ -164,11 +165,11 @@ export function StepReview({
           )}
           <button
             onClick={onSubmit}
-            disabled={submitting || submitBlocked}
+            disabled={submitting || submitBlocked || submitLocked}
             data-testid="client-create-order-submit"
             className="px-8 py-3 text-sm font-medium bg-[#F26B2B] text-white rounded-lg hover:bg-[#E05A1A] disabled:opacity-50 transition-colors h-12 inline-flex items-center gap-2"
           >
-            {submitting ? 'Creating…' : submitBlocked ? 'Preparing…' : 'Submit Your Order'}
+            {submitLocked ? 'Do not re-enter' : submitting ? 'Creating…' : submitBlocked ? 'Preparing…' : 'Submit Your Order'}
           </button>
         </div>
       </div>

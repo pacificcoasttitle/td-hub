@@ -12,6 +12,7 @@ import { StepReview } from '@/components/client/new-order/step-review';
 import type { SiteXPropertyResult } from '@/components/shared/property-confirm-modal';
 import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
 import { buildPreInitAddressKey, usePreInitOnSiteX } from '@/lib/orders/use-pre-init-on-sitex';
+import { classifySiteXOwners } from '@/lib/domain/orders/names/classify-owners';
 
 export default function ClientNewOrderPage() {
   const [step, setStep] = useState<Step>(1);
@@ -43,7 +44,7 @@ export default function ClientNewOrderPage() {
   });
   const [, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ type: 'success' | 'error'; message: string; orderId?: number } | null>(null);
+  const [result, setResult] = useState<{ type: 'success' | 'error'; message: string; orderId?: number; submitLocked?: boolean } | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const prevTxType = useRef<string>('');
 
@@ -96,29 +97,17 @@ export default function ClientNewOrderPage() {
   }, [transaction.transactionType, seller.siteXFilled, seller.primary, seller.secondary, seller.hasSecondary, seller.isOrg, seller.orgType]);
 
   function fillOwnersFromSiteX(siteX: SiteXPropertyResult) {
-    if (siteX.primaryOwner) {
-      const parts = siteX.primaryOwner.split(' ');
-      const first = parts[0] ?? '';
-      const last = parts.length > 1 ? parts[parts.length - 1] : '';
-      const middle = parts.length > 2 ? parts.slice(1, -1).join(' ') : '';
-      setSeller((prev) => ({
-        ...prev,
-        primary: { firstName: first, middleName: middle, lastName: last },
-        siteXFilled: true,
-      }));
-    }
-    if (siteX.secondaryOwner) {
-      const parts = siteX.secondaryOwner.split(' ');
-      const first = parts[0] ?? '';
-      const last = parts.length > 1 ? parts[parts.length - 1] : '';
-      const middle = parts.length > 2 ? parts.slice(1, -1).join(' ') : '';
-      setSeller((prev) => ({
-        ...prev,
-        secondary: { firstName: first, middleName: middle, lastName: last },
-        hasSecondary: true,
-        siteXFilled: true,
-      }));
-    }
+    const owners = classifySiteXOwners(siteX.primaryOwner, siteX.secondaryOwner);
+    if (!owners.primary) return;
+    setSeller((prev) => ({
+      ...prev,
+      primary: owners.primary!.person,
+      isOrg: owners.primary!.isOrg,
+      orgType: owners.primary!.isOrg ? owners.primary!.orgType : prev.orgType,
+      secondary: owners.secondary ? owners.secondary.person : prev.secondary,
+      hasSecondary: !!owners.secondary || prev.hasSecondary,
+      siteXFilled: true,
+    }));
   }
 
   function handleSiteXResult(siteX: SiteXPropertyResult, propertyAfter: PropertyData) {
@@ -152,7 +141,7 @@ export default function ClientNewOrderPage() {
   }
 
   async function handleSubmit() {
-    if (preInit.submitBlocked) return;
+    if (preInit.submitBlocked || result?.submitLocked) return;
     setSubmitting(true);
     setResult(null);
     try {
@@ -170,7 +159,15 @@ export default function ClientNewOrderPage() {
         }),
       });
       const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error ?? `Order creation failed (${res.status})`);
+      if (!res.ok) {
+        setResult({
+          type: 'error',
+          message: body?.error ?? `Order creation failed (${res.status})`,
+          orderId: body?.orderId,
+          submitLocked: body?.submitLocked === true || body?.createdInSoftPro === true,
+        });
+        return;
+      }
       setResult({ type: 'success', message: `Order ${body.fileNumber ?? body.orderId ?? ''} created.`, orderId: body.orderId });
     } catch (err) {
       setResult({ type: 'error', message: err instanceof Error ? err.message : 'Order creation failed' });
@@ -317,6 +314,7 @@ export default function ClientNewOrderPage() {
               preInitPhase={preInit.phase}
               error={result?.type === 'error' ? result.message : null}
               duplicateWarning={duplicateWarning}
+              submitLocked={result?.submitLocked === true}
               onSubmit={handleSubmit} onPrev={prev} onGoTo={setStep}
               onFilesChange={setFiles}
             />

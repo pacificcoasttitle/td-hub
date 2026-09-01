@@ -4,6 +4,12 @@ import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox,
 import { validateDeliverableEmails } from '@/lib/domain/notifications/deliverable-emails';
 import { eq, and, inArray } from 'drizzle-orm';
 import { createOrder as softproCreateOrder } from '@/lib/integrations/softpro';
+import {
+  CREATE_TIMEOUT_LOOKUP_FAILED,
+  findCreatedSoftProFile,
+  ORDER_NOT_CREATED_SAFE_TO_RETRY,
+  softProCreatedDoNotReenter,
+} from './recover-created-file';
 import { propertyLookup } from '@/lib/integrations/sitex/client';
 import type { SiteXPropertyData } from '@/lib/integrations/sitex/types';
 import { autoTriggerTitlePoint } from '@/lib/domain/titlepoint/auto-trigger';
@@ -128,9 +134,91 @@ export interface CreateOrderResult {
   orderId?: number;
   fileNumber?: string;
   error?: string;
+  /** SoftPro already has this file. Create must not run again. */
+  createdInSoftPro?: boolean;
+  submitLocked?: boolean;
 }
 
 const SOFTPRO_CONFIG_ERROR_MESSAGE = 'Order could not be sent to SoftPro — service configuration error';
+
+function isCreateTimeout(error: { code?: string; message?: string } | undefined): boolean {
+  if (!error) return false;
+  if (error.code === 'TIMEOUT') return true;
+  return /aborted due to timeout/i.test(error.message ?? '');
+}
+
+function foundDoNotReenter(fileNumber: string, orderId?: number): CreateOrderResult {
+  return {
+    success: false,
+    fileNumber,
+    orderId,
+    createdInSoftPro: true,
+    submitLocked: true,
+    error: softProCreatedDoNotReenter(fileNumber),
+  };
+}
+
+type PersistArgs = {
+  input: CreateOrderInput;
+  sitexData: SiteXPropertyData | null;
+  enriched: { apn: string; legal: string; county: string; fips: string | null };
+  resolved: ResolvedContacts;
+  origin: OrderOrigin;
+  userId?: string;
+  underwriterId?: number | null;
+};
+
+async function attachHubRowForCreatedFile(
+  fileNumber: string,
+  args: PersistArgs,
+): Promise<{ orderId?: number; attached: boolean }> {
+  try {
+    const [existing] = await db
+      .select({ id: orders.id })
+      .from(orders)
+      .where(eq(orders.fileNumber, fileNumber))
+      .limit(1);
+    if (existing) return { orderId: existing.id, attached: true };
+  } catch { /* lookup failure falls through to persist */ }
+
+  try {
+    const { orderId } = await createLocalRecords(
+      args.input, fileNumber, args.sitexData, args.enriched,
+      args.resolved, args.origin, args.userId, args.underwriterId,
+    );
+    return { orderId, attached: true };
+  } catch {
+    return { attached: false };
+  }
+}
+
+/**
+ * Timeout: we do not know if SoftPro created the file. Ask, then apply the
+ * same Found / Not-found treatment as a 200-then-hub-insert-fail.
+ */
+async function recoverAfterCreateUnknown(args: PersistArgs): Promise<CreateOrderResult> {
+  const found = await findCreatedSoftProFile({
+    address: args.input.property.address,
+    city: args.input.property.city,
+  });
+  if (found.kind === 'found') {
+    const attached = await attachHubRowForCreatedFile(found.fileNumber, args);
+    if (attached.attached && attached.orderId) {
+      return {
+        success: true,
+        orderId: attached.orderId,
+        fileNumber: found.fileNumber,
+        createdInSoftPro: true,
+        submitLocked: true,
+      };
+    }
+    return foundDoNotReenter(found.fileNumber);
+  }
+  if (found.kind === 'not_found') {
+    return { success: false, error: ORDER_NOT_CREATED_SAFE_TO_RETRY, submitLocked: false };
+  }
+  return { success: false, error: CREATE_TIMEOUT_LOOKUP_FAILED, submitLocked: true };
+}
 
 // ─── Main Entry Point ───────────────────────────────────────────────────────
 
@@ -211,8 +299,15 @@ export async function createAndSendToSoftPro(raw: unknown, origin: OrderOrigin, 
     throw err;
   }
 
+  const persistArgs = {
+    input, sitexData, enriched: { apn, legal, county, fips }, resolved, origin, userId, underwriterId,
+  };
+
   const spResult = await softproCreateOrder(softProPayload);
   if (!spResult.success || !spResult.data) {
+    if (isCreateTimeout(spResult.error)) {
+      return recoverAfterCreateUnknown(persistArgs);
+    }
     return {
       success: false,
       error: spResult.error?.code === 'AUTH'
@@ -223,7 +318,15 @@ export async function createAndSendToSoftPro(raw: unknown, origin: OrderOrigin, 
 
   const fileNumber = spResult.data.orderNumber;
 
-  const { orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county, fips }, resolved, origin, userId, underwriterId);
+  // SoftPro 200: same contract as a timeout that later finds the file.
+  // If the hub insert fails (varchar overflow is the case we already hit),
+  // tell the operator the file number and lock Create — never a second SoftPro create.
+  let orderId: number;
+  try {
+    ({ orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county, fips }, resolved, origin, userId, underwriterId));
+  } catch {
+    return foundDoNotReenter(fileNumber);
+  }
 
   if (input.titlePointSessionId) {
     try {

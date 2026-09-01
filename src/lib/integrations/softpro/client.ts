@@ -463,16 +463,23 @@ async function makeRequest<T>(
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
+/**
+ * Create-only. Observed create p50 21s / p95 39s / max 57s; 60s was clipping
+ * the tail. Report the new tail after a week. Other SoftPro ops stay at 60s.
+ */
+export const CREATE_ORDER_TIMEOUT_MS = 120_000;
+
 export async function createOrder(
   payload: Record<string, unknown>
 ): Promise<VendorResult<{ orderNumber: string }>> {
   const requestId = crypto.randomUUID();
   const startedAt = new Date();
   const url = getBaseUrl() + SOFTPRO_ENDPOINTS.createOrder;
+  let loggedPayload: ReturnType<typeof redactSoftProAuthFields> | undefined;
 
   try {
     const payloadWithUserId = addSoftProUserIdToRecord(payload);
-    const loggedPayload = redactSoftProAuthFields(payloadWithUserId);
+    loggedPayload = redactSoftProAuthFields(payloadWithUserId);
     const hdrs: Record<string, string> = {
       'Content-Type': 'application/json',
       ...buildSoftProHeaders({ requireToken: true }),
@@ -482,7 +489,7 @@ export async function createOrder(
       method: 'POST',
       headers: hdrs,
       body: JSON.stringify(payloadWithUserId),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(CREATE_ORDER_TIMEOUT_MS),
     });
 
     const raw = (await response.json()) as SoftProResponse & { OrderNumber?: string };
@@ -508,17 +515,22 @@ export async function createOrder(
     const message = err instanceof Error ? err.message : 'Unknown error';
     const durationMs = Date.now() - startedAt.getTime();
     const isConfigError = err instanceof SoftProConfigError;
+    const isTimeout = !isConfigError && (
+      (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError'))
+      || /aborted due to timeout/i.test(message)
+    );
+    const code = isConfigError ? 'AUTH' : isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR';
 
     await logRequest({
       operation: 'create_order', requestId, startedAt,
       success: false,
       retryable: !isConfigError,
-      errorCategory: isConfigError ? 'auth' : 'NETWORK',
-      requestMeta: { url, method: 'POST' },
+      errorCategory: isConfigError ? 'auth' : isTimeout ? 'timeout' : 'NETWORK',
+      requestMeta: { url, method: 'POST', ...(loggedPayload ? { payload: loggedPayload } : {}) },
       responseMeta: { error: message },
     });
 
-    return vendorError<{ orderNumber: string }>(VENDOR, isConfigError ? 'AUTH' : 'NETWORK_ERROR', message, {
+    return vendorError<{ orderNumber: string }>(VENDOR, code, message, {
       retryable: !isConfigError, requestId, durationMs,
     });
   }

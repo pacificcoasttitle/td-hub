@@ -1,12 +1,21 @@
-# Title docs marked synced, SoftPro holds none of them
+# ~~Title docs marked synced, SoftPro holds none of them~~
+
+**Void title — 2026-08-31.** Empty GetAttachedDocuments was read as "SoftPro
+holds none." That listing misses Production Documents subfolders. Keep the
+filename so older quotes still resolve here.
 
 **Status: do not re-post yet.** Measured 2026-08-28. The write path is
 fixed on `fix/softpro-adddocuments-batch`; this ticket is the seven-order
 cleanup only.
 
-GetAttachedDocuments on every file that holds a local LV / grant deed / tax
+~~GetAttachedDocuments on every file that holds a local LV / grant deed / tax
 row: **13 documents said `is_synced_to_softpro = true` and zero of them exist
-on SoftPro.** Four more orders never claimed success.
+on SoftPro.**~~ **Void — 2026-08-31.** Empty GetAttachedDocuments is not proof
+the files are missing. That listing does not see Production Documents
+subfolders (LV / Grant Deed / Taxes). AddDocuments 200, and a later 400
+"An item already exists by that name", are write-API evidence the name is
+filed. Gerard confirmed 20021642-OCT on screen after the same 200 + empty
+list + already-exists pattern. Four more orders never claimed success.
 
 Do not flip flags. Do not re-post. Verdicts below.
 
@@ -24,21 +33,27 @@ Do not flip flags. Do not re-post. Verdicts below.
 
 Folder string was never stored on those posts, and GetAttachedDocuments for
 these files returns bare URL strings, so a `Title Docs` folder cannot be
-confirmed from the vendor response. The files are simply not there under any
-name.
+confirmed from the vendor response. ~~The files are simply not there under any
+name.~~ **Void — 2026-08-31.** Empty GetAttached ⇒ not listed by that API, not
+"not there." HMAC/S3-URL failures on the March/August test batch remain a
+separate write-path bug; do not treat a later empty listing as the same fact.
 
 ## Why this ticket exists
 
-The path that produced the lie is fixed: we no longer mark synced from
-AddDocuments' 200. This ticket is only "what to do with the seven." The four
-incomplete SoftPro orders belong to a larger population — see
+~~The path that produced the lie is fixed: we no longer mark synced from
+AddDocuments' 200.~~ **Void as a hard rule — 2026-08-31.** AddDocuments 200
+(or already-exists) with an empty GetAttached list is **accepted**, not a
+lie. Listing-confirmed is a separate field (`softpro_listing_confirmed`).
+This ticket is only "what to do with the seven." The four incomplete SoftPro
+orders belong to a larger population — see
 `SOFTPRO_ADDDOCUMENTS_REQUIRED_FIELDS.md`.
 
 ## Acceptance
 
 - 20015761: one grant deed chosen, the other three left unsynced or deleted
-  locally, then one batched re-post, then GetAttachedDocuments names match.
-- 376 and 378: `is_synced` cleared, one batched re-post, names match, prelim
-  still the only pre-existing attachment.
+  locally, then one batched re-post, ~~then GetAttachedDocuments names match.~~
+  then write-accepted (200 or already-exists). Listing match is confirmed, not required.
+- 376 and 378: `is_synced` cleared, one batched re-post, ~~names match,~~
+  write-accepted, prelim still the only pre-existing **GetAttached** attachment.
 - The four 400s: not re-posted until the vendor order has address, city,
   state, zip, and a title officer.

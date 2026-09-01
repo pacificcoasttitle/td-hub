@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { softProSyncLabel } from '@/lib/domain/documents/softpro-attach-verify';
 
 interface CplDocument {
   id: number;
@@ -12,6 +13,7 @@ interface CplDocument {
   createdAt: string;
   isSyncedToSoftpro: boolean;
   softproSyncError?: string | null;
+  softproListingConfirmed?: boolean | null;
 }
 
 export default function OrderCpl({ orderId, fileNumber }: { orderId: number; fileNumber: string }) {
@@ -99,7 +101,7 @@ export default function OrderCpl({ orderId, fileNumber }: { orderId: number; fil
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                         </svg>
-                        In SoftPro
+                        {softProSyncLabel(doc)}
                       </span>
                     ) : (
                       <span className="text-xs font-medium text-amber-700" title={doc.softproSyncError ?? undefined}>

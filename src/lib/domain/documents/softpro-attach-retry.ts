@@ -12,6 +12,11 @@ const BACKOFF_MS = [
   24 * 60 * 60_000, // 24h
 ];
 
+/** SoftPro already filed the name. Another AddDocuments can only 400. */
+export function softProAlreadyExistsByName(message: string): boolean {
+  return /an item already exists by that name/i.test(message);
+}
+
 export function softProAttachNextRetryAt(attemptCount: number, from = new Date()): Date | null {
   if (attemptCount >= SOFTPRO_ATTACH_MAX_ATTEMPTS) return null;
   const idx = Math.min(Math.max(attemptCount - 1, 0), BACKOFF_MS.length - 1);

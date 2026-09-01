@@ -260,8 +260,9 @@ export async function ingestPrelimFromSoftPro(
     description: input.source === 'softpro_webhook'
       ? `Received via SoftPro prelim webhook for ${input.fileNumber}`
       : `Prelim fetched from SoftPro for ${input.fileNumber}`,
-    // SoftPro-origin — never write-back-push eligible
+    // SoftPro-origin — never write-back-push eligible. We listed it to fetch it.
     isSyncedToSoftpro: true,
+    softproListingConfirmed: true,
     softproSyncedAt: new Date(),
     createdBy: input.createdBy,
   }).returning({ id: documents.id, createdAt: documents.createdAt });

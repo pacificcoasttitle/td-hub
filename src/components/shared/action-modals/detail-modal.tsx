@@ -13,6 +13,7 @@ import {
   isRefinanceTransaction,
 } from '@/lib/domain/orders/order-format';
 import { statusLabel } from '@/lib/domain/orders/status-format';
+import { softProSyncDisplay, softProSyncLabel } from '@/lib/domain/documents/softpro-attach-verify';
 
 interface Assignment {
   id?: string | number | null;
@@ -113,6 +114,7 @@ interface Doc {
   softproSyncError?: string | null;
   softproDocumentId?: string | null;
   softproAttachAttemptCount?: number | null;
+  softproListingConfirmed?: boolean | null;
 }
 
 interface FeeLineItem {
@@ -765,10 +767,12 @@ function SoftProSyncBadge({
   if (doc.isSyncedToSoftpro) {
     return (
       <span
-        className="shrink-0 text-[11px] font-medium text-green-700"
+        className={`shrink-0 text-[11px] font-medium ${
+          softProSyncDisplay(doc) === 'accepted' ? 'text-amber-800' : 'text-green-700'
+        }`}
         title={doc.softproDocumentId ? `SoftPro id ${doc.softproDocumentId}` : 'Synced to SoftPro'}
       >
-        In SoftPro
+        {softProSyncLabel(doc)}
       </span>
     );
   }

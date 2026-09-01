@@ -131,6 +131,12 @@ export async function getAttachedDocuments(
   return vendorSuccess(docs, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 50 });
 }
 
+export async function getAttachedDocumentsPrelim(
+  orderNumber: string
+): Promise<VendorResult<SoftProAttachedDocument[]>> {
+  return getAttachedDocuments(orderNumber);
+}
+
 export async function getLookupTable(
   userType: string
 ): Promise<VendorResult<SoftProLookupItem[]>>;

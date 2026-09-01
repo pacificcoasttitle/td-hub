@@ -141,7 +141,7 @@ function buildSuccessResponseMeta<T>(
     message: raw.Message,
   };
 
-  if (operation === 'get_attached_documents') {
+  if (operation === 'get_attached_documents' || operation === 'get_attached_documents_prelim') {
     meta.attached = describeAttachedDocuments(raw.data);
   }
 
@@ -667,6 +667,15 @@ export async function getAttachedDocuments(
   return makeRequest<SoftProAttachedDocument[]>('GET', SOFTPRO_ENDPOINTS.getAttachedDocuments, {
     queryParams: { orderNumber },
     operation: 'get_attached_documents',
+  });
+}
+
+export async function getAttachedDocumentsPrelim(
+  orderNumber: string
+): Promise<VendorResult<SoftProAttachedDocument[]>> {
+  return makeRequest<SoftProAttachedDocument[]>('GET', SOFTPRO_ENDPOINTS.getAttachedDocumentsPrelim, {
+    queryParams: { orderNumber },
+    operation: 'get_attached_documents_prelim',
   });
 }
 

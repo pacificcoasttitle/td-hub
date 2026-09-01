@@ -869,3 +869,85 @@ export function parseName(
   const last = parts.pop()!;
   return { firstName: parts.join(' '), lastName: last };
 }
+
+// ─── File Check — spec 7.1, recovering an order Westcor already holds ────────
+//
+// "Validates if the order exists, return back limited information." A READ: it
+// creates nothing, updates nothing, and is the only way to learn a tvid we
+// failed to record.
+//
+// ═══ THE SPEC IS WRONG ABOUT THIS ENDPOINT IN THREE WAYS ═══════════════════
+//
+// Measured against production on 2026-09-01, not inferred:
+//
+//   1. It is documented as GET with a request body. It is a POST. A GET falls
+//      through to the Order/{tvid} route and answers
+//      {"ModelState":{"tvid":["The value 'FileCheck' is not valid for Int32."]}}
+//
+//   2. The spec offers `agentnumber` / `agent_file_number` and `AN` /
+//      `FileNumber` as equivalent spellings. ONLY `AN` / `FileNumber` resolves.
+//      The snake_case body returns an empty array — a silent miss, not an
+//      error, which is the dangerous kind of wrong.
+//
+//   3. The response is documented as a bare object. It is an ARRAY.
+//
+// ═══ SCOPING, ESTABLISHED BY THE RESPONSE ══════════════════════════════════
+//
+// Both fields are required and the agent number genuinely scopes the search:
+//
+//   AN=CA1038 + FileNumber=20015222-OCT  -> 1 row, tvid 3692238
+//   no AN,      FileNumber=20015222-OCT  -> 0 rows
+//   AN='',      FileNumber=20015222-OCT  -> 0 rows
+//   AN=CA9999,  FileNumber=20015222-OCT  -> 0 rows
+//   AN=CA1038,  FileNumber=<nonexistent> -> 0 rows
+//
+// So a false positive requires a duplicate file number WITHIN agent CA1038,
+// not merely anywhere at Westcor. A miss is an empty array; an error is a
+// non-200. The two are distinguishable, which is why this can fail safe.
+
+export interface WestcorFileCheckResult {
+  tvid: string;
+  completed: boolean;
+  canceled: boolean;
+}
+
+export async function fileCheck(
+  cfg: { baseUrl: string; integrationPartner: string },
+  token: string,
+  agentNumber: string,
+  agentFileNumber: string,
+): Promise<WestcorFileCheckResult | null> {
+  if (!agentNumber.trim() || !agentFileNumber.trim()) return null;
+
+  const res = await fetch(
+    `${cfg.baseUrl}VendorApi/Order/FileCheck/${cfg.integrationPartner}`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ AN: agentNumber, FileNumber: agentFileNumber }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    },
+  );
+
+  // A lookup that fails must never block a CPL. Returning null puts us back on
+  // the path we were already taking.
+  if (!res.ok) return null;
+
+  const body = (await res.json().catch(() => null)) as unknown;
+  const rows = Array.isArray(body) ? body : null;
+  if (!rows || rows.length === 0) return null;
+
+  // More than one row for one agent + one file number is the ambiguity this
+  // whole design has to fear. Refuse it rather than pick.
+  if (rows.length > 1) return null;
+
+  const row = rows[0] as { tvid?: number | string; canceled?: boolean; completed?: boolean };
+  const tvid = row?.tvid != null ? String(row.tvid) : '';
+  if (tvid === '' || tvid === '0') return null;
+
+  return {
+    tvid,
+    completed: row.completed === true,
+    canceled: row.canceled === true,
+  };
+}

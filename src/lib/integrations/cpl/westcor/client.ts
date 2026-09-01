@@ -7,12 +7,12 @@ import type {
 import { MOCK_PDF_BASE64 } from '../types';
 import { db } from '@/lib/db/client';
 import { vendorApiLogs, vendorTokens, cplBranches } from '@/lib/db/schema';
-import { and, eq, gt, desc, sql } from 'drizzle-orm';
+import { and, eq, gt, desc, sql, inArray } from 'drizzle-orm';
 import { getToken, cachedGroups, mapGroupsToBranches } from './auth';
 import type { WestcorGroup } from './auth';
 import {
   createOrUpdateOrder, getOrder, prepareAddCpl, generateCplPdf, selectCplForm,
-  resolvePurchasePrice, preflightValidate, describeNamesForDiagnostics,
+  resolvePurchasePrice, preflightValidate, describeNamesForDiagnostics, fileCheck,
 } from './payloads';
 import type { WestcorBranchInfo } from './payloads';
 
@@ -107,6 +107,31 @@ async function lookupExistingTvid(orderId: number): Promise<string | null> {
   }
 }
 
+/**
+ * Has a CPL been attempted on this order before?
+ *
+ * The gate for the FileCheck recovery read. A first-ever CPL cannot have
+ * stranded an order, so it should not pay for a lookup; a retry might have,
+ * and that is the only case worth a round trip.
+ */
+async function hasPriorCplAttempt(orderId: number): Promise<boolean> {
+  try {
+    const [row] = await db
+      .select({ id: vendorApiLogs.id })
+      .from(vendorApiLogs)
+      .where(and(
+        eq(vendorApiLogs.vendor, VENDOR),
+        eq(vendorApiLogs.orderId, orderId),
+        inArray(vendorApiLogs.operation, ['generate_cpl', 'create_order']),
+      ))
+      .limit(1);
+    return !!row;
+  } catch {
+    // Unknown means "do the read". A missed recovery is the expensive outcome.
+    return true;
+  }
+}
+
 // ─── Adapter ────────────────────────────────────────────────────────────────
 
 export const westcorAdapter: CplAdapter = {
@@ -145,8 +170,48 @@ export const westcorAdapter: CplAdapter = {
 
       const txType = orderDetail.transactionType ?? 'unknown';
 
-      // Look up existing Westcor tvid from a previous successful Step A for this order
-      const existingTvid = await lookupExistingTvid(input.orderId);
+      // Look up existing Westcor tvid from a previous Step A for this order
+      let existingTvid = await lookupExistingTvid(input.orderId);
+
+      // ─── RECOVERY: ask Westcor for an order our records lost ───────────────
+      //
+      // SCOPED TO THE RETRY PATH. Only when we hold no tvid AND this order has
+      // been attempted before. A first-ever CPL cannot have stranded anything,
+      // so it pays no extra round trip.
+      //
+      // This exists because Westcor can create the order and still return an
+      // error (see createOrUpdateOrder). Orders stranded BEFORE that fix have
+      // no tvid anywhere on our side, and every retry issues a CREATE that
+      // Westcor refuses as "Agent Number - Order Number Must be Unique". The
+      // only place the tvid still exists is Westcor, and FileCheck is a read
+      // that returns it.
+      //
+      // FAILS SAFE. Any miss — no rows, several rows, a non-200, a throw —
+      // leaves existingTvid null and we take exactly the path we take today.
+      if (!existingTvid && orderDetail.fileNumber) {
+        const attempted = await hasPriorCplAttempt(input.orderId);
+        if (attempted) {
+          try {
+            const found = await fileCheck(cfg, token, branch.branchCode, orderDetail.fileNumber);
+            await logRequest({
+              operation: 'file_check', orderId: input.orderId, requestId,
+              startedAt: new Date(), success: true,
+              meta: { agentNumber: branch.branchCode, fileNumber: orderDetail.fileNumber, reason: 'no stored tvid on a retry' },
+              responseMeta: found
+                ? { tvid: found.tvid, completed: found.completed, canceled: found.canceled, recovered: true }
+                : { recovered: false },
+            });
+            // A canceled order at Westcor must not be revived by an update.
+            if (found && !found.canceled) existingTvid = found.tvid;
+          } catch (e) {
+            await logRequest({
+              operation: 'file_check', orderId: input.orderId, requestId,
+              startedAt: new Date(), success: false, errorCategory: 'LOOKUP_FAILED',
+              meta: { error: e instanceof Error ? e.message : 'unknown' },
+            });
+          }
+        }
+      }
 
       // Step A: Create/update order in Westcor
       const { westcorOrderId, orderResponse } = await createOrUpdateOrder(cfg, token, orderDetail, input, branch, existingTvid);

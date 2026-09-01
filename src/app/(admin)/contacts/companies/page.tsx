@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CompanySyncAllButton } from '@/components/admin/contacts/company-sync-all-button';
 import { CompanyFormModal, type CompanyRecord } from '@/components/admin/contacts/company-form-modal';
 import { CompanyOfficerModal, type OfficerTarget } from '@/components/admin/contacts/company-officer-modal';
+import { CreatePartyWizard } from '@/components/admin/create-party-wizard';
 
 interface StaffOption { id: number; name: string }
 
@@ -214,7 +215,19 @@ export default function CompaniesPage() {
         )}
       </div>
 
-      <CompanyFormModal open={modalOpen} onClose={() => setModalOpen(false)} onSuccess={fetchCompanies} company={editCompany} />
+      {editCompany ? (
+        <CompanyFormModal open={modalOpen} onClose={() => setModalOpen(false)} onSuccess={fetchCompanies} company={editCompany} />
+      ) : (
+        <CreatePartyWizard
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+          onCompanyCreated={() => fetchCompanies()}
+          userType="realtor"
+          label="Company"
+          companyOnly
+          chooseUserType
+        />
+      )}
       <CompanyOfficerModal
         open={!!officerTarget}
         target={officerTarget}

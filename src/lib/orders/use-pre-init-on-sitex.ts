@@ -61,7 +61,23 @@ export interface UsePreInitOnSiteXResult {
   invalidateIfAddressChanged: (addressKey: string) => void;
 }
 
-/** Shared address identity for invalidate-on-edit (Hub + client). */
+/**
+ * Shared address identity for invalidate-on-edit (Hub + client).
+ *
+ * Identity of the property a pre-init session belongs to.
+ *
+ * DELIBERATELY ADDRESS-BASED, NOT APN-BASED. This is recomputed on every
+ * keystroke and compared by `invalidateIfAddressChanged`, so it is the guard
+ * that stops a session for one property surviving into another. The `apn` here
+ * comes from component state, which can still hold the PREVIOUSLY CONFIRMED
+ * parcel while the operator types a new address — keying on it would report
+ * "same property" for a property the operator has already left, and attach one
+ * property's documents to another. That is the failure this key exists to
+ * prevent (design edge case 4).
+ *
+ * Reuse of a live session is handled in `onConfidentSiteX` instead, where the
+ * APN arrives from a fresh SiteX confirm rather than from form state.
+ */
 export function buildPreInitAddressKey(p: {
   address: string;
   city: string;
@@ -79,6 +95,8 @@ export function usePreInitOnSiteX(): UsePreInitOnSiteXResult {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [siteXSnapshot, setSiteXSnapshot] = useState<SiteXSnapshotForOrder | null>(null);
   const firedKeyRef = useRef<string | null>(null);
+  /** APN of the parcel the live session belongs to, from a SiteX confirm. */
+  const sessionApnRef = useRef<string | null>(null);
   const gateStartedAtRef = useRef<number | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -132,6 +150,7 @@ export function usePreInitOnSiteX(): UsePreInitOnSiteXResult {
       setPhase('skipped');
       setSessionId(null);
       firedKeyRef.current = null;
+      sessionApnRef.current = null;
       clearTimers();
       return;
     }
@@ -141,6 +160,26 @@ export function usePreInitOnSiteX(): UsePreInitOnSiteXResult {
       // Same confident match already in flight / done — do not re-fire.
       return;
     }
+
+    // ─── Reuse a live session for the same parcel ───────────────────────────
+    //
+    // Safe here and only here: `property` is a fresh SiteX confirm, so its APN
+    // describes the parcel the operator just accepted, not whatever is left in
+    // form state. `isConfidentSiteXMatch` has already required a single match.
+    //
+    // NOT a prerequisite for anything. The 53-sessions-across-31-addresses
+    // figure was RETRIES downstream of the create failures fixed in #80 —
+    // 15181 Jackson St fired five sessions and produced three SoftPro files
+    // (20021669 and 20021679 cancelled, 20021683 kept), which is a create-retry
+    // signature, not an operator editing an address. This is three lines that
+    // cost nothing, kept because a second confirm of the same parcel has no
+    // reason to start a second pair of searches.
+    const confirmedApn = (property.apn ?? '').trim().toLowerCase();
+    if (confirmedApn !== '' && sessionApnRef.current === confirmedApn && sessionId) {
+      firedKeyRef.current = key;
+      return;
+    }
+    sessionApnRef.current = confirmedApn || null;
 
     firedKeyRef.current = key;
     setSiteXSnapshot({
@@ -204,15 +243,23 @@ export function usePreInitOnSiteX(): UsePreInitOnSiteXResult {
   const onNoSiteXMatch = useCallback(() => {
     clearTimers();
     firedKeyRef.current = null;
+    sessionApnRef.current = null;
     setSessionId(null);
     setSiteXSnapshot(null);
     setPhase('skipped');
   }, [clearTimers]);
 
+  /**
+   * Drop the session when the operator has moved to a different property.
+   *
+   * Unchanged behaviour: any change to the address key invalidates. See
+   * `buildPreInitAddressKey` for why this is not keyed on the APN.
+   */
   const invalidateIfAddressChanged = useCallback((nextKey: string) => {
     if (!firedKeyRef.current || firedKeyRef.current === nextKey) return;
     clearTimers();
     firedKeyRef.current = null;
+    sessionApnRef.current = null;
     setSessionId(null);
     setSiteXSnapshot(null);
     setPhase('idle');

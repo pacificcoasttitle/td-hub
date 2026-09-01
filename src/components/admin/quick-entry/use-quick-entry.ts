@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClientContact } from '@/components/admin/client-selector';
 import type { ParsedAddress } from '@/components/ui/address-autocomplete';
 import type { SiteXPropertyResult } from '@/components/shared/property-confirm-modal';
+import {
+  missingTitlePointInputs,
+  describeMissingTitlePointInputs,
+} from '@/lib/domain/orders/titlepoint-preconditions';
 import { buildPreInitAddressKey, usePreInitOnSiteX } from '@/lib/orders/use-pre-init-on-sitex';
 import { isConfidentSiteXMatch } from '@/lib/domain/titlepoint/confident-sitex';
 import { toCreateOrderContact } from '@/lib/domain/orders/party-contact';
@@ -309,6 +313,26 @@ export function useQuickEntry() {
   async function handleSubmit() {
     if (result?.submitLocked) return;
     if (submitting) return;
+
+    // ─── County is required, because without it there are no documents ──────
+    //
+    // TitlePoint needs address, state AND county. Any one missing skipped the
+    // searches entirely, and until now silently: 4 of 27 live hub orders in
+    // seven days were created with no county and got no title documents at all.
+    //
+    // This is the entrance, not the whole fix — county has two sources and a
+    // SiteX failure empties it just as effectively as a blank field. The server
+    // records which input was missing whatever the cause; see
+    // titlepoint-preconditions.ts. This just stops the common one at the form,
+    // where the operator can still do something about it.
+    const missingForTitlePoint = missingTitlePointInputs({
+      address: street, state: state || 'CA', county,
+    });
+    if (missingForTitlePoint.length > 0) {
+      setResult({ type: 'error', message: describeMissingTitlePointInputs(missingForTitlePoint) });
+      return;
+    }
+
     if (!claimCreateInFlight(createInFlightRef)) return;
     setResult(null);
     setSubmitting(true);

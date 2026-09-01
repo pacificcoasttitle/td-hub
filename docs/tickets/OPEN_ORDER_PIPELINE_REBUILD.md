@@ -67,36 +67,129 @@ containing a name we uploaded. It is currently marking **57 documents across 20
 orders** as unsynced while SoftPro's own reply — *"An item already exists by that
 name"*, with `FileUploadedStatus: true` — says they are there.
 
-### Corrected from the brief
+### Corrected from the brief — and then corrected again
 
-**The county gap is 9 of 32, not 4 of 32 — 28% of orders — and the correlation
-is total.** Hub-created orders, last 3 days:
+**The brief said 4 of 32. The first draft of this document said 9 of 32 and
+called the brief wrong. The brief was right.**
+
+The 9 included **five cancelled orphans** from the 2026-08-31/09-01 incident —
+`20021663-OCT`, `20021669-OCT`, `20021677-OCT`, `20021678-OCT`,
+`20021679-OCT`. All five are `operational_status: canceled` and
+`softpro_status: canceled`, all five appear on the `CANCEL_FILES` list in
+`scripts/audit/repair-create-order-orphans.ts`, and
+`docs/tickets/CREATE_ORDER_ORPHANS_2026-08-31.md` says *"Do not un-cancel."*
+They have no `order_properties` row because they were cancelled, not because
+anything failed. Counting them as failures inflated the defect by 2x.
+
+The live population:
 
 ```
-orders                 32
-with no county          9
-with no TitlePoint      9
-no county AND no TP     9    <- the same nine, every time
+live hub orders (7 days, excluding cancelled):  27
+with no county:                                  4
+with no TitlePoint:                              4      the same four
 ```
 
-Every order missing a county got zero TitlePoint rows. Every order with zero
-TitlePoint rows was missing a county. There is no third cause.
+`20021653-GLT`, `20021658-GLT`, `20021664-GLT`, `20021668-OCT`.
 
-Orders affected: 8136, 8141, 8146, 8147, 8151, 8152, 8159, 8160, 8161.
+**15% of live orders lose every title document.** Still the cheapest fix on the
+list; it is a required field. But the number is 4 of 27, and any argument that
+rests on a larger one is resting on cancelled files.
 
-**This makes step 2 the highest-value item in the build order**, not the
-smallest. It is a required field on a form against a defect costing a quarter of
-all orders their title documents.
+### The gate is three-way, and that is the real fix
+
+`create-order.ts:342`:
+
+```ts
+} else if (input.property.address && input.property.state && county) {
+```
+
+**Any** of the three missing skips TitlePoint entirely, silently. County is one
+door into the same hole; address and state are the others. And county itself has
+two sources —
+
+```ts
+const county = input.property.county ?? sitexData?.county ?? '';
+```
+
+— so a SiteX failure or a no-match empties it just as effectively as a
+multi-match, and the SiteX call is wrapped in
+`catch { /* SiteX failure never blocks order creation */ }`.
+
+So the fix is **not** "county required". It is: this branch records which input
+was missing, and that reason is visible on the order. The required field on the
+form is the entrance; the recorded reason is what stops the next silent skip
+through a different door.
+
+### The 105 parked sessions — investigated, zero repairs
+
+53 sessions across 31 addresses, every one accounted for:
+
+| Where the order ended up | Addresses | Repair |
+|---|---:|---|
+| Created in **legacy** (arrived via `softpro_sync`) | 13 | None — not our order |
+| Created in the **hub** | 14 | None — all 14 complete, `tp=4 docs=3` |
+| No order at all | 4 | None — abandoned |
+
+**No order is missing documents because of a linking failure.**
+
+Two findings fall out of it:
+
+**Session churn — and it is now step 1.** 53 sessions for 31 addresses; 11
+addresses have more than one, up to **5**. `buildPreInitAddressKey` is
+`address|city|state|zip|apn`, recomputed on every keystroke, and the invalidation
+effect in `use-quick-entry.ts:98-108` fires on each change. Every edit after a
+match drops the session locally while the server-side searches keep running.
+
+Today that wastes two searches per edit. **After Phase A moves generation
+earlier it wastes two searches and three PDFs per edit** — an operator
+correcting an address twice would generate nine documents for one order. That is
+why this moves ahead of Phase A rather than being cleanup.
+
+**13 addresses started in the hub and finished in legacy.** The order arrived
+later via `softpro_sync`. `15181 Jackson St` fired five sessions and still went
+to legacy. **No cause is inferred here** — Gerard is asking the team directly.
+The measurement stays running so we can see whether it drops as things are
+fixed.
 
 ### Assumed, and flagged as such
 
-- That the SiteX multi-match case is the *only* producer of a missing county.
-  Nine orders is a small sample; the fix is a required field either way, which
-  is correct regardless of the cause.
+- ~~That the SiteX multi-match is the only producer of a missing county.~~
+  **Resolved: it is not.** The gate is three-way and county has two sources.
+  See "The gate is three-way" above.
 - That generating a PDF needs nothing from the order row beyond the property.
   This is true of the three types in scope but has not been proven for every
-  code path that writes a document, and step 4 must establish it before moving
+  code path that writes a document, and step 5 must establish it before moving
   generation.
+
+### Session churn: reuse, not cancel
+
+**Decision: reuse the session when the property resolves to the same APN.**
+
+Two pieces of evidence:
+
+1. **The APN is stable across re-fires. 11 of 11, zero exceptions.** Every
+   address with more than one parked session carried an identical APN on every
+   one of them:
+
+   ```
+   15181 jackson st     5 sessions   ["107-151-44"]
+   56320 bonanza dr     4 sessions   ["0585-452-03-0000"]
+   349 kirby st         4 sessions   ["5486-016-001"]
+   9207 s central ave   4 sessions   ["6049-031-035"]
+   ...                             11 addresses, 0 with a differing APN
+   ```
+
+2. **There is no cancel to call.** The TitlePoint client uses eight endpoints —
+   `CreateService3/4`, `GetRequestSummaries`, `GetResultByID/3`,
+   `CreateRequest3`, `GetRequestStatus`, `GetGeneratedImage`,
+   `GetDocumentsByParameters3`. None cancels a service. "Cancel the in-flight
+   one" could only mean abandoning it locally while it keeps running and keeps
+   costing, which is exactly today's behaviour.
+
+So cancel is unavailable and reuse is provably safe. The key becomes the APN
+when one is present, falling back to the current address key when it is not —
+`isConfidentSiteXMatch` already requires a single match, and a single match
+carries an APN.
 
 ---
 
@@ -215,15 +308,16 @@ One PR per step, each independently revertable.
 
 | # | Step | Why here |
 |---|---|---|
-| 1 | **Trace id** through SiteX, TitlePoint, SoftPro, jobs, local writes | Every question this week needed archaeology because `create_order` rows carry `order_id = NULL` on every row. Nothing else is measurable until this exists. |
-| 2 | **County required on multi-match** | 9 of 32 orders. Smallest change, largest measured effect. |
-| 3 | **Delete the submit gate** | Pure subtraction. No vendor contact. |
-| 4 | **Session-keyed generation (Phase A)** | The core change. Requires the migration below. |
-| 5 | **Bind and rename (Phase B)** | `linkSessionToOrder` already exists; extend it to artifacts. |
-| 6 | **Sequential Phase C; delete the verify step** | |
-| 7 | **State model persisted, resumable** | Last because steps 4–6 define what the states actually are. |
+| 1 | **Session reuse on address edit** | Ahead of Phase A because Phase A multiplies its cost from 2 wasted searches per edit to 2 searches + 3 PDFs. |
+| 2 | **Three-way gate records the missing input, plus the required field** | 4 of 27 live orders lose every document. The recorded reason closes the other two doors. |
+| 3 | **Trace id** through SiteX, TitlePoint, SoftPro, jobs, local writes | Every question this week needed archaeology because `create_order` rows carry `order_id = NULL` on every row. |
+| 4 | **Delete the submit gate** | Pure subtraction. No vendor contact. |
+| 5 | **Session-keyed generation (Phase A)** | The core change. Requires the migration below. |
+| 6 | **Bind and rename (Phase B)** | `linkSessionToOrder` already exists; extend it to artifacts. |
+| 7 | **Sequential Phase C; delete the verify step** | |
+| 8 | **State model persisted, resumable** | Last because steps 5–7 define what the states actually are. |
 
-### The migration step 4 needs
+### The migration step 5 needs
 
 `documents.order_id` becomes nullable, `documents.session_id` is added, and a
 check constraint requires **exactly one** of them. Additive; hand-applied ahead
@@ -245,7 +339,7 @@ Captured on today's code first, so the comparison is real.
 | Submit → confirmation email sent | not instrumented |
 | Submit → all documents in SoftPro | not instrumented |
 | % of orders with all three documents in SoftPro | not instrumented |
-| **% of orders with no documents at all** | **28% (9 of 32)** |
+| **% of live orders with no documents at all** | **15% (4 of 27)** |
 
 The two "not instrumented" rows are what step 1 exists to fix. **If these
 numbers do not move after the rebuild, the design was wrong and that should be

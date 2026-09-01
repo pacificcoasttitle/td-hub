@@ -21,6 +21,25 @@ async function logAuthRequest(params: {
   } catch { /* logging must not break the main flow */ }
 }
 
+// ─── Persist-then-throw helpers ─────────────────────────────────────────────
+//
+// A token response is not a document, so the whole body is safe to keep. It can
+// still hold a secret on the SUCCESS path, which is why these are only ever
+// used where the expected token field is ABSENT.
+const AUTH_BODY_LIMIT = 4_000;
+
+function safeJson<T>(raw: string): T | null {
+  try { return JSON.parse(raw) as T; } catch { return null; }
+}
+
+function describeBody(raw: string): Record<string, unknown> {
+  return {
+    rawResponse: raw.slice(0, AUTH_BODY_LIMIT),
+    rawResponseBytes: raw.length,
+    rawResponseTruncated: raw.length > AUTH_BODY_LIMIT,
+  };
+}
+
 export async function getCachedToken(tokenType: string): Promise<string | null> {
   const rows = await db
     .select()
@@ -72,9 +91,21 @@ export async function getVendorToken(cfg: {
     throw new Error(`FNF vendor token request failed: HTTP ${res.status}`);
   }
 
-  const data = await res.json() as { jwtToken: string; expiresAt: string };
-  const token = data.jwtToken;
-  if (!token) throw new Error('FNF returned empty vendor token (no jwtToken field)');
+  const rawBody = await res.text();
+  const data = safeJson<{ jwtToken?: string; expiresAt?: string }>(rawBody);
+  const token = data?.jwtToken;
+  if (!token) {
+    // PERSIST FIRST, THROW SECOND. A 200 whose body lacks the expected field is
+    // the case with no other record: logAuthRequest covers !res.ok, not this.
+    // Without the body we would know only that the token was "empty", never
+    // what FNF actually said.
+    await logAuthRequest({
+      operation: 'get_vendor_token', requestId: rid, startedAt, success: false,
+      httpStatus: res.status, errorCategory: 'AUTH_SHAPE',
+      meta: { reason: 'no jwtToken field', ...describeBody(rawBody) },
+    });
+    throw new Error('FNF returned empty vendor token (no jwtToken field)');
+  }
 
   // Legacy uses expiresAt from response. Fallback to 8 hours (28800s) if missing.
   let expiresAt: Date;
@@ -130,9 +161,17 @@ export async function getUserToken(cfg: {
     throw new Error(`FNF user token request failed: HTTP ${res.status}`);
   }
 
-  const data = await res.json() as { user_token: string; expires_in: number; username: string };
-  const token = data.user_token;
-  if (!token) throw new Error('FNF returned empty user token (no user_token field)');
+  const rawBody = await res.text();
+  const data = safeJson<{ user_token?: string; expires_in?: number; username?: string }>(rawBody);
+  const token = data?.user_token;
+  if (!token) {
+    await logAuthRequest({
+      operation: 'get_user_token', requestId: rid, startedAt, success: false,
+      httpStatus: res.status, errorCategory: 'AUTH_SHAPE',
+      meta: { reason: 'no user_token field', ...describeBody(rawBody) },
+    });
+    throw new Error('FNF returned empty user token (no user_token field)');
+  }
 
   const expiresAt = new Date(Date.now() + (data.expires_in ?? 3500) * 1000);
   await db.insert(vendorTokens).values({ vendor: VENDOR, tokenType: 'user_jwt', token, expiresAt });

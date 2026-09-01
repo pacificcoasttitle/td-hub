@@ -5,6 +5,20 @@ import { classifyPartyName } from '@/lib/domain/cpl/borrower-resolution';
 const TIMEOUT_MS = 15_000;
 const CPL_TIMEOUT_MS = 30_000;
 
+// How much of a vendor response body we keep on a failure.
+//
+// 1,000 characters was the old ceiling and it truncated exactly the part worth
+// having: a SOAP fault or a .NET exception puts the boilerplate first and the
+// specific cause last, so a capped body reliably keeps the useless half. The
+// column is jsonb with no size constraint, these rows are written only on
+// FAILURES, and the whole point of storing them is that somebody reads one
+// during an incident.
+//
+// 64 KB is generous enough for a full fault and still bounded, and the stored
+// meta records the original length and whether it was cut, so a reader is never
+// guessing whether they have all of it.
+const RAW_BODY_LIMIT = 64_000;
+
 // ─── Branch info needed by the payload builders ─────────────────────────────
 
 export interface WestcorBranchInfo {
@@ -449,6 +463,62 @@ const ACTIONS_CREATE = {
 
 // ─── Step A: Create order in Westcor ────────────────────────────────────────
 
+/**
+ * An error from Westcor's Order/Update that CARRIES THE BODY.
+ *
+ * Persist-then-throw, in one place. The caller writes `diagnostics` into the
+ * failure log and reads `westcorTvid` to record a partly-created order, so an
+ * error built here can never be the total loss the old `throw new Error` was.
+ *
+ * `tvid` is dug out of whatever shape the body happens to be: Westcor returns
+ * a JSON object on a 200-with-errors, and on a 500 we genuinely do not know —
+ * nobody kept one to look at. If a tvid is in there, this finds it; if it is
+ * not, nothing is invented.
+ */
+function westcorOrderError(
+  message: string,
+  rawBody: string,
+  extra?: Record<string, unknown>,
+): Error & { diagnostics: Record<string, unknown>; westcorTvid?: string } {
+  const err = new Error(message) as Error & {
+    diagnostics: Record<string, unknown>;
+    westcorTvid?: string;
+  };
+
+  // The WHOLE body, up to a limit that fits a SOAP fault or a stack trace
+  // rather than the first sentence of one. See RAW_BODY_LIMIT.
+  err.diagnostics = {
+    ...(extra ?? {}),
+    rawResponse: rawBody.slice(0, RAW_BODY_LIMIT),
+    rawResponseBytes: rawBody.length,
+    rawResponseTruncated: rawBody.length > RAW_BODY_LIMIT,
+  };
+
+  const tvid = extractTvidFromBody(rawBody);
+  if (tvid) {
+    err.westcorTvid = tvid;
+    err.diagnostics.partialCreateTvid = tvid;
+  }
+
+  return err;
+}
+
+/** Pull a tvid out of a response body of unknown shape. Never invents one. */
+function extractTvidFromBody(rawBody: string): string | null {
+  const text = rawBody.trim();
+  if (text === '') return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const obj = Array.isArray(parsed) ? parsed[0] : parsed;
+    if (obj && typeof obj === 'object') {
+      const v = (obj as Record<string, unknown>).tvid;
+      const s = v != null ? String(v) : '';
+      if (s !== '' && s !== '0' && /^\d+$/.test(s)) return s;
+    }
+  } catch { /* not JSON — fall through */ }
+  return null;
+}
+
 export async function createOrUpdateOrder(
   cfg: { baseUrl: string; integrationPartner: string },
   token: string,
@@ -492,8 +562,25 @@ export async function createOrUpdateOrder(
   );
 
   if (!res.ok) {
+    // ─── THE OTHER BRANCH OF THE SAME HOLE ─────────────────────────────────
+    //
+    // The 200-with-messages.error path below keeps the tvid. This one used to
+    // read the body, slice 300 characters into a message, and discard the rest
+    // — on the branch that emitted
+    //
+    //   HTTP 500 — Exception Errors Occurred: Agent Number - Order Number Must
+    //   be Unique. |
+    //
+    // Whether a Westcor 500 also carries a tvid was UNKNOWABLE from what we
+    // stored, which is exactly how orders 48, 49 and 6142 became unrecoverable.
+    // So: persist first, throw second. If a tvid is in there, it now survives
+    // and the order can still be recovered.
     const text = await res.text().catch(() => '');
-    throw new Error(`Westcor order update failed: HTTP ${res.status} — ${text.slice(0, 300)}`);
+    throw westcorOrderError(
+      `Westcor order update failed: HTTP ${res.status} — ${text.slice(0, 300)}`,
+      text,
+      { httpStatus: res.status },
+    );
   }
 
   const data = (await res.json()) as WestcorOrderResponse;

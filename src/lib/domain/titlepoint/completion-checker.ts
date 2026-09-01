@@ -157,14 +157,52 @@ export async function getConfirmationReadiness(orderId: number): Promise<Confirm
   // Do NOT hard-fail early when only one of Tax/LV failed while the other is still in-flight.
   // Wait for both terminals or the timeout outer bound (legacy).
 
-  const [orderRow] = await db
-    .select({ createdAt: orders.createdAt, openedAt: orders.openedAt })
-    .from(orders)
-    .where(eq(orders.id, orderId))
-    .limit(1);
-
+  // ─── THE TIMEOUT IS MEASURED FROM THE SEARCH, NOT FROM THE ORDER ─────────
+  //
+  // This used to anchor on `orders.openedAt ?? orders.createdAt`, which asks
+  // "how old is this order?" when the question is "how long have these searches
+  // been running?". On an order created within the last ten minutes the two
+  // coincide, which is why it went unnoticed.
+  //
+  // On ANY LATE RE-TRIGGER they do not. Order 8136 was created on 1 September;
+  // TitlePoint was started on it a day later after its missing county was
+  // filled in. The order was ~24h old, the window is 10 minutes, so the very
+  // first readiness check returned `timeout` THREE SECONDS after the searches
+  // began — and a confirmation went to the escrow company saying there were no
+  // documents. Two minutes later all three completed.
+  //
+  // Anchoring on the earliest search means the outer bound starts when the work
+  // starts. A search begun now gets its full window however old the order is.
+  //
+  // NO SEARCHES AT ALL means there is nothing to wait for, so the order-level
+  // anchor still applies — that is the genuinely-nothing-started case, and it
+  // must stay ready or an order with no TitlePoint would never confirm.
+  //
+  // ─── THIS WHOLE MECHANISM GOES AWAY IN THE PIPELINE REBUILD ──────────────
+  //
+  // Phase C is sequential: C2 (send the confirmation) cannot begin until C1
+  // (all documents terminal) has finished. There is no clock and therefore no
+  // anchor to get wrong. Clock-based readiness is precisely what the rebuild
+  // removes; this fix is what keeps it honest until then.
+  // See docs/tickets/OPEN_ORDER_PIPELINE_REBUILD.md.
   const timeoutMinutes = await getConfirmationTimeoutMinutes();
-  const anchor = orderRow?.openedAt ?? orderRow?.createdAt ?? null;
+
+  const searchStarts = records
+    .map((r) => r.createdAt)
+    .filter((d): d is Date => d instanceof Date);
+
+  let anchor: Date | null = null;
+  if (searchStarts.length > 0) {
+    anchor = new Date(Math.min(...searchStarts.map((d) => d.getTime())));
+  } else {
+    const [orderRow] = await db
+      .select({ createdAt: orders.createdAt, openedAt: orders.openedAt })
+      .from(orders)
+      .where(eq(orders.id, orderId))
+      .limit(1);
+    anchor = orderRow?.openedAt ?? orderRow?.createdAt ?? null;
+  }
+
   if (anchor) {
     const ageMs = Date.now() - new Date(anchor).getTime();
     if (ageMs >= timeoutMinutes * 60_000) {

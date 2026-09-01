@@ -118,8 +118,7 @@ describe('getConfirmationReadiness / maybeEnqueueConfirmation (OC-3 legacy gate)
       .mockReturnValueOnce(chainSelect([
         { searchType: 'legal_vesting', status: 'failed', createdAt: recent },
         { searchType: 'tax', status: 'processing', createdAt: recent },
-      ]))
-      .mockReturnValueOnce(chainSelect([{ createdAt: recent, openedAt: recent }]));
+      ]));
 
     const { maybeEnqueueConfirmation } = await import('./completion-checker');
     const enqueued = await maybeEnqueueConfirmation(50);
@@ -136,8 +135,9 @@ describe('getConfirmationReadiness / maybeEnqueueConfirmation (OC-3 legacy gate)
       .mockReturnValueOnce(chainSelect([
         { searchType: 'legal_vesting', status: 'processing', createdAt: old },
         { searchType: 'tax', status: 'processing', createdAt: old },
-      ]))
-      .mockReturnValueOnce(chainSelect([{ createdAt: old, openedAt: old }]));
+      ]));
+    // No orders select: with searches present the anchor is the earliest
+    // search createdAt, so the order row is never read.
 
     const { maybeEnqueueConfirmation } = await import('./completion-checker');
     const enqueued = await maybeEnqueueConfirmation(50);
@@ -155,14 +155,66 @@ describe('getConfirmationReadiness / maybeEnqueueConfirmation (OC-3 legacy gate)
       .mockReturnValueOnce(chainSelect([{ emailStatus: 'pending' }]))
       .mockReturnValueOnce(chainSelect([
         { searchType: 'legal_vesting', status: 'processing', createdAt: recent },
-      ]))
-      .mockReturnValueOnce(chainSelect([{ createdAt: recent, openedAt: recent }]));
+      ]));
 
     const { maybeEnqueueConfirmation } = await import('./completion-checker');
     const enqueued = await maybeEnqueueConfirmation(50);
 
     expect(enqueued).toBe(false);
     expect(insertValuesMock).not.toHaveBeenCalled();
+  });
+
+  // ─── Order 8136: a day-old order, searches started three seconds ago ──────
+  //
+  // The live failure this fix exists for. 20021653-GLT was created 1 September
+  // with no county, so TitlePoint never ran. A day later the county was filled
+  // in and the searches started — and because the timeout was anchored on the
+  // ORDER's createdAt, the very first readiness check saw a ~24h-old order
+  // against a 10-minute window and returned `timeout` immediately. A
+  // confirmation went to the escrow company saying there were no documents.
+  // Two minutes later all three completed.
+  it('a fresh search on an OLD order is not instantly timed out', async () => {
+    const orderCreated = new Date(Date.now() - 24 * 60 * 60_000); // yesterday
+    const searchStarted = new Date(Date.now() - 3_000);           // 3s ago
+
+    selectLimitMock
+      .mockReturnValueOnce(chainSelect([]))
+      .mockReturnValueOnce(chainSelect([{ emailStatus: 'pending' }]))
+      .mockReturnValueOnce(chainSelect([
+        { searchType: 'legal_vesting', status: 'processing', createdAt: searchStarted },
+        { searchType: 'tax', status: 'processing', createdAt: searchStarted },
+      ]));
+
+    const { maybeEnqueueConfirmation } = await import('./completion-checker');
+    const enqueued = await maybeEnqueueConfirmation(8136);
+
+    expect(enqueued).toBe(false);
+    expect(insertValuesMock).not.toHaveBeenCalled();
+    // Three selects: outbox, email_status, searches. The ORDER row is never
+    // read — reading it is the bug. `orderCreated` exists only to name what the
+    // old code would have anchored on.
+    expect(selectLimitMock).toHaveBeenCalledTimes(3);
+    expect(orderCreated.getTime()).toBeLessThan(searchStarted.getTime());
+  });
+
+  it('an old order with NO searches still falls back to the order date', async () => {
+    // The genuinely-nothing-started case. Without this an order that will never
+    // get TitlePoint would wait for a search that is never coming.
+    const orderCreated = new Date(Date.now() - 24 * 60 * 60_000);
+
+    selectLimitMock
+      .mockReturnValueOnce(chainSelect([]))
+      .mockReturnValueOnce(chainSelect([{ emailStatus: 'pending' }]))
+      .mockReturnValueOnce(chainSelect([]))
+      .mockReturnValueOnce(chainSelect([{ createdAt: orderCreated, openedAt: orderCreated }]));
+
+    const { maybeEnqueueConfirmation } = await import('./completion-checker');
+    const enqueued = await maybeEnqueueConfirmation(8136);
+
+    expect(enqueued).toBe(true);
+    expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ enqueueReason: 'timeout', noDocuments: true }),
+    }));
   });
 
   it('double-send guard: skips when email_status already sent', async () => {

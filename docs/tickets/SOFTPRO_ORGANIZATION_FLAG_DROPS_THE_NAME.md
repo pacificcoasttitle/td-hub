@@ -221,3 +221,56 @@ the reason the `TRS` marker gap recorded above is worth more than it looked.
 `documentId 6571` was found by reading one letter during a spot-check, not by a
 sweep. The population is every CPL whose buyer or seller is a trust or company,
 and nobody has counted it.
+
+### Correction, same day, Claude — the hyphen claim above is wrong
+
+I wrote that the `'-'` last-name placeholder "printed on the letter as a literal
+hyphen between two halves of the trust's name," and offered that as evidence the
+classifier gap had reached the document face. The first half is a
+misreading.
+
+I then read all 73 issued CPLs instead of one. **65 of the 69 Westcor letters
+carry a trailing ` -`**, on ordinary person names, going back to the first letter
+in March:
+
+```
+#3     2026-03-26   ["GERARDO HERNANDEZ -"]
+#6401  2026-09-02   ["Stephen Davis -"]
+#6431  2026-09-02   ["Hector Castro -"]
+```
+
+The trailing hyphen is how *every* party renders. We send the whole name in
+`First` and `'-'` in `Last`, so the form prints `<name> -`. It is not
+trust-specific, not new, and not evidence of anything. I generalised from one
+document to a population without looking at the population — the same move this
+ticket was opened to record.
+
+**What is actually wrong on 6571** is the name text, not the hyphen: one trust
+became two party rows, `Giahuy H Tr G H Nguyen` and `Living Tr Nguyen`. That is
+real, and the sweep found six more letters where a name is visibly chopped:
+
+```
+#6283  20021437-GLT  ["L Ramona -"]
+#6321  20019177-GLT  ["KOGAN -", "YURIY -"]        one person, two party rows
+#6361  20016337-OCT  ["VIVEROS -", "ALEX -", "Tenants -"]
+#6420  20019036-GLT  ["Tenants -"]                 from "as Joint Tenants"
+#6421  20021004-OCT  ["2016"]                      from a trust's date
+#6520  20021342-GLT  ["S Maria -"]
+```
+
+Seven letters counting 6571, on seven separate orders. The detector is
+deliberately conservative — it only flags a name that is a single token or a lone
+initial — and it did **not** flag 6571, whose fragments are multi-word. So seven
+is a floor, not a count.
+
+Worth recording alongside it: **entity names render intact.** `LORNA CURTIS
+LIVING TRUST`, `RADIANT SUNSHINE INVESTMENT GROUP LLC`, `OAKLINE LLC`,
+`Penrose Capital Group LLC`, `Deus Gratia, a California Corporation` all print as
+one name. The entity path works. What fails is the *person* path applied to
+something that is not a person, and vesting language (`as Joint Tenants`, a trust
+date) being parsed as though it were a party.
+
+That sharpens the split this note was making. It is not "the classifier reaches
+the letter and the flag does not" in general — it is specifically that **name
+fragmentation** reaches the letter, on roughly one letter in ten, while entity
+recognition is working.

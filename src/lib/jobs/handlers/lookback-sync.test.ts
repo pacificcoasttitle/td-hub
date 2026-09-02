@@ -110,24 +110,43 @@ describe('dry run writes nothing', () => {
 // ─── Timeouts ───────────────────────────────────────────────────────────────
 
 describe('timeouts count as unchecked', () => {
+  // FAKE TIMERS, not a real wait. This used to sleep PER_CALL_TIMEOUT_MS + 5s of
+  // actual wall clock — 35 seconds on every run of the whole suite, holding a
+  // worker slot the entire time. It was the only test in 1,730 over 4 seconds.
+  //
+  // Both sides of the race are setTimeout-based — the mock's delay here, and
+  // `withTimeout`'s `sleep(PER_CALL_TIMEOUT_MS)` in the handler — so faking
+  // timers exercises the SAME production timeout, just without spending the
+  // seconds. The mock still outlives the ceiling; the ceiling still wins.
   it('never counts a timed-out order as corrected, and never shrinks the denominator', async () => {
-    rows.claimed = claimed(4);
-    getDetailsMock.mockImplementation(async ({ orderNumber }: { orderNumber: string }) => {
-      if (orderNumber === 'F100' || orderNumber === 'F101') {
-        // Outlives the per-call ceiling.
-        await new Promise((r) => setTimeout(r, PER_CALL_TIMEOUT_MS + 5_000));
-      }
-      return detail(orderNumber, 'Closed');
-    });
+    vi.useFakeTimers();
+    try {
+      rows.claimed = claimed(4);
+      getDetailsMock.mockImplementation(async ({ orderNumber }: { orderNumber: string }) => {
+        if (orderNumber === 'F100' || orderNumber === 'F101') {
+          // Outlives the per-call ceiling.
+          await new Promise((r) => setTimeout(r, PER_CALL_TIMEOUT_MS + 5_000));
+        }
+        return detail(orderNumber, 'Closed');
+      });
 
-    const r = await handleLookbackSync({ dryRun: true });
-    expect(r.examined).toBe(4);
-    expect(r.unchecked).toBe(2);
-    expect(r.checked).toBe(2);
-    expect(r.corrected).toBe(2);
-    expect(r.correctionPct).toBe(100); // 2/2, not 2/4
-    expect(processMock).not.toHaveBeenCalled();
-  }, 120_000);
+      const pending = handleLookbackSync({ dryRun: true });
+      // Past the ceiling but short of the mock's own delay, so the timeout is
+      // what resolves the race — then past everything so the run can finish.
+      await vi.advanceTimersByTimeAsync(PER_CALL_TIMEOUT_MS + 1_000);
+      await vi.advanceTimersByTimeAsync(PER_CALL_TIMEOUT_MS + 10_000);
+      const r = await pending;
+
+      expect(r.examined).toBe(4);
+      expect(r.unchecked).toBe(2);
+      expect(r.checked).toBe(2);
+      expect(r.corrected).toBe(2);
+      expect(r.correctionPct).toBe(100); // 2/2, not 2/4
+      expect(processMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('treats a thrown vendor error as unchecked, not as a failure of the run', async () => {
     rows.claimed = claimed(3);

@@ -121,20 +121,34 @@ describe('entity names do not go out as people with the surname "-"', () => {
     expect(b.Last).toBe('');
   });
 
-  it('a person is BYTE-FOR-BYTE what we sent before', () => {
-    // The classifier only adds a route. Persons render correctly on issued
-    // letters today and that behaviour must not move on a marker list.
+  it('a person is split at the last space, so the letter prints no hyphen', () => {
+    // This test used to assert Last === '-' on the grounds that "persons render
+    // correctly on issued letters today". Nobody had read a letter. 65 of the
+    // 69 issued between March and September print "<name> -" on the face,
+    // because the form prints First then Last.
     const b = namesOf('Monica C Sarmiento');
-    expect(b.Last).toBe('-');
-    expect(b.First).toBe('Monica C Sarmiento');
+    expect(b.Last).toBe('Sarmiento');
+    expect(b.First).toBe('Monica C');
     expect(b.CompanyName).toBe('');
     expect(b.Trust).toBe('');
+    // What the letter renders is First + ' ' + Last, so this is the check that
+    // actually matters: the printed name is unchanged and the hyphen is gone.
+    expect(`${b.First} ${b.Last}`).toBe('Monica C Sarmiento');
   });
 
-  it('a trustee is a person, so the old shape is kept', () => {
-    const b = namesOf('DANNA MICHAEL A (TRUSTEE)');
+  it('keeps the placeholder for a one-word name, the only shape Westcor takes', () => {
+    // Measured: Last '' and Last ' ' are both rejected with "Please provide at
+    // least a Company Name and/or First and Last Name of the individual."
+    const b = namesOf('Cher');
+    expect(b.First).toBe('Cher');
     expect(b.Last).toBe('-');
-    expect(b.First).toBe('DANNA MICHAEL A (TRUSTEE)');
+  });
+
+  it('a trustee is still a person, and still round-trips to the same string', () => {
+    const b = namesOf('DANNA MICHAEL A (TRUSTEE)');
+    expect(b.First).toBe('DANNA MICHAEL A');
+    expect(b.Last).toBe('(TRUSTEE)');
+    expect(`${b.First} ${b.Last}`).toBe('DANNA MICHAEL A (TRUSTEE)');
   });
 
   it('never sends a name with no field populated at all', () => {
@@ -192,8 +206,8 @@ describe('order 6142: a trust seller reaches Westcor with an identity', () => {
 
   it('and it is the SECOND seller that used to fail, not the first', () => {
     // Position matters: Westcor numbers positionally and said "#2".
-    expect(buildOrderBodyForTest([OWNERS[0]!]).First).toBe('MCCLENTON MARIE S');
-    expect(buildOrderBodyForTest([OWNERS[0]!]).Last).toBe('-');
+    expect(buildOrderBodyForTest([OWNERS[0]!]).First).toBe('MCCLENTON MARIE');
+    expect(buildOrderBodyForTest([OWNERS[0]!]).Last).toBe('S');
   });
 });
 

@@ -322,6 +322,45 @@ function buildProperty(
  * exactly the shape it takes today — persons render correctly on issued
  * letters and that is not being altered on the strength of a marker list.
  */
+/**
+ * The only `Last` a person can carry when we have no real surname.
+ *
+ * ─── WHY NOT EMPTY ─────────────────────────────────────────────────────────
+ *
+ * Measured against production Order/Update on 2026-09-03, one buyer, four
+ * shapes, on test file 20015761-GLT:
+ *
+ *   Last "-"            HTTP 200, accepted
+ *   Last ""             HTTP 200, "Buyer #1: Not Added. Please provide at
+ *                       least a Company Name and/or First and Last Name of
+ *                       the individual."
+ *   Last " "            same rejection — Westcor trims it and stores ""
+ *   Last "HERNANDEZ"    HTTP 200, accepted, First "GERARDO J"
+ *
+ * So the field cannot be blanked and cannot be whitespace. Both First and
+ * Last must be non-empty for a party with no CompanyName, exactly as
+ * §2.3.3.3 says. Splitting the name is the only shape that both passes and
+ * prints correctly.
+ *
+ * ─── WHAT THE PLACEHOLDER WAS DOING ────────────────────────────────────────
+ *
+ * We used to put the whole name in `First` and this placeholder in `Last` for
+ * every person. The CPL form prints `First` then `Last`, so it printed:
+ *
+ *   #3     2026-03-26   GERARDO HERNANDEZ -
+ *   #6401  2026-09-02   Stephen Davis -
+ *
+ * 65 of the 69 Westcor letters issued between 2026-03-26 and 2026-09-03 carry
+ * that trailing hyphen, on the face of an indemnity letter sent to a lender.
+ * It survived six months because it is invisible in the data — the name looks
+ * whole in `First` — and only shows up when you read the PDF.
+ *
+ * The test that guarded this shape asserted a person was "BYTE-FOR-BYTE what
+ * we sent before", reasoning that "persons render correctly on issued letters
+ * today". That premise was never checked against a letter, and it was wrong.
+ */
+const PERSON_PLACEHOLDER = '-';
+
 function nameFields(fullName: string): Record<string, unknown> {
   const name = fullName.trim();
   const kind = classifyPartyName(name);
@@ -333,8 +372,22 @@ function nameFields(fullName: string): Record<string, unknown> {
   if (kind === 'company') {
     return { Last: '', First: '', CompanyName: name, Trust: '' };
   }
-  // Person — byte-for-byte what we sent before.
-  return { Last: '-', First: name, CompanyName: '', Trust: '' };
+  // Person — Westcor needs BOTH First and Last, so the name is split at its
+  // last space. See the block above `PERSON_PLACEHOLDER` for why, and for what
+  // the old placeholder was printing on 65 issued letters.
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return {
+      Last: parts[parts.length - 1]!,
+      First: parts.slice(0, -1).join(' '),
+      CompanyName: '',
+      Trust: '',
+    };
+  }
+  // One word, so there is no last name to give. The placeholder stays: it is
+  // the only shape Westcor accepts, and a one-word person name is rare enough
+  // that the alternative — rejecting the CPL — is plainly worse.
+  return { Last: PERSON_PLACEHOLDER, First: name, CompanyName: '', Trust: '' };
 }
 
 /**

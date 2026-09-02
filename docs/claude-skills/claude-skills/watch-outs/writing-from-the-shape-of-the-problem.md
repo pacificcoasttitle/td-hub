@@ -205,3 +205,43 @@ against our code.
 
 And check the guard against the population that will hit it, not the population
 that produced the bug.
+
+---
+
+## The rule this all collapses into
+
+> **Any claim about what a letter, an email or a confirmation *says* has to come
+> from reading one.** Not from the payload we sent, not from the columns behind
+> it, not from the code that renders it.
+
+Three distinct instances in a single day, all the same shape — a confident claim
+about a document, made by someone who had only read the data:
+
+1. **"Persons render correctly on issued letters today."** Written into a test as
+   the justification for freezing the person name shape. Nobody had opened a
+   letter. 65 of 69 issued CPLs printed `GERARDO HERNANDEZ -`, for six months.
+
+2. **"The `'-'` placeholder printed as a literal hyphen between two halves of the
+   trust's name."** True of the one letter I read, and I generalised it to a
+   population without reading the population. The hyphen is on nearly every
+   letter including ordinary person names, so it was evidence of nothing.
+
+3. **"Four letters are going out with a blank addressee address."** My parser
+   looked for the Westcor form's `"Addressee":` label, found nothing on four FNF
+   letters that use a different form, and returned empty. They had full
+   addresses. Reading two of the actual PDFs took a minute and killed the
+   finding — and turned up that FNF had issued four letters in two days, which
+   contradicted a premise we were both reasoning from.
+
+### The part worth keeping
+
+The third one only got caught because I read the raw document instead of my own
+parse output. The first one had been *sitting inside a passing test* for months,
+phrased as a fact, and the test was green the whole time. A test that asserts a
+premise about rendering does not verify that premise — it freezes it.
+
+And when the sweep disproved my trust conclusion, I stopped there. A hyphen on
+65 letters was in front of me and I filed it as "not the bug I was looking for"
+rather than asking what it was. **Disproving your hypothesis and closing the
+file are different things.** The evidence that kills your theory is usually
+still evidence of something.

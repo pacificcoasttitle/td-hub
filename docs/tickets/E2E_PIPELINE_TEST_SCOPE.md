@@ -173,19 +173,67 @@ is ~5 SiteX credits and ~70 TitlePoint calls per night.
 
 ---
 
-## 6. What else we need from you
+## 6. Staging isolation — VERIFIED, not assumed
 
-1. **A test account** — email, password, active profile, admin role.
-2. **Confirmation that SoftPro staging is reachable at `:8081`** and whether it
-   uses different `SOFTPRO_TOKEN` / `SOFTPRO_USER_ID`. `SOFTPRO_API_URL` is the
-   single switch (`softpro/client.ts:61`), but the token and user id are
-   separate env vars and I have not assumed they carry over.
-3. **Whether staging assigns real file numbers**, and whether staging orders
-   need cleaning up between runs. If every nightly run leaves a file, that is a
-   growing pile someone owns.
-4. **The unit prices**, for the cost line above.
+Gerard said `:8081` lands in SoftPro's test profile and the vendor prefixes the
+file number with `TEST-`. Checked rather than taken, 2026-09-02.
 
----
+**Read check — the two known files:**
+
+```
+TEST-20002219-OCT   :8081 rows=1  OrderNumber=TEST-20002219-OCT
+                    :3000 rows=0
+TEST-20002223-OCT   :8081 rows=1  OrderNumber=TEST-20002223-OCT
+                    :3000 rows=0
+```
+
+**Write check — one order created against `:8081` with PRODUCTION credentials:**
+
+```
+POST http://100.29.181.61:8081/api/ordercreation/create
+{"Status":200,"Message":"Order created successfully",
+ "OrderNumber":"TEST-20002225-OCT","data":[]}          41.5s
+
+file number carries TEST- prefix : YES
+:8081 sees it                    : YES  (rows=1)
+:3000 sees it                    : no   (rows=0)
+```
+
+Same `SOFTPRO_TOKEN` and `SOFTPRO_USER_ID`. `SOFTPRO_API_URL` is the only
+switch (`softpro/client.ts:61`), and the base URL carries the `/api/` suffix:
+`http://100.29.181.61:8081/api/`.
+
+### What this removes from the scope
+
+**The distinguishing problem is gone.** No test flag on the orders table, no
+marking step, no separate deployment, and no shared-database concern — the
+vendor separates the environments and names the files for us.
+
+```sql
+WHERE file_number NOT LIKE 'TEST-%'
+```
+
+is the whole of it, and it excludes test orders from every list and every
+measurement. Gerard's team never sees them. **Currently 0 of our 8,230 orders
+carry a TEST- prefix**, so the predicate is free today and stays correct as
+runs accumulate.
+
+### The one thing it adds
+
+**A staging create took 41.5 seconds** — consistent with production (p50 21.5s,
+p95 45.1s, max 57.3s), so staging is not a faster environment to test against.
+The harness needs a create timeout at or above the production ceiling, and a
+nightly run should budget ~1 minute for that stage alone.
+
+### Still needed from Gerard
+
+1. **Test account credentials** — email and password, active `profiles` row,
+   role in `ADMIN_ROLES`.
+2. **The unit prices** — SiteX credit and TitlePoint per-search, for the cost
+   line in section 5.
+
+Not needed, now that the vendor separates them: any answer about cleanup.
+Test files accumulate in SoftPro's test profile, which is what it is for.
 
 ## 7. What this does not cover
 

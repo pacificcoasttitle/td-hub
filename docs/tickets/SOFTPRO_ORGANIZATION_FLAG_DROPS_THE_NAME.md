@@ -166,3 +166,58 @@ without the read-back test is the same move that produced this ticket.
   same shape of question.
 - `docs/tickets/SOFTPRO_PROPERTYDETAILS_ARRAY_DROPS_ADDRESS.md` — the precedent
   for this kind of ask.
+
+---
+
+## 2026-09-02, Claude — this is now on an issued document, not just in a column
+
+Everything above measures the gap in **stored data**. As of today it is also
+measurable on **paper a lender receives**.
+
+Order `7999` / `20019876-OCT`, CPL `documentId 6571`, issued 2026-09-03 01:06 UTC
+and attached to the file. The buyer block on the letter face reads, verbatim from
+`pdftotext -layout`:
+
+```
+"Real Estate Transaction":
+Seller:
+Buyer:
+Giahuy H Tr G H Nguyen -
+Living Tr Nguyen
+```
+
+The owner of record is a living trust. The person parser split it into first and
+last name fragments, and the `'-'` last-name placeholder — the one documented
+above as the deliberate substitute for an empty last name — printed on the
+letter as a literal hyphen between two halves of the trust's name.
+
+**What changes because of this**
+
+Nothing about the diagnosis, and nothing about the hold. The fix still waits on
+Gerard's Select check, and the reasoning in this ticket is unchanged: we do not
+touch the flag again without a read-back.
+
+What changes is the **cost of waiting**. Until today the argument for holding was
+that the flag's blast radius was bad data in fields PCT reads through the SoftPro
+UI, where a human sees the whole name and works around it. That is still true of
+SoftPro. It is not true of the CPL — the letter is generated from the same
+classified names, rendered without a human in the loop, and sent outside the
+company. A wrong name on a closing protection letter is a defect in an
+indemnity document, and the addressee is the lender.
+
+So the flag question and the classifier question, which this ticket deliberately
+kept together, now have different urgencies:
+
+- **The `IsOrganization` flag** — still held, still correctly held. It only
+  affects what SoftPro stores.
+- **The classifier splitting an entity into person fragments** — this is what
+  reaches the letter, and it does so whether or not the flag is ever set again.
+  It does not depend on the Select check to be worth fixing.
+
+That second half is the part to reach for first when the hold lifts, and it is
+the reason the `TRS` marker gap recorded above is worth more than it looked.
+
+**Not yet measured:** how many issued CPLs already carry a mangled entity name.
+`documentId 6571` was found by reading one letter during a spot-check, not by a
+sweep. The population is every CPL whose buyer or seller is a trust or company,
+and nobody has counted it.

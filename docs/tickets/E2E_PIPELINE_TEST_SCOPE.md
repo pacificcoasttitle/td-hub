@@ -36,11 +36,51 @@ Using `@supabase/ssr` for both halves means the cookie format is never
 hand-rolled — that format is chunked and version-sensitive, and hand-rolling it
 is the kind of thing that works until a dependency bump.
 
-**WHAT WE NEED FROM YOU: one dedicated test account.** An email and password,
-with an active `profiles` row and a role in `ADMIN_ROLES` (the create route
-returns 403 otherwise). Nothing else, and specifically **no new auth surface** —
-no test-only bypass, no shared secret that skips `getSession`. A bypass on the
-production auth path to make testing easier is a bad trade at any price.
+**WHAT WE NEED FROM YOU: credentials for the existing `open_order_team` test
+user.** Gerard already has test users in every role, all pointing at his email.
+No account needs creating.
+
+**THE SUITE RUNS AS `open_order_team`, NOT AS AN ADMIN.** That is the role that
+actually opens orders, and a suite running with elevated permissions can pass
+while a real operator gets a 403.
+
+Specifically **no new auth surface** — no test-only bypass, no shared secret
+that skips `getSession`. A bypass on the production auth path to make testing
+easier is a bad trade at any price.
+
+### CORRECTION, 2026-09-02 — the first draft of this section was wrong
+
+It said the create route "returns 403" without a role in `ADMIN_ROLES` and, on
+that basis, recommended running the suite as an admin. **`open_order_team` can
+reach the route and always could.**
+
+The route defines its OWN constant, wider than the one in `security/auth.ts`:
+
+```
+security/auth.ts       ADMIN_ROLES        ['super_admin','admin','cs_admin']
+orders/create (local)  ORDER_CREATE_ROLES ['super_admin','admin','cs_admin',
+                                           'open_order_team','escrow_assistant']
+```
+
+Both were called `ADMIN_ROLES`. I read the name in the route and attached the
+other one's meaning to it. Production settles it — the operators opening orders
+are the role the draft claimed was excluded:
+
+```
+open_order_team   Amna Illyas       12 orders
+super_admin       Jerry Hernandez   11
+open_order_team   Shean Veoh         9
+admin             Aileen Delfin      5
+open_order_team   Emelio Delfin      3
+```
+
+The route's constant is now `ORDER_CREATE_ROLES`. The wider survey is in
+`docs/tickets/ROLE_CONSTANTS_SHARE_NAMES.md`: 32 local `ADMIN_ROLES` with three
+different contents, 35 local `ALLOWED_ROLES` with twelve.
+
+**Every other route on this path gates on session only, with no role check**, so
+running as `open_order_team` exercises the whole pipeline with exactly the
+permissions a real operator has.
 
 ### Can anything on that path NOT be driven from outside the UI?
 
@@ -227,8 +267,8 @@ nightly run should budget ~1 minute for that stage alone.
 
 ### Still needed from Gerard
 
-1. **Test account credentials** — email and password, active `profiles` row,
-   role in `ADMIN_ROLES`.
+1. **Credentials for the existing `open_order_team` test user.** No account
+   needs creating — Gerard has one per role already.
 2. **The unit prices** — SiteX credit and TitlePoint per-search, for the cost
    line in section 5.
 

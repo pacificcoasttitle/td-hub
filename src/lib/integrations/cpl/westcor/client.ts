@@ -7,7 +7,7 @@ import type {
 import { MOCK_PDF_BASE64 } from '../types';
 import { db } from '@/lib/db/client';
 import { vendorApiLogs, vendorTokens, cplBranches } from '@/lib/db/schema';
-import { and, eq, gt, desc, sql, inArray } from 'drizzle-orm';
+import { and, eq, gt, desc, sql } from 'drizzle-orm';
 import { getToken, cachedGroups, mapGroupsToBranches } from './auth';
 import type { WestcorGroup } from './auth';
 import {
@@ -107,31 +107,6 @@ async function lookupExistingTvid(orderId: number): Promise<string | null> {
   }
 }
 
-/**
- * Has a CPL been attempted on this order before?
- *
- * The gate for the FileCheck recovery read. A first-ever CPL cannot have
- * stranded an order, so it should not pay for a lookup; a retry might have,
- * and that is the only case worth a round trip.
- */
-async function hasPriorCplAttempt(orderId: number): Promise<boolean> {
-  try {
-    const [row] = await db
-      .select({ id: vendorApiLogs.id })
-      .from(vendorApiLogs)
-      .where(and(
-        eq(vendorApiLogs.vendor, VENDOR),
-        eq(vendorApiLogs.orderId, orderId),
-        inArray(vendorApiLogs.operation, ['generate_cpl', 'create_order']),
-      ))
-      .limit(1);
-    return !!row;
-  } catch {
-    // Unknown means "do the read". A missed recovery is the expensive outcome.
-    return true;
-  }
-}
-
 // ─── Adapter ────────────────────────────────────────────────────────────────
 
 export const westcorAdapter: CplAdapter = {
@@ -175,41 +150,59 @@ export const westcorAdapter: CplAdapter = {
 
       // ─── RECOVERY: ask Westcor for an order our records lost ───────────────
       //
-      // SCOPED TO THE RETRY PATH. Only when we hold no tvid AND this order has
-      // been attempted before. A first-ever CPL cannot have stranded anything,
-      // so it pays no extra round trip.
+      // A Westcor order can exist without us holding its tvid for two reasons:
+      // Westcor created it and returned an error in the same 200 (see
+      // createOrUpdateOrder), or LEGACY created it — legacy runs concurrently
+      // and owns the file numbers the team works every day.
       //
-      // This exists because Westcor can create the order and still return an
-      // error (see createOrUpdateOrder). Orders stranded BEFORE that fix have
-      // no tvid anywhere on our side, and every retry issues a CREATE that
-      // Westcor refuses as "Agent Number - Order Number Must be Unique". The
-      // only place the tvid still exists is Westcor, and FileCheck is a read
-      // that returns it.
+      // FileCheck is a read that returns the tvid either way, turning the next
+      // Step A into an UPDATE instead of a CREATE that Westcor refuses as
+      // "Agent Number - Order Number Must be Unique".
       //
       // FAILS SAFE. Any miss — no rows, several rows, a non-200, a throw —
       // leaves existingTvid null and we take exactly the path we take today.
+      //
+      // RUNS WHENEVER WE HOLD NO TVID. There is deliberately no "has this order
+      // been tried before" gate — that gate was the defect.
+      //
+      // The first version asked `hasPriorCplAttempt` and skipped the lookup when
+      // our logs showed none, reasoning that "a first-ever CPL cannot have
+      // stranded anything". That is only true if WE are the only thing that
+      // creates Westcor orders. We are not: legacy runs concurrently and has
+      // already created the Westcor order for its own file numbers.
+      //
+      // MEASURED. On 2026-09-02, five CPLs failed with "Agent Number - Order
+      // Number Must be Unique", every one on a softpro_sync order — legacy's
+      // book, which is the population the team actually works. Each had exactly
+      // one westcor log row (the failure itself), so the gate saw no prior
+      // attempt and skipped the recovery. `file_check` had never run in
+      // production, not once. FileCheck resolves all five:
+      //
+      //   20019876-OCT -> 4019450     20019485-OCT -> 4029051
+      //   20020199-OCT -> 4069405     20020146-OCT -> 4131680
+      //   20018183-OCT -> 4117354
+      //
+      // The cost of removing the gate is one ~2s read on an order we hold no
+      // tvid for. The cost of keeping it was five failed letters a day.
       if (!existingTvid && orderDetail.fileNumber) {
-        const attempted = await hasPriorCplAttempt(input.orderId);
-        if (attempted) {
-          try {
-            const found = await fileCheck(cfg, token, branch.branchCode, orderDetail.fileNumber);
-            await logRequest({
-              operation: 'file_check', orderId: input.orderId, requestId,
-              startedAt: new Date(), success: true,
-              meta: { agentNumber: branch.branchCode, fileNumber: orderDetail.fileNumber, reason: 'no stored tvid on a retry' },
-              responseMeta: found
-                ? { tvid: found.tvid, completed: found.completed, canceled: found.canceled, recovered: true }
-                : { recovered: false },
-            });
-            // A canceled order at Westcor must not be revived by an update.
-            if (found && !found.canceled) existingTvid = found.tvid;
-          } catch (e) {
-            await logRequest({
-              operation: 'file_check', orderId: input.orderId, requestId,
-              startedAt: new Date(), success: false, errorCategory: 'LOOKUP_FAILED',
-              meta: { error: e instanceof Error ? e.message : 'unknown' },
-            });
-          }
+        try {
+          const found = await fileCheck(cfg, token, branch.branchCode, orderDetail.fileNumber);
+          await logRequest({
+            operation: 'file_check', orderId: input.orderId, requestId,
+            startedAt: new Date(), success: true,
+            meta: { agentNumber: branch.branchCode, fileNumber: orderDetail.fileNumber, reason: 'no stored tvid' },
+            responseMeta: found
+              ? { tvid: found.tvid, completed: found.completed, canceled: found.canceled, recovered: true }
+              : { recovered: false },
+          });
+          // A canceled order at Westcor must not be revived by an update.
+          if (found && !found.canceled) existingTvid = found.tvid;
+        } catch (e) {
+          await logRequest({
+            operation: 'file_check', orderId: input.orderId, requestId,
+            startedAt: new Date(), success: false, errorCategory: 'LOOKUP_FAILED',
+            meta: { error: e instanceof Error ? e.message : 'unknown' },
+          });
         }
       }
 

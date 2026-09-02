@@ -152,3 +152,56 @@ confirmation.** When agreeing with a hypothesis, say what makes it plausible
 and say plainly that it is unverified — agreement is not evidence, which is
 the same lesson as `endorsement-is-not-corroboration.md`, pointed the other
 way.
+
+---
+
+## A guard written around "how could this have happened" only covers the causes you had in mind
+
+Different failure from the ones above, same root: reasoning from my model of the
+problem instead of from the world.
+
+I built a recovery for Westcor orders whose tvid we had lost, and gated it:
+
+```ts
+// A first-ever CPL cannot have stranded anything, so it pays no extra round trip.
+const attempted = await hasPriorCplAttempt(input.orderId);
+if (attempted) { /* look the order up at the vendor */ }
+```
+
+The sentence is true **if we are the only thing that creates Westcor orders.**
+We are not. Legacy runs concurrently and has already created the Westcor order
+for its own file numbers. So on legacy's book — the population the team actually
+works — there is no prior attempt of ours, the gate skips the lookup, and the
+first hub CPL collides every time.
+
+**Five failed letters on the first day the form was used properly.**
+`file_check` had never run in production, not once, in the days since it
+shipped.
+
+### The tell
+
+I enumerated the ways an order could be stranded, found one, and wrote the guard
+around that one. The enumeration felt complete because it covered every cause
+**I had just finished debugging**. Nothing prompted me to ask "what else creates
+these?" — the bug I had in hand supplied the whole model.
+
+### Worse: the population I tested on was not the population that uses it
+
+I proved the recovery on orders 48, 49 and 6142 — hub-created, stranded by us,
+exactly the case the guard was shaped around. Every one passed. The team's
+actual traffic is `softpro_sync` orders, where the guard is wrong, and I never
+ran it against one.
+
+**A guard verified only on the cases that motivated it has been tested for
+agreement, not for coverage.**
+
+### The rule
+
+When writing a condition that skips work, state the assumption it rests on as a
+sentence about the world, then ask who else could make that sentence false.
+"A first-ever CPL cannot have stranded anything" is a claim about **every
+producer of Westcor orders**, not about our code — and it was only ever checked
+against our code.
+
+And check the guard against the population that will hit it, not the population
+that produced the bug.

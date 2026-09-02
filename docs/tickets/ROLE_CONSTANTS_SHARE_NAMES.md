@@ -90,13 +90,45 @@ sweep:
 The third is the smallest change that fixes the actual defect: the problem is
 not duplication, it is that the same NAME means different things.
 
-## Why this is not being swept now
+## The real finding is underneath the rename
 
-Authorization is one of the few places where a mechanical rename can silently
-change who can reach what, and there is no test that would catch a widened
-list. Before touching 67 sites there should be a test asserting each route's
-allowed set — otherwise the cleanup is exactly the kind of unverified sweep
-this codebase has been bitten by.
+**No test asserts any route's allowed set. The authorization surface is
+entirely unverified.**
+
+That is not a footnote to the naming problem — it is the reason the naming
+problem was able to cost an hour, and it is worth fixing whether or not
+anything is ever renamed. Today, a change to any of these 67 lists is invisible:
+nothing fails, nothing warns, and the only way to notice is an operator getting
+a 403 or — worse — someone reaching a route they should not.
+
+### The prerequisite, not an optional companion
+
+**A test per route asserting exactly which roles reach it, GENERATED FROM THE
+CURRENT CONSTANTS.**
+
+Generated, not hand-written, and that distinction is the whole point: it must
+document **today's truth**, not somebody's intention about what the rules ought
+to be. A hand-written expectation encodes what the author believed; a generated
+one encodes what production actually does. If the current lists are wrong, the
+test should record them as they are and the wrongness becomes a separate,
+visible decision.
+
+Once it exists, any future change to an allowed set shows up in a diff instead
+of happening silently. That is what makes the sweep safe.
+
+### Sequence
+
+```
+1. assert   — a test per route, generated from today's constants
+2. sweep    — rename in place, and watch the assertions hold
+```
+
+Not the other way round. A 67-site rename with nothing to catch a widened list
+is exactly the kind of unverified sweep this codebase has been bitten by.
+
+**Neither step is scheduled yet.** Both go after the end-to-end harness: the
+harness gives every later change a baseline, and building it first means a
+regression can be told apart from a gap that was already there.
 
 ## Related
 

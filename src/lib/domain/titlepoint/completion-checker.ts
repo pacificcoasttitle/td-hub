@@ -3,8 +3,11 @@ import { titlePointData, eventOutbox, orders } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { getSetting } from '@/lib/domain/settings/service';
 
-/** Docs that may attach when present — never gates confirmation (legacy). */
-export const CONFIRMATION_OPTIONAL_DOC_TYPES = ['grant_deed'] as const;
+// Defined in notifications/confirmation-documents.ts, which is a leaf module
+// with no db import so the email template can read it too. Re-exported here so
+// existing importers are unchanged, and so the rule has ONE definition — the
+// confirmation body and the confirmation gate must not drift apart.
+export { CONFIRMATION_OPTIONAL_DOC_TYPES } from '@/lib/domain/notifications/confirmation-documents';
 
 /**
  * Legacy Order.php gate: enqueue when TAX + LV are TERMINAL

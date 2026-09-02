@@ -10,6 +10,7 @@ import {
   fieldTable,
   detailsRow as row,
 } from './email-layout';
+import { OUTSTANDING_DOCUMENTS_SENTENCE } from './confirmation-documents';
 import {
   formatOrderAddress,
   isMeaningfulMoney,
@@ -90,8 +91,15 @@ export interface FullConfirmationData {
   } | null;
   assignments?: { salesRep?: string | null; titleOfficer?: string | null } | null;
   hasDocuments: boolean;
-  /** Labels for PDFs actually attached (attach-what-exists). Empty = no doc pills. */
+  /** Labels for PDFs actually attached (attach-what-exists). Empty = no list. */
   attachedDocLabels?: string[];
+  /**
+   * A NON-OPTIONAL document is not attached, so something is genuinely still
+   * coming. Not the same as "fewer than three attached": a grant deed absent
+   * because the LV found no qualifying deed is not outstanding, and promising
+   * it would be a promise nobody can keep. See confirmation-documents.ts.
+   */
+  hasOutstandingDocuments?: boolean;
   isTitlePointActive: boolean;
 }
 
@@ -224,6 +232,12 @@ function installmentCard(
   return `<td width="50%" valign="top" style="${pad}"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:${bg};border-radius:12px;"><tr><td style="padding:20px;color:#ffffff;"><p style="margin:0 0 14px;color:${ORANGE_SOFT};font-size:11px;font-weight:bold;letter-spacing:.8px;">${title}</p><p style="margin:0 0 12px;font-size:24px;font-weight:bold;">${esc(amount)}</p>${lines}<p style="margin:12px 0 0;color:#ffffff;font-size:11px;font-weight:bold;">${esc(footer)}</p></td></tr></table></td>`;
 }
 
+/** "A, B and C" — an email is read by a person, not parsed. */
+function joinLabels(labels: string[]): string {
+  if (labels.length <= 1) return labels[0] ?? '';
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
 export function orderConfirmationTemplate(data: FullConfirmationData): { subject: string; html: string } {
   const fn = data.fileNumber;
   const money = moneyForTransaction(data.transactionType, data.salesPrice, data.loanAmount);
@@ -277,6 +291,34 @@ export function orderConfirmationTemplate(data: FullConfirmationData): { subject
     ? `${heading('Tax installments')}<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>${installmentCard('1ST INSTALLMENT', tax?.firstInstallment, 'left', PCT_DEEP)}${installmentCard('2ND INSTALLMENT', tax?.secondInstallment, 'right', HERO_BG)}</tr></table>`
     : '';
 
+  // ─── Documents ──────────────────────────────────────────────────────────
+  //
+  // Two independent things, and they can both be true:
+  //
+  //   ENCLOSED  — name the PDFs that are attached. Until now three files
+  //               arrived with nothing in the body saying what they were:
+  //               `attachedDocLabels` has existed since 0c6b574 and the
+  //               redesign in d7d9910 dropped the rendering while keeping the
+  //               field, so it has been dead ever since.
+  //
+  //   OUTSTANDING — one sentence when a NON-OPTIONAL document is missing.
+  //               Deliberately no count, no names and no timeframe: when
+  //               nothing has generated we do not know which documents will
+  //               exist, and there is no measured turnaround to promise.
+  //
+  // An order with LV + Tax attached and no qualifying grant deed gets the
+  // enclosed list and NO sentence — nothing is coming for it.
+  const docLabels = data.attachedDocLabels ?? [];
+  const enclosedHtml = docLabels.length > 0
+    ? `<p style="margin:0 0 10px;color:${TEXT_PRIMARY};font-size:14px;line-height:1.6;">Enclosed with this email: ${esc(joinLabels(docLabels))}.</p>`
+    : '';
+  const outstandingHtml = data.hasOutstandingDocuments
+    ? `<p style="margin:0;color:${TEXT_PRIMARY};font-size:14px;line-height:1.6;">${esc(OUTSTANDING_DOCUMENTS_SENTENCE)}</p>`
+    : '';
+  const documentsHtml = (enclosedHtml || outstandingHtml)
+    ? `${heading('Documents')}${enclosedHtml}${outstandingHtml}`
+    : '';
+
   const bodyHtml = `
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:${ORANGE_TINT};border-radius:14px;"><tr><td style="padding:22px 22px 20px;">
 <span style="display:inline-block;background:#E8F5EF;color:#176B4D;font-size:11px;line-height:1;font-weight:bold;letter-spacing:.6px;padding:8px 11px;border-radius:999px;">ORDER OPENED SUCCESSFULLY</span>
@@ -291,7 +333,8 @@ ${taxRows.length ? `${heading('Property tax details')}${fieldTable(taxRows)}` : 
 ${installmentsHtml}
 ${heading('Seller / owner details')}${fieldTable([{ label: 'Primary owner', valueHtml: esc(display(data.seller?.primary)) }, { label: 'Secondary owner', valueHtml: esc(display(data.seller?.secondary)) }])}
 ${heading('Transaction details')}${fieldTable(transactionRows)}
-${heading('Escrow details')}${fieldTable([{ label: 'Name', valueHtml: esc(display(escrow?.name)) }, { label: 'Email address', valueHtml: mail(escrow?.email) }, { label: 'Telephone', valueHtml: tel(escrow?.phone) }, { label: 'Company', valueHtml: esc(display(escrow?.company)) }])}`;
+${heading('Escrow details')}${fieldTable([{ label: 'Name', valueHtml: esc(display(escrow?.name)) }, { label: 'Email address', valueHtml: mail(escrow?.email) }, { label: 'Telephone', valueHtml: tel(escrow?.phone) }, { label: 'Company', valueHtml: esc(display(escrow?.company)) }])}
+${documentsHtml}`;
 
   const subject = buildOrderConfirmationSubject(fn, data.property);
   return {

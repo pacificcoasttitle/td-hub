@@ -1,6 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import {
+  ContactDropdown,
+  ContactResultButton,
+  contactInitial,
+  formatContactAddress,
+  joinIdentity,
+} from '@/components/admin/contact-picker';
 import { ModalShell } from './modal-shell';
 
 type Underwriter = 'westcor' | 'fnf';
@@ -393,14 +400,31 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
                 <div className="relative">
                   <F label="Search Lender" value={lenderSearch} onChange={handleLenderSearch} placeholder="Type to search…" />
                   {lenderResults.length > 0 && (
-                    <div className="absolute z-10 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                    <ContactDropdown>
+                      {/*
+                        STREET ADDRESS, not just city and state.
+
+                        "bank of hope" returned four results, two of them
+                        rendering identically as "Bank of Hope, Los Angeles, CA"
+                        — nothing on screen told the operator which office they
+                        were about to commit to a legal document.
+
+                        Reusing ContactResultButton and formatContactAddress
+                        rather than styling a third variant: the client selector
+                        and the party picker already solve this, and a lender on
+                        a CPL needs confirming at least as much as a client does.
+                      */}
                       {lenderResults.map((l) => (
-                        <button key={l.id} onClick={() => selectLender(l)} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-100 last:border-0">
-                          <span className="font-medium text-[#1A1A2E]">{l.companyName}</span>
-                          {l.city && <span className="text-[#6B7280] ml-2 text-xs">{l.city}, {l.state}</span>}
-                        </button>
+                        <ContactResultButton
+                          key={l.id}
+                          initial={contactInitial(l.companyName)}
+                          title={l.companyName}
+                          detail={joinIdentity([l.city, l.state])}
+                          subDetail={formatContactAddress(l)}
+                          onClick={() => selectLender(l)}
+                        />
                       ))}
-                    </div>
+                    </ContactDropdown>
                   )}
                 </div>
               )}

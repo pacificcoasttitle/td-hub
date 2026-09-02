@@ -8,6 +8,33 @@ that it doesn't. They have shown it *can* work; this shows it *does*.
 
 ---
 
+## 0. Where this sits in the sequence
+
+**The harness comes BEFORE the pipeline rebuild.** Trace id and
+generation-before-submit move behind it.
+
+```
+1. test cast          people and companies the suite runs as
+2. harness            built against TODAY's code
+3. green on today     the baseline
+4. trace id
+5. generation before submit, then the sequential phases
+```
+
+Building the harness first gives every rebuild step a baseline. Rebuilding
+first leaves us unable to tell a regression from a gap that was already there —
+and this codebase already has gaps that looked like regressions for exactly
+that reason.
+
+**After the harness, and only then**, in this order:
+
+1. A test per route asserting which roles reach it, generated from the current
+   constants (`docs/tickets/ROLE_CONSTANTS_SHARE_NAMES.md`). The authorization
+   surface is entirely unverified today.
+2. The role-constant sweep, which that test makes safe.
+
+---
+
 ## 1. The two blocking questions, answered from source
 
 ### How does a script authenticate without a browser?

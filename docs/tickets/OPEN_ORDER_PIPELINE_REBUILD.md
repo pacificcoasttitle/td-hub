@@ -193,6 +193,72 @@ carries an APN.
 
 ---
 
+## 1a. The denominator — read this before any percentage in this document
+
+**Legacy is running concurrently and handling PCT's business.** The hub is
+being built alongside it and the team cuts over when it is ready. We are not
+replacing a dead system; we are building the better version of a live one.
+
+```
+softpro_sync (legacy's order, mirrored here)   8,185
+manual_entry (hub-created, ours end to end)       40
+                                               ─────
+                                               8,225      hub = 0.49%
+```
+
+**Any percentage measured against 8,225 describes legacy's book, not ours.**
+A gap on a synced order is not evidence of a defect — legacy sent that
+confirmation, delivered that prelim, attached those documents. Absence there
+means it was handled somewhere we cannot see.
+
+**The hub's denominator is 40.** Three consequences that change how this
+project is run:
+
+1. **Every hub-created order can be checked individually.** There is no need to
+   sample, and no excuse for a conclusion drawn from a subset.
+2. **A defect on 4 orders is 10% of everything the hub has ever created.** The
+   county gap and the missing confirmations are not edge cases at this scale;
+   they are a tenth of the product.
+3. **A number that looks small against 8,225 can be the whole story against 40.**
+   That is how "49 orders with no prelim recipient" survived as a finding for a
+   day: 44 were legacy's and the 4 that were ours had already been counted
+   elsewhere.
+
+**One refinement, because the rule is easy to over-apply.** Source tells you
+whose ORDER it is, not whose ACTION. We push CPLs and prelims onto legacy's
+synced orders; a failure in one of OUR calls is ours wherever the order came
+from. The rule applies to ABSENCE, where legacy plausibly did the thing.
+
+A worked example of getting this wrong, from the same day:
+
+```
+upload_document, hub orders:   252 attempts,  33 successes    -> "13% success"
+```
+
+That reading was wrong twice over. The 252 attempts carried only **60 distinct
+documents** — the retry cap is 8, and a rejected duplicate inflates attempts
+without touching documents. Counting documents instead of attempts:
+
+```
+distinct documents attempted:                60
+reached SoftPro (success or "already exists"): 40
+did not reach:                                20   ALL "order has unresolved errors"
+```
+
+67%, not 13% — and the 20 failures are one cause on seven orders from March to
+August, all of them SoftPro refusing a document onto an order with outstanding
+errors on its own side. On the current population:
+
+```
+hub orders created in the last 14 days:  34
+their pushable documents:                80
+marked synced:                           80      100%
+```
+
+**Count the things, not the attempts at the things.**
+
+---
+
 ## 2. Target flow
 
 ### Phase A — while the operator fills the form. Nothing blocks them.

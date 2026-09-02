@@ -164,3 +164,43 @@ is **document fetch lag**. The Aug 27 `isBackfilledOrder` gate does not cover
 it — 371 of 548 T&E-without-prelim would still send. See
 `PRELIM_GATE_MISSES_DOCUMENT_FETCH_LAG.md`. Do not add a suppression to the
 live delivery path to fix a backfill.
+
+
+---
+
+## CORRECTION — 2026-09-02, Claude — split on source
+
+**Appended, not rewritten.** The analysis above stands on its own terms; this
+adds the one dimension it does not have. Nothing in the original has been
+edited.
+
+**Legacy is running concurrently and is handling PCT's business.** The hub is
+being built alongside it, and the team cuts over when it is ready. So a gap on
+an order the hub did not create is not evidence of anything — legacy sent that
+confirmation, delivered that prelim, attached those documents.
+
+Every measurement has to split on source:
+
+```
+softpro_sync (legacy's order, mirrored here)   8,185
+manual_entry (hub-created, ours end to end)       40
+                                               ─────
+                                               8,225      hub = 0.49%
+```
+
+**Any figure counted across the whole table is 99.5% legacy's orders by
+construction.** For this ticket that means at most 40 of the population
+described above could possibly be ours to have failed.
+
+**One refinement, because the rule is easy to over-apply:** source tells you
+whose ORDER it is, not whose ACTION. We push CPLs and prelims onto legacy's
+synced orders, and a failure in one of OUR calls is ours to own wherever the
+order came from. The rule applies to ABSENCE — nothing sent, nothing delivered
+— where legacy plausibly did it.
+
+The re-measurement is not a restatement of this ticket's query, which was not
+reproduced. It is a separate count and the two should not be conflated.
+
+**Independently counted here** — Title & Escrow orders with no prelim
+document: **3 of 3 hub-created, 315 of 804 synced.** The three are ours and
+worth looking at; the rest are legacy's book.

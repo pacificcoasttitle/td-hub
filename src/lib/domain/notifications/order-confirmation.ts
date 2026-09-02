@@ -26,11 +26,11 @@ import { isBuyerAgentRecipientEnabled } from './buyer-agent-recipient-gate';
 
 export { EMAIL_STATUS_SENT_NO_CLIENT } from './confirmation-send-guard';
 
-const DOC_LABELS: Record<string, string> = {
-  legal_vesting: 'Legal and Vesting',
-  tax: 'Tax Roll',
-  grant_deed: 'Recent Grant Deed',
-};
+import {
+  CONFIRMATION_DOC_LABELS,
+  CONFIRMATION_DOC_TYPES,
+  hasOutstandingDocuments,
+} from './confirmation-documents';
 
 export async function handleOrderConfirmation(
   orderId: number,
@@ -80,7 +80,7 @@ export async function handleOrderConfirmation(
   const tpShutOff = (await getSetting('titlepoint_shut_off')) === 'true';
 
   // Attach whatever LV/tax/grant-deed PDFs exist — never block on missing ones.
-  const { attachments, labels: attachedDocLabels } = await buildAttachments(orderId);
+  const { attachments, labels: attachedDocLabels, outstanding } = await buildAttachments(orderId);
 
   const address = order.property.addressFormatted !== '—'
     ? order.property.addressFormatted
@@ -139,6 +139,7 @@ export async function handleOrderConfirmation(
     },
     hasDocuments: attachments.length > 0,
     attachedDocLabels,
+    hasOutstandingDocuments: outstanding,
     isTitlePointActive: !tpShutOff,
   });
 
@@ -390,7 +391,7 @@ async function loadLegalDescription(orderId: number, fallback: string | null): P
 
 async function buildAttachments(
   orderId: number,
-): Promise<{ attachments: SendGridAttachment[]; labels: string[] }> {
+): Promise<{ attachments: SendGridAttachment[]; labels: string[]; outstanding: boolean }> {
   const docRows = await db.select({
     storageKey: documents.storageKey,
     filename: documents.filename,
@@ -405,7 +406,8 @@ async function buildAttachments(
 
   const attachments: SendGridAttachment[] = [];
   const labels: string[] = [];
-  const order = ['legal_vesting', 'tax', 'grant_deed'] as const;
+  const attachedCategories: string[] = [];
+  const order = CONFIRMATION_DOC_TYPES;
 
   for (const cat of order) {
     const doc = docRows.find((d) => d.category === cat);
@@ -418,7 +420,8 @@ async function buildAttachments(
           type: 'application/pdf',
           filename: doc.filename,
         });
-        labels.push(DOC_LABELS[cat] ?? cat);
+        labels.push(CONFIRMATION_DOC_LABELS[cat] ?? cat);
+        attachedCategories.push(cat);
       }
     } catch {
       try {
@@ -431,5 +434,8 @@ async function buildAttachments(
       } catch { /* never fail the email send */ }
     }
   }
-  return { attachments, labels };
+  // Outstanding is decided on what ACTUALLY ATTACHED, not on what exists in the
+  // documents table — a row whose S3 download failed is not in this email, so
+  // from the customer's side it is still coming.
+  return { attachments, labels, outstanding: hasOutstandingDocuments(attachedCategories) };
 }

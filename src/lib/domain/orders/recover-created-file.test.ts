@@ -17,9 +17,21 @@ import {
 } from './recover-created-file';
 
 describe('operator copy — one treatment for timeout and post-200', () => {
-  it('Found names the file and forbids re-entry', () => {
-    expect(softProCreatedDoNotReenter('20021683-OCT'))
-      .toBe('SoftPro created this file: 20021683-OCT. Do not re-enter. Repair it.');
+  it('Found names the file, forbids re-entry, and gives the operator somewhere to go', () => {
+    const msg = softProCreatedDoNotReenter('20021683-OCT');
+    expect(msg).toBe(
+      'SoftPro created this file: 20021683-OCT, but the hub did not record it. '
+      + 'Do not re-enter the order — it already exists. '
+      + 'Contact support with this file number so the two can be reconciled.',
+    );
+  });
+
+  it('does not tell the operator to do something the product cannot do', () => {
+    // "Repair it." shipped for a while. There is no repair screen, no repair
+    // route and no repair action — the only consumers relabel a button and
+    // lock Create. An imperative with nothing behind it is worse than no
+    // instruction, because the operator goes looking.
+    expect(softProCreatedDoNotReenter('20021683-OCT')).not.toMatch(/repair it/i);
   });
 
   it('Not found is safe to retry', () => {

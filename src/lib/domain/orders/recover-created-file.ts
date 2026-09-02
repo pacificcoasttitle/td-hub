@@ -15,8 +15,24 @@ import type { SoftProOrderDetailItem } from '@/lib/integrations/softpro/types';
  *
  * Copy is Gerard's, 2026-09-01.
  */
+/**
+ * WHY THIS DOES NOT SAY "REPAIR IT".
+ *
+ * It used to. There is no repair screen, no repair route and no repair action
+ * anywhere in the product — the only consumers of this message are two buttons
+ * that relabel to "Do not re-enter" and lock Create. The word named a remedy
+ * that does not exist, in the imperative, to an operator who then had nowhere
+ * to go. A message that reads like an instruction has to be followable.
+ *
+ * What is true: the file exists in SoftPro, the hub failed to record it, and a
+ * person has to reconcile the two. So the message says that, and points at
+ * someone. If a named channel ever owns this, put it here — the constant is
+ * the one place the wording lives.
+ */
 export function softProCreatedDoNotReenter(fileNumber: string): string {
-  return `SoftPro created this file: ${fileNumber}. Do not re-enter. Repair it.`;
+  return `SoftPro created this file: ${fileNumber}, but the hub did not record it. `
+    + 'Do not re-enter the order — it already exists. '
+    + 'Contact support with this file number so the two can be reconciled.';
 }
 
 export const ORDER_NOT_CREATED_SAFE_TO_RETRY = 'The order was not created. Safe to try again.';

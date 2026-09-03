@@ -216,3 +216,49 @@ external recipients all along, with copy written for a colleague, independent of
 the fallback.** The variant is therefore selected by email domain — reusing the
 existing definition of internal in `contacts/filters.ts` — and never by
 resolution source.
+
+---
+
+## 2026-09-03, Claude — two prerequisites, both found by accident
+
+The wizard's purpose is to put an agent on every order. Two things in the
+contact layer make that unsafe today, and **neither was found by looking for
+them** — both fell out of investigating a single failed order create.
+
+### 1. Over-length lookup codes block order creation
+
+SoftPro's order endpoint rejects a lookup code longer than ten characters
+(`400 "Value must be no longer than 10 characters."`). Their contact endpoint
+accepts one, so the code is minted quietly and fails on the first *order* that
+names the person.
+
+**154 active contacts carry one**, almost all real estate agents.
+
+We have seen exactly two failures from this in thirty days — because PCT rarely
+has a listing or buying agent on a file at all. The landmines are laid and
+nobody is walking on them. **The wizard walks the whole team onto them at
+volume.** The generator fix (#902df82) stops new ones; it does nothing for the
+154 already stored.
+
+### 2. Duplicate contacts break match-then-update
+
+The design is match first, then update anything stale. **1,420 duplicate person
+rows** exist (`docs/tickets/DUPLICATE_CONTACTS.md`) — Aashi Narang nine times,
+Siyu Guo eight, Victor Wen seven. With nine records for one agent, "match and
+update" updates one at random and leaves eight stale. The wizard would then
+spread whichever one it happened to pick across new orders.
+
+### 3. And the contact book we match against is 6% complete
+
+Related and worse: the contacts sync has been reading 1,000 rows per type and
+stopping (`docs/tickets/SOFTPRO_PAGINATION_TRUNCATES_AT_1000.md`).
+`Order Contact - Person` has 15,609 rows in SoftPro; we hold the first 1,000.
+
+So the wizard would be matching against a fraction of the real contact book,
+and **failing to match is what creates a new contact** — which mints a new
+lookup code, which is how the collisions and the duplicates happen in the first
+place. The three problems feed each other.
+
+**These are prerequisites, not parallel work.** Shipping the wizard first would
+convert a dormant population into a live one and add to the duplicate pile while
+doing it.

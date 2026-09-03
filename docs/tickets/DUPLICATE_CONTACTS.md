@@ -294,3 +294,67 @@ they need a human to confirm each. There is no safe bulk merge here.
   proposed above prefers `is_active = false` to a delete, because a delete throws
   away the evidence. If retention or an audit requires actual removal, Step 3
   needs a different design.
+
+---
+
+## 2026-09-03, Claude — measured at 1,420, and how it was found
+
+**The number.** 16,858 person rows with a first and last name resolve to 15,438
+distinct identities on `(first, last, company, email)`. **1,420 surplus rows.**
+
+```
+x9  Aashi Narang      x8  Siyu Guo          x7  Victor Wen
+x7  Title Report      x6  Silvia Lee        x6  Will Quintanilla
+x6  Tom Deluca        x5  Yessenia Garcia
+```
+
+`Title Report` appears seven times as a *person*.
+
+### How it surfaced, because the method is the point
+
+Nobody was looking for duplicates. The task was to find a better lookup-code
+formula, so I measured collision rates for several arrangements of name letters
+inside ten characters:
+
+```
+current 3+3+4    14200 distinct   4723 colliding (28.0%)
+4+4+2            14552 distinct   4189 (24.8%)
+3+5+2            14491 distinct   4279 (25.4%)
+2+6+2            14215 distinct   4668 (27.7%)
+1+7+2            13416 distinct   5630 (33.4%)
+```
+
+No arrangement helped much, so I tried replacing letters with a hash of the
+contact's identity, expecting collisions to fall to nearly zero:
+
+```
+3+3 + 4-char hash    15438 distinct   2712 (16.1%)
+4+3 + 3-char hash    15438 distinct   2712 (16.1%)
+3+5 + 2-char hash    15436 distinct   2714 (16.1%)
+```
+
+**All three landed on the same floor — 15,438 distinct, 16.1%.** A hash does not
+collide by accident, and it certainly does not collide identically across three
+different shapes. The only thing that produces that plateau is inputs that are
+byte-for-byte the same. The "collisions" the hash could not remove were not
+collisions at all: they were the same person entered repeatedly.
+
+That plateau *is* the duplicate count. 15,438 is the number of distinct people;
+everything above it is surplus rows.
+
+The general form, worth keeping: **a result that refuses to move when the method
+changes is telling you about the data, not the method.**
+
+### What it means for the lookup codes
+
+Of the 28% collision rate on the current formula, roughly 16 points are
+duplicate records and only about 12 points are the formula genuinely colliding
+on different people. Bucket sizes confirm there is no crisis in the formula:
+
+```
+worst bucket 13    buckets > 9: 1    buckets > 99: 0
+```
+
+A ten-character code leaves 9 one-digit suffix slots and 90 two-digit ones, so
+the fixed uniquifier (#902df82) has ample room and the formula does not need
+replacing. **The duplicates are the bigger lever, and they are this ticket.**

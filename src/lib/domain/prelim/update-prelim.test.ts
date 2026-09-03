@@ -50,6 +50,13 @@ describe('the button gate', () => {
     expect(actions).toContain('Do not re-add THAT one');
   });
 
+  it('carries the settled name verbatim and never the banned one as a label', () => {
+    expect(actions).toMatch(/>\s*Request Updated Prelim\s*<\/button>/);
+    // "Update Prelim" is the banned fetch button. It may appear in the warning
+    // comment, but never as rep-facing copy.
+    expect(actions).not.toMatch(/>\s*Update Prelim\s*</);
+  });
+
   it('warns in the modal instead of blocking, and does not block', () => {
     const modal = readFileSync(
       join(process.cwd(), 'src/components/sales/update-prelim-modal.tsx'),

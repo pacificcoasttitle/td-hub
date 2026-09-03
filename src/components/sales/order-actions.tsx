@@ -19,8 +19,8 @@ interface Props {
    */
   tessaPrelimEnabled?: boolean;
   /**
-   * Effective Update Prelim flag (admin DB flag AND env backstop). When false
-   * the button does not render. Defaults to false so it ships dark.
+   * Effective "Request Updated Prelim" flag (admin DB flag AND env backstop).
+   * When false the button does not render. Defaults to false so it ships dark.
    */
   updatePrelimEnabled?: boolean;
 }
@@ -64,11 +64,11 @@ export function OrderActions({
   const updatePrelimButton = updatePrelimEnabled ? (
     <button
       type="button"
-      title="Send an updated prelim to production, with a note"
+      title="Request Updated Prelim — send production your PDF and a note"
       onClick={() => onAction('push_prelim_update', order)}
       className={secondaryBtn}
     >
-      Update Prelim
+      Request Updated Prelim
     </button>
   ) : null;
 

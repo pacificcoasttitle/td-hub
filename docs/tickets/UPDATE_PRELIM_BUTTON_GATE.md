@@ -1,7 +1,32 @@
-# What the Update Prelim button is gated on
+# "Request Updated Prelim" — the name, and what the button is gated on
 
-**Decided 2026-09-03 by Gerard. Settled — do not re-litigate without reading
-the asymmetry below.**
+**Both decided 2026-09-03 by Gerard. Settled — do not re-litigate without
+reading the asymmetry below.**
+
+## The name
+
+**"Request Updated Prelim."** Gerard's wording, verbatim, including the word
+order. It appears on the button, the modal title, the toast, the email subject
+and body, the Admin settings label, and the API rejection messages.
+
+Two reasons it is not "Update Prelim":
+
+1. **A button called "Update Prelim" was banned on this row.** That one
+   FETCHED from SoftPro and could never work — see the comment in
+   `order-actions.tsx`. Re-using the name would collide with it in the team's
+   memory no matter what a code comment says.
+2. **The rep is asking, not delivering.** Legacy's own email template said
+   "Prelim Update Action Required" and "urgent items that need your
+   attention", which is the voice of a request. And since the button is
+   ungated (below), it renders on orders with no prelim at all, where
+   "Update" would describe something that is not happening.
+
+The slug `order.prelim.updated` and the action `push_prelim_update` are
+identifiers, not copy. They are unchanged deliberately: renaming the slug
+would need code and database moved in lockstep or every email silently
+resolves no recipients.
+
+## The gate
 
 ## The gate
 

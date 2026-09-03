@@ -42,7 +42,7 @@ export async function POST(
 
   // Ships dark. Gerard turns it on in Admin → Settings once staging is proven.
   if (!(await isUpdatePrelimEnabled())) {
-    return NextResponse.json({ error: 'Update Prelim is not enabled' }, { status: 403 });
+    return NextResponse.json({ error: 'Request Updated Prelim is not enabled' }, { status: 403 });
   }
 
   const { id } = await params;
@@ -92,7 +92,7 @@ export async function POST(
   const active = await findActiveUpdatePrelimJob(orderId);
   if (active) {
     return NextResponse.json(
-      { error: 'An Update Prelim submission for this order is already in progress', jobId: active.id },
+      { error: 'A Request Updated Prelim submission for this order is already in progress', jobId: active.id },
       { status: 409 },
     );
   }

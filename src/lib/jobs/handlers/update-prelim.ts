@@ -1,5 +1,5 @@
 /**
- * Update Prelim — the SoftPro half, run in the background.
+ * Request Updated Prelim — the SoftPro half, run in the background.
  *
  * Order matters and is not legacy's. Legacy ran
  *   note → task → local note → S3 → doc row → SoftPro upload → email
@@ -363,13 +363,16 @@ async function sendUpdatePrelimEmail(input: {
       eventType: 'order.prelim.updated',
       orderId: input.orderId,
       data: {
-        subject: `Updated Prelim — ${fileNumber}: ${input.subject}`.slice(0, 480),
+        // Matches the button and modal wording verbatim, so a rep who gets a
+        // reply recognises what it is about.
+        subject: `Request Updated Prelim — ${fileNumber}: ${input.subject}`.slice(0, 480),
         html: [
-          `<p><strong>Updated prelim uploaded for ${escapeHtml(fileNumber)}.</strong></p>`,
+          `<p><strong>Request Updated Prelim — ${escapeHtml(fileNumber)}.</strong></p>`,
+          `<p>${escapeHtml(input.requestedBy)} sent an updated prelim and is asking production to action it.</p>`,
           `<p><strong>Subject:</strong> ${escapeHtml(input.subject)}</p>`,
           `<p><strong>Note:</strong><br>${escapedNote.replace(/\n/g, '<br>')}</p>`,
           `<p>SoftPro task ${UPDATE_PRELIM_TASK_ID} is open. ${filedNote}</p>`,
-          `<p style="color:#6b7280;font-size:12px">Uploaded by ${escapeHtml(input.requestedBy)} · document #${input.documentId}</p>`,
+          `<p style="color:#6b7280;font-size:12px">Requested by ${escapeHtml(input.requestedBy)} · document #${input.documentId}</p>`,
         ].join(''),
       },
     });

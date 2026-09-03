@@ -4,8 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ModalShell } from '@/components/shared/action-modals';
 
 /**
- * Titled for the action it performs. Legacy called this "Add a Note", which
- * described one of the four things it did and none of the reason for doing it.
+ * Titled for the action it performs: "Request Updated Prelim". Legacy called
+ * this "Add a Note", which described one of the four things it did and none of
+ * the reason for doing it.
+ *
+ * The name is deliberate and settled — see
+ * docs/tickets/UPDATE_PRELIM_BUTTON_GATE.md. The rep is asking production for
+ * a change, not delivering one, and it must not collide in anyone's memory
+ * with the banned fetch-action button that was called "Update Prelim".
  */
 interface Props {
   open: boolean;
@@ -115,7 +121,7 @@ export function UpdatePrelimModal({
 
       setJob({ jobId: payload.jobId, status: 'queued', verifyState: null, error: null });
       setPhase('tracking');
-      onAccepted?.('Update Prelim accepted — sending to SoftPro.');
+      onAccepted?.('Request Updated Prelim accepted — sending to SoftPro.');
       void poll();
     } catch {
       setPhase('form');
@@ -129,7 +135,7 @@ export function UpdatePrelimModal({
     <ModalShell
       open={open}
       onClose={onClose}
-      title="Update Prelim"
+      title="Request Updated Prelim"
       subtitle={fileNumber}
     >
       <div className="p-5">
@@ -258,7 +264,7 @@ export function UpdatePrelimModal({
                 disabled={phase === 'submitting'}
                 className="px-4 py-2 text-sm rounded-lg bg-[#F26B2B] text-white hover:bg-[#E05A1A] disabled:opacity-60"
               >
-                {phase === 'submitting' ? 'Submitting…' : 'Submit Update'}
+                {phase === 'submitting' ? 'Sending…' : 'Send Request'}
               </button>
             </div>
           </form>

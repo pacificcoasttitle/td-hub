@@ -121,9 +121,19 @@ export async function enqueueUpdatePrelimJob(
 
 export type UpdatePrelimJobState = 'queued' | 'running' | 'completed' | 'failed' | 'retrying';
 
+/**
+ * 'confirmed' — the prelim listing returned the name we sent.
+ * 'accepted'  — SoftPro took the write; the listing did not show it.
+ *
+ * Held separately from the job status on purpose. A job can complete in either
+ * state, and only this field says which. Null until the listing has been read.
+ */
+export type UpdatePrelimVerifyState = 'confirmed' | 'accepted' | 'failed';
+
 export interface UpdatePrelimStatus {
   jobId: number;
   status: UpdatePrelimJobState;
+  verifyState: UpdatePrelimVerifyState | null;
   error: string | null;
   documentId: number | null;
   createdAt: Date;
@@ -151,11 +161,18 @@ export async function getUpdatePrelimStatus(
 
   if (!row) return null;
 
-  const payload = (row.payload ?? {}) as Partial<UpdatePrelimJobPayload>;
+  const payload = (row.payload ?? {}) as Partial<UpdatePrelimJobPayload> & {
+    progress?: { verifyState?: unknown };
+  };
+  const rawState = payload.progress?.verifyState;
+  const verifyState = rawState === 'confirmed' || rawState === 'accepted' || rawState === 'failed'
+    ? rawState
+    : null;
 
   return {
     jobId: row.id,
     status: row.status as UpdatePrelimJobState,
+    verifyState,
     error: row.error ?? null,
     documentId: typeof payload.documentId === 'number' ? payload.documentId : null,
     createdAt: row.createdAt,

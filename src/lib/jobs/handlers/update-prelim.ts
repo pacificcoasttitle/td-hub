@@ -16,8 +16,12 @@
 
 import { eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { documents, orders } from '@/lib/db/schema';
+import { documentAudit, documents, orders } from '@/lib/db/schema';
 import { attachToSoftPro } from '@/lib/domain/documents/service';
+import {
+  SOFTPRO_ACCEPTED_NOT_CONFIRMED_COPY,
+  type SoftProAttachVerifyState,
+} from '@/lib/domain/documents/softpro-attach-verify';
 import { softProDocumentName } from '@/lib/domain/documents/softpro-document-name';
 import { attachedNamesFromGetAttached } from '@/lib/domain/documents/softpro-folder';
 import { dispatchNotification } from '@/lib/domain/notifications/dispatch';
@@ -45,7 +49,8 @@ export interface UpdatePrelimStepResult {
  */
 export interface UpdatePrelimProgress {
   attached?: boolean;
-  listingConfirmed?: boolean;
+  /** Terminal verify state once decided. Absent means the listing was not read yet. */
+  verifyState?: SoftProAttachVerifyState;
   noted?: boolean;
   tasked?: boolean;
   emailed?: boolean;
@@ -55,9 +60,12 @@ export interface UpdatePrelimProgress {
 function parseProgress(raw: unknown): UpdatePrelimProgress {
   if (!raw || typeof raw !== 'object') return {};
   const r = raw as Record<string, unknown>;
+  const state = r.verifyState;
   return {
     attached: r.attached === true,
-    listingConfirmed: r.listingConfirmed === true,
+    verifyState: state === 'confirmed' || state === 'accepted' || state === 'failed'
+      ? state
+      : undefined,
     noted: r.noted === true,
     tasked: r.tasked === true,
     emailed: r.emailed === true,
@@ -87,8 +95,16 @@ export interface UpdatePrelimRunResult {
   documentId: number;
   orderNumber: string;
   attach: UpdatePrelimStepResult;
-  /** GetAttachedDocumentsPrelim saw the name. False is not failure — see below. */
-  listingConfirmed: boolean;
+  /**
+   * 'confirmed' — GetAttachedDocumentsPrelim returned the name we sent.
+   * 'accepted'  — SoftPro took the write but the listing did not show it.
+   *
+   * Deliberately not one boolean and not one word. Both open the task, but if
+   * someone reports a prelim missing later, this is the difference between
+   * "we watched it land" and "we heard a 200". Collapsing them throws away the
+   * only evidence that answers that question.
+   */
+  verifyState: SoftProAttachVerifyState;
   note: UpdatePrelimStepResult;
   task: UpdatePrelimStepResult;
   email: UpdatePrelimStepResult;
@@ -207,19 +223,37 @@ export async function handleUpdatePrelim(
     await saveProgress(jobId, progress);
   }
 
-  // 2 — verify against the prelim listing.
-  let verifyDetail = 'listing check skipped (already confirmed)';
-  if (!progress.listingConfirmed) {
+  // 2 — verify against the prelim listing. Records WHICH of the two states we
+  // ended in, not merely whether we got the good one.
+  let verifyDetail = `listing already read: ${progress.verifyState}`;
+  if (!progress.verifyState) {
     const verify = await confirmPrelimListed(orderNumber, documentName);
     verifyDetail = verify.detail;
-    if (verify.confirmed) {
-      await db
-        .update(documents)
-        .set({ softproListingConfirmed: true, updatedAt: new Date() })
-        .where(eq(documents.id, documentId));
-      progress.listingConfirmed = true;
-      await saveProgress(jobId, progress);
-    }
+    progress.verifyState = verify.confirmed ? 'confirmed' : 'accepted';
+
+    await db
+      .update(documents)
+      .set({
+        softproListingConfirmed: verify.confirmed,
+        updatedAt: new Date(),
+      })
+      .where(eq(documents.id, documentId));
+
+    // The evidence, kept where a later "where did our prelim go?" will look.
+    await db.insert(documentAudit).values({
+      documentId,
+      action: 'attached_to_softpro',
+      meta: {
+        source: 'update_prelim',
+        orderNumber,
+        documentName,
+        verifyState: progress.verifyState,
+        listing: 'GetAttachedDocumentsPrelim',
+        listingDetail: verify.detail,
+      } as Record<string, unknown>,
+    });
+
+    await saveProgress(jobId, progress);
   }
 
   // The new prelim is filed, so it is safe to retire the old ones. Doing this
@@ -272,7 +306,7 @@ export async function handleUpdatePrelim(
       subject: payload.subject,
       note: payload.note,
       documentId,
-      listingConfirmed: progress.listingConfirmed === true,
+      verifyState: progress.verifyState ?? 'accepted',
       requestedBy: payload.requestedBy,
     });
     if (email.ok) {
@@ -285,7 +319,7 @@ export async function handleUpdatePrelim(
     documentId,
     orderNumber,
     attach: step(true, verifyDetail),
-    listingConfirmed: progress.listingConfirmed === true,
+    verifyState: progress.verifyState ?? 'accepted',
     note,
     task,
     email,
@@ -299,7 +333,7 @@ async function sendUpdatePrelimEmail(input: {
   subject: string;
   note: string;
   documentId: number;
-  listingConfirmed: boolean;
+  verifyState: SoftProAttachVerifyState;
   requestedBy: string;
 }): Promise<UpdatePrelimStepResult> {
   try {
@@ -311,9 +345,11 @@ async function sendUpdatePrelimEmail(input: {
 
     const fileNumber = order?.fileNumber ?? input.orderNumber;
     const escapedNote = escapeHtml(input.note);
-    const filedNote = input.listingConfirmed
-      ? 'Confirmed on the SoftPro prelim listing.'
-      : 'Write accepted by SoftPro; the prelim listing did not return the name.';
+    // Two different sentences on purpose. The recipient should be able to tell,
+    // from the email alone, whether we saw the prelim land.
+    const filedNote = input.verifyState === 'confirmed'
+      ? 'Confirmed: the SoftPro prelim listing returned this document.'
+      : `Accepted, unconfirmed (${SOFTPRO_ACCEPTED_NOT_CONFIRMED_COPY}): SoftPro took the write, but the prelim listing did not return the name. The document is very likely on the file — this is not a failure — but we did not see it there.`;
 
     const result = await dispatchNotification({
       eventType: 'order.prelim.updated',

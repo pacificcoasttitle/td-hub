@@ -24,6 +24,7 @@ type Phase = 'form' | 'submitting' | 'tracking';
 interface JobStatus {
   jobId: number;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'retrying';
+  verifyState: 'confirmed' | 'accepted' | 'failed' | null;
   error: string | null;
 }
 
@@ -33,6 +34,16 @@ const STATUS_COPY: Record<JobStatus['status'], string> = {
   retrying: 'A step did not complete. Retrying automatically.',
   completed: 'Done. Prelim attached, note added, task 03-005 opened.',
   failed: 'Did not complete.',
+};
+
+/**
+ * Said out loud rather than folded into "done". A completed job means the task
+ * is open either way, but the operator should know whether we actually saw the
+ * prelim on the file or only got a 200 back.
+ */
+const VERIFY_COPY: Record<'confirmed' | 'accepted', string> = {
+  confirmed: 'Confirmed on the SoftPro prelim listing.',
+  accepted: 'Accepted, unconfirmed — SoftPro took the upload but its prelim listing did not return the file. Almost certainly on the file; we just could not see it there.',
 };
 
 export function UpdatePrelimModal({ open, onClose, orderId, fileNumber, onAccepted }: Props) {
@@ -88,7 +99,7 @@ export function UpdatePrelimModal({ open, onClose, orderId, fileNumber, onAccept
         return;
       }
 
-      setJob({ jobId: payload.jobId, status: 'queued', error: null });
+      setJob({ jobId: payload.jobId, status: 'queued', verifyState: null, error: null });
       setPhase('tracking');
       onAccepted?.('Update Prelim accepted — sending to SoftPro.');
       void poll();
@@ -120,6 +131,10 @@ export function UpdatePrelimModal({ open, onClose, orderId, fileNumber, onAccept
               }`}
             >
               <p className="font-medium">{STATUS_COPY[job.status]}</p>
+              {job.status === 'completed'
+                && (job.verifyState === 'confirmed' || job.verifyState === 'accepted') && (
+                <p className="mt-1 text-xs opacity-90">{VERIFY_COPY[job.verifyState]}</p>
+              )}
               {job.error && (
                 <p className="mt-1 text-xs opacity-90">{job.error}</p>
               )}

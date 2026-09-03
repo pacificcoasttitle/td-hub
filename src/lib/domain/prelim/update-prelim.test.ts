@@ -143,6 +143,29 @@ describe('the Update Prelim flow does not repeat legacy behaviour', () => {
     expect(UPDATE_PRELIM_TASK_ID).toBe('03-005');
   });
 
+  it('keeps accepted and confirmed as two distinct states, never one boolean', () => {
+    // The whole point: if a prelim is ever reported missing, this is the
+    // difference between "we watched it land" and "we heard a 200".
+    expect(handler).toContain('verifyState');
+    expect(handler).not.toMatch(/listingConfirmed:\s*(true|false),\s*\n\s*note/);
+    expect(handler).toMatch(/verify\.confirmed \? 'confirmed' : 'accepted'/);
+
+    // Written down where a later investigation looks, not just returned.
+    expect(handler).toMatch(/documentAudit\)\.values\(/);
+    expect(handler).toMatch(/verifyState: progress\.verifyState/);
+
+    // Surfaced separately from the job status, which is 'completed' for both.
+    const domain = readFileSync(join(__dirname, 'update-prelim.ts'), 'utf8');
+    expect(domain).toMatch(/verifyState: UpdatePrelimVerifyState \| null/);
+
+    const modal = readFileSync(
+      join(process.cwd(), 'src/components/sales/update-prelim-modal.tsx'),
+      'utf8',
+    );
+    expect(modal).toMatch(/VERIFY_COPY/);
+    expect(modal).toMatch(/Accepted, unconfirmed/);
+  });
+
   it('supersedes only after the attach was accepted', () => {
     const attach = handler.indexOf('attachToSoftPro(');
     const supersede = handler.indexOf('supersedePriorPrelims(');

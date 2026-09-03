@@ -46,7 +46,10 @@ export async function POST(req: NextRequest) {
       // of the 32 APN lookups on record returned HTTP 400 "Missing required
       // fields", and every one of them told an operator the property does not
       // exist.
-      if (!result.success) {
+      // `VendorResult` is not a discriminated union — `success: boolean` with
+      // `data?: T` — so `!result.success` does not narrow `data`. Both are
+      // checked: a success carrying no data is an anomaly, not a no-match.
+      if (!result.success || !result.data) {
         return NextResponse.json({ match: 'error', property: null, locations: [] });
       }
       if (result.data.matchCode !== 'S') {

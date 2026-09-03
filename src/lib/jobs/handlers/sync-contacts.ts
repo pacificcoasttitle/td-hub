@@ -714,23 +714,58 @@ export async function fetchSyncContactRows(
   const userType = COMPANY_CONFIGS[entityType]?.userType ?? entityType;
   const pageSize = options.pageSize ?? 1000;
   const items: SyncRow[] = [];
+
+  // ─── PAGINATE UNTIL A PAGE COMES BACK EMPTY ───────────────────────────────
+  //
+  // This loop used to be `while (hasMore)`. `hasMore` was parsed from the top
+  // level of the response, SoftPro returns it inside `Pagination`, and so it
+  // was `undefined` -> false on every call. The loop ran ONCE. Every contact
+  // type has been truncated to its first 1,000 rows since 2026-07-14
+  // (`d33c9ac`): 15,609 people in SoftPro, 1,000 read.
+  //
+  // The parser is fixed, but the loop no longer depends on the flag. A vendor
+  // boolean is one field away from silently capping a sync, and nothing about
+  // a truncated read looks wrong from the outside — the rows we did get are
+  // all valid. So: keep asking until the vendor has nothing left to give.
+  //
+  // "Empty" means empty AFTER A RETRY. During the investigation `Page=1`
+  // returned zero rows once and 1,000 rows on the next call, so treating a
+  // single empty response as the end would reintroduce the same silent
+  // truncation through a different door.
+  const MAX_PAGES = 500;
   let page = 1;
-  let hasMore = true;
 
-  while (hasMore) {
-    const adapterResult = await getLookupTable({
-      userType,
-      Page: page,
-      pageSize,
-      ...(options.modifiedSince ? { modifiedSince: options.modifiedSince } : {}),
-    });
+  while (page <= MAX_PAGES) {
+    let pageItems: SyncRow[] | null = null;
+    let lastError: string | null = null;
 
-    if (!adapterResult.success || !adapterResult.data) {
-      return { items: [], error: adapterResult.error?.message ?? 'Failed to fetch lookup table' };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const adapterResult = await getLookupTable({
+        userType,
+        Page: page,
+        pageSize,
+        ...(options.modifiedSince ? { modifiedSince: options.modifiedSince } : {}),
+      });
+
+      if (!adapterResult.success || !adapterResult.data) {
+        lastError = adapterResult.error?.message ?? 'Failed to fetch lookup table';
+        continue;
+      }
+      lastError = null;
+      if (adapterResult.data.items.length > 0) {
+        pageItems = adapterResult.data.items;
+        break;
+      }
+      // Empty. Retry the SAME page once before believing it.
     }
 
-    items.push(...adapterResult.data.items);
-    hasMore = adapterResult.data.hasMore;
+    // A hard failure must not be read as the end of the data. Returning the
+    // rows collected so far would look exactly like a successful short sync,
+    // which is the failure mode this whole comment exists to prevent.
+    if (lastError) return { items: [], error: lastError };
+    if (!pageItems) break;
+
+    items.push(...pageItems);
     page += 1;
   }
 

@@ -799,12 +799,31 @@ export async function getLookupTable(
       );
     }
 
+    // SoftPro returns paging inside a `Pagination` object, NOT at the top
+    // level. Measured on production, 2026-09-03:
+    //
+    //   top-level keys: Status | Message | Pagination | data
+    //   Pagination: {"Page":1,"PageSize":1000,"TotalRows":15609,
+    //                "TotalPages":16,"HasMore":true}
+    //
+    // Reading `raw.HasMore` gave `undefined` on every response, so the sync
+    // loop's `while (hasMore)` ran exactly once and every contact type was
+    // truncated to its first 1,000 rows. The top-level spellings are kept as
+    // fallbacks in case an older deployment answers differently.
     const raw = parsed as SoftProResponse<SoftProLookupItem[]> & {
       HasMore?: boolean;
       hasMore?: boolean;
       Page?: number;
       pageSize?: number;
+      Pagination?: {
+        Page?: number;
+        PageSize?: number;
+        TotalRows?: number;
+        TotalPages?: number;
+        HasMore?: boolean;
+      };
     };
+    const pagination = raw.Pagination;
     const success = raw.Status === 200 && response.status < 400 && Array.isArray(raw.data);
     const category = categorizeSoftProResponse({
       bodyStatus: raw.Status,
@@ -815,10 +834,12 @@ export async function getLookupTable(
     const durationMs = Date.now() - startedAt.getTime();
     const pageData: SoftProLookupTablePage = {
       items: Array.isArray(raw.data) ? raw.data : [],
-      hasMore: raw.HasMore === true || raw.hasMore === true,
-      page: typeof raw.Page === 'number' ? raw.Page : page,
-      pageSize: typeof raw.pageSize === 'number' ? raw.pageSize : pageSize,
+      hasMore: pagination?.HasMore === true || raw.HasMore === true || raw.hasMore === true,
+      page: pagination?.Page ?? (typeof raw.Page === 'number' ? raw.Page : page),
+      pageSize: pagination?.PageSize ?? (typeof raw.pageSize === 'number' ? raw.pageSize : pageSize),
       modifiedSince: input.modifiedSince ?? null,
+      totalRows: typeof pagination?.TotalRows === 'number' ? pagination.TotalRows : null,
+      totalPages: typeof pagination?.TotalPages === 'number' ? pagination.TotalPages : null,
     };
 
     await logRequest({
@@ -839,6 +860,8 @@ export async function getLookupTable(
           hasMore: pageData.hasMore,
           page: pageData.page,
           pageSize: pageData.pageSize,
+          totalRows: pageData.totalRows,
+          totalPages: pageData.totalPages,
           modifiedSince: pageData.modifiedSince,
         }
         : { status: raw.Status, bodyStatus: raw.Status, message: raw.Message, rawBody: raw },

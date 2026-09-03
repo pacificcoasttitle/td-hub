@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { vendorSuccess } from '../../integrations/types';
+import { vendorSuccess, vendorError } from '../../integrations/types';
 
 const {
   getLookupTableMock,
@@ -439,7 +439,87 @@ describe('fetchSyncContactRows incremental lookup fetch', () => {
     activeRepCount.value = 0;
   });
 
-  it('passes modifiedSince and paginates until HasMore is false', async () => {
+  it('paginates until a page comes back empty, ignoring hasMore entirely', async () => {
+    // This test used to be called "paginates until HasMore is false" and it
+    // passed for over a year while the sync read 1,000 rows and stopped: the
+    // mock set hasMore itself, so it tested the loop against a flag the real
+    // parser never populated. hasMore is deliberately WRONG on both pages here
+    // — false on the page that has more, true on the last — so the only way to
+    // pass is to page until the vendor returns nothing.
+    getLookupTableMock
+      .mockResolvedValueOnce(vendorSuccess({
+        items: [{ LookupCode: 'A' }],
+        hasMore: false,
+        page: 1, pageSize: 1, modifiedSince: '2026-07-13T18:00:00.000Z',
+        totalRows: 2, totalPages: 2,
+      }))
+      .mockResolvedValueOnce(vendorSuccess({
+        items: [{ LookupCode: 'B' }],
+        hasMore: true,
+        page: 2, pageSize: 1, modifiedSince: '2026-07-13T18:00:00.000Z',
+        totalRows: 2, totalPages: 2,
+      }))
+      .mockResolvedValue(vendorSuccess({
+        items: [],
+        hasMore: true,
+        page: 3, pageSize: 1, modifiedSince: '2026-07-13T18:00:00.000Z',
+        totalRows: 2, totalPages: 2,
+      }));
+
+    const result = await fetchSyncContactRows('Lender', {
+      modifiedSince: '2026-07-13T18:00:00.000Z',
+      pageSize: 1,
+    });
+
+    expect(result).toEqual({
+      items: [{ LookupCode: 'A' }, { LookupCode: 'B' }],
+      error: null,
+    });
+    expect(getLookupTableMock).toHaveBeenNthCalledWith(1, {
+      userType: 'Lender', Page: 1, pageSize: 1, modifiedSince: '2026-07-13T18:00:00.000Z',
+    });
+    expect(getLookupTableMock).toHaveBeenNthCalledWith(2, {
+      userType: 'Lender', Page: 2, pageSize: 1, modifiedSince: '2026-07-13T18:00:00.000Z',
+    });
+  });
+
+  it('retries an empty page once before treating it as the end', async () => {
+    // Page 1 returned zero rows once during the investigation and 1,000 rows
+    // on the next call. One empty response is not proof the data ran out.
+    getLookupTableMock
+      .mockResolvedValueOnce(vendorSuccess({
+        items: [], hasMore: false, page: 1, pageSize: 1, modifiedSince: null,
+        totalRows: null, totalPages: null,
+      }))
+      .mockResolvedValueOnce(vendorSuccess({
+        items: [{ LookupCode: 'LATE' }], hasMore: false, page: 1, pageSize: 1,
+        modifiedSince: null, totalRows: null, totalPages: null,
+      }))
+      .mockResolvedValue(vendorSuccess({
+        items: [], hasMore: false, page: 2, pageSize: 1, modifiedSince: null,
+        totalRows: null, totalPages: null,
+      }));
+
+    const result = await fetchSyncContactRows('Lender', { modifiedSince: null, pageSize: 1 });
+    expect(result).toEqual({ items: [{ LookupCode: 'LATE' }], error: null });
+  });
+
+  it('a hard failure mid-pagination is an error, never a short success', async () => {
+    // Returning what was collected so far is indistinguishable from a complete
+    // sync, which is the exact shape of the bug this file now guards.
+    getLookupTableMock
+      .mockResolvedValueOnce(vendorSuccess({
+        items: [{ LookupCode: 'A' }], hasMore: false, page: 1, pageSize: 1,
+        modifiedSince: null, totalRows: null, totalPages: null,
+      }))
+      .mockResolvedValue(vendorError('softpro', 'TIMEOUT', 'gateway timeout', { retryable: true }));
+
+    const result = await fetchSyncContactRows('Lender', { modifiedSince: null, pageSize: 1 });
+    expect(result.items).toEqual([]);
+    expect(result.error).toBe('gateway timeout');
+  });
+
+  it('legacy: modifiedSince is still passed through on the first call', async () => {
     getLookupTableMock
       .mockResolvedValueOnce(vendorSuccess({
         items: [{ LookupCode: 'A' }],
@@ -454,6 +534,11 @@ describe('fetchSyncContactRows incremental lookup fetch', () => {
         page: 2,
         pageSize: 1,
         modifiedSince: '2026-07-13T18:00:00.000Z',
+      }))
+      // The loop now ends on an empty page, so every test must supply one.
+      .mockResolvedValue(vendorSuccess({
+        items: [], hasMore: false, page: 3, pageSize: 1,
+        modifiedSince: '2026-07-13T18:00:00.000Z', totalRows: 2, totalPages: 2,
       }));
 
     const result = await fetchSyncContactRows('Lender', {
@@ -480,13 +565,20 @@ describe('fetchSyncContactRows incremental lookup fetch', () => {
   });
 
   it('omits modifiedSince for first-run full resync fallback', async () => {
-    getLookupTableMock.mockResolvedValueOnce(vendorSuccess({
-      items: [{ LookupCode: 'FULL' }],
-      hasMore: false,
-      page: 1,
-      pageSize: 1000,
-      modifiedSince: null,
-    }));
+    getLookupTableMock
+      .mockResolvedValueOnce(vendorSuccess({
+        items: [{ LookupCode: 'FULL' }],
+        hasMore: false,
+        page: 1,
+        pageSize: 1000,
+        modifiedSince: null,
+        totalRows: 1,
+        totalPages: 1,
+      }))
+      .mockResolvedValue(vendorSuccess({
+        items: [], hasMore: false, page: 2, pageSize: 1000, modifiedSince: null,
+        totalRows: 1, totalPages: 1,
+      }));
 
     const result = await fetchSyncContactRows('Lender', { modifiedSince: null });
 

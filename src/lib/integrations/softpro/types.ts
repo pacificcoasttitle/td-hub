@@ -143,10 +143,20 @@ export interface SoftProLookupTableRequest {
 
 export interface SoftProLookupTablePage {
   items: SoftProLookupItem[];
+  /**
+   * From `Pagination.HasMore`. Kept for logging and for a caller that wants a
+   * hint — NOT as a loop condition. See `SOFTPRO_PAGINATION_TRUNCATES_AT_1000`:
+   * this field read `undefined` for over a year because the parser looked at
+   * the top level, and the sync stopped after 1,000 rows every time.
+   */
   hasMore: boolean;
   page: number;
   pageSize: number;
   modifiedSince: string | null;
+  /** From `Pagination.TotalRows` — null when the vendor omits the envelope. */
+  totalRows: number | null;
+  /** From `Pagination.TotalPages` — null when the vendor omits the envelope. */
+  totalPages: number | null;
 }
 
 // Known field names for the Title Officer entity type

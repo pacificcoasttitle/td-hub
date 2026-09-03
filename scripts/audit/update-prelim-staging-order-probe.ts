@@ -194,8 +194,14 @@ async function main(): Promise<void> {
 
   const fileUrl = rawFileUrl ? await checkFileUrl(rawFileUrl) : undefined;
   if (!fileUrl) {
-    console.log('No --file-url given: Q1 (Subject) and Q3 (listings) are answered,');
-    console.log('Q2 (folder placement) is NOT — that needs a document attached.\n');
+    console.log('No --file-url given. Q1 (Subject) IS answered — that is the one');
+    console.log('blocking a design decision, so this run is worth doing without a PDF.');
+    console.log('');
+    console.log('Q2 (folder placement) and Q3 (which listing sees the prelim) are NOT.');
+    console.log('Both need a document actually attached, and the listings below will');
+    console.log('read empty for the honest reason that nothing was uploaded — not');
+    console.log('because a listing failed to show something. Do not record an empty');
+    console.log('listing from this run as evidence about either question.\n');
   }
 
   const { addNotes, addTask, getAttachedDocuments, getAttachedDocumentsPrelim } =
@@ -290,7 +296,9 @@ async function main(): Promise<void> {
     console.log(`    success: ${task.success}`);
     console.log(`    returned: ${JSON.stringify(task.success ? task.data : task.error)}`);
 
-    console.log('\n  [Q3] listings AFTER the writes');
+    console.log(fileUrl
+      ? '\n  [Q3] listings AFTER the writes'
+      : '\n  [listings] AFTER the writes — expected empty, nothing was uploaded');
     describeListing('GetAttachedDocumentsPrelim', await getAttachedDocumentsPrelim(orderNumber));
     describeListing('GetAttachedDocuments      ', await getAttachedDocuments(orderNumber));
     console.log('');
@@ -303,12 +311,19 @@ async function main(): Promise<void> {
     console.log(`  ${orderNumber}  ${orderType}`);
   }
   console.log('\nStill needs a human, and the script will not pretend otherwise:');
-  console.log('  1. Open each order in SoftPro and read the note. Does the subject');
-  console.log('     line render the way a person would expect?');
-  console.log('  2. Read the FOLDER PATH on screen for the attached prelim, per');
-  console.log('     order type. That is defect D and the listing strings above are');
-  console.log('     evidence for it, not a substitute.');
-  console.log('  3. Record both in docs/tickets/, against these order numbers.');
+  console.log('  1. Open each order in SoftPro Select and read the note. Does the');
+  console.log('     subject appear? A 200 above proves the request was accepted,');
+  console.log('     not that the subject renders.');
+  if (fileUrl) {
+    console.log('  2. Read the FOLDER PATH on screen for the attached prelim, per');
+    console.log('     order type. That is defect D, and the listing strings above');
+    console.log('     are evidence for it, not a substitute — what matters is where');
+    console.log('     the team will actually find it.');
+  } else {
+    console.log('  2. Folder placement was NOT probed (no --file-url). It can wait');
+    console.log('     for a button run once the feature is enabled.');
+  }
+  console.log('  3. Record what you saw in docs/tickets/, against these order numbers.');
 }
 
 main()

@@ -51,12 +51,23 @@ saying so. This is the newest instance, found 2026-09-03 while building the
 
 ### 3. Escrow officer code with an empty name — reassigned to your service account
 
+**This is silent substitution, not silent omission, and it is the hardest of
+the five to explain as validation.**
+
 - `TEST-20002219-OCT` — sent no officer code with an empty
   `EscrowOfficerName`. Came back **assigned to the API service account
   `PCT\rsupport`**.
 
-Worse than a drop: the field is populated, so nothing looks wrong, and the
-order is assigned to a robot.
+The field did not fail to resolve and get left empty. It was *filled in with a
+different value* — your own integration account — and success was returned. So
+there is nothing for us to detect: the order has an escrow officer, the
+response said success, and the officer is a robot. Every other instance in this
+report leaves a hole, which at least a human can spot on the file. This one
+leaves a plausible-looking wrong answer.
+
+Read instances 3 and 4 together. Same field, same request, differing only in
+`''` versus `null`, producing two *different* wrong outcomes and no error
+either time.
 
 ### 4. Escrow officer null name — no officer at all
 

@@ -12,6 +12,13 @@ interface Props {
   onClose: () => void;
   orderId: number;
   fileNumber: string;
+  /**
+   * Whether the Hub holds an active prelim for this order. The button is not
+   * gated on it, so this is a notice rather than a block — the rep should know
+   * they are sending a request about a prelim we do not have, and send it
+   * anyway if that is what they mean to do.
+   */
+  hubHoldsPrelim: boolean;
   onAccepted?: (message: string) => void;
 }
 
@@ -46,7 +53,14 @@ const VERIFY_COPY: Record<'confirmed' | 'accepted', string> = {
   accepted: 'Accepted, unconfirmed — SoftPro took the upload but its prelim listing did not return the file. Almost certainly on the file; we just could not see it there.',
 };
 
-export function UpdatePrelimModal({ open, onClose, orderId, fileNumber, onAccepted }: Props) {
+export function UpdatePrelimModal({
+  open,
+  onClose,
+  orderId,
+  fileNumber,
+  hubHoldsPrelim,
+  onAccepted,
+}: Props) {
   const [subject, setSubject] = useState('');
   const [note, setNote] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -158,6 +172,17 @@ export function UpdatePrelimModal({ open, onClose, orderId, fileNumber, onAccept
             {error && (
               <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
                 {error}
+              </div>
+            )}
+
+            {!hubHoldsPrelim && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                We don&apos;t currently have a prelim on this file — your request
+                will still be sent.
+                <span className="mt-1 block text-[11px] opacity-90">
+                  SoftPro may hold one we haven&apos;t fetched. The note says the
+                  same thing, so production knows before they open it.
+                </span>
               </div>
             )}
 

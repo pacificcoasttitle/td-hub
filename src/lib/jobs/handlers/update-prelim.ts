@@ -268,7 +268,14 @@ export async function handleUpdatePrelim(
   // 3 — note. Subject is prepended into Text; AddNotes has no Subject field.
   let note = step(true, 'already added on an earlier attempt');
   if (!progress.noted) {
-    const noteText = buildPrelimNoteText({ subject: payload.subject, note: payload.note });
+    // supersededCount is the honest answer to "did we already hold a prelim?" —
+    // it counts the active prelims this upload retired. Derived from our own
+    // rows a moment ago, not from what the client claimed on submit.
+    const noteText = buildPrelimNoteText({
+      subject: payload.subject,
+      note: payload.note,
+      hubHeldPrelim: (progress.supersededCount ?? 0) > 0,
+    });
     const noteResult = await addNotes(orderNumber, noteText);
     note = step(
       noteResult.success,

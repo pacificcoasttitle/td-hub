@@ -244,6 +244,7 @@ export function DashboardContent({ displayName, role }: Props) {
           onClose={() => setUpdatePrelimOrder(null)}
           orderId={updatePrelimOrder.id}
           fileNumber={updatePrelimOrder.fileNumber}
+          hubHoldsPrelim={!!updatePrelimOrder.hasPrelim}
           onAccepted={showToast}
         />
       )}

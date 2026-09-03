@@ -40,6 +40,38 @@ export function OrderActions({
 }: Props) {
   const hasPrelim = !!order.hasPrelim;
 
+  /*
+    Deliberately NOT gated on hasPrelim — see
+    docs/tickets/UPDATE_PRELIM_BUTTON_GATE.md.
+
+    hasPrelim means "the Hub holds an active prelim row", not "SoftPro has a
+    prelim". There is no local equivalent of legacy's `prelim_summary_id != 0`;
+    orders carries only last_prelim_fetch_at, which records an attempt. So
+    gating on hasPrelim hides the button in the one case that matters most —
+    SoftPro has a prelim, or a newer one, that we have not fetched — and it
+    hides it silently.
+
+    The asymmetry decides it. A false hide blocks the rep and fails silently.
+    A false show sends a request about a prelim that does not exist, and the
+    person receiving it says so; it fails visibly and recovers itself. Since
+    the point of this button is to stop reps phoning production, a false hide
+    costs more. The modal says when we hold no prelim, and the SoftPro note
+    carries the same line, so nobody is hunting for a document blind.
+
+    The eventual gate is a stored SoftPro-side signal from the parked
+    GetAttachedDocumentsPrelim/ModifiedAt polling. That, not hasPrelim.
+  */
+  const updatePrelimButton = updatePrelimEnabled ? (
+    <button
+      type="button"
+      title="Send an updated prelim to production, with a note"
+      onClick={() => onAction('push_prelim_update', order)}
+      className={secondaryBtn}
+    >
+      Update Prelim
+    </button>
+  ) : null;
+
   return (
     <div className="flex flex-wrap items-center justify-end gap-1">
       {hasPrelim ? (
@@ -81,16 +113,7 @@ export function OrderActions({
             button. "Get Prelim Doc" in the hasPrelim === false branch below is
             the real, working on-demand fetch — leave it alone.
           */}
-          {updatePrelimEnabled && (
-            <button
-              type="button"
-              title="Upload an updated prelim to SoftPro"
-              onClick={() => onAction('push_prelim_update', order)}
-              className={secondaryBtn}
-            >
-              Update Prelim
-            </button>
-          )}
+          {updatePrelimButton}
           <button
             type="button"
             title="View Contacts"
@@ -123,6 +146,7 @@ export function OrderActions({
           >
             Get Prelim Doc
           </button>
+          {updatePrelimButton}
           <button
             type="button"
             title="View Contacts"

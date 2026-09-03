@@ -34,12 +34,27 @@ export const PRELIM_NOTE_BODY_MAX = 4000;
  * report, not a switch to flip — keep prepending until someone has read a
  * note in SoftPro's own UI and confirmed the subject renders there.
  */
-export function buildPrelimNoteText(input: { subject: string; note: string }): string {
+/**
+ * The button is not gated on the Hub holding a prelim (see
+ * docs/tickets/UPDATE_PRELIM_BUTTON_GATE.md). So a request can arrive for an
+ * order we hold no prelim for, and the person reading the note needs to know
+ * that before they go looking for one — otherwise they hunt for a prelim the
+ * Hub never had and conclude the request was noise.
+ */
+const NO_PRELIM_HELD_LINE =
+  '[Hub: no prelim was on file in the Hub for this order when this request was sent. '
+  + 'Either this is the first prelim, or SoftPro holds one we have not fetched.]';
+
+export function buildPrelimNoteText(input: {
+  subject: string;
+  note: string;
+  hubHeldPrelim?: boolean;
+}): string {
   const subject = input.subject.trim();
   const note = input.note.trim();
-  if (!subject) return note;
-  if (!note) return subject;
-  return `${subject}\n\n${note}`;
+  const parts = [subject, note].filter(Boolean);
+  if (input.hubHeldPrelim === false) parts.push(NO_PRELIM_HELD_LINE);
+  return parts.join('\n\n');
 }
 
 /**

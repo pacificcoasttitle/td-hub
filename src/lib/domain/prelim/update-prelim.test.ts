@@ -18,6 +18,48 @@ describe('buildPrelimNoteText', () => {
     expect(buildPrelimNoteText({ subject: 'Only subject', note: '   ' })).toBe('Only subject');
     expect(buildPrelimNoteText({ subject: '  ', note: 'Only note' })).toBe('Only note');
   });
+
+  it('tells the recipient when the Hub held no prelim — the button is not gated on it', () => {
+    const text = buildPrelimNoteText({ subject: 'S', note: 'N', hubHeldPrelim: false });
+    expect(text).toContain('no prelim was on file in the Hub');
+    expect(text.startsWith('S\n\nN')).toBe(true);
+  });
+
+  it('stays silent when we did hold one, and when nobody said', () => {
+    expect(buildPrelimNoteText({ subject: 'S', note: 'N', hubHeldPrelim: true }))
+      .toBe('S\n\nN');
+    expect(buildPrelimNoteText({ subject: 'S', note: 'N' })).toBe('S\n\nN');
+  });
+});
+
+describe('the button gate', () => {
+  const actions = readFileSync(
+    join(process.cwd(), 'src/components/sales/order-actions.tsx'),
+    'utf8',
+  );
+
+  it('is not gated on hasPrelim — that hides it exactly when SoftPro has one we lack', () => {
+    // Rendered from a single const placed in BOTH branches of the hasPrelim
+    // ternary, so a future edit to one branch cannot silently re-gate it.
+    expect(actions).toMatch(/const updatePrelimButton = updatePrelimEnabled \?/);
+    expect(actions.match(/\{updatePrelimButton\}/g)).toHaveLength(2);
+    expect(actions).not.toMatch(/hasPrelim && updatePrelimEnabled/);
+  });
+
+  it('keeps the ban on the fetch-action button of the same name', () => {
+    expect(actions).toContain('Do not re-add THAT one');
+  });
+
+  it('warns in the modal instead of blocking, and does not block', () => {
+    const modal = readFileSync(
+      join(process.cwd(), 'src/components/sales/update-prelim-modal.tsx'),
+      'utf8',
+    );
+    expect(modal).toMatch(/hubHoldsPrelim/);
+    expect(modal).toMatch(/your request\s*\n?\s*will still be sent/);
+    // The notice must never gate the submit button.
+    expect(modal).not.toMatch(/disabled=\{[^}]*hubHoldsPrelim/);
+  });
 });
 
 describe('prelimUploadFilename', () => {

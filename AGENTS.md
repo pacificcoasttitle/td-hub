@@ -31,3 +31,21 @@ You have CI, branch protection, and required checks; use them. Confirm app + scr
 ## Production writes
 
 Nothing that writes to production runs from uncommitted code. Not a one-shot, not a backfill, not a repair script. If it touches production it goes through a branch and a review first, even when the change is obviously right.
+
+## Staging probes: prove separation, do not assert it (2026-09-03)
+
+Any script that writes to SoftPro refuses to run until it has **evidence** the profile is separate, not a claim that it is.
+
+- **Check the port, then prove it with a query.** `SOFTPRO_API_URL` on `:8081` is a claim about configuration. The check that means something is to ask staging for a **known production order number** and refuse unless the answer is **zero records**. A port can be right while the profile behind it is shared; an empty result for a real production file cannot. Reference implementation: `proveSeparation()` in `scripts/audit/update-prelim-staging-order-probe.ts`; the older form is `scripts/audit/staging-run.ts`.
+- **Create your own orders.** Staging prefixes what it creates with `TEST-`, so a fresh order cannot collide with a production file number and nobody has to volunteer a file they mind marking up. Do not probe a production number on the assumption it will not resolve.
+- **Refuse rather than default.** Missing `SOFTPRO_USER_ID`, missing URL, wrong port: exit non-zero with the reason. A probe that guesses is worse than one that stops.
+- **Guard the inputs against the defect you are documenting.** The prelim probe rejects a `--file-url` over 200 characters and validates the last path segment through `cleanSoftProFileUrl`, because SoftPro downloads on a Windows host and rejects long URLs with *"The specified path, file name, or both are too long"* (MAX_PATH 260 — that is the real error behind the presigned-S3 failures, **not** illegal characters). A probe that exists to document a failure must not be able to reproduce it by accident.
+- **Verify the refusals by running them.** All three guards above were confirmed by execution before the script was trusted, including against a production-shaped URL.
+
+Corollary on credentials: a production-capable SoftPro token does not go in a `.env.local` on a machine carrying sixty-odd worktrees. The probe refuses to point at production; nothing else on that machine does. Where a run needs the token, a human runs it and pastes the output back.
+
+## A vendor 200 is not a result (2026-09-03)
+
+SoftPro accepts fields it cannot resolve, returns success, and silently drops or substitutes them — five proven instances across five different fields, enumerated with order numbers in `docs/tickets/SOFTPRO_ACCEPTS_AND_SILENTLY_DROPS_FIELDS.md`.
+
+So: never record an outcome from a request payload or a `200`. Read the thing back, and store "we were told it worked" and "we saw it" as two different states. Where a read-back is impossible, say so in the copy rather than collapsing it into the good state.

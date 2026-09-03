@@ -40,13 +40,46 @@ export function isSoftProLookupCollision(message: string | undefined): boolean {
   );
 }
 
+/**
+ * SoftPro's order endpoint rejects a lookup code longer than this:
+ *
+ *   HTTP 400  "Value must be no longer than 10 characters."
+ *
+ * Their CONTACT endpoint does not enforce it — `JuaLesKell1` was accepted by
+ * `CreateUser` on 2026-09-03 and then rejected by order creation seven minutes
+ * later, twice. So an over-length code does not fail loudly when it is minted;
+ * it fails on the first order that names the person.
+ */
+export const MAX_LOOKUP_CODE_LENGTH = 10;
+
+/**
+ * Append a collision suffix WITHIN the length limit, not past it.
+ *
+ * The old version appended without trimming: a person base is
+ * 3 + 3 + 4 = exactly 10 whenever the names are long enough, so the very first
+ * collision produced an 11-character code. 154 contacts carry one.
+ *
+ * A naive "first nine plus the digit" is not enough on its own — measured
+ * against the existing 154, six of them would land on a code another contact
+ * already holds. So each trimmed candidate is checked against `taken` like any
+ * other, and the search continues until one is free.
+ */
 export function uniquifyLookupCode(base: string, existing: Iterable<string>): string {
   const taken = new Set(
     [...existing].map((c) => c.trim().toLowerCase()).filter(Boolean),
   );
   if (!base) return base;
-  if (!taken.has(base.toLowerCase())) return base;
-  let n = 1;
-  while (taken.has(`${base}${n}`.toLowerCase())) n += 1;
-  return `${base}${n}`;
+
+  const capped = base.slice(0, MAX_LOOKUP_CODE_LENGTH);
+  if (!taken.has(capped.toLowerCase())) return capped;
+
+  // Bounded: the caller's vendor round-trip already handles a code SoftPro
+  // rejects as duplicate, so exhausting this range is better than spinning.
+  for (let n = 1; n <= 9999; n += 1) {
+    const suffix = String(n);
+    if (suffix.length >= MAX_LOOKUP_CODE_LENGTH) break;
+    const candidate = capped.slice(0, MAX_LOOKUP_CODE_LENGTH - suffix.length) + suffix;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+  return capped;
 }

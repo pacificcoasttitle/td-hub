@@ -163,6 +163,8 @@ export async function getLookupTable(
     page,
     pageSize,
     modifiedSince: input.modifiedSince ?? null,
+    totalRows: items.length,
+    totalPages: Math.max(1, Math.ceil(items.length / pageSize)),
   }, { requestId: 'mock-' + crypto.randomUUID(), durationMs: 50 });
 }
 

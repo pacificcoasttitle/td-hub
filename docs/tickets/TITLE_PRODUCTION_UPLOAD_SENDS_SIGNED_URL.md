@@ -31,6 +31,18 @@ A presigned URL is ~440 characters. SoftPro rejects it on length before the
 `?`-in-filename problem can bite. Both are consequences of sending a presigned
 URL; length is the one the vendor reports, so that is the string to search for.
 
+**This supersedes the "defect A" wording**, which describes the fault as a
+filename-parsing failure on illegal characters. That framing is not wrong about
+the cause — a presigned URL is the cause — but it names an error string the
+vendor never returns, so searching the logs for filename or illegal-character
+errors finds nothing and reads as "it never happened." Search `too long`.
+`Document-Upload-Break-Diagnosis.md` is not tracked in this repository and has
+never been; whoever holds that copy needs the same correction applied there.
+The code comments are already right: `softpro-fetch-token.ts:42` and
+`documents/service.ts:166-168` both lead with MAX_PATH, and
+`error-category.ts` classifies `path, file name, or both are too long` as
+`validation`.
+
 ## Exposure
 
 `AddDocuments` calls carrying `X-Amz-Signature`, all time — three days only:

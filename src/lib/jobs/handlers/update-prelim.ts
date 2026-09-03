@@ -211,8 +211,9 @@ export async function handleUpdatePrelim(
   const progress = parseProgress(raw.progress);
 
   // 1 — attach. attachToSoftPro builds the short fetch-doc FileURL (never a
-  // presigned S3 URL — Path.GetFileName would choke on the query string),
-  // posts AddDocuments, and classifies accepted vs confirmed vs failed.
+  // presigned S3 URL: at ~440 chars those fail the Windows 260-char MAX_PATH
+  // before Path.GetFileName ever chokes on the query string), posts
+  // AddDocuments, and classifies accepted vs confirmed vs failed.
   if (!progress.attached) {
     const attach = await attachToSoftPro(documentId, UPDATE_PRELIM_FOLDER_NAME);
     if (!attach.success) {

@@ -23,7 +23,7 @@ Do not flip flags. Do not re-post. Verdicts below.
 
 | File | Local rows | SoftPro today | How they failed | Re-post? |
 |---|---|---|---|---|
-| 20015761-GLT | 7 marked synced (1 LV, 2 tax, **4 grant deeds**), Mar 31 | empty | Signed S3 URLs with query strings. `Path.GetFileName` saw `?X-Amz-…`. AddDocuments 200. Nothing landed. | **Not yet.** A human must pick which of the four grant deeds is the real one. A naive re-post would add all four. |
+| 20015761-GLT | 7 marked synced (1 LV, 2 tax, **4 grant deeds**), Mar 31 | empty | Presigned S3 URLs, ~440 chars. Vendor error is **MAX_PATH**, not illegal characters — corrected 2026-09-02, see below. AddDocuments returned an empty `{}`, scored success. ~~Nothing landed.~~ | **Not yet.** A human must pick which of the four grant deeds is the real one. A naive re-post would add all four. |
 | 20021376-OCT | 3 marked synced, Aug 24 | one prelim only | HMAC fetch URL ended in the signature, not a filename. Marked synced off the 200. | Safe as an **add** once `is_synced` is cleared. Will not touch the prelim. |
 | 20021378-GLT | 3 marked synced, Aug 24 | one prelim only | Same as 376. | Same as 376. |
 | 20018616-GLT | 3, 8 failed attempts | empty | SoftPro `400`: no address / city / state / zip / title officer. | **No.** The vendor order is unfinished. Re-posting documents will 400 again. |
@@ -37,6 +37,51 @@ confirmed from the vendor response. ~~The files are simply not there under any
 name.~~ **Void — 2026-08-31.** Empty GetAttached ⇒ not listed by that API, not
 "not there." HMAC/S3-URL failures on the March/August test batch remain a
 separate write-path bug; do not treat a later empty listing as the same fact.
+
+## The twelve presigned-URL calls carry lower confidence than the record claims
+
+Added 2026-09-02. **Inference, not a measurement. No repairs — Gerard's rule
+stands.**
+
+Presigned URLs reached `AddDocuments` on exactly three days, ever:
+
+| Day | Calls | Vendor response | Scored |
+|---|---|---|---|
+| 2026-03-31 | 9 | empty `{}` | success |
+| 2026-04-02 | 3 | empty `{}` | success |
+| 2026-06-08 | 8 | `400` MAX_PATH, `FileUploadedStatus: false` | failed |
+
+June 8 is the same input shape as March and April — a ~440-character presigned
+URL — and it returned a hard 400 on all eight calls. The only thing that
+changed in between is that we started reading the response body properly. So
+**the twelve March/April calls most likely failed too**, and are recorded as
+synced because an empty `{}` was scored as success.
+
+That does not license a re-post, and it is not proof of absence: this ticket's
+own void notes establish that empty listings and empty bodies prove neither
+presence nor absence. What it does mean is that the seven rows on
+20015761-GLT are weaker evidence than `is_synced_to_softpro = true` suggests.
+Treat the grant-deed decision as "which one do we want on the file", not
+"which of four that are already there".
+
+### The error string, corrected
+
+We documented this failure as illegal characters in the filename —
+`Path.GetFileName` seeing `?X-Amz-…` and producing a name Windows rejects.
+**That is not what the vendor returns.** All eight recorded failures say:
+
+> `Status: 400` — "The specified path, file name, or both are too long. The
+> fully qualified file name must be less than 260 characters, and the directory
+> name must be less than 248 characters."
+
+A presigned URL exceeds MAX_PATH before the `?` matters. Both faults come from
+sending a presigned URL and the fix is the same one — mint a short
+`fetch-doc` URL — but only one of them is a string you can search for.
+Anyone hunting this in the logs for filename or illegal-character errors finds
+nothing and concludes it never happened. Search for `too long` instead;
+`error-category.ts` already classifies it as `validation`.
+
+Full measurement: `TITLE_PRODUCTION_UPLOAD_SENDS_SIGNED_URL.md`.
 
 ## Why this ticket exists
 

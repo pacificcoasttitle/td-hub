@@ -89,12 +89,16 @@ export function StepProperty({ data, onChange, onSiteXResult, onNoSiteXMatch, on
         };
         onChange(updated);
         onSiteXResult?.(p, updated);
+      } else if (result.match === 'error') {
+        // Not "no property" — we never got an answer. See the API route.
+        setNoMatchMessage('The property search could not be completed. Please try again, or enter the address manually.');
+        onNoSiteXMatch?.();
       } else {
         setNoMatchMessage('No property found for this APN.');
         onNoSiteXMatch?.();
       }
     } catch {
-      setNoMatchMessage('Search failed. Please try again.');
+      setNoMatchMessage('The property search could not be completed. Please try again, or enter the address manually.');
       onNoSiteXMatch?.();
     } finally {
       setApnSearching(false);

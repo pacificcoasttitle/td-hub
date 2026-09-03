@@ -36,13 +36,28 @@ export async function POST(req: NextRequest) {
     }
     try {
       const result = await apnLookup(parsed.data);
-      const data = result.success ? result.data : undefined;
-      if (!data || data.matchCode !== 'S') {
+      // A VENDOR FAILURE IS NOT AN ABSENT PROPERTY.
+      //
+      // This used to read `result.success ? result.data : undefined` and then
+      // fold everything into `match: 'none'`, so a 400 from SiteX and a genuine
+      // no-match were indistinguishable by the time the UI saw them. The UI
+      // faithfully rendered what it was told — "No property found for this
+      // APN." — which is a claim about the world we had not earned. Every one
+      // of the 32 APN lookups on record returned HTTP 400 "Missing required
+      // fields", and every one of them told an operator the property does not
+      // exist.
+      // `VendorResult` is not a discriminated union — `success: boolean` with
+      // `data?: T` — so `!result.success` does not narrow `data`. Both are
+      // checked: a success carrying no data is an anomaly, not a no-match.
+      if (!result.success || !result.data) {
+        return NextResponse.json({ match: 'error', property: null, locations: [] });
+      }
+      if (result.data.matchCode !== 'S') {
         return NextResponse.json({ match: 'none', property: null, locations: [] });
       }
-      return NextResponse.json({ match: 'single', property: data, locations: [] });
+      return NextResponse.json({ match: 'single', property: result.data, locations: [] });
     } catch {
-      return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+      return NextResponse.json({ match: 'error', property: null, locations: [] });
     }
   }
 
@@ -53,11 +68,13 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await propertySearch(parsed.data);
+    // Same rule as the APN branch above: a failed call is an error, not an
+    // answer about whether the property exists.
     if (!result.success) {
-      return NextResponse.json({ match: 'none', property: null, locations: [] });
+      return NextResponse.json({ match: 'error', property: null, locations: [] });
     }
     return NextResponse.json(result.data);
   } catch {
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+    return NextResponse.json({ match: 'error', property: null, locations: [] });
   }
 }

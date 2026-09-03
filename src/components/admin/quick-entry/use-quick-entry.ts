@@ -296,12 +296,17 @@ export function useQuickEntry() {
         } else {
           preInit.onNoSiteXMatch();
         }
+      } else if (data.match === 'error') {
+        // We do not know whether the property exists — the search did not
+        // complete. Saying "no property found" here is a claim we cannot make.
+        setNoMatchMsg('The property search could not be completed. Try again, or enter the address manually.');
+        preInit.onNoSiteXMatch();
       } else {
         setNoMatchMsg('No property found for this APN.');
         preInit.onNoSiteXMatch();
       }
     } catch {
-      setNoMatchMsg('Search failed.');
+      setNoMatchMsg('The property search could not be completed. Try again, or enter the address manually.');
       preInit.onNoSiteXMatch();
     } finally {
       setApnSearching(false);

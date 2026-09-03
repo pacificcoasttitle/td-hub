@@ -4,6 +4,7 @@ import type { SalesOrder } from './types';
 
 export type SalesAction =
   | 'review_prelim' | 'prelim_summary' | 'update_prelim'
+  | 'push_prelim_update'
   | 'regenerate_summary' | 'get_prelim_doc'
   | 'view_contacts' | 'view_detail';
 
@@ -17,6 +18,11 @@ interface Props {
    * are unaffected. Defaults to false so the feature ships dark.
    */
   tessaPrelimEnabled?: boolean;
+  /**
+   * Effective Update Prelim flag (admin DB flag AND env backstop). When false
+   * the button does not render. Defaults to false so it ships dark.
+   */
+  updatePrelimEnabled?: boolean;
 }
 
 const primaryBtn =
@@ -26,7 +32,12 @@ const secondaryBtn =
 const reviewPrelimBtn =
   `${primaryBtn} bg-[#F26B2B] text-white shadow-[0_10px_22px_-12px_rgba(242,107,43,0.9)] hover:bg-[#E05A1A]`;
 
-export function OrderActions({ order, onAction, tessaPrelimEnabled = false }: Props) {
+export function OrderActions({
+  order,
+  onAction,
+  tessaPrelimEnabled = false,
+  updatePrelimEnabled = false,
+}: Props) {
   const hasPrelim = !!order.hasPrelim;
 
   return (
@@ -52,21 +63,34 @@ export function OrderActions({ order, onAction, tessaPrelimEnabled = false }: Pr
             </button>
           )}
           {/*
-            No "Update Prelim" button here — it could never work, so it is not
-            hidden for tidiness but because it was a bug on screen.
+            The button below PUSHES an operator's PDF to SoftPro. It is not the
+            'update_prelim' action, which FETCHES from SoftPro and is still
+            removed from this row — read on before wiring anything to that name.
 
-            It rendered only when hasPrelim === true, and fetchPrelimsForOrder
-            early-returns the moment an order already has an active prelim
-            (fetch-prelims.ts). Same predicate on both ends, so the click could
-            never reach SoftPro: it returned documentsFound: 0 and the modal
-            then showed "No prelim available yet in SoftPro" directly above the
-            prelim it already had.
+            'update_prelim' could never work here. It rendered only when
+            hasPrelim === true, and fetchPrelimsForOrder early-returns the
+            moment an order already has an active prelim (fetch-prelims.ts).
+            Same predicate on both ends, so the click could never reach
+            SoftPro: it returned documentsFound: 0 and the modal then showed
+            "No prelim available yet in SoftPro" directly above the prelim it
+            already had.
 
-            Do not re-add it. Catching an UPDATED prelim needs change detection
-            (the parked GetAttachedDocumentsPrelim/ModifiedAt polling), not
-            another fetch button. "Get Prelim Doc" in the hasPrelim === false
-            branch below is the real, working on-demand fetch — leave it alone.
+            Do not re-add THAT one. Catching an UPDATED prelim from the vendor
+            needs change detection (the parked
+            GetAttachedDocumentsPrelim/ModifiedAt polling), not another fetch
+            button. "Get Prelim Doc" in the hasPrelim === false branch below is
+            the real, working on-demand fetch — leave it alone.
           */}
+          {updatePrelimEnabled && (
+            <button
+              type="button"
+              title="Upload an updated prelim to SoftPro"
+              onClick={() => onAction('push_prelim_update', order)}
+              className={secondaryBtn}
+            >
+              Update Prelim
+            </button>
+          )}
           <button
             type="button"
             title="View Contacts"

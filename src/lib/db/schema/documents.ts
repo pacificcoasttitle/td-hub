@@ -41,6 +41,14 @@ export const documents = pgTable('documents', {
   /** True only when GetAttachedDocuments listed the sent name. False + is_synced = accepted (listing-blind). */
   softproListingConfirmed: boolean('softpro_listing_confirmed').notNull().default(false),
 
+  /**
+   * Set when a newer document of the same category replaced this one.
+   * The current prelim is active AND superseded_at IS NULL. Describes our
+   * side only — SoftPro keeps every prelim ever attached.
+   */
+  supersededAt: timestamp('superseded_at'),
+  supersededByDocumentId: integer('superseded_by_document_id'),
+
   createdBy: varchar('created_by', { length: 64 }),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

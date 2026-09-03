@@ -115,6 +115,15 @@ export async function addNotes(orderNumber: string, text: string, noteId?: strin
   return client.addNotes(orderNumber, text, noteId);
 }
 
+export async function addTask(orderNumber: string, taskId: string) {
+  if (useMock) {
+    const mock = await import('./mock');
+    return mock.addTask(orderNumber, taskId);
+  }
+  const client = await import('./client');
+  return client.addTask(orderNumber, taskId);
+}
+
 export async function getSalesReps() {
   if (useMock) {
     const { vendorSuccess } = await import('../types');

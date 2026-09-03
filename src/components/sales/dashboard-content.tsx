@@ -7,10 +7,12 @@ import { TessaPrelimResultsModal } from '@/components/tessa/TessaPrelimResultsMo
 import { DashboardKpi } from './dashboard-kpi';
 import { RepSelector } from './rep-selector';
 import { ClosingsDrilldownModal } from './closings-drilldown-modal';
+import { UpdatePrelimModal } from './update-prelim-modal';
 import { OrderActions } from './order-actions';
 import type { SalesAction } from './order-actions';
 import type { SalesDashboardStats, SalesOrder } from './types';
 import { useTessaPrelimEnabled } from '@/hooks/useTessaPrelimEnabled';
+import { useUpdatePrelimEnabled } from '@/hooks/useUpdatePrelimEnabled';
 import { formatOrderDate } from '@/lib/domain/orders/date-format';
 import { formatOrderAddress } from '@/lib/domain/orders/order-format';
 import { statusBadge } from '@/lib/domain/orders/status-format';
@@ -39,7 +41,9 @@ export function DashboardContent({ displayName, role }: Props) {
   const [tessaOrder, setTessaOrder] = useState<SalesOrder | null>(null);
   const [detailOrder, setDetailOrder] = useState<SalesOrder | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [updatePrelimOrder, setUpdatePrelimOrder] = useState<SalesOrder | null>(null);
   const tessaPrelimEnabled = useTessaPrelimEnabled();
+  const updatePrelimEnabled = useUpdatePrelimEnabled();
 
   function showToast(msg: string) {
     setToast(msg);
@@ -56,6 +60,9 @@ export function DashboardContent({ displayName, role }: Props) {
       case 'update_prelim':
       case 'get_prelim_doc':
         setPrelimOrder(order);
+        break;
+      case 'push_prelim_update':
+        setUpdatePrelimOrder(order);
         break;
       case 'prelim_summary':
       case 'regenerate_summary':
@@ -172,7 +179,12 @@ export function DashboardContent({ displayName, role }: Props) {
                         </td>
                         <td className="px-5 py-3 text-gray-500 whitespace-nowrap border-r border-gray-100">{formatOrderDate(o.openedAt)}</td>
                         <td className="px-2 py-3 text-right align-middle">
-                          <OrderActions order={o} onAction={handleOrderAction} tessaPrelimEnabled={tessaPrelimEnabled} />
+                          <OrderActions
+                            order={o}
+                            onAction={handleOrderAction}
+                            tessaPrelimEnabled={tessaPrelimEnabled}
+                            updatePrelimEnabled={updatePrelimEnabled}
+                          />
                         </td>
                       </tr>
                     );
@@ -223,6 +235,16 @@ export function DashboardContent({ displayName, role }: Props) {
           orderId={prelimOrder.id}
           fileNumber={prelimOrder.fileNumber}
           address={fmtAddr(prelimOrder)}
+        />
+      )}
+
+      {updatePrelimOrder && (
+        <UpdatePrelimModal
+          open
+          onClose={() => setUpdatePrelimOrder(null)}
+          orderId={updatePrelimOrder.id}
+          fileNumber={updatePrelimOrder.fileNumber}
+          onAccepted={showToast}
         />
       )}
 

@@ -179,6 +179,19 @@ export async function addNotes(
   }], { requestId: 'mock-' + crypto.randomUUID(), durationMs: 30 });
 }
 
+export async function addTask(
+  orderNumber: string,
+  _taskId: string,
+): Promise<VendorResult<Array<{ Status: number; Message: string; OrderNumber: string }>>> {
+  void _taskId;
+  await new Promise((r) => setTimeout(r, 30));
+  return vendorSuccess([{
+    Status: 200,
+    Message: 'Task updated successfully in the order',
+    OrderNumber: orderNumber,
+  }], { requestId: 'mock-' + crypto.randomUUID(), durationMs: 30 });
+}
+
 export async function getFees(
   _orderNumber: string,
 ): Promise<VendorResult<SoftProFeeResponse>> {

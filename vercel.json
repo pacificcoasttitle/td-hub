@@ -29,6 +29,10 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/jobs/run?name=prelim.update_drain",
+      "schedule": "*/1 * * * *"
+    },
+    {
       "path": "/api/jobs/run?name=notifications.process_outbox",
       "schedule": "*/1 * * * *"
     },

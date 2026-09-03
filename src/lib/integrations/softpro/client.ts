@@ -905,6 +905,35 @@ export async function addNotes(
   });
 }
 
+export interface SoftProAddTaskResponseItem {
+  Status?: number;
+  Message?: string;
+  OrderNumber?: string;
+  FileUploadedStatus?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * Open (or update) a SoftPro task by task code — `03-005` is Update Prelim.
+ *
+ * Returns its result. Legacy's `updateTaskStatus()` returned nothing, so a
+ * failed task was invisible and the flow carried on as though a human had
+ * been told there was work to do. Callers must honour the result.
+ */
+export async function addTask(
+  orderNumber: string,
+  taskId: string,
+): Promise<VendorResult<SoftProAddTaskResponseItem[]>> {
+  const body = [{ OrderNumber: orderNumber, TaskId: taskId }];
+
+  return makeRequest<SoftProAddTaskResponseItem[]>('POST', SOFTPRO_ENDPOINTS.updateTask, {
+    body,
+    operation: 'add_task',
+    bodyShape: 'array',
+    responseShape: 'array',
+  });
+}
+
 // AddDocuments, AddNotes, and future AddTask use array bodies/responses.
 // Do not inject per-item UserId: INV-UPLOAD-DIFF proved that broke uploads.
 // Before adapter auth is enforced globally, the Director must confirm with the

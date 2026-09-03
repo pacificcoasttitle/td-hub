@@ -189,6 +189,15 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     type: 'boolean',
     defaultValue: 'false',
   },
+  // ── Prelim ──
+  {
+    key: 'update_prelim_enabled',
+    label: 'Update Prelim (sales dashboard)',
+    description: 'When OFF, the "Update Prelim" button does not render on the sales dashboard and the submit endpoint rejects. Submitting attaches a PDF, adds a note and opens task 03-005 on the real SoftPro file, and SoftPro has no delete on that path — so this ships OFF and stays OFF until staging on :8081 is proven. (Env UPDATE_PRELIM_ENABLED=false is a master-kill backstop that holds it off regardless of this toggle.)',
+    category: 'Prelim',
+    type: 'boolean',
+    defaultValue: 'false',
+  },
   // ── System ──
   {
     key: 'maintenance_mode',

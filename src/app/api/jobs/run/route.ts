@@ -33,6 +33,7 @@ import { handleJobsWatchdog } from '@/lib/jobs/handlers/jobs-watchdog';
 import { handleOpsDailyReport } from '@/lib/jobs/handlers/ops-daily-report';
 import { handleRetrySoftProDocumentAttach } from '@/lib/jobs/handlers/retry-softpro-document-attach';
 import { handlePartyWizardInvite } from '@/lib/jobs/handlers/party-wizard-invite';
+import { handleUpdatePrelimDrain } from '@/lib/jobs/handlers/update-prelim-drain';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 
 function formatTodayForImport(): string {
@@ -141,6 +142,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleOpsDailyReport(),
   'softpro.retry_document_attach': () =>
     handleRetrySoftProDocumentAttach(),
+  'prelim.update_drain': () =>
+    handleUpdatePrelimDrain(),
 };
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

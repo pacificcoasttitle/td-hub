@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { OrdersHubTable, type HubOrder, type ActionType } from '@/components/shared/orders-hub-table';
 import { CplModal } from '@/components/shared/action-modals/cpl-modal';
 import { PrelimModal } from '@/components/shared/action-modals/prelim-modal';
@@ -37,8 +36,13 @@ function oAddr(o: HubOrder | QuickResult) {
  * /hub can switch between it and the split view. Split view is a mode, not a
  * replacement: both read the same endpoint and fire the same actions.
  */
+/*
+  No useRouter here, deliberately. Nothing in the Hub table should navigate out
+  of the Hub: every action it offers is a modal over the current view. The one
+  router.push this component had sent a search result to /orders/<id>, and
+  removing the router removes the means rather than just the instance.
+*/
 export function HubTableView({ onSwitchToSplit }: { onSwitchToSplit: () => void }) {
-  const router = useRouter();
   const [selectedOrders, setSelectedOrders] = useState<HubOrder[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [tableSearch, setTableSearch] = useState('');
@@ -112,6 +116,18 @@ export function HubTableView({ onSwitchToSplit }: { onSwitchToSplit: () => void 
     e.preventDefault();
     setTableSearch(searchQuery);
     setQsOpen(false);
+  }
+
+  /**
+   * Picking a typeahead result narrows the table to that file and stays in the
+   * Hub. The input is set to the file number too, so what is on screen explains
+   * why the table now shows one row — a filter the box does not admit to is its
+   * own bug report waiting to happen.
+   */
+  function selectSearchResult(fileNumber: string) {
+    setSearchQuery(fileNumber);
+    setTableSearch(fileNumber);
+    setQsResults([]);
   }
 
   function clearSearch() {
@@ -275,7 +291,17 @@ export function HubTableView({ onSwitchToSplit }: { onSwitchToSplit: () => void 
             <div className="absolute z-30 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
               {qsResults.map((r) => (
                 <button key={r.id} onClick={() => {
-                  setQsOpen(false); router.push(`/orders/${r.id}`);
+                  // Filter the Hub's own table down to the picked file. Do NOT
+                  // router.push('/orders/<id>') — that was the bug: it left the
+                  // Hub for the admin order page, which mounts the admin
+                  // sidebar and, more to the point, renders no Proposed Insured
+                  // modal at all. So searching for a file in the Hub took you
+                  // somewhere you could no longer act on it.
+                  //
+                  // Same effect as pressing Enter (handleSearchSubmit), which
+                  // always stayed put. Only the dropdown navigated away.
+                  setQsOpen(false);
+                  selectSearchResult(r.fileNumber);
                 }}
                   className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0">
                   <span className="text-xs font-mono font-semibold text-[#1A1A2E]">{r.fileNumber}</span>

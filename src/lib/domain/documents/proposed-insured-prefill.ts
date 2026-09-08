@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import { orders, branches, contacts, companies } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { determineUnderwriter } from './proposed-insured';
+import { getCplRefPrefill, preferCplRef } from './cpl-ref-prefill';
 
 export async function getProposedInsuredPrefill(orderId: number) {
   const [orderRow] = await db
@@ -66,6 +67,18 @@ export async function getProposedInsuredPrefill(orderId: number) {
     if (company) lenderCompanyData = company;
   }
 
+  // What the operator typed on this order's CPL, layered over the values
+  // derived above. Read-only, every underwriter, allowlisted fields only —
+  // see cpl-ref-prefill.ts.
+  //
+  // KNOWN LIMITATION, stated here because this is where someone debugging an
+  // empty modal will land: cpl/service.ts writes these refs only AFTER a
+  // successful CPL. A CPL that failed at the vendor stores nothing, so
+  // Proposed Insured opens with the derived values and none of the operator's
+  // typing. That is not this function misbehaving — there is genuinely
+  // nothing stored to read.
+  const cpl = await getCplRefPrefill(orderId);
+
   return {
     fileNumber: orderRow.fileNumber,
     productType: orderRow.productType,
@@ -78,26 +91,29 @@ export async function getProposedInsuredPrefill(orderId: number) {
       zipcode: property?.zip ?? '',
     },
 
+    // companyId and lookupCode stay derived — they are PI's own identity for
+    // the lender and flow to PI only, never back. A CPL holds a typed name and
+    // address, not an id, so there is nothing there to override them with.
     lender: lenderCompanyData
       ? {
           company: lenderCompanyData.name,
           companyId: lenderCompanyData.id,
           lookupCode: lenderCompanyData.lookupCode ?? '',
-          assignmentClause: lenderCompanyData.assignmentClause ?? '',
-          address: lenderCompanyData.address1 ?? '',
-          city: lenderCompanyData.city ?? '',
-          state: lenderCompanyData.state ?? '',
-          zipcode: lenderCompanyData.zip ?? '',
+          assignmentClause: preferCplRef(cpl.assignmentClause, lenderCompanyData.assignmentClause ?? ''),
+          address: preferCplRef(cpl.lenderAddress, lenderCompanyData.address1 ?? ''),
+          city: preferCplRef(cpl.lenderCity, lenderCompanyData.city ?? ''),
+          state: preferCplRef(cpl.lenderState, lenderCompanyData.state ?? ''),
+          zipcode: preferCplRef(cpl.lenderZip, lenderCompanyData.zip ?? ''),
         }
       : {
           company: lenderParty?.externalCompany ?? '',
           companyId: null,
           lookupCode: '',
-          assignmentClause: '',
-          address: '',
-          city: '',
-          state: '',
-          zipcode: '',
+          assignmentClause: preferCplRef(cpl.assignmentClause, ''),
+          address: preferCplRef(cpl.lenderAddress, ''),
+          city: preferCplRef(cpl.lenderCity, ''),
+          state: preferCplRef(cpl.lenderState, ''),
+          zipcode: preferCplRef(cpl.lenderZip, ''),
         },
 
     titleOfficer: titleOfficerData
@@ -108,7 +124,11 @@ export async function getProposedInsuredPrefill(orderId: number) {
 
     borrowersVesting: buyers.join('; '),
     loanAmount: orderRow.loanAmount ? parseFloat(orderRow.loanAmount) : 0,
-    loanNumber: '',
+    // Was hard-coded '' — PI had no source for a loan number at all, so the
+    // operator retyped it every time. `orders.loan_number` is also populated
+    // on some orders and would be a reasonable second fallback, but that is a
+    // separate change from carrying the CPL across and is not made here.
+    loanNumber: preferCplRef(cpl.loanNumber, ''),
     salesPrice: orderRow.salesPrice ? parseFloat(orderRow.salesPrice) : 0,
   };
 }

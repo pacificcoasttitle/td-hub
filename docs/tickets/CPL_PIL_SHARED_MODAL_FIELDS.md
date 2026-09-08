@@ -1,7 +1,11 @@
 # CPL and Proposed Insured — the field overlap
 
-**Status: MAPPING, for approval. Nothing built.**
-Opened: 2026-09-03
+**Status: BUILT. Read-only prefill, no migration.**
+Opened: 2026-09-03 · Built: 2026-09-08
+
+`src/lib/domain/documents/cpl-ref-prefill.ts` reads the shared values;
+`proposed-insured-prefill.ts` layers them over what it already derives. The
+open question at the bottom of this document is answered — see *The decision*.
 
 The team generates a CPL, opens Proposed Insured, and retypes the same lender,
 borrower, property and loan details. This is the mapping that decides what
@@ -133,24 +137,92 @@ neither. `supplementalDate` / `prelimDate` are report dates with no CPL meaning.
 
 ---
 
-## One open question for you
+## The decision (2026-09-08)
 
-**Should the shared store be keyed under a new non-underwriter `system` value,
-or should the existing `cpl_*` refs be read directly by Proposed Insured?**
+The question was posed as two options. The answer is a third one, and it costs
+nothing:
 
-- **New shared key** (e.g. `system: 'hub'`, `ref_type: 'shared_lender_address'`)
-  is cleaner and survives an underwriter switch, but leaves the seven existing
-  `cpl_*` refs as a second, older copy that will drift.
-- **Read the existing `cpl_*` refs** is smaller and works today, but inherits the
-  underwriter-scoped `system` — so a CPL issued on Westcor prefills a PIL, and
-  the same order re-issued on FNF does not.
+**Read the existing `cpl_*` refs, and do not filter by `system` at all.**
 
-I would take the new shared key and have the CPL modal write **both** during a
-transition, but it is a schema-shaped decision and the migration convention says
-flag it before applying anything.
+The objection to reading the existing refs was that they inherit the
+underwriter-scoped `system`. They only inherit it *if you filter on it*.
+Proposed Insured has no underwriter, so it has no business narrowing by one —
+it asks for every `cpl_*` ref on the order and takes the most recent. A CPL
+issued on Westcor prefills a PI, and so does the same order re-issued on FNF.
 
-`order_external_refs` needs no migration either way — it is already
-`(order_id, system, ref_type, ref_value)` with the right unique constraint.
-Only the `system` enum would need a new value, and **that is an `ALTER TYPE`**,
-which is exactly the kind of change this project applies by hand ahead of the
-code.
+That closes the FNF/Westcor gap without the new `system` value, which means
+**no `ALTER TYPE`, no migration, and no transitional double-write** that would
+have left two copies to drift.
+
+### What actually carries — six fields, not thirteen
+
+Worth stating plainly, because the mapping table above lists thirteen and
+that reads like thirteen new values arriving:
+
+| From `cpl_*` refs (new) | Already derived by PI (unchanged) |
+|---|---|
+| lender address, city, state, ZIP | property street / city / state / ZIP |
+| assignment clause | borrower / vesting |
+| loan number | loan amount |
+| | lender company |
+
+The other seven were never the bug. PI already reads them from
+`order_properties`, `order_parties`, `orders` and `companies`. The bug was the
+six above: PI took the lender address and assignment clause from the *company
+record* — a default — while ignoring what the operator typed on the CPL for
+this specific file, and `loanNumber` was hard-coded `''` with no source at all.
+
+So the rule is precedence, not population: **a stored CPL value beats a derived
+one, and an absent one never blanks it.**
+
+### Measured before building, 2026-09-08
+
+```
+cpl_* refs                        1,172 rows across 148 orders
+cpl_lender_address/city/state/zip   146 orders   (since 2026-07-22)
+cpl_loan_number                     145 orders   (since 2026-08-31)
+cpl_assignment_clause               142 orders   (since 2026-08-31)
+cpl_lender_contact                  145 orders   — excluded, no PI field
+cpl_branch_id                       148 orders   — excluded, THE TRAP
+```
+
+**Orders holding the same `ref_type` under two underwriters: 1 of 148** —
+`20021472-GLT`, generated on Westcor at 22:28 and FNF at 22:34 the same
+evening. Every value this prefill reads is *identical* across the two. The only
+field that differs is `cpl_branch_id`: **2** under Westcor, **20** under FNF —
+the trap field, and the one we exclude. Which is the mapping's argument arriving
+as data rather than as reasoning.
+
+### Ordering: "most recent first" is a proxy, and here is why
+
+`order_external_refs` has `created_at` and **no `updated_at`**, and the upsert
+in `cpl/service.ts` sets only `ref_value` on conflict. So `created_at` is when
+a row was *first written*, not when its value was last edited. A Westcor ref
+created in July and edited today still sorts behind an FNF ref first created
+last week.
+
+Ordering is `created_at DESC, id DESC`, which is the best the table can
+currently answer. It only decides anything on an order with refs under two
+underwriters — one order, on which every carried value agrees. Adding
+`updated_at` would be a migration bought for no observable difference today.
+**If that count grows, or the two underwriters start disagreeing on a shared
+field, `updated_at` is the fix.**
+
+### Known limitation, recorded rather than designed around
+
+`cpl/service.ts` writes these refs **only after a successful CPL**. A CPL that
+failed at the vendor stores nothing, so Proposed Insured opens with the derived
+values and none of the operator's typing. Nothing here is malfunctioning —
+there is genuinely nothing stored to read. The note is repeated in
+`proposed-insured-prefill.ts` at the call site, which is where someone
+debugging an empty modal will actually land.
+
+### Guarded in code, not just in prose
+
+`SHARED_CPL_REF_TYPES` is an **allowlist of six**, deliberately not
+`ref_type LIKE 'cpl_%'`. A prefix match would carry `cpl_branch_id` and
+`cpl_lender_contact` today and anything added to `cpl/service.ts` tomorrow,
+silently. Tests assert the branch id is absent from the list, is dropped even
+if a row for it is returned, and that no `system` predicate is applied.
+
+`order_external_refs` needed no migration, as anticipated above.

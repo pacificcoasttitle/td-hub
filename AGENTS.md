@@ -63,3 +63,48 @@ every path is yours.
 If you do destroy something: `git fsck --unreachable --no-progress | grep commit`
 and inspect each for the missing files. Autostashes from rebases are the usual
 survivor. Say plainly whether you verified the recovery or inferred it.
+
+## Hand-applied migrations (2026-09-09)
+
+**Apply the migration, then merge. Never the other way round.**
+
+Migrations in this repo are applied by hand — `drizzle-kit migrate` is not run
+against production, and the journal in `src/lib/db/migrations/meta/` stopped
+tracking these files at `0008`. A merge carrying a new column therefore ships
+code that reads a column the database does not have.
+
+**The column tolerates arriving early. The code does not tolerate arriving
+first.** An unused column is inert; a missing one is an outage.
+
+On 2026-09-09 `c0e39f3` deployed at 12:57 with `0045_order_properties_unit_number.sql`
+unapplied, and production returned 500s until the column was added:
+
+```
+code    : 42703
+message : column "unit_number" does not exist
+```
+
+### Why it was a total outage and not one broken feature
+
+`titlepoint/service.ts` reads the table with no column list:
+
+```ts
+await db.select().from(orderProperties).where(...)
+```
+
+Drizzle expands a bare `.select()` to **every column in the schema object**, so
+the moment the schema knew about `unit_number`, every read of
+`order_properties` asked for it — including reads on code paths that have
+nothing to do with units. Two call sites in that file alone.
+
+**This is the part that generalises.** The sequencing rule protects against
+forgetting; a bare `.select()` is what makes forgetting catastrophic instead of
+partial. Any future column added to a table read this way has the same blast
+radius, on every path that touches it. When you add a column to a table whose
+reads use a bare `.select()`, the deploy is all-or-nothing whether you intended
+that or not.
+
+Naming the columns you actually need would scope the failure to the feature
+that added them. That is a larger change than this note, and it is not proposed
+here — but the risk is the same size next time, so it belongs written down
+rather than rediscovered.

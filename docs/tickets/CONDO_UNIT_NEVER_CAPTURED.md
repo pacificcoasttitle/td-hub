@@ -96,3 +96,36 @@ volume.
 ## Not done
 
 No historical repair. No re-run of any existing search.
+
+## Postscript: the deploy took production down for twelve minutes
+
+`0045` adds `unit_number` and is applied by hand. The merge deployed at 12:57
+with the column missing, and every read of `order_properties` failed:
+
+```
+code 42703  column "unit_number" does not exist
+```
+
+Not one feature — **every** read, because `titlepoint/service.ts` uses a bare
+`db.select().from(orderProperties)`, which Drizzle expands to every column in
+the schema. Adding a column to the schema therefore changed the shape of reads
+on paths that have nothing to do with units.
+
+Fixed by applying the migration rather than reverting the deploy: the diagnosis
+was confirmed from the Postgres error before anything was touched, and adding a
+nullable column is a smaller and more reversible action than rolling back a
+deploy the team may be mid-order on.
+
+Two rules came out of it, both in `AGENTS.md`:
+
+1. **Apply the migration, then merge.** The column tolerates arriving early;
+   the code does not tolerate arriving first.
+2. **A bare `.select()` makes any future column addition an all-or-nothing
+   deploy.** The sequencing rule protects against forgetting; this is what
+   makes forgetting catastrophic rather than partial.
+
+The author of this ticket wrote the migration, put its number in the PR body,
+merged it, watched the deploy land, and did not apply it — having spent the
+previous hour discovering that the number collided with two other hand-applied
+migrations, which is to say knowing every fact required and assembling none of
+them.

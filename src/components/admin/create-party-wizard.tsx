@@ -288,7 +288,7 @@ export function CreatePartyWizard({
               </div>
             ) : (
               <p className="text-xs text-[#6B7280]">
-                SoftPro type: {USER_TYPE_LABEL[userType]}. Search existing firms before creating a new one.
+                SoftPro type: {USER_TYPE_LABEL[userType]}.
               </p>
             )}
             {selectedCompany ? (
@@ -299,64 +299,106 @@ export function CreatePartyWizard({
               </div>
             ) : (
               <>
+                {/* SEARCH FIRST.
+                    The common case is a company PCT already works with: find
+                    it, then add the employee under it. This step used to open
+                    as a create form with required Name and Address1 and the
+                    matches tucked underneath in an amber "are you sure" box, so
+                    the common path started by filling in a form for something
+                    that already existed. Same state, same endpoints, same
+                    pickMatch and submitCompany — presented in the order the
+                    work actually happens. */}
                 <div>
-                  <label className="block text-xs font-medium text-[#1A1A2E] mb-1">Company Name *</label>
-                  <input className={IN} value={name} onChange={(e) => { setName(e.target.value); setConfirmCreate(false); }} required />
+                  <label className="block text-xs font-medium text-[#1A1A2E] mb-1">
+                    Find the company
+                  </label>
+                  <input
+                    className={IN}
+                    value={name}
+                    autoFocus
+                    placeholder="Start typing a company name…"
+                    onChange={(e) => { setName(e.target.value); setConfirmCreate(false); }}
+                    required
+                  />
+                  {name.trim().length > 0 && name.trim().length < 2 && (
+                    <p className="mt-1 text-xs text-[#6B7280]">Keep typing to search.</p>
+                  )}
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#1A1A2E] mb-1">Address1 *</label>
-                  <input className={IN} value={address1} onChange={(e) => setAddress1(e.target.value)} required />
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-[#1A1A2E] mb-1">City</label>
-                    <input className={IN} value={city} onChange={(e) => setCity(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-[#1A1A2E] mb-1">State</label>
-                    <input className={IN} value={state} onChange={(e) => setState(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-[#1A1A2E] mb-1">ZIP</label>
-                    <input className={IN} value={zip} onChange={(e) => setZip(e.target.value)} />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-[#1A1A2E] mb-1">Phone</label>
-                    <input className={IN} value={phone} onChange={(e) => setPhone(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-[#1A1A2E] mb-1">Email</label>
-                    <input type="email" className={IN} value={email} onChange={(e) => setEmail(e.target.value)} />
-                  </div>
-                </div>
+
                 {matches.length > 0 && (
-                  <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-2">
-                    <p className="text-xs font-medium text-amber-900">Similar companies — select one or confirm create</p>
+                  <div className="border border-[#E5E7EB] rounded-lg divide-y divide-[#F3F4F6] max-h-64 overflow-y-auto">
                     {matches.map((m) => (
                       <button
                         key={m.id}
                         type="button"
                         onClick={() => pickMatch(m)}
-                        className="w-full text-left px-2 py-1.5 rounded bg-white border border-amber-100 hover:border-amber-300 text-sm"
+                        className="w-full text-left px-3 py-2 hover:bg-[#1B2A4A]/5 text-sm"
                       >
                         <span className="font-medium text-[#1A1A2E]">{m.name}</span>
                         <span className="block text-xs text-[#6B7280]">{[m.lookupCode, m.address1, m.city].filter(Boolean).join(' · ')}</span>
                       </button>
                     ))}
-                    <label className="flex items-center gap-2 text-xs text-amber-900 cursor-pointer">
-                      <input type="checkbox" checked={confirmCreate} onChange={(e) => setConfirmCreate(e.target.checked)} />
-                      Create a new company anyway
-                    </label>
+                  </div>
+                )}
+
+                {name.trim().length >= 2 && matches.length === 0 && !confirmCreate && (
+                  <p className="text-xs text-[#6B7280]">No existing company matches that name.</p>
+                )}
+
+                {/* Creation is the fallback, and stays explicit: ticking this is
+                    what satisfies the confirmCreate guard in submitCompany when
+                    near-matches exist. */}
+                {name.trim().length >= 2 && (
+                  <label className="flex items-center gap-2 text-xs text-[#1A1A2E] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={confirmCreate}
+                      onChange={(e) => setConfirmCreate(e.target.checked)}
+                    />
+                    Not listed — create <span className="font-medium">{name.trim()}</span> as a new company
+                  </label>
+                )}
+
+                {confirmCreate && (
+                  <div className="space-y-4 border-l-2 border-[#1B2A4A]/15 pl-3">
+                    <div>
+                      <label className="block text-xs font-medium text-[#1A1A2E] mb-1">Address1 *</label>
+                      <input className={IN} value={address1} onChange={(e) => setAddress1(e.target.value)} required />
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-[#1A1A2E] mb-1">City</label>
+                        <input className={IN} value={city} onChange={(e) => setCity(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-[#1A1A2E] mb-1">State</label>
+                        <input className={IN} value={state} onChange={(e) => setState(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-[#1A1A2E] mb-1">ZIP</label>
+                        <input className={IN} value={zip} onChange={(e) => setZip(e.target.value)} />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-[#1A1A2E] mb-1">Phone</label>
+                        <input className={IN} value={phone} onChange={(e) => setPhone(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-[#1A1A2E] mb-1">Email</label>
+                        <input type="email" className={IN} value={email} onChange={(e) => setEmail(e.target.value)} />
+                      </div>
+                    </div>
                   </div>
                 )}
               </>
             )}
             <div className="flex gap-3 pt-2">
               <button type="button" onClick={onClose} className="flex-1 h-10 border border-gray-200 rounded-lg text-sm font-medium text-[#4B5563] hover:bg-gray-50">Cancel</button>
-              <button type="submit" disabled={saving} className="flex-1 h-10 bg-[#1B2A4A] text-white rounded-lg text-sm font-semibold hover:bg-[#243658] disabled:opacity-50">
-                {selectedCompany ? (companyOnly ? 'Use company' : 'Continue') : 'Create company'}
+              <button type="submit" disabled={saving || (!selectedCompany && !confirmCreate)} className="flex-1 h-10 bg-[#1B2A4A] text-white rounded-lg text-sm font-semibold hover:bg-[#243658] disabled:opacity-50">
+                {selectedCompany
+                  ? (companyOnly ? 'Use company' : 'Continue')
+                  : confirmCreate ? 'Create company' : 'Select a company'}
               </button>
             </div>
           </form>

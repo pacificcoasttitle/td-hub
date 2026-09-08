@@ -32,7 +32,9 @@ const NAV: NavEntry[] = [
     { label: 'Escrow Companies', href: '/contacts/escrow-companies' },
     { label: 'External Escrow Officers', href: '/contacts/external-escrow-officers' },
     { label: 'Lenders', href: '/contacts/lenders' },
+    { label: 'Lender Contacts', href: '/contacts/lender-contacts' },
     { label: 'Mortgage Brokers', href: '/contacts/mortgage-brokers' },
+    { label: 'Mortgage Broker Contacts', href: '/contacts/mortgage-broker-contacts' },
     { label: 'Companies', href: '/contacts/companies' },
   ]},
 

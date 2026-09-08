@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { contacts, companies } from '@/lib/db/schema';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getLookupTable, getSalesReps } from '@/lib/integrations/softpro';
 import type { SoftProLookupItem } from '@/lib/integrations/softpro';
 import { COMPANY_TYPE_MAP } from '@/lib/domain/contacts/company-constants';
@@ -206,60 +206,159 @@ export function isSyncContactEntityType(entityType: string): entityType is SyncC
 
 // ─── Sync 1: Open Contacts (userType=Order Contact - Person) ─────────────
 
+/** Fields the sync owns. Compared before writing, so an unchanged row is skipped. */
+const OPEN_CONTACT_FIELDS = [
+  'flookupCode', 'courtesyTitle', 'firstName', 'middleName', 'lastName', 'email',
+  'phone', 'phoneExt', 'suffix', 'title', 'fax', 'cell', 'pager', 'genderId',
+  'address1', 'address2', 'city', 'state', 'zip', 'note', 'licenseNo',
+] as const;
+
+const INSERT_CHUNK = 500;
+
+/**
+ * WHY THIS IS NOT A LOOP OF SINGLE QUERIES
+ *
+ * It was, until 2026-09-09: a SELECT and then an UPDATE or INSERT per item, two
+ * sequential round trips each. That was survivable while the sync only ever read
+ * one page, because a page is 1,000 rows. Fixing the pagination bug made it read
+ * all sixteen - 15,609 rows, ~31,000 round trips - and the job began exceeding
+ * its ten-minute watchdog. It failed roughly 70% of runs for five days.
+ *
+ * The watchdog was not the defect, and raising it would have hidden this. Three
+ * changes, in order of how much they matter:
+ *
+ *   1. ONE SELECT PER PAGE instead of one per row.
+ *   2. SKIP ROWS THAT HAVE NOT CHANGED. This is the big one: on an hourly sync
+ *      of a table that barely moves, almost every row is identical to what we
+ *      already hold, and the old code wrote all of them anyway.
+ *   3. INSERTS IN CHUNKS rather than one at a time.
+ *
+ * Steady state is now one read and close to zero writes.
+ *
+ * ONE ROW PER CODE
+ *
+ * `lookup_code` is NOT unique on our side - 2,232 codes are held by more than
+ * one contact row. The old code took `.limit(1)` with no ordering, so which
+ * sibling received the update was whatever the planner happened to return. This
+ * takes the lowest id: still one arbitrary row of a set that should not exist,
+ * but the same one every run, which is strictly better than a different one
+ * each time. Measured before changing it - 4,446 of 4,471 rows in shared-code
+ * groups carry the same name SoftPro holds for that code, so the choice changes
+ * almost nothing today. The duplicates are a separate ticket.
+ */
 async function syncOpenContacts(items: SyncRow[]): Promise<SyncContactsResult> {
-  let created = 0, updated = 0, skipped = 0;
+  let created = 0, updated = 0, skipped = 0, unchanged = 0;
   const errors: SyncContactsResult['errors'] = [];
 
+  // Build every row first; nothing touches the database until they are ready.
+  const wanted = new Map<string, Record<string, unknown>>();
   for (const item of items) {
     const code = str(item, 'LookupCode');
     if (!code) { skipped++; continue; }
     if (!str(item, 'Email')) { skipped++; continue; }
+    wanted.set(code, {
+      lookupCode: code,
+      flookupCode: str(item, 'Filter: LookupCode') ?? str(item, 'FLookupCode'),
+      courtesyTitle: str(item, 'CourtesyTitle'),
+      firstName: str(item, 'FirstName'),
+      middleName: str(item, 'MiddleName'),
+      lastName: str(item, 'LastName'),
+      email: str(item, 'Email'),
+      phone: str(item, 'Phone'),
+      phoneExt: str(item, 'PhoneExt'),
+      suffix: str(item, 'Suffix'),
+      title: str(item, 'Title'),
+      fax: str(item, 'Fax'),
+      cell: str(item, 'Cell'),
+      pager: str(item, 'Pager'),
+      genderId: str(item, 'GenderID'),
+      address1: str(item, 'Address1'),
+      address2: str(item, 'Address2'),
+      city: str(item, 'City'),
+      state: str(item, 'State'),
+      zip: str(item, 'Zip'),
+      note: str(item, 'Note'),
+      licenseNo: str(item, 'License No'),
+      userType: 'open_contact' as const,
+      isActive: true,
+    });
+  }
+  if (wanted.size === 0) return { entityType: 'Order Contact - Person', totalFetched: items.length, created, updated, skipped, errors };
+
+  // ONE read for the whole page.
+  const codes = [...wanted.keys()];
+  const existingRows = await db
+    .select({
+      id: contacts.id, lookupCode: contacts.lookupCode,
+      flookupCode: contacts.flookupCode, courtesyTitle: contacts.courtesyTitle,
+      firstName: contacts.firstName, middleName: contacts.middleName,
+      lastName: contacts.lastName, email: contacts.email, phone: contacts.phone,
+      phoneExt: contacts.phoneExt, suffix: contacts.suffix, title: contacts.title,
+      fax: contacts.fax, cell: contacts.cell, pager: contacts.pager,
+      genderId: contacts.genderId, address1: contacts.address1,
+      address2: contacts.address2, city: contacts.city, state: contacts.state,
+      zip: contacts.zip, note: contacts.note, licenseNo: contacts.licenseNo,
+    })
+    .from(contacts)
+    .where(inArray(contacts.lookupCode, codes))
+    .orderBy(asc(contacts.id));
+
+  const existingByCode = new Map<string, (typeof existingRows)[number]>();
+  for (const row of existingRows) {
+    if (row.lookupCode && !existingByCode.has(row.lookupCode)) {
+      existingByCode.set(row.lookupCode, row);
+    }
+  }
+
+  const toInsert: Array<Record<string, unknown>> = [];
+  for (const [code, vals] of wanted) {
+    const existing = existingByCode.get(code);
+    if (!existing) { toInsert.push({ ...vals, sourceSystem: 'softpro' }); continue; }
+
+    // omitEmptyForUpdate drops null and blank values, so a field we would not
+    // write must not count as a difference. Compare exactly what would be sent.
+    const patch = omitEmptyForUpdate(vals) as Record<string, unknown>;
+    const current = existing as unknown as Record<string, unknown>;
+    const differs = OPEN_CONTACT_FIELDS.some((f) => f in patch && patch[f] !== current[f]);
+    if (!differs) { unchanged++; continue; }
 
     try {
-      const [existing] = await db.select({ id: contacts.id })
-        .from(contacts).where(eq(contacts.lookupCode, code)).limit(1);
-
-      const vals = {
-        lookupCode: code,
-        flookupCode: str(item, 'Filter: LookupCode') ?? str(item, 'FLookupCode'),
-        courtesyTitle: str(item, 'CourtesyTitle'),
-        firstName: str(item, 'FirstName'),
-        middleName: str(item, 'MiddleName'),
-        lastName: str(item, 'LastName'),
-        email: str(item, 'Email'),
-        phone: str(item, 'Phone'),
-        phoneExt: str(item, 'PhoneExt'),
-        suffix: str(item, 'Suffix'),
-        title: str(item, 'Title'),
-        fax: str(item, 'Fax'),
-        cell: str(item, 'Cell'),
-        pager: str(item, 'Pager'),
-        genderId: str(item, 'GenderID'),
-        address1: str(item, 'Address1'),
-        address2: str(item, 'Address2'),
-        city: str(item, 'City'),
-        state: str(item, 'State'),
-        zip: str(item, 'Zip'),
-        note: str(item, 'Note'),
-        licenseNo: str(item, 'License No'),
-        userType: 'open_contact' as const,
-        isActive: true,
-        updatedAt: new Date(),
-      };
-
-      if (existing) {
-        await db.update(contacts)
-          .set(omitEmptyForUpdate(vals))
-          .where(eq(contacts.id, existing.id));
-        updated++;
-      } else {
-        await db.insert(contacts).values({ ...vals, sourceSystem: 'softpro' });
-        created++;
-      }
+      await db.update(contacts)
+        .set({ ...patch, updatedAt: new Date() })
+        .where(eq(contacts.id, existing.id));
+      updated++;
     } catch (err) {
       errors.push({ lookupCode: code, error: err instanceof Error ? err.message : 'Unknown' });
     }
   }
+
+  for (let i = 0; i < toInsert.length; i += INSERT_CHUNK) {
+    const chunk = toInsert.slice(i, i + INSERT_CHUNK);
+    try {
+      await db.insert(contacts).values(chunk as never);
+      created += chunk.length;
+    } catch {
+      // One bad row must not lose the chunk - fall back to one at a time so the
+      // rest still land and the failure names the row that caused it.
+      for (const row of chunk) {
+        try {
+          await db.insert(contacts).values(row as never);
+          created++;
+        } catch (inner) {
+          errors.push({
+            lookupCode: String(row.lookupCode ?? '?'),
+            error: inner instanceof Error ? inner.message : 'Unknown',
+          });
+        }
+      }
+    }
+  }
+
+  // `unchanged` is not "skipped" - skipped means the vendor row was unusable.
+  // Folded into the caller's total, counted separately here so that a run which
+  // writes nothing reads as a no-op rather than as a failure.
+  skipped += unchanged;
+
   return { entityType: 'Order Contact - Person', totalFetched: items.length, created, updated, skipped, errors };
 }
 

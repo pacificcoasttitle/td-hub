@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { getLookupTable, mapLookupTableEntry } from '@/lib/integrations/softpro';
+import { SOFTPRO_LOOKUP_USER_TYPES, resolveLookupUserType } from '@/lib/integrations/softpro/lookup-types';
 
 const ALLOWED_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant',
   'sales_rep', 'title_officer', 'escrow_officer'];
@@ -25,8 +26,20 @@ export async function GET(req: NextRequest) {
 
   const { userType, q } = parsed.data;
 
+  // Do not relay an arbitrary string to the vendor. `userType` arrives from a
+  // query parameter, and SoftPro rejects anything but its own spellings — 15
+  // such calls are on record, every one a wasted round trip answered with a
+  // vendor error that named no valid value.
+  const resolved = resolveLookupUserType(userType);
+  if (!resolved) {
+    return NextResponse.json({
+      error: `Unknown userType "${userType}".`,
+      allowed: SOFTPRO_LOOKUP_USER_TYPES,
+    }, { status: 400 });
+  }
+
   try {
-    const result = await getLookupTable(userType);
+    const result = await getLookupTable(resolved);
 
     if (!result.success || !result.data) {
       return NextResponse.json({

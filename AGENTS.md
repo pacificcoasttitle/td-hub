@@ -4,6 +4,21 @@
 - Throwaway probes and scratch output go in `_scratch_untracked/`, which is also excluded from that tsconfig — a half-finished scratch file cannot fail a deploy or a local `npm run typecheck`. It is gitignored and per-machine, so it deliberately has no tsconfig of its own and is not typechecked in CI.
 - Chrome user-data profiles for browser automation go in a temp directory outside the repository (`$env:TEMP` on Windows), never under `_scratch_untracked/` — a profile holds a live cookie store, so the concern is session credentials sitting at rest inside a working tree, not repo tidiness. The gitignore stops such a profile being committed, not being created.
 
+## Before you say it is ready (2026-09-09)
+
+**`npm run verify`.** Typecheck, script typecheck, tests — the three things CI
+runs, in one command.
+
+`npm run test` passing does not mean the build passes: **vitest does not
+typecheck.** Twice on 2026-09-09 a green suite went to CI and failed on `tsc` —
+once on a mock missing a field a type had gained, once on a narrowing error.
+Both were two CI round trips that a local command would have caught in one.
+
+Run it before pushing anything, and read the whole result rather than the tail.
+If the run looks degraded — worker start-up timeouts, far fewer test files than
+usual — the machine is starved, not the code; re-run it before drawing any
+conclusion, and never report the summary line from a starved run as a result.
+
 ## Decide vs ask (2026-08-27)
 
 DECIDE ALONE — do not ask:

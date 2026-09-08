@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   dayDividerLabel, describeMissing, fullAddress, fullDateTime, groupByDay,
-  isIncomplete, listAddress, missingFields, nextIncompleteIndex, pacificDayKey,
+  isIncomplete, isShellOrder, listAddress, missingFields, nextIncompleteIndex, pacificDayKey,
   timeOfDay, typeChip, type HubListOrder,
 } from './hub-list-row';
 
@@ -135,6 +135,15 @@ describe('missing fields', () => {
     expect(describeMissing(['address'])).toBe('no address');
     expect(describeMissing(['address', 'client'])).toBe('no address and no client');
     expect(describeMissing([])).toBe('');
+  });
+});
+
+describe('shell orders', () => {
+  it('is a shell only when street and city are both empty', () => {
+    expect(isShellOrder(row({ propertyStreet: null, propertyCity: null }))).toBe(true);
+    expect(isShellOrder(row({ propertyStreet: '   ', propertyCity: '' }))).toBe(true);
+    expect(isShellOrder(row({ propertyStreet: null, propertyCity: 'La Verne' }))).toBe(false);
+    expect(isShellOrder(row())).toBe(false);
   });
 });
 

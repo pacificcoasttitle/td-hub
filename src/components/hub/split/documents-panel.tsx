@@ -51,6 +51,12 @@ export type GenerateKind = 'cpl' | 'proposed' | 'prelim';
 export interface DocumentsPanelProps {
   documents?: OrderDocuments;
   onGenerate: (kind: GenerateKind) => void;
+  /**
+   * SoftPro copy with no property. Documents are not late — they cannot
+   * exist on this file. The panel says that, and does not offer Find or
+   * Create as if the screen failed to load them.
+   */
+  shell?: boolean;
 }
 
 /**
@@ -80,7 +86,7 @@ const ARRIVING: Array<{ key: keyof OrderDocuments; label: string }> = [
   { key: 'tax', label: 'Taxes' },
 ];
 
-export function DocumentsPanel({ documents, onGenerate }: DocumentsPanelProps) {
+export function DocumentsPanel({ documents, onGenerate, shell = false }: DocumentsPanelProps) {
   return (
     <section className="bg-white border border-[#EEF0F4] rounded-[9px]">
       <header className="h-7 flex items-center px-[13px] border-b border-[#EEF0F4]">
@@ -90,29 +96,45 @@ export function DocumentsPanel({ documents, onGenerate }: DocumentsPanelProps) {
       </header>
 
       <div className="px-[13px] py-[9px]">
-        <PrelimTile doc={documents?.prelim} onFind={() => onGenerate('prelim')} />
+        <PrelimTile
+          doc={documents?.prelim}
+          onFind={() => onGenerate('prelim')}
+          shell={shell}
+        />
 
         <div className="mt-[9px] flex flex-wrap items-center gap-[6px]">
           <span className="text-[10px] text-[#8A94A6] mr-[2px]">Order documents</span>
           {ARRIVING.map((d) => (
-            <ArrivingChip key={d.key} label={d.label} doc={documents?.[d.key]} />
+            <ArrivingChip
+              key={d.key}
+              label={d.label}
+              doc={documents?.[d.key]}
+              shell={shell}
+            />
           ))}
         </div>
 
-        {/* Actions, kept visually apart from the documents above them. These
-            MAKE something; the row above only reports what exists. */}
         <div className="mt-[10px] pt-[9px] border-t border-[#EEF0F4] flex flex-wrap items-center gap-[7px]">
-          <span className="text-[10px] text-[#8A94A6] mr-[2px]">Create</span>
-          <CreateButton
-            label="CPL"
-            existing={openable(documents?.cpl)}
-            onCreate={() => onGenerate('cpl')}
-          />
-          <CreateButton
-            label="Proposed insured"
-            existing={openable(documents?.proposedInsured)}
-            onCreate={() => onGenerate('proposed')}
-          />
+          {shell ? (
+            <p className="text-[11.5px] text-[#6B7280] leading-[1.4]">
+              CPL and proposed insured need a property on the SoftPro file.
+              This order has none yet.
+            </p>
+          ) : (
+            <>
+              <span className="text-[10px] text-[#8A94A6] mr-[2px]">Create</span>
+              <CreateButton
+                label="CPL"
+                existing={openable(documents?.cpl)}
+                onCreate={() => onGenerate('cpl')}
+              />
+              <CreateButton
+                label="Proposed insured"
+                existing={openable(documents?.proposedInsured)}
+                onCreate={() => onGenerate('proposed')}
+              />
+            </>
+          )}
         </div>
       </div>
     </section>
@@ -124,7 +146,9 @@ export function DocumentsPanel({ documents, onGenerate }: DocumentsPanelProps) {
  * the fetch_prelims job and the prelim webhook. 83% of Title-only orders have
  * one, which is why it gets the full-width tile.
  */
-function PrelimTile({ doc, onFind }: { doc?: DocCatFull; onFind: () => void }) {
+function PrelimTile({
+  doc, onFind, shell,
+}: { doc?: DocCatFull; onFind: () => void; shell: boolean }) {
   const open = openable(doc);
   const issued = open !== null;
 
@@ -138,6 +162,8 @@ function PrelimTile({ doc, onFind }: { doc?: DocCatFull; onFind: () => void }) {
           <span className="text-[10.5px] text-[#8A94A6] ml-[8px]">
             {issued ? (
               <>Issued {shortTime(open!.latestCreatedAt)}{open!.count > 1 && ` · ${open!.count} on file`}</>
+            ) : shell ? (
+              'Unavailable — SoftPro has no property on this file'
             ) : 'Not received'}
           </span>
         </div>
@@ -147,9 +173,7 @@ function PrelimTile({ doc, onFind }: { doc?: DocCatFull; onFind: () => void }) {
               <SmallButton onClick={() => window.open(`/api/documents/${open!.latestId}/view`, '_blank', 'noopener')}>View</SmallButton>
               <SmallButton onClick={() => window.open(`/api/documents/${open!.latestId}/download`, '_blank', 'noopener')}>Download</SmallButton>
             </>
-          ) : (
-            // "Find", not "Create" — you do not make a prelim, you look for one
-            // SoftPro may already hold.
+          ) : shell ? null : (
             <SmallButton primary onClick={onFind}>Find</SmallButton>
           )}
         </div>
@@ -159,7 +183,9 @@ function PrelimTile({ doc, onFind }: { doc?: DocCatFull; onFind: () => void }) {
 }
 
 /** One of the three that come in with the open-order email. View only. */
-function ArrivingChip({ label, doc }: { label: string; doc?: OrderDocuments[keyof OrderDocuments] }) {
+function ArrivingChip({
+  label, doc, shell,
+}: { label: string; doc?: OrderDocuments[keyof OrderDocuments]; shell: boolean }) {
   const open = openable(doc);
 
   if (open) {
@@ -186,7 +212,7 @@ function ArrivingChip({ label, doc }: { label: string; doc?: OrderDocuments[keyo
 
   return (
     <span className="text-[10.5px] border border-[#EEF0F4] rounded-md px-[8px] py-[3px] text-[#8A94A6]">
-      {label} — not received
+      {label} — {shell ? 'unavailable' : 'not received'}
     </span>
   );
 }

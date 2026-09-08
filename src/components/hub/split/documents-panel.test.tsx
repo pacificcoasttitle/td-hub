@@ -134,6 +134,26 @@ describe('CPL and proposed insured are ACTIONS, not absence reports', () => {
   });
 });
 
+describe('a shell order — SoftPro has no property', () => {
+  it('says documents are unavailable and why, never "not received"', () => {
+    const text = panel({ shell: true });
+    expect(text).toContain('Unavailable — SoftPro has no property on this file');
+    expect(text).toContain('Legal & vesting — unavailable');
+    expect(text).toContain('Grant deed — unavailable');
+    expect(text).toContain('Taxes — unavailable');
+    expect(text).not.toContain('Not received');
+    expect(text).not.toContain('not received');
+  });
+
+  it('does not offer Find or Create — those imply SoftPro has something to fetch', () => {
+    const text = panel({ shell: true });
+    expect(text).not.toContain('Find');
+    expect(text).not.toContain('Create CPL');
+    expect(text).not.toContain('Create Proposed insured');
+    expect(text).toContain('CPL and proposed insured need a property on the SoftPro file');
+  });
+});
+
 describe('the create buttons are wired to the right action', () => {
   const fired: string[] = [];
   const html = renderToStaticMarkup(

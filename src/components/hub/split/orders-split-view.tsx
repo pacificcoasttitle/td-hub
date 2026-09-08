@@ -12,7 +12,7 @@ import {
   type HubQueueCounts, type HubQueueId,
 } from '@/lib/domain/orders/hub-queues';
 import {
-  fullAddress, isIncomplete, nextIncompleteIndex, type HubListOrder,
+  fullAddress, isIncomplete, isShellOrder, nextIncompleteIndex, type HubListOrder,
 } from '@/lib/domain/orders/hub-list-row';
 import { QueueRail } from './queue-rail';
 import { OrderList, type SortField } from './order-list';
@@ -324,12 +324,12 @@ export function OrdersSplitView({
     const docs = selected.documents;
     const id = docs?.cpl?.latestId ?? docs?.prelim?.latestId ?? null;
     if (id) window.open(`/api/documents/${id}/view`, '_blank', 'noopener');
-    else setModal('cpl');
+    else if (!isShellOrder(selected)) setModal('cpl');
   }, [selected]);
 
   const fireAction = useCallback((type: 'cpl' | 'proposed' | 'prelim') => {
     if (bulkOrders.length >= 2) { void runBulk(type); return; }
-    if (selected) setModal(type);
+    if (selected && !isShellOrder(selected)) setModal(type);
   }, [bulkOrders.length, runBulk, selected]);
 
   // ─── keyboard ─────────────────────────────────────────────────────────────

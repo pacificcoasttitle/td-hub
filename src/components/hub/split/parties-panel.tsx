@@ -12,9 +12,10 @@ export interface PartiesPanelProps {
   parties: OrderParty[];
   unnamedRoleCount: number;
   loading: boolean;
+  shell?: boolean;
 }
 
-export function PartiesPanel({ parties, unnamedRoleCount, loading }: PartiesPanelProps) {
+export function PartiesPanel({ parties, unnamedRoleCount, loading, shell = false }: PartiesPanelProps) {
   return (
     <section className="bg-white border border-[#EEF0F4] rounded-[9px] flex flex-col min-h-0">
       <header className="h-7 shrink-0 flex items-center justify-between px-[13px] border-b border-[#EEF0F4]">
@@ -31,7 +32,9 @@ export function PartiesPanel({ parties, unnamedRoleCount, loading }: PartiesPane
           <p className="text-[11.5px] text-[#8A94A6]">Loading…</p>
         ) : parties.length === 0 ? (
           <p className="text-[11.5px] text-[#8A94A6]">
-            No parties on this order.
+            {shell
+              ? 'No parties yet — SoftPro has none on this file.'
+              : 'No parties on this order.'}
           </p>
         ) : (
           <ul className="flex flex-col gap-[7px]">

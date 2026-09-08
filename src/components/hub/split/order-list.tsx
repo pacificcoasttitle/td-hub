@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import {
-  groupByDay, listAddress, timeOfDay, typeChip,
+  groupByDay, isShellOrder, listAddress, timeOfDay, typeChip,
   type HubListOrder,
 } from '@/lib/domain/orders/hub-list-row';
 import { hubQueue, type HubQueueId } from '@/lib/domain/orders/hub-queues';
@@ -185,6 +185,8 @@ function Row({
       </span>
       {address ? (
         <span className="flex-1 min-w-0 text-[12px] text-[#3C4557] truncate">{address}</span>
+      ) : isShellOrder(order) ? (
+        <span className="flex-1 min-w-0 text-[12px] text-[#9AA0AA] truncate">No property</span>
       ) : (
         <span className="flex-1 min-w-0">
           <Flag>no address</Flag>

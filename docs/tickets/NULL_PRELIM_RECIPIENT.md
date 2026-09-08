@@ -4,6 +4,15 @@
 `resolvePrelimRecipients` against production on 27 Aug 2026. Do not build. Do
 not change recipient resolution. Do not send email. Do not run jobs.
 
+**Split this number before anyone acts on it.** Gerard confirmed 2026-08-28
+that SoftPro file-copies produce permanent shells (no property, no officers,
+no parties). Re-measured the no-path bucket the same day (no escrow officer
+and no `escrow_company` party — 1,084 orders): **263 are shells** (no street
+and no city), **821 have an address**. Live: 104 shells, 596 with an address.
+A shell will never have a prelim recipient because there is nothing on the
+file. Acting on 1,093 as one population mixes copies with real orders that
+are missing an officer. See `SOFTPRO_ADDDOCUMENTS_REQUIRED_FIELDS.md` §2.
+
 **The headline:** of 8,044 orders, **1,101 (13.7%) resolve `to: null`**. 1,086
 have no escrow officer and no `escrow_company` party (no delivery path at all);
 15 have a company party with a name and no email; **0** have an officer FK

@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  clientLabel, describeMissing, fullAddress, fullDateTime, missingFields, timeOfDay,
+  clientLabel, describeMissing, fullAddress, fullDateTime, isShellOrder, missingFields, timeOfDay,
   type HubListOrder,
 } from '@/lib/domain/orders/hub-list-row';
 import { statusBadge } from '@/lib/domain/orders/status-format';
@@ -59,6 +59,7 @@ export function OrderDetail({
   }
 
   const missing = missingFields(order);
+  const shell = isShellOrder(order);
   const failed = order.syncStatus === 'failed';
   const address = fullAddress(order);
   const status = statusBadge(order.operationalStatus);
@@ -72,7 +73,7 @@ export function OrderDetail({
             className="text-[18px] font-semibold tracking-[-0.015em] leading-[1.2] truncate"
             style={{ color: '#1B2A4A' }}
           >
-            {address ?? 'Address pending'}
+            {address ?? (shell ? 'No property on file' : 'Address pending')}
           </h1>
           <div className="text-[12px] text-[#6B7280] truncate mt-[2px]">
             <span className="font-mono">{order.fileNumber}</span>
@@ -119,14 +120,18 @@ export function OrderDetail({
           </Banner>
         )}
 
-        {missing.length > 0 && (
+        {shell && (
+          <Banner tone="info">
+            There&apos;s nothing on this order yet. SoftPro has no property on
+            this file, so documents and a CPL cannot exist until someone puts
+            an address on it there.
+          </Banner>
+        )}
+
+        {!shell && missing.length > 0 && (
           <Banner tone="warning">
             <div className="flex items-center gap-3">
               <span className="flex-1">Incomplete — {describeMissing(missing)}.</span>
-              {/* The spec asks for [Open in SoftPro]. SoftPro is reachable here only
-                  as an API — there is no user-facing URL to deep-link into, and a
-                  fabricated one would 404 on the first click. Re-pulling from the
-                  source is the action that actually fills a missing field. */}
               <SmallButton disabled={busy !== null} onClick={() => onResync(order)}>
                 {busy === 'resync' ? 'Syncing…' : 'Resync from SoftPro'}
               </SmallButton>
@@ -159,10 +164,15 @@ export function OrderDetail({
             parties={extras.parties}
             unnamedRoleCount={extras.unnamedRoleCount}
             loading={extras.loading}
+            shell={shell}
           />
         </div>
 
-        <DocumentsPanel documents={d.documents} onGenerate={d.onGenerateDocument} />
+        <DocumentsPanel
+          documents={d.documents}
+          onGenerate={d.onGenerateDocument}
+          shell={shell}
+        />
 
         {/* Editable for the life of the order — the common case is adding
             somebody after the order is already open. */}
@@ -221,6 +231,7 @@ function Field({
 const BANNER_TONE = {
   error: 'bg-[#FDECEA] border-[#F2C4BD] text-[#8E2A1E]',
   warning: 'bg-[#FDF4E7] border-[#EFD9AE] text-[#B4620B]',
+  info: 'bg-[#F4F7FC] border-[#D5DEEA] text-[#3C4557]',
 } as const;
 
 function Banner({ tone, children }: { tone: keyof typeof BANNER_TONE; children: React.ReactNode }) {

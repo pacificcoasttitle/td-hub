@@ -56,6 +56,17 @@ export function isIncomplete(o: HubListOrder): boolean {
   return missingFields(o).length > 0;
 }
 
+/**
+ * SoftPro copy with no property on the file. Permanent — Gerard confirmed
+ * these are in-house copies, not a sync miss. Street or city present means
+ * there is a property, even a thin one; both empty is a shell.
+ */
+export function isShellOrder(
+  o: Pick<HubListOrder, 'propertyStreet' | 'propertyCity'>,
+): boolean {
+  return !nonEmpty(o.propertyStreet) && !nonEmpty(o.propertyCity);
+}
+
 /** "no address, no client and no order type" — for the warning banner. */
 export function describeMissing(fields: readonly IncompleteField[]): string {
   const parts = fields.map((f) => `no ${f}`);

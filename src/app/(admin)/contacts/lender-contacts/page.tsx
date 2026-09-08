@@ -19,6 +19,7 @@ export default function LenderContactsPage() {
       typeFilter="lender"
       scope="external"
       showCompanyColumn
+      requireName
       emptyStateMessage="No lender contacts found"
     />
   );

@@ -152,6 +152,15 @@ describe('precedence', () => {
     expect(preferCplRef('   ', '1 Company Default St')).toBe('1 Company Default St');
   });
 
+  it('loan number: CPL beats the order, the order beats a blank box', () => {
+    // Three levels, and the order matters. The CPL value is what a human typed
+    // on this file; orders.loan_number comes from the SoftPro sync. Reversing
+    // these would quietly overwrite a deliberate value with a synced one.
+    expect(preferCplRef('2026080140', '9999')).toBe('2026080140');
+    expect(preferCplRef(undefined, '9999')).toBe('9999');
+    expect(preferCplRef(undefined, '')).toBe('');
+  });
+
   it('skips a blank ref and falls through to the next row for that field', async () => {
     rows(
       { refType: 'cpl_lender_state', refValue: '  ' },

@@ -125,10 +125,14 @@ export async function getProposedInsuredPrefill(orderId: number) {
     borrowersVesting: buyers.join('; '),
     loanAmount: orderRow.loanAmount ? parseFloat(orderRow.loanAmount) : 0,
     // Was hard-coded '' — PI had no source for a loan number at all, so the
-    // operator retyped it every time. `orders.loan_number` is also populated
-    // on some orders and would be a reasonable second fallback, but that is a
-    // separate change from carrying the CPL across and is not made here.
-    loanNumber: preferCplRef(cpl.loanNumber, ''),
+    // operator retyped one we already held.
+    //
+    // PRECEDENCE, and do not reverse it: the CPL value first, the order's own
+    // loan number second. The CPL value is what a human typed on this file;
+    // orders.loan_number arrives from the SoftPro sync. When they disagree the
+    // operator's is the deliberate one, and the sync value is the better
+    // default than a blank box.
+    loanNumber: preferCplRef(cpl.loanNumber, orderRow.loanNumber ?? ''),
     salesPrice: orderRow.salesPrice ? parseFloat(orderRow.salesPrice) : 0,
   };
 }

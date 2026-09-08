@@ -175,6 +175,20 @@ this specific file, and `loanNumber` was hard-coded `''` with no source at all.
 So the rule is precedence, not population: **a stored CPL value beats a derived
 one, and an absent one never blanks it.**
 
+#### Loan number has three levels, and the order must not be reversed
+
+```
+cpl_loan_number        what the operator typed on the CPL for this file
+orders.loan_number     what the SoftPro sync holds for the order
+''                     only when we hold neither
+```
+
+PI previously showed a blank box even when the order carried a loan number,
+which is the same defect as not carrying the CPL across — a value we already
+hold, retyped. The CPL value wins because it is deliberate; the sync value is
+the better default than nothing. Recorded here because the two look
+interchangeable and someone will otherwise flip them.
+
 ### Measured before building, 2026-09-08
 
 ```

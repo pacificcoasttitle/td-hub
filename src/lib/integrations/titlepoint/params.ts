@@ -23,6 +23,31 @@ export function buildLegacyTaxParameters(apn?: string): string {
   return `Tax.APN=${apn ?? ''};General.AutoSearchTaxes=true;General.AutoSearchProperty=false`;
 }
 
+/**
+ * The unit, formatted for `LvLookupValue`.
+ *
+ * `buildLegacyLvParameters` interpolates it as `${address}, ${unitInfo}${city}`,
+ * so it carries its own trailing separator, and an empty unit must produce an
+ * empty string rather than a stray space that would alter the lookup value on
+ * every non-condo order.
+ *
+ * THE VALUE IS PASSED THROUGH UNCHANGED, BECAUSE THAT IS WHAT LEGACY DOES.
+ * Legacy hands the raw unit straight to `createService4` with no prefix. An
+ * earlier version of this function added `#` to a bare number, which was an
+ * invention — a format nothing had ever sent TitlePoint. Matching legacy is
+ * not the same as being confirmed with the vendor, and it is not claimed to
+ * be: it is the only format with a working precedent.
+ *
+ * That the legal-vesting search needs the unit at all IS established — without
+ * it the search resolves to the building, and 16281 Castello Ln is at least
+ * six parcels sharing one address.
+ */
+export function lvUnitInfo(unitNumber: string | null | undefined): string | undefined {
+  const n = (unitNumber ?? '').trim();
+  if (!n) return undefined;
+  return `${n} `;
+}
+
 export function buildLegacyLvParameters(input: {
   address: string;
   city: string;

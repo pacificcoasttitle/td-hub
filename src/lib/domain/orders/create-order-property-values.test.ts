@@ -29,6 +29,10 @@ describe('buildOrderPropertyValues', () => {
       zip: '96003',
       county: 'Shasta',
       apn: '074-070-012-000',
+      // The unit is now stored in its own column, not only folded into
+      // fullAddress. The TitlePoint legal-vesting search needs it as a
+      // separate value — concatenated into the address it cannot be used.
+      unitNumber: '2',
       legalDescription: null,
       propertyType: null,
       primaryOwner: null,

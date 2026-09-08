@@ -43,5 +43,14 @@ export interface TitlePointCreateInput {
   county?: string;
   fips?: string;
   apn?: string;
+  /**
+   * The unit, for a condo or any address with one.
+   *
+   * `buildLegacyLvParameters` has always had a slot for this and nothing ever
+   * filled it, so the legal-vesting search ran on the building. On a condo that
+   * returns the building's legal description rather than the unit's — wrong on
+   * a prelim, and invisible, because nothing about it looks like an error.
+   */
+  unitNumber?: string | null;
   searchType: TitlePointSearchType;
 }

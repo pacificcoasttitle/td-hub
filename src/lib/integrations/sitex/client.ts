@@ -72,13 +72,32 @@ async function classifyNonOk(response: Response): Promise<NonOkOutcome> {
   return classifyNonOkBody(response.status, body);
 }
 
+/**
+ * The multi-match candidate list, as the UI needs it.
+ *
+ * KEEP THE UNIT. SiteX returns `UnitNumber` and `UnitType` on every candidate
+ * — confirmed from their published schema at
+ * `GET /realestatedata/search/schema/{feedId}` — and dropping them here is why
+ * 16281 Castello Ln, Fontana came back as six rows all reading
+ * "16281 CASTELLO LN" with nothing to choose between them. An operator
+ * searched it four times in six minutes and got the same unusable list.
+ *
+ * The zip is `ZIP`, not `Zip`. The old spelling matched no field, which is why
+ * every candidate ever logged carried `"zip": ""`. `Zip` stays as a fallback.
+ *
+ * `FIPS` is the parcel's own county code. It is better than anything we can
+ * derive from a county name, and it is what makes picking a candidate work.
+ */
 function mapLocations(raw: SiteXSearchResponse) {
   return (raw.Locations ?? []).map((loc) => ({
     address: loc.Address ?? '',
     city: loc.City ?? '',
     state: loc.State ?? '',
-    zip: loc.Zip ?? '',
+    zip: loc.ZIP ?? loc.Zip ?? '',
     apn: loc.APN ?? '',
+    unitNumber: loc.UnitNumber?.trim() || null,
+    unitType: loc.UnitType?.trim() || null,
+    fips: loc.FIPS?.trim() || null,
   }));
 }
 
@@ -136,7 +155,8 @@ export async function propertySearch(
     if (matchCode === 'S' && raw.Feed?.PropertyProfile) {
       result = { match: 'single', property: { matchCode: 'S' as const, ...mapProfile(raw.Feed.PropertyProfile) }, locations: [] };
     } else if (matchCode === 'M' && raw.Locations) {
-      result = { match: 'multi', property: null, locations: raw.Locations.map((loc) => ({ address: loc.Address ?? '', city: loc.City ?? '', state: loc.State ?? '', zip: loc.Zip ?? '', apn: loc.APN ?? '' })) };
+      // Same shape as every other multi-match path — see mapLocations.
+      result = { match: 'multi', property: null, locations: mapLocations(raw) };
     } else {
       result = { match: 'none', property: null, locations: [] };
     }
@@ -254,6 +274,26 @@ export async function apnLookup(
   // stored APNs — but a space would break a search that otherwise works.
   const fips = fips5From(params.fips, params.county, params.state);
 
+  // WHEN THE VENDOR AND OUR TABLE DISAGREE, SAY SO.
+  //
+  // params.fips is SiteX's own code for the parcel; fips5From(null, county,
+  // state) is ours, derived from a county-name table covering three states.
+  // Preferring theirs is right, but silently preferring it would mean a wrong
+  // row in our table is never discovered — we would quietly get the correct
+  // answer forever and keep shipping the bad county to Westcor, which uses the
+  // same table. One log line, so the disagreement is findable.
+  if (params.fips) {
+    const derived = fips5From(null, params.county, params.state);
+    if (derived && derived !== fips) {
+      await logRequest({
+        operation: 'apn_lookup', requestId, startedAt, success: false,
+        errorCategory: 'FIPS_TABLE_DISAGREES',
+        requestMeta: { apn: params.apn, county: params.county, state: params.state },
+        responseMeta: { vendorFips: params.fips, ourFips: derived, using: fips },
+      });
+    }
+  }
+
   // Without a FIPS this request is `apn` + `feedId` — byte-for-byte the shape
   // that failed all 13 times. Sending it anyway would spend a round trip to be
   // told "Missing required fields" again, and the operator would be shown a
@@ -278,6 +318,22 @@ export async function apnLookup(
   searchUrl.searchParams.set('fips', fips);
   searchUrl.searchParams.set('feedId', config.feedId);
 
+  // LOG WHAT WE SENT, NOT WHAT WE WERE ASKED FOR.
+  //
+  // This log used to record { apn, county } — the caller's arguments. When the
+  // fips fix was verified on 2026-09-09 the log could show the call succeeded
+  // but not that `fips=06037` had gone on the wire, because the parameter the
+  // fix introduced was the one parameter absent from the log. A request log
+  // that omits the field under test cannot verify the change.
+  const apnRequestMeta = {
+    apn: params.apn.trim(),
+    fips,
+    fipsSource: params.fips ? 'caller' : 'derived',
+    county: params.county,
+    state: params.state ?? null,
+    url: searchUrl.toString().replace(/([?&]feedId=)[^&]*/, '$1<redacted>'),
+  };
+
   try {
     const token = await getAccessToken(config.baseUrl, config.clientId, config.clientSecret);
     const response = await fetch(searchUrl.toString(), { method: 'GET', headers: { 'Authorization': `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -287,17 +343,17 @@ export async function apnLookup(
       const outcome = await classifyNonOk(response);
 
       if (outcome.kind === 'no_match') {
-        await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: true, requestMeta: { apn: params.apn, county: params.county }, responseMeta: { matchCode: 'N', httpStatus: response.status } });
+        await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: true, requestMeta: apnRequestMeta, responseMeta: { matchCode: 'N', httpStatus: response.status } });
         return vendorSuccess<SiteXPropertyData>(emptyResult('N'), { requestId, durationMs });
       }
 
       if (outcome.kind === 'multi_match') {
         const candidates = mapLocations(outcome.raw);
-        await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: true, requestMeta: { apn: params.apn, county: params.county }, responseMeta: { matchCode: 'M', httpStatus: response.status, locationCount: candidates.length, candidates: candidates.slice(0, 10) } });
+        await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: true, requestMeta: apnRequestMeta, responseMeta: { matchCode: 'M', httpStatus: response.status, locationCount: candidates.length, candidates: candidates.slice(0, 10) } });
         return vendorSuccess<SiteXPropertyData>(emptyResult('M'), { requestId, durationMs });
       }
 
-      await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: false, errorCategory: 'API_ERROR', requestMeta: { apn: params.apn, county: params.county }, responseMeta: { status: response.status, body: outcome.body.slice(0, 500) } });
+      await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: false, errorCategory: 'API_ERROR', requestMeta: apnRequestMeta, responseMeta: { status: response.status, body: outcome.body.slice(0, 500) } });
       return vendorError<SiteXPropertyData>(VENDOR, 'SEARCH_FAILED', `SiteX ${response.status}`, { httpStatus: response.status, retryable: response.status >= 500, requestId, durationMs });
     }
 
@@ -308,12 +364,12 @@ export async function apnLookup(
     else if (matchCode === 'M') { result = emptyResult('M'); }
     else { result = emptyResult('N'); }
 
-    await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: true, requestMeta: { apn: params.apn, county: params.county }, responseMeta: { matchCode: result.matchCode, apn: result.apn } });
+    await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: true, requestMeta: apnRequestMeta, responseMeta: { matchCode: result.matchCode, apn: result.apn } });
     return vendorSuccess(result, { requestId, durationMs });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     const durationMs = Date.now() - startedAt.getTime();
-    await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: false, errorCategory: 'NETWORK', requestMeta: { apn: params.apn, county: params.county }, responseMeta: { error: message } });
+    await logRequest({ operation: 'apn_lookup', requestId, startedAt, success: false, errorCategory: 'NETWORK', requestMeta: apnRequestMeta, responseMeta: { error: message } });
     return vendorError<SiteXPropertyData>(VENDOR, 'NETWORK_ERROR', message, { retryable: true, requestId, durationMs });
   }
 }

@@ -527,6 +527,7 @@ export function buildOrderPropertyValues(
     zip: input.property.zip.slice(0, 5),
     county: enriched.county || null,
     apn: enriched.apn || null,
+    unitNumber: input.property.unitNumber || null,
     legalDescription: enriched.legal || null,
     propertyType: sitex?.propertyType ?? null,
     primaryOwner: sitex?.primaryOwner ?? null,

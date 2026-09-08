@@ -14,6 +14,7 @@ import {
   SERVICE_TYPE_MAP,
   buildLegacyGeoParameters,
   buildLegacyLvParameters,
+  lvUnitInfo,
   buildLegacyTaxParameters,
 } from './params';
 import { mockCreateService, mockGetRequestSummaries, mockGetResult } from './mocks';
@@ -273,6 +274,7 @@ export function buildPostOrderLvCreateServiceRequest(
       address: input.address,
       city: input.city,
       apn: input.apn,
+      unitInfo: lvUnitInfo(input.unitNumber),
       includeAddressApn: true,
     })}&` +
     'department=&' +
@@ -333,6 +335,7 @@ export function buildPreOrderLvCreateServiceRequest(
       address: input.address,
       city: input.city,
       apn: input.apn,
+      unitInfo: lvUnitInfo(input.unitNumber),
       includeAddressApn,
     }))}&` +
     `fipsCode=${encodeValue(input.fips ?? '')}`;

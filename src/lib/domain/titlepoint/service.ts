@@ -56,9 +56,13 @@ export async function initiateSearch(
   const county = property?.county ?? '';
   const apn = property?.apn ?? undefined;
   const fips = property?.fips ?? resolveCaliforniaFips(county) ?? undefined;
+  // Without this the legal-vesting search resolves to the building. On a condo
+  // that returns the building's legal description, which is wrong on a prelim
+  // and looks like a successful search.
+  const unitNumber = property?.unitNumber ?? undefined;
 
   const result = await createService(
-    { address, city, state, county, fips, apn, searchType },
+    { address, city, state, county, fips, apn, unitNumber, searchType },
     orderId
   );
 

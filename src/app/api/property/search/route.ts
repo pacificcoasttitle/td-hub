@@ -14,8 +14,12 @@ const addressSchema = z.object({
 const apnSchema = z.object({
   mode: z.literal('apn'),
   apn: z.string().min(1),
-  county: z.string().min(1),
+  // Not min(1): a candidate picked from a multi-match has a FIPS and no county
+  // name, which is the better identifier of the two.
+  county: z.string(),
   state: z.string().max(2).default('CA'),
+  /** SiteX's own 5-digit FIPS for this parcel, when we have it. */
+  fips: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {

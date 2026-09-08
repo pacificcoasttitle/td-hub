@@ -22,6 +22,25 @@ interface SiteXLocation {
   state: string;
   zip: string;
   apn: string;
+  unitNumber?: string | null;
+  unitType?: string | null;
+  fips?: string | null;
+}
+
+/**
+ * The unit, as it should read in a list of candidates.
+ *
+ * Every candidate in one building shares an address, so without this the list
+ * is unusable: 16281 Castello Ln, Fontana returns six rows all reading
+ * "16281 CASTELLO LN". SiteX sends UnitNumber on each of them and we were
+ * discarding it before it reached this component.
+ */
+function unitLabel(loc: SiteXLocation): string | null {
+  const n = loc.unitNumber?.trim();
+  if (!n) return null;
+  const t = loc.unitType?.trim();
+  // "APT 5" reads better than "Unit APT 5"; a bare number needs the word.
+  return t ? `${t} ${n}` : `Unit ${n}`;
 }
 
 interface PropertyConfirmModalProps {
@@ -103,8 +122,13 @@ export function PropertyConfirmModal({
   async function handlePickLocation(loc: SiteXLocation, index: number) {
     setPickingIndex(index);
     try {
+      // The candidate carries its own FIPS, which is what /search wants. This
+      // used to send `county: ''` — no county, so no FIPS could be derived,
+      // so the lookup could never succeed and every pick fell through to the
+      // stub below with no owner, county or legal description. SiteX had been
+      // handing us the right value on the same row the whole time.
       const payload = loc.apn
-        ? { mode: 'apn' as const, apn: loc.apn, county: '', state: loc.state || 'CA' }
+        ? { mode: 'apn' as const, apn: loc.apn, county: '', state: loc.state || 'CA', fips: loc.fips ?? undefined }
         : { mode: 'address' as const, street: loc.address, city: loc.city, state: loc.state || 'CA', zip: loc.zip };
 
       const res = await fetch('/api/property/search', {
@@ -229,6 +253,11 @@ export function PropertyConfirmModal({
                 >
                   <p className="text-sm font-medium text-[#1B2A4A]">
                     {[loc.address, loc.city, loc.state, loc.zip].filter(Boolean).join(', ')}
+                    {unitLabel(loc) && (
+                      <span className="ml-2 inline-block px-1.5 py-0.5 rounded bg-[#1B2A4A]/8 text-[#1B2A4A] text-xs font-semibold align-middle">
+                        {unitLabel(loc)}
+                      </span>
+                    )}
                   </p>
                   {loc.apn && (
                     <p className="text-xs text-[#6B7280] mt-0.5">APN: {loc.apn}</p>

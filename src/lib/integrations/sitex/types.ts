@@ -94,12 +94,39 @@ export interface SiteXRawPropertyProfile {
   [key: string]: unknown;
 }
 
+/**
+ * One multi-match candidate.
+ *
+ * Field names are from SiteXPro's own OpenAPI document, free at
+ * `GET /realestatedata/search/schema/{feedId}`:
+ *
+ *   FIPS, APN, Address, City, State, ZIP, ZIP4, UnitType, UnitNumber,
+ *   Latitude, Longitude, UseCode, UseCodeDescription
+ *
+ * Two things follow that were wrong before:
+ *
+ *  - The zip is `ZIP`, not `Zip`. We read `Zip`, got undefined, and every
+ *    logged candidate carried `"zip": ""` — visible in the Castello Lane and
+ *    Lake Arrowhead responses and never questioned.
+ *  - `UnitNumber` and `UnitType` exist on every candidate. Dropping them is
+ *    what made 16281 Castello Ln return six rows reading `16281 CASTELLO LN`
+ *    with nothing to tell them apart.
+ *
+ * `Zip` is kept as a fallback rather than removed: it costs nothing, and this
+ * type is a guess about a vendor payload until a response proves otherwise.
+ */
 export interface SiteXRawLocation {
   Address?: string;
   City?: string;
   State?: string;
+  ZIP?: string;
+  ZIP4?: string;
+  /** Non-schema spelling, retained as a fallback. */
   Zip?: string;
   APN?: string;
+  FIPS?: string;
+  UnitType?: string;
+  UnitNumber?: string;
   [key: string]: unknown;
 }
 

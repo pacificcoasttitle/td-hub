@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SyncButton } from './sync-button';
+import { CreatePartyWizard } from '../create-party-wizard';
+import type { CreatePersonUserType } from '@/lib/domain/contacts/create-contact';
 
 interface Company {
   id: number;
@@ -21,12 +23,19 @@ interface Props {
   subtitle: string;
   companyType: string;
   syncUserType?: string;
+  /**
+   * The person type this company type pairs with, which the wizard needs even
+   * in companyOnly mode because it picks the SoftPro company type from it.
+   * Omitted means no create button — the page stays read-only.
+   */
+  createAs?: CreatePersonUserType;
 }
 
 const PAGE_SIZE = 25;
 
-export function CompanyTypeListPage({ title, subtitle, companyType, syncUserType }: Props) {
+export function CompanyTypeListPage({ title, subtitle, companyType, syncUserType, createAs }: Props) {
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -67,10 +76,33 @@ export function CompanyTypeListPage({ title, subtitle, companyType, syncUserType
           <h1 className="text-2xl font-semibold text-[#1A1A2E]">{title}</h1>
           <p className="text-sm text-[#6B7280] mt-1">{subtitle}</p>
         </div>
-        {syncUserType && (
-          <SyncButton endpoint="/api/contacts/sync" userType={syncUserType} onSuccess={fetchCompanies} />
-        )}
+        <div className="flex items-center gap-2">
+          {syncUserType && (
+            <SyncButton endpoint="/api/contacts/sync" userType={syncUserType} onSuccess={fetchCompanies} />
+          )}
+          {createAs && (
+            <button onClick={() => setWizardOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] transition-colors">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              Add New
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Company only. Adding a PERSON to one of these firms is the other flow,
+          and it lives on the paired contacts page — this covers the case where
+          the firm itself is new. */}
+      {createAs && (
+        <CreatePartyWizard
+          open={wizardOpen}
+          onClose={() => setWizardOpen(false)}
+          onCompanyCreated={() => { setWizardOpen(false); fetchCompanies(); }}
+          userType={createAs}
+          label={title}
+          companyOnly
+        />
+      )}
 
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <div className="relative flex-1 max-w-sm">

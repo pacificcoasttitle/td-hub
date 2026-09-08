@@ -1,0 +1,11 @@
+-- 0045, not 0043: 0043_prelim_superseded and 0044_request_updated_prelim_rename
+-- were taken by the Update Prelim work on another branch and are already
+-- applied. Two agents in one repo means the next free number is not the one
+-- after the last number visible in your own worktree — check every branch.
+-- The unit is the only thing distinguishing one condo from another in the same
+-- building. SiteX returns it on every multi-match candidate (Location.UnitNumber
+-- and Location.UnitType) and it was discarded at parse time, so it has never
+-- been stored and never reached the TitlePoint legal-vesting search.
+--
+-- Nullable and unindexed: it is read with the property row, never searched on.
+ALTER TABLE order_properties ADD COLUMN IF NOT EXISTS unit_number varchar(30);

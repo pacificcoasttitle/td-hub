@@ -46,3 +46,35 @@ You have CI, branch protection, and required checks; use them. Confirm app + scr
 ## Production writes
 
 Nothing that writes to production runs from uncommitted code. Not a one-shot, not a backfill, not a repair script. If it touches production it goes through a branch and a review first, even when the change is obviously right.
+
+## Reverting (2026-09-09)
+
+**Revert by naming the files you changed. Never by naming a directory.**
+
+```bash
+git checkout -- src/lib src/components        # NO
+git checkout -- src/lib/integrations/sitex/client.ts   # yes, one path per file
+```
+
+Several agents work in this repo at once and each other's uncommitted changes
+sit in the same worktrees. `git checkout -- <dir>` reverts every modified file
+underneath it, not only the ones you touched. On 2026-09-09 a cleanup after a
+test run destroyed eight files belonging to the hub split-view work — files the
+session had spent all day deliberately avoiding.
+
+They were recovered from a dropped autostash git happened to be holding
+(`git fsck --unreachable` finds these), and the working tree was restored to
+match it exactly. **That recovery was luck, and it was unverifiable**: the
+diffstat was compared only after the deletion, so "the stash matches what was
+there" is an inference, not a proof. Nobody could tell from inside the repo
+whether the stash was six days stale.
+
+The same hazard already had a rule for `git stash` — pushed with a unique tag,
+restored with `apply` not `pop`. That rule did not cover `checkout`, and the
+hazard is not the command, it is **operating on files you did not touch**.
+Before any destructive git operation, list what it will affect and confirm
+every path is yours.
+
+If you do destroy something: `git fsck --unreachable --no-progress | grep commit`
+and inspect each for the missing files. Autostashes from rebases are the usual
+survivor. Say plainly whether you verified the recovery or inferred it.

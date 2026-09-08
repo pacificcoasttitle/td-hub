@@ -18,7 +18,7 @@ const {
   updateSets: [] as Record<string, unknown>[],
   updateWheres: [] as unknown[],
   deactivateCalls: [] as unknown[],
-  contactSelectQueue: [] as Array<Array<{ id: number }>>,
+  contactSelectQueue: [] as Array<Array<{ id: number; lookupCode?: string }>>,
   contactSelectWheres: [] as unknown[],
   orderByCalls: [] as unknown[][],
   updateFailures: [] as unknown[],
@@ -55,12 +55,20 @@ vi.mock('@/lib/db/client', () => {
         where: vi.fn((w: unknown) => {
           contactSelectWheres.push(w);
           const limit = vi.fn(async () => contactSelectQueue.shift() ?? []);
+          // Drizzle's builder is thenable: awaiting .where() runs the query.
+          // The mock has to be too, or a caller that reads a whole page in one
+          // go — rather than .limit(1) per row — gets the builder object back
+          // and fails on something unrelated to what it was testing.
           return {
             limit,
             orderBy: vi.fn((...args: unknown[]) => {
               orderByCalls.push(args);
               return { limit };
             }),
+            then: (
+              resolve: (rows: Array<{ id: number; lookupCode?: string }>) => unknown,
+              reject?: (e: unknown) => unknown,
+            ) => Promise.resolve(contactSelectQueue.shift() ?? []).then(resolve, reject),
           };
         }),
       })),
@@ -111,6 +119,8 @@ vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
   asc: vi.fn((col) => ({ type: 'asc', col })),
   eq: vi.fn((left, right) => ({ type: 'eq', left, right })),
+  // syncOpenContacts reads the whole page in one query now, not one per row.
+  inArray: vi.fn((col, values) => ({ type: 'inArray', col, values })),
   or: vi.fn((...args: unknown[]) => ({ type: 'or', args })),
   sql: Object.assign(vi.fn((...args: unknown[]) => ({ type: 'sql', args })), {
     raw: vi.fn(),
@@ -602,7 +612,9 @@ describe('syncContactRows preserve-on-empty + sales-rep deactivate guard', () =>
   });
 
   it('preserves existing open-contact fields when SoftPro row is sparse', async () => {
-    contactSelectQueue.push([{ id: 10 }]);
+    // syncOpenContacts reads the page in one query and keys the result by
+    // lookup code, so the row it finds has to carry one.
+    contactSelectQueue.push([{ id: 10, lookupCode: 'OC-1' }]);
 
     const result = await syncContactRows('Order Contact - Person', [{
       LookupCode: 'OC-1',

@@ -5,7 +5,7 @@ export default function AgentsPage() {
     <CompanyTypeListPage
       title="Real Estate Companies"
       subtitle="Brokerages linked to real estate agents on PCT orders"
-      companyType="real_estate_company"
+      companyType="real_estate_company" createAs="realtor"
     />
   );
 }

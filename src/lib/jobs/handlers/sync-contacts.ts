@@ -300,11 +300,13 @@ async function syncOpenContacts(items: SyncRow[]): Promise<SyncContactsResult> {
       zip: contacts.zip, note: contacts.note, licenseNo: contacts.licenseNo,
     })
     .from(contacts)
-    .where(inArray(contacts.lookupCode, codes))
-    .orderBy(asc(contacts.id));
+    .where(inArray(contacts.lookupCode, codes));
 
+  // Lowest id wins for a shared code. Sorted here rather than with an ORDER BY
+  // so the choice does not depend on the query builder — the point is that the
+  // same sibling is picked on every run, not that the database does the work.
   const existingByCode = new Map<string, (typeof existingRows)[number]>();
-  for (const row of existingRows) {
+  for (const row of [...existingRows].sort((a, b) => a.id - b.id)) {
     if (row.lookupCode && !existingByCode.has(row.lookupCode)) {
       existingByCode.set(row.lookupCode, row);
     }

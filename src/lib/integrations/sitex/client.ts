@@ -253,9 +253,29 @@ export async function apnLookup(
   // leading space. That was NOT the cause — 1 of 13 calls, and 0 of 6,061
   // stored APNs — but a space would break a search that otherwise works.
   const fips = fips5From(params.fips, params.county, params.state);
+
+  // Without a FIPS this request is `apn` + `feedId` — byte-for-byte the shape
+  // that failed all 13 times. Sending it anyway would spend a round trip to be
+  // told "Missing required fields" again, and the operator would be shown a
+  // vendor error for something we could see before asking. An unresolvable
+  // county is our problem, so it is reported as ours.
+  if (!fips) {
+    await logRequest({
+      operation: 'apn_lookup', requestId, startedAt, success: false,
+      errorCategory: 'UNRESOLVED_COUNTY',
+      requestMeta: { apn: params.apn, county: params.county, state: params.state },
+      responseMeta: { error: 'No FIPS could be derived; request not sent.' },
+    });
+    return vendorError<SiteXPropertyData>(
+      VENDOR, 'UNRESOLVED_COUNTY',
+      `Could not determine the FIPS code for county "${params.county ?? ''}" in ${params.state ?? 'CA'}.`,
+      { retryable: false, requestId, durationMs: Date.now() - startedAt.getTime() },
+    );
+  }
+
   const searchUrl = new URL(`${config.baseUrl}/realestatedata/search`);
   searchUrl.searchParams.set('apn', params.apn.trim());
-  if (fips) searchUrl.searchParams.set('fips', fips);
+  searchUrl.searchParams.set('fips', fips);
   searchUrl.searchParams.set('feedId', config.feedId);
 
   try {

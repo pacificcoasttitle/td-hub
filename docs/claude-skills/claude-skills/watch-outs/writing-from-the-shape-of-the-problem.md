@@ -153,6 +153,48 @@ and say plainly that it is unverified — agreement is not evidence, which is
 the same lesson as `endorsement-is-not-corroboration.md`, pointed the other
 way.
 
+### Both halves of instance 3
+
+Gerard has since said where his parameter list came from: **his recollection of
+the SiteX Pro API, asserted as fact.** It turned out to be correct. That does
+not make either half of what happened acceptable, and the two failures are
+independent:
+
+- **He stated a recollection as though it were documentation.** Right, this
+  time. Nothing in the exchange would have revealed it if it had been wrong.
+- **I promoted it to a citation.** I wrote "the documented parameter set" about
+  a list I had received in chat, having opened no document.
+
+**Neither error is recoverable from the other.** If I had said "you've told me
+this, I haven't checked it", his recollection being wrong would have been
+caught by the next step. If he had said "from memory, verify it", my citation
+would have had nothing to stand on. It took both of us to turn a guess into a
+fact, and a correct outcome hid that completely — the fix shipped, the endpoint
+was wrong for the reason he said, and the process that produced the claim was
+broken the whole time.
+
+**A right answer is not evidence that the method was sound.** This is the same
+lesson as `endorsement-is-not-corroboration.md`, arriving from the opposite
+direction: there, agreement made a wrong claim look verified; here, a correct
+outcome made an unverified claim look justified.
+
+### What actually settled it, and what that cost
+
+The vendor publishes its own contract, free:
+
+```
+GET /realestatedata/search/schema/{feedId}    -> the OpenAPI document
+GET /realestatedata/search/options/{feedId}   -> the feed's option list
+```
+
+Twelve parameters, `fips` and `apn` among them, `county` and `state` absent.
+One round trip, no charge, no ambiguity — against a billable call that had been
+authorised, and a chain of inference three messages long.
+
+**Before paying a vendor to answer a question about its own contract, check
+whether the vendor publishes the contract.** Neither of us thought to look, and
+the endpoint had been there the whole time.
+
 ---
 
 ## A guard written around "how could this have happened" only covers the causes you had in mind

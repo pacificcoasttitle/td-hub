@@ -231,6 +231,32 @@ there is genuinely nothing stored to read. The note is repeated in
 `proposed-insured-prefill.ts` at the call site, which is where someone
 debugging an empty modal will actually land.
 
+### Adjacent finding, measured but deliberately not fixed here
+
+While confirming where the lender fields come from: `proposed-insured-prefill.ts`
+resolves the lender company by **exact string match** on
+`companies.name = order_parties.external_company`. Measured 2026-09-08:
+
+```
+orders with a named lender party      4,728
+  exact companies.name match          3,623   (77%)
+  no match                            1,105   (23%)
+```
+
+On those 1,105 the modal takes the `else` branch: `companyId` null,
+`lookupCode` empty, and every lender address field blank. It looks identical to
+"this order has no lender on file", so nobody reports it — the operator just
+retypes, which is the same complaint that produced this ticket.
+
+**The CPL prefill does not rescue them.** Of the 1,105, only **5** have a
+`cpl_lender_address` to fall back on, because `cpl_*` refs exist on 148 orders
+in total and only since July. So this is a separate defect of its own size, and
+fixing it means matching on `lookup_code` or a normalised name rather than raw
+equality. Not attempted in this change — it would put a fuzzy company match
+inside a prefill, which is exactly the kind of quiet wrongness `branchId` is
+excluded for. Recorded so it is not rediscovered as "the PIL prefill doesn't
+work".
+
 ### Guarded in code, not just in prose
 
 `SHARED_CPL_REF_TYPES` is an **allowlist of six**, deliberately not

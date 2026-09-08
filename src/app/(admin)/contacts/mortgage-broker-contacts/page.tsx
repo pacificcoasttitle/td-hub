@@ -13,6 +13,7 @@ export default function MortgageBrokerContactsPage() {
       typeFilter="mortgage_broker"
       scope="external"
       showCompanyColumn
+      requireName
       emptyStateMessage="No mortgage broker contacts found"
     />
   );

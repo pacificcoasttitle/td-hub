@@ -133,6 +133,15 @@ export const orderProperties = pgTable('order_properties', {
   zip: varchar('zip', { length: 20 }),
   county: varchar('county', { length: 100 }),
   apn: varchar('apn', { length: 50 }),
+  /**
+   * The unit, for a condo or any address with one.
+   *
+   * From SiteX `Location.UnitNumber`. Stored separately rather than folded into
+   * `address` because the TitlePoint legal-vesting search needs it as its own
+   * value — without it that search runs against the building and returns the
+   * building's legal description.
+   */
+  unitNumber: varchar('unit_number', { length: 30 }),
   legalDescription: text('legal_description'),
   propertyType: varchar('property_type', { length: 50 }),
 

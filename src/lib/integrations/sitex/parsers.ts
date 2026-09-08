@@ -58,5 +58,17 @@ export function emptyResult(matchCode: 'M' | 'N'): SiteXPropertyData {
 export interface PropertySearchResult {
   match: 'single' | 'multi' | 'none';
   property: SiteXPropertyData | null;
-  locations: Array<{ address: string; city: string; state: string; zip: string; apn: string }>;
+  locations: Array<{
+    address: string;
+    city: string;
+    state: string;
+    zip: string;
+    apn: string;
+    /** From SiteX's Location.UnitNumber — the only thing distinguishing units in one building. */
+    unitNumber: string | null;
+    /** Location.UnitType, e.g. "APT", "UNIT". Shown beside the number when present. */
+    unitType: string | null;
+    /** Location.FIPS — authoritative for this parcel, better than deriving from a county name. */
+    fips: string | null;
+  }>;
 }

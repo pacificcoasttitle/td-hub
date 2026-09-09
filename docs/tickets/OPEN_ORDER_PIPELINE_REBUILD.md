@@ -438,3 +438,69 @@ reported, not explained away.**
   surveyed.
 - `docs/tickets/PERSIST_THEN_THROW_AS_A_STRUCTURE.md` — the helper the pipeline's
   vendor calls should route through.
+
+---
+
+## Evidence from 2026-09-09/10 — two reasons this rebuild matters
+
+Both found while handling a live incident on `20022014-GLT`. Neither is fixed by
+the rebuild's design as written; both are things the rebuild must not inherit.
+
+### 1. No transaction, so a failure leaves wreckage instead of nothing
+
+`createLocalRecords` inserts in sequence with nothing wrapping it:
+
+```
+orders  ->  orderProperties  ->  orderParties  ->  orderStatusHistory
+```
+
+Order `20022014-GLT` threw at the property insert. The order row was already
+committed, so what exists is a half-built order: listed in the UI, no address,
+no title search, no documents, and no way for the operator to retry — a second
+attempt would create a second SoftPro file.
+
+**Ten hub-created orders are in this state**, about one a day since at least
+2026-08-31, roughly 1 in 20:
+
+```
+09-09 x1   09-08 x1   09-03 x2   09-02 x1   09-01 x3   08-31 x2
+```
+
+Each needed a manual repair. **Wrapped in a transaction, every one of them would
+have been a clean failure the operator could simply retry.** That is the whole
+difference between an incident and a retry, and it is ten incidents so far.
+
+Gerard's decision on 2026-09-10: the property row for 8525 stays, no searches
+are fired, and **the other nine are not repaired** — today is the starting point
+and we fix forward. So this section is not a repair plan; it is the argument for
+why the rebuilt pipeline writes atomically.
+
+### 2. Two clocks that disagree, and compose only by accident of ordering
+
+`sweepPendingConfirmations` selects candidates on:
+
+```sql
+coalesce(o.opened_at, o.created_at) <= cutoff     -- measured from the ORDER
+```
+
+`getConfirmationReadiness` then decides on:
+
+```ts
+anchor = searchStarts.length > 0
+  ? min(searchStarts)                    // measured from the SEARCH  (#85)
+  : (openedAt ?? createdAt);             // the old anchor, still live
+```
+
+**They measure from different events.** On order 8525 — opened 17 hours ago,
+25-minute timeout — the sweeper's clause is already true, so it would offer the
+order the moment a search row appeared. The readiness check then correctly says
+"the search started ten seconds ago, not ready."
+
+It composes **only because readiness runs last**. That is a real ordering
+dependency, not a coincidence, and nothing in the code says so. Traced on
+2026-09-10 and confirmed safe today; the `openedAt` fallback survives for the
+genuinely-nothing-started case, which is what #85 demoted it to.
+
+**Clock-based readiness is what this rebuild removes.** Until it does, these two
+clocks have to keep agreeing by luck. Recorded so the rebuild does not reproduce
+the pattern in a new shape.

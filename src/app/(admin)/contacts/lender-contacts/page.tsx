@@ -14,7 +14,7 @@ import { ContactListPage } from '@/components/admin/contacts/contact-list-page';
 export default function LenderContactsPage() {
   return (
     <ContactListPage
-      title="Lender Contacts"
+      title="Lender Employees"
       subtitle="People at lending institutions"
       typeFilter="lender"
       scope="external"

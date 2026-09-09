@@ -28,13 +28,13 @@ const NAV: NavEntry[] = [
 
   { kind: 'section', label: 'Clients', icon: <I d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />, children: [
     { label: 'Real Estate Companies', href: '/contacts/agents' },
-    { label: 'Real Estate Agents', href: '/contacts/real-estate-agents' },
+    { label: 'Real Estate Employees', href: '/contacts/real-estate-agents' },
     { label: 'Escrow Companies', href: '/contacts/escrow-companies' },
-    { label: 'External Escrow Officers', href: '/contacts/external-escrow-officers' },
-    { label: 'Lenders', href: '/contacts/lenders' },
-    { label: 'Lender Contacts', href: '/contacts/lender-contacts' },
-    { label: 'Mortgage Brokers', href: '/contacts/mortgage-brokers' },
-    { label: 'Mortgage Broker Contacts', href: '/contacts/mortgage-broker-contacts' },
+    { label: 'Escrow Employees', href: '/contacts/external-escrow-officers' },
+    { label: 'Lender Companies', href: '/contacts/lenders' },
+    { label: 'Lender Employees', href: '/contacts/lender-contacts' },
+    { label: 'Mortgage Companies', href: '/contacts/mortgage-brokers' },
+    { label: 'Mortgage Employees', href: '/contacts/mortgage-broker-contacts' },
     { label: 'Companies', href: '/contacts/companies' },
   ]},
 

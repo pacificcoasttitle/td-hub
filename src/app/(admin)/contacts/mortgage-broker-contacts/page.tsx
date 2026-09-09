@@ -8,7 +8,7 @@ import { ContactListPage } from '@/components/admin/contacts/contact-list-page';
 export default function MortgageBrokerContactsPage() {
   return (
     <ContactListPage
-      title="Mortgage Broker Contacts"
+      title="Mortgage Employees"
       subtitle="People at mortgage brokerages"
       typeFilter="mortgage_broker"
       scope="external"

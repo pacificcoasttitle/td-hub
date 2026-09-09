@@ -21,6 +21,22 @@ export interface SendEmailParams {
   from?: string;
   replyTo?: string;
   attachments?: SendGridAttachment[];
+  /**
+   * The order this email is about, so the delivery log can be searched the way
+   * anybody would actually search it — by file number.
+   *
+   * MEASURED 2026-09-10: all 1,521 sendgrid rows had `order_id` NULL, and the
+   * delivery log's fallback parser only matches `File X` / `Order X`, which
+   * neither of our two subject formats uses ("20022021-GLT · address ·
+   * Confirmation" and "Preliminary Title Report — address"). So when a client
+   * said they never got their prelim, nobody could look the send up at all.
+   *
+   * Optional because genuinely order-less mail exists — user invites, the ops
+   * digest, template samples. Anything sent ABOUT an order must pass it.
+   */
+  orderId?: number | null;
+  /** Denormalised onto request_meta so a log row is searchable on its own. */
+  fileNumber?: string | null;
 }
 
 interface SendEmailResult {
@@ -41,6 +57,7 @@ async function logRequest(params: {
   startedAt: Date;
   success: boolean;
   errorCategory?: string;
+  orderId?: number | null;
   requestMeta?: Record<string, unknown>;
   responseMeta?: Record<string, unknown>;
 }) {
@@ -48,6 +65,7 @@ async function logRequest(params: {
     await db.insert(vendorApiLogs).values({
       vendor: VENDOR,
       operation: params.operation,
+      orderId: params.orderId ?? null,
       requestId: params.requestId,
       startedAt: params.startedAt,
       endedAt: new Date(),
@@ -83,7 +101,8 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
       requestId,
       startedAt,
       success: true,
-      requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo, mock: true },
+      orderId: params.orderId,
+      requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo, fileNumber: params.fileNumber ?? null, mock: true },
     });
     return vendorSuccess({ messageId: `mock-${requestId}` }, { requestId, durationMs: 0 });
   }
@@ -133,7 +152,8 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
         requestId,
         startedAt,
         success: true,
-        requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo },
+        orderId: params.orderId,
+      requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo, fileNumber: params.fileNumber ?? null },
         responseMeta: { status: response.status, messageId },
       });
       return vendorSuccess({ messageId }, { requestId, durationMs });
@@ -146,7 +166,8 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
       startedAt,
       success: false,
       errorCategory: 'API_ERROR',
-      requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo },
+      orderId: params.orderId,
+      requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo, fileNumber: params.fileNumber ?? null },
       responseMeta: { status: response.status, body: errorBody },
     });
 
@@ -166,7 +187,8 @@ export async function sendEmail(params: SendEmailParams): Promise<VendorResult<S
       startedAt,
       success: false,
       errorCategory: 'NETWORK',
-      requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo },
+      orderId: params.orderId,
+      requestMeta: { to: toList, cc: ccList, subject: params.subject, from, replyTo, fileNumber: params.fileNumber ?? null },
       responseMeta: { error: message },
     });
 

@@ -657,6 +657,8 @@ export async function handlePartyWizardInvite(
 
     try {
       const send = await sendEmail({
+        orderId: row.orderId,
+        fileNumber: row.fileNumber,
         to,
         subject,
         html: buildPartyWizardEmail(input),

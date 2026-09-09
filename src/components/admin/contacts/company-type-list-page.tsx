@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SyncButton } from './sync-button';
 import { CreatePartyWizard } from '../create-party-wizard';
+import { CompanyFormModal, type CompanyRecord } from './company-form-modal';
 import type { CreatePersonUserType } from '@/lib/domain/contacts/create-contact';
 
 interface Company {
@@ -36,6 +37,12 @@ const PAGE_SIZE = 25;
 export function CompanyTypeListPage({ title, subtitle, companyType, syncUserType, createAs }: Props) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
+  // The four type pages (Lender/Mortgage/Escrow/Real Estate Companies) had no
+  // edit control at all — the only place to edit a company was the generic
+  // /contacts/companies page. CompanyFormModal already existed and worked
+  // there; these pages simply never got it.
+  const [editCompany, setEditCompany] = useState<CompanyRecord | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -93,6 +100,13 @@ export function CompanyTypeListPage({ title, subtitle, companyType, syncUserType
       {/* Company only. Adding a PERSON to one of these firms is the other flow,
           and it lives on the paired contacts page — this covers the case where
           the firm itself is new. */}
+      <CompanyFormModal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        onSuccess={() => { setEditOpen(false); fetchCompanies(); }}
+        company={editCompany}
+      />
+
       {createAs && (
         <CreatePartyWizard
           open={wizardOpen}
@@ -135,6 +149,7 @@ export function CompanyTypeListPage({ title, subtitle, companyType, syncUserType
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Phone</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Address</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Status</th>
+                  <th className="text-right px-4 py-3 font-medium text-[#6B7280]">Edit</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -154,6 +169,23 @@ export function CompanyTypeListPage({ title, subtitle, companyType, syncUserType
                         <span className={`h-2 w-2 rounded-full ${co.isActive ? 'bg-green-500' : 'bg-gray-300'}`} />
                         {co.isActive ? 'Active' : 'Inactive'}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <button
+                        onClick={() => {
+                          setEditCompany({
+                            id: co.id, name: co.name, companyType,
+                            lookupCode: co.lookupCode ?? '',
+                            city: co.city ?? '', state: co.state ?? '', zip: co.zip ?? '',
+                            phone: co.phone ?? '', email: co.email ?? '', isActive: co.isActive,
+                          });
+                          setEditOpen(true);
+                        }}
+                        className="text-[#6B7280] hover:text-[#1B2A4A] transition-colors"
+                        title="Edit"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      </button>
                     </td>
                   </tr>
                 )) : null}

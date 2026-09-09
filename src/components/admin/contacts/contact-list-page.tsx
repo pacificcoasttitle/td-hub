@@ -58,13 +58,61 @@ const SYNC_USER_TYPE: Record<string, string> = {
 
 const PAGE_SIZE = 25;
 
-const WIZARD_TYPES = new Set(['escrow', 'lender', 'mortgage_broker', 'realtor', 'agent', 'real_estate_agent']);
+/**
+ * The SoftPro person type this page creates, or null if it must not create.
+ *
+ * WHY THIS REPLACED A SET PLUS A DEFAULT. The old version tested membership of
+ * a set containing `escrow` while the escrow-officer pages pass
+ * `escrow_officer`, so they missed by six characters and silently fell through
+ * to the older flat form — which then returns 400, because `escrow_officer` is
+ * not a CreatePersonUserType either. Aileen could not add an external escrow
+ * officer at all: the button was there and every request was refused.
+ *
+ * The mapper alongside it ended `return 'realtor'`, so any type it did not
+ * recognise would have been created in SoftPro AS A REALTOR — correct-looking,
+ * silent, and discovered months later. Adding two strings to the set without
+ * touching that default would have done exactly that.
+ *
+ * So: every case is written out, and the default THROWS. A page that wants to
+ * create a new kind of person has to say what it is here first.
+ *
+ * SCOPE MATTERS, NOT JUST TYPE. `/escrow-officers` and
+ * `/external-escrow-officers` both pass `escrow_officer` and differ only on
+ * scope. The internal roster is PCT branch units — `aayala@pct.com` with the
+ * lookup code `OCT`, mostly without names — maintained in SoftPro and synced
+ * down. Creating one of those as an external escrow contact would be wrong, so
+ * the internal page returns null and loses its Add New button.
+ */
+export function wizardPersonType(
+  typeFilter: string,
+  scope: 'internal' | 'external' | 'all',
+): CreatePersonUserType | null {
+  switch (typeFilter) {
+    case 'lender': return 'lender';
+    case 'mortgage_broker': return 'mortgage_broker';
+    case 'escrow': return 'escrow';
+    case 'realtor':
+    case 'agent':
+    case 'real_estate_agent': return 'realtor';
 
-function toPersonType(typeFilter: string): CreatePersonUserType {
-  if (typeFilter === 'escrow') return 'escrow';
-  if (typeFilter === 'lender') return 'lender';
-  if (typeFilter === 'mortgage_broker') return 'mortgage_broker';
-  return 'realtor';
+    // External escrow officers are people at outside escrow companies, which is
+    // SoftPro's `escrow` person type. Internal ones are our own branch units.
+    case 'escrow_officer': return scope === 'external' ? 'escrow' : null;
+
+    // Maintained in SoftPro and synced. There is no CreatePersonUserType for a
+    // title officer, and inventing one to satisfy a routing check is how a
+    // person ends up filed as the wrong thing.
+    case 'title_officer':
+    case 'sales_rep':
+      return null;
+
+    default:
+      throw new Error(
+        `wizardPersonType: no SoftPro person type mapped for "${typeFilter}". `
+        + 'Add an explicit case rather than letting it default — an unmapped '
+        + 'type used to become a realtor.',
+      );
+  }
 }
 
 function cName(c: Contact) {
@@ -82,6 +130,9 @@ export function ContactListPage({
   readOnly = false,
   emptyStateMessage = 'No contacts found',
 }: Props) {
+  // Throws for an unmapped type, so a new page cannot quietly create the wrong
+  // kind of person. null means this page does not create at all.
+  const createPersonType = wizardPersonType(typeFilter, scope);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -169,7 +220,7 @@ export function ContactListPage({
           {SYNC_USER_TYPE[typeFilter] && (
             <SyncButton endpoint="/api/contacts/sync" userType={SYNC_USER_TYPE[typeFilter]} onSuccess={fetchContacts} />
           )}
-          {!readOnly && (
+          {!readOnly && createPersonType && (
             <button onClick={() => { setEditContact(null); setModalOpen(true); }}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-[#1B2A4A] text-white rounded-lg hover:bg-[#243658] transition-colors">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
@@ -328,18 +379,18 @@ export function ContactListPage({
         <ContactFormModal open={modalOpen} onClose={() => setModalOpen(false)} onSuccess={fetchContacts}
           contact={editContact} defaultType={typeFilter} />
       )}
-      {!readOnly && !editContact && WIZARD_TYPES.has(typeFilter) && (
+      {/* Create goes through the wizard, always. The flat ContactFormModal is
+          kept for EDIT only: its Company box is free text with no lookup code,
+          which the create path requires, so it could never create anything the
+          wizard handles. Pages that cannot create show no button at all. */}
+      {!readOnly && !editContact && createPersonType && (
         <CreatePartyWizard
           open={modalOpen}
           onClose={() => setModalOpen(false)}
           onCreated={() => fetchContacts()}
-          userType={toPersonType(typeFilter)}
+          userType={createPersonType}
           label={title}
         />
-      )}
-      {!readOnly && !editContact && !WIZARD_TYPES.has(typeFilter) && (
-        <ContactFormModal open={modalOpen} onClose={() => setModalOpen(false)} onSuccess={fetchContacts}
-          contact={null} defaultType={typeFilter} />
       )}
       {showManagerColumn && mgrTarget && (
         <ManagerAssignModal open={mgrModalOpen} managerId={mgrTarget.id} managerName={mgrTarget.name}

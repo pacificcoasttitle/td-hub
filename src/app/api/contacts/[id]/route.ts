@@ -5,7 +5,6 @@ import { getContactById } from '@/lib/domain/contacts/service';
 import { db } from '@/lib/db/client';
 import { contacts } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { updateUser } from '@/lib/integrations/softpro';
 import { ALL_CONTACT_TYPES, INTERNAL_TYPES } from '@/lib/domain/contacts/contact-constants';
 
 const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin'];
@@ -77,27 +76,37 @@ export async function PUT(
     const effectiveType = data.userType ?? existing.softproUserType ?? '';
     const isInternal = INTERNAL_TYPES.has(effectiveType);
 
+    // ─── EDITS THAT PUSH TO SOFTPRO ARE BLOCKED ─────────────────────────────
+    //
+    // The payload here was built from the REQUEST BODY, and the edit form has
+    // no address or zip field AT ALL — not empty, absent. So `data.address` was
+    // undefined on every request, `?? ''` made it an empty string, and
+    // UpdateUser overwrote whatever SoftPro held with nothing.
+    //
+    // Evidenced on contact #12058, read from SoftPro's own lookup table:
+    //   Address1 "3700 Campus Drive #107"  City "Newport Beach"  Zip "92660"
+    // and our row holds none of it. 16,297 contacts push on edit, and every one
+    // would lose Address1 and Zip — plus City on 137 and State on 133 where our
+    // row is also empty.
+    //
+    // Nothing has been destroyed. There is no `update_user` call in the log,
+    // all time — this blocks the path before the first one. The edit button was
+    // made visible on 2026-09-09, which turned a latent path into a one-click
+    // one; that is what made this urgent rather than theoretical.
+    //
+    // THE FIX is read-modify-write: fetch SoftPro's current record, merge the
+    // changed fields into it, send everything else back byte-for-byte. Until
+    // that lands, an edit that would push is refused rather than silently
+    // destructive.
+    //
+    // Internal types (title_officer, escrow_officer, sales_rep) never pushed,
+    // so those edits are untouched and still work.
     if (!isInternal) {
-      const spPayload = {
-        FirstName: data.firstName,
-        LastName: data.lastName,
-        Phone: data.phone ?? '',
-        Email: data.email ?? '',
-        ClientLookupCode: lookupCode,
-        CompanyLookupCode: data.companyLookupCode ?? '',
-        Address1: data.address ?? '',
-        City: data.city ?? '',
-        State: data.state ?? '',
-        Zip: data.zip ?? '',
-      };
-
-      const spResult = await updateUser(spPayload);
-      if (!spResult.success) {
-        return NextResponse.json(
-          { error: 'SoftPro UpdateUser failed', detail: spResult.error?.message },
-          { status: 502 },
-        );
-      }
+      return NextResponse.json({
+        error: 'Editing this contact is temporarily disabled.',
+        detail: 'Saving would erase the address SoftPro holds for this contact. '
+          + 'See docs/tickets/CONTACT_EDIT_BLANKS_SOFTPRO_ADDRESS.md',
+      }, { status: 503 });
     }
 
     await db.update(contacts).set({

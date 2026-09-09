@@ -36,6 +36,13 @@ export interface PrelimAutoDeliveryResult {
   needsManualDelivery: boolean;
   reason?: string;
   messageId?: string;
+  /**
+   * The send succeeded but a proof row did not get written. Carried here and
+   * onto the attempt log because the previous version dropped it: the writeback
+   * failed 1,082 times, downgraded itself to a `warning` string, and nothing
+   * read that string — so `outcome: 'delivered'` was recorded either way.
+   */
+  writebackWarning?: string;
 }
 
 const AUTO_DELIVERY_ACTOR = {
@@ -152,6 +159,7 @@ async function logAttempt(input: PrelimAutoDeliveryInput, result: PrelimAutoDeli
       document_created_at: input.documentCreatedAt.toISOString(),
       triggered_by: input.triggeredBy,
       message_id: result.messageId,
+      writeback_warning: result.writebackWarning ?? null,
     } as Record<string, unknown>,
   });
 }
@@ -232,8 +240,11 @@ export async function maybeAutoDeliverPrelim(input: PrelimAutoDeliveryInput): Pr
     return finish(input, {
       outcome: 'delivered',
       sent: true,
+      // A proof row that did not get written still needs a human: the client
+      // has the prelim, but nothing in the hub says so.
       needsManualDelivery: false,
       messageId: delivery.messageId,
+      writebackWarning: delivery.warning,
     });
   } catch (err) {
     // A refused document is not a failed send — it never left. Distinct outcome

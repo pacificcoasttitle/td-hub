@@ -204,7 +204,7 @@ async function handleGenericDispatch(
 
     for (const recipient of targets) {
       if (channel === 'email' && recipient.email) {
-        const result = await sendEmail({ to: recipient.email, subject, html });
+        const result = await sendEmail({ orderId, to: recipient.email, subject, html });
         const status = result.success ? 'sent' : 'failed';
 
         try {

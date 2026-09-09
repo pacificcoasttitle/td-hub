@@ -72,6 +72,54 @@ been `max-h-60` since April; the section grew into it at seven children on
 `docs/tickets/REACHABILITY_SWEEP.md` for the wider pattern — four capabilities
 in one week that existed and could not be reached.
 
+## A projection is not the row (2026-09-10)
+
+Five times now, a conclusion about the data has been drawn from a **subset of
+columns that a script happened to select**, and stated as a fact about the
+record. The query was correct every time. The reasoning on top of it was wrong
+every time, because the projection was mistaken for the thing itself.
+
+| # | The claim | What was actually selected | The truth |
+|---|---|---|---|
+| 1 | "The contact book is at 6% coverage" | what one sync run *reads* | the table held 91%; the gap was 1,476, not 18,000 |
+| 2 | "2,609 codeless duplicates" | a wrong denominator | actual collisions: zero |
+| 3 | "4,630 distinct person codes from 18,700 rows" | `Filter: LookupCode`, the *company* code | the person code gives 17,163 |
+| 4 | "Our row holds none of Gerard's address" | a SELECT with no `address1`/`city`/`state`/`zip` | the row had the full address |
+| 5 | "All 120 of these contacts have no name" | `first_name`, `last_name` — printing `(no name)` when both were null | **106 of the 120 are named**; the name is in `full_name` |
+
+**Where the fifth one landed is the point.** It was in the dry run whose entire
+purpose was to decide whether to write to 74 live rows — and it was used to
+answer the gating question, "are these contacts reachable from anywhere a
+person can edit them?" The display artefact said nameless, the nameless-row
+filter hides nameless rows on two pages, so the risk looked closed. It was not:
+86 of the 120 are listed and editable today, 79 of them on a page that does not
+apply that filter at all. **A decision about writing to production nearly
+turned on how a `console.log` had been written.**
+
+So:
+
+- **When a claim is about a record, select the record.** `SELECT *`, or name
+  every column the claim depends on. The cost of over-selecting is a wider
+  table in the terminal; the cost of under-selecting is a confident wrong
+  answer that survives review because the SQL is valid.
+- **Never print a fallback string for absence you did not check.** `|| '(no
+  name)'` asserts something the query was never asked. If a field was not
+  selected, print nothing for it — a blank column invites the question, a
+  fallback answers it wrongly.
+- **A cache is a projection too.** The first contact scan kept four fields and
+  dropped the addresses — built *while investigating a bug about missing
+  addresses*. The re-scan keeps `address1`, `city`, `state`, `zip`, `email`,
+  and the control (`distinct/rows > 0.80`) aborts a scan keyed on the wrong
+  column, which is what caught #3.
+- **Check the filter's definition, not its name.** `namedContactFilter` checks
+  `full_name` OR `first_name` OR `last_name`. Reasoning about it from the two
+  columns a different script had selected is how #5 and the reachability
+  conclusion both went wrong at once.
+
+The tell, in all five: the claim was about a *thing* ("the row", "the
+contacts", "the book") while the evidence was about a *view*. When those two
+nouns differ, stop and re-query.
+
 ## Decide vs ask (2026-08-27)
 
 DECIDE ALONE — do not ask:

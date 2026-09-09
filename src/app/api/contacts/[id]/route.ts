@@ -8,6 +8,12 @@ import { contacts } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { ALL_CONTACT_TYPES, INTERNAL_TYPES } from '@/lib/domain/contacts/contact-constants';
 
+/**
+ * Lookup codes that are a UI button's text, not an identity. Lower-cased; the
+ * six affected rows use three different casings of two words plus 'add'.
+ */
+const SUSPECT_LOOKUP_CODES = new Set(['new', 'add', 'upd', 'update', 'edit', 'save', 'submit', 'create']);
+
 const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin'];
 
 const updateSchema = z.object({
@@ -74,6 +80,34 @@ export async function PUT(
     const data = parsed.data;
     const fullName = `${data.lastName}, ${data.firstName}`;
     const lookupCode = existing.softproLookupCode ?? '';
+
+    // ─── A LOOKUP CODE THAT IS A BUTTON LABEL ────────────────────────────────
+    //
+    // Six contacts carry `New`, `NEW`, `new`, `Add`, `UPD` or `upd` in
+    // softpro_lookup_code — a UI button's text landed in the identity field.
+    // They arrived through the READ sync (source_system 'softpro', source_id
+    // equal to the same word), between 2026-06-13 and 2026-07-12. We did not
+    // write them: our first create_user call was 2026-09-01, and there was no
+    // SoftPro write operation of any kind in that window.
+    //
+    // None of the six codes exist in SoftPro today — an 18,705-row scan of the
+    // three person feeds has no match — so UpdateUser against one of them would
+    // at best fail and at worst act on some other record that has since taken
+    // the name. Judith Beserra ('New') is on 125 orders, so this is a live
+    // contact, not a stray row.
+    //
+    // Refusing is the conservative move while the source is unexplained: the
+    // operator gets a clear reason instead of a silent 502 or a write to the
+    // wrong record. Remove this the moment the six are given real codes —
+    // docs/tickets/BUTTON_LABEL_LOOKUP_CODES.md.
+    if (SUSPECT_LOOKUP_CODES.has(lookupCode.trim().toLowerCase())) {
+      return NextResponse.json({
+        error: 'This contact cannot be edited yet',
+        detail: `Its SoftPro ID is "${lookupCode}", which is a button label rather `
+          + 'than a real lookup code, so an update would not reach the right record '
+          + 'in SoftPro. Reported to the team — please leave this contact alone for now.',
+      }, { status: 409 });
+    }
     const effectiveType = data.userType ?? existing.softproUserType ?? '';
     const isInternal = INTERNAL_TYPES.has(effectiveType);
 

@@ -87,6 +87,24 @@ export async function handleOrderConfirmation(
     record: attachmentRecord,
   } = await buildAttachments(orderId);
 
+  /*
+    WHO THE CONFIRMATION WENT TO, recorded alongside WHAT IT CARRIED.
+
+    The outstanding-documents alert has to tell a person which customer is
+    still owed documents. Deriving that later from the order would answer "who
+    is the client now", which is not the same question — parties get corrected
+    after a send. This records who was actually written to, at the time.
+
+    `opener` is the client contact resolved for the TO line; when the order has
+    no client contact it is null, `clientRecipientPresent` is false, and the
+    alert says so rather than inventing a recipient.
+  */
+  const sendRecord = {
+    ...attachmentRecord,
+    clientName: opener?.name ?? null,
+    clientEmail: opener?.email ?? null,
+  };
+
   const address = order.property.addressFormatted !== '—'
     ? order.property.addressFormatted
     : (formatOrderAddress({
@@ -169,7 +187,7 @@ export async function handleOrderConfirmation(
         provider: 'sendgrid',
         errorMessage: 'Confirmation had zero TO recipients after resolver (unexpected)',
         sentAt: null,
-        metadata: attachmentRecord,
+        metadata: sendRecord,
       });
     } catch { /* logging must never mask the failure */ }
     // Do NOT return quietly — outbox must not mark published/success for a non-send.
@@ -223,7 +241,7 @@ export async function handleOrderConfirmation(
         errorMessage: result.error?.message
           ?? (missingClient ? 'Sent without client recipient — openorders CC only guaranteed delivery' : null),
         sentAt: result.success ? new Date() : null,
-        metadata: attachmentRecord,
+        metadata: sendRecord,
       });
     }
   } catch { /* notification logging must never break the send flow */ }

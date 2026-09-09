@@ -4,7 +4,12 @@ import { documents } from '@/lib/db/schema';
 import { downloadFile, getSignedUrl } from '@/lib/integrations/s3/client';
 import { sendEmail, type SendGridAttachment } from '@/lib/integrations/sendgrid/client';
 import { applyVisibility, getOrderReadModel } from '@/lib/domain/orders/read-model';
-import { checkPrelimPdf, type PrelimContentAssessment } from './prelim-content-check';
+import { extractPdfText } from '@/lib/tessa/pdf-extract';
+import {
+  identifyDocument,
+  describeDocumentType,
+  type DocumentIdentity,
+} from '@/lib/domain/documents/document-identity';
 import {
   ORANGE_SOFT,
   ORANGE_TINT,
@@ -100,8 +105,8 @@ interface PrelimDocumentAttachment {
    * PDF is attached either way, so this degrades softly.
    */
   downloadUrl: string | null;
-  /** Content gate result — see prelim-content-check.ts. */
-  contentCheck: PrelimContentAssessment;
+  /** What the document IS — see document-identity.ts. */
+  identity: DocumentIdentity;
   attachment: SendGridAttachment;
 }
 
@@ -299,7 +304,26 @@ async function loadPrelimPdfAttachment(orderId: number): Promise<PrelimDocumentA
 
   // Look at what the document actually IS before it can be auto-delivered.
   // The buffer is already in hand here, so this costs no extra download.
-  const contentCheck = await checkPrelimPdf(download.data);
+  //
+  // This used to be a marker COUNT — three of seven title-paperwork phrases
+  // and the document passed. Every document in an escrow file has that
+  // vocabulary, so on 2026-08-11 and 2026-08-12 two internal Order Summaries
+  // went to outside escrow companies as preliminary title reports. It now asks
+  // what the document is, and refuses when the answer is anything else.
+  let identity: DocumentIdentity;
+  try {
+    identity = identifyDocument(await extractPdfText(download.data));
+  } catch {
+    // A PDF we cannot read is a document we cannot identify. That is a refusal,
+    // not a pass — the whole point is that not knowing is a safe answer.
+    identity = {
+      type: 'unidentified',
+      matchedOn: '',
+      reason: 'no_extractable_text',
+      candidates: [],
+      textChars: 0,
+    };
+  }
 
   // 7 days is the SigV4 maximum. A link that outlives the recipient's attention
   // span is the point; if it does expire, the attached PDF still works, which is
@@ -315,7 +339,7 @@ async function loadPrelimPdfAttachment(orderId: number): Promise<PrelimDocumentA
   return {
     documentId: prelim.id,
     downloadUrl: signed.success ? (signed.data ?? null) : null,
-    contentCheck,
+    identity,
     filename: prelim.filename,
     contentType: prelim.contentType ?? 'application/pdf',
     sizeBytes: download.data.length,
@@ -379,19 +403,26 @@ export async function sendPrelimDeliveryEmail(
 
   // The gate. Refuse BEFORE building or sending anything, so a wrong document
   // cannot leave the building on the automatic path.
-  if (options.requirePrelimContent && !prelimAttachment.contentCheck.passed) {
+  // POSITIVE IDENTIFICATION, NOT ABSENCE OF SUSPICION. The document must read
+  // as a preliminary title report; anything else — a policy, an order summary,
+  // a scan we cannot extract — is refused and routed to a human.
+  if (options.requirePrelimContent
+      && prelimAttachment.identity.type !== 'clta_preliminary_report') {
     console.warn('[prelim-delivery] refused: document does not read as a prelim', {
       orderId,
       documentId: prelimAttachment.documentId,
       filename: prelimAttachment.filename,
-      reason: prelimAttachment.contentCheck.reason,
-      matchedMarkers: prelimAttachment.contentCheck.matched,
-      textChars: prelimAttachment.contentCheck.textChars,
+      identifiedAs: prelimAttachment.identity.type,
+      reason: prelimAttachment.identity.reason ?? 'wrong_document_type',
+      matchedOn: prelimAttachment.identity.matchedOn,
+      candidates: prelimAttachment.identity.candidates,
+      textChars: prelimAttachment.identity.textChars,
     });
     throw new PrelimContentCheckFailedError(
-      prelimAttachment.contentCheck.reason,
+      `document is ${describeDocumentType(prelimAttachment.identity.type)}`
+      + (prelimAttachment.identity.reason ? ` (${prelimAttachment.identity.reason})` : ''),
       prelimAttachment.filename,
-      prelimAttachment.contentCheck.matched,
+      prelimAttachment.identity.candidates,
     );
   }
 

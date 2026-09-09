@@ -209,6 +209,16 @@ describe('wiring', () => {
     expect(migration).toContain('openorders@pct.com');
   });
 
+  it('is previewable in Admin, where its recipients are edited', () => {
+    // An unmapped slug degrades to a "no preview available" panel rather than
+    // erroring, so this is not a crash guard — it is that the one notification
+    // an operator is expected to configure should be visible before they do.
+    const preview = readFileSync(
+      join(root, 'src/app/api/admin/notifications/types/[slug]/preview/route.ts'), 'utf8',
+    );
+    expect(preview).toContain(`'${OUTSTANDING_ALERT_EVENT_TYPE}'`);
+  });
+
   it('is registered as a job and scheduled as a cron', () => {
     const route = readFileSync(join(root, 'src/app/api/jobs/run/route.ts'), 'utf8');
     const vercel = readFileSync(join(root, 'vercel.json'), 'utf8');

@@ -54,10 +54,10 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
   {
     key: 'open_order_confirmation_timeout_minutes',
     label: 'Open Order Confirmation Timeout (minutes)',
-    description: 'If TitlePoint legal_vesting/tax/grant_deed are not all completed within this many minutes, enqueue the confirmation email without the missing documents instead of waiting forever.',
+    description: 'Outer bound on how long the confirmation waits for TitlePoint. The confirmation sends as soon as legal_vesting AND tax are both terminal; if they are not, it sends anyway after this many minutes, WITHOUT the missing documents. Grant deed never gates the confirmation — it is attached if it happens to be ready, and its absence is why a grant deed can reach SoftPro but not the customer. Raising this delays ONLY orders that were going to send incomplete: an order whose searches finish in four minutes still confirms in four minutes. Measured over 236 searches, 10 minutes caught 66.5% of legal vesting and 25 caught 95.3%; p99 is 61 minutes, so no value short of an hour catches everything. See docs/tickets/CONFIRMATION_SENDS_BEFORE_DOCUMENTS_EXIST.md — this is a stopgap on a gate the pipeline rebuild removes.',
     category: 'Email',
     type: 'number',
-    defaultValue: '10',
+    defaultValue: '25',
   },
   {
     key: 'confirmation_buyer_agent_recipient_enabled',

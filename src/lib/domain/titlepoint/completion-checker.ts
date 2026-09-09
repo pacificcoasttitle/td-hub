@@ -21,7 +21,27 @@ export const TERMINAL_TITLEPOINT_STATUSES = new Set([
   'failed',
 ]);
 
-const DEFAULT_CONFIRMATION_TIMEOUT_MINUTES = 10;
+/*
+  25, not 10.
+
+  10 was set below the tail of the distribution it is meant to bound. Measured
+  over 236 completed legal-vesting searches: p50 7.1 min, p75 11.3, p90 15.6,
+  p95 24.8, p99 61.0. So **34% of searches ran past the timeout**, the clock won,
+  and the confirmation went out mid-search — 18.9% of orders had their grant
+  deed created after their email was sent, 19.6% their legal vesting.
+
+  25 catches 95.3%. It costs orders that finish fast NOTHING: the branch above
+  returns ready/'complete' as soon as both gated searches are terminal, and it
+  returns before this value is read. The clock is only consulted when something
+  is still missing. So the only orders affected are ones that would have sent
+  incomplete — 68 of 236 now send complete instead, and 11 still send incomplete
+  but 15 minutes later than they used to.
+
+  This is a stopgap. See docs/tickets/CONFIRMATION_SENDS_BEFORE_DOCUMENTS_EXIST.md
+  and the note further down: the pipeline rebuild removes the clock entirely, so
+  there is no timeout to size. Do not treat a better number as the fix.
+*/
+const DEFAULT_CONFIRMATION_TIMEOUT_MINUTES = 25;
 
 export interface CompletionCheckResult {
   complete: boolean;

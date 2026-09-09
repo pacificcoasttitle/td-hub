@@ -136,6 +136,25 @@ incomplete:
 but 25 is the answer to the question asked. No value short of an hour catches
 everything; p99 is 61 minutes.
 
+**The code default is now 25 and that does not change production.** There is a
+stored `settings` row (`value: 10`, last written 2026-07-23), and a stored value
+always wins over the registered default, so the default only governs a fresh
+environment. The live lever is the row:
+
+```sql
+UPDATE settings SET value = '25', updated_at = now()
+WHERE key = 'open_order_confirmation_timeout_minutes';
+```
+
+Or Admin → Settings → Email, which is the same thing and needs no deploy.
+
+**Deliberately not applied yet.** Raising the timeout is only correct if the
+race is real, and the confirming artefact — the CC'd copy of `20021993-GLT`,
+which should carry neither document and should carry the "separately" sentence —
+has not been read yet. If that message has attachments the timestamps say it
+cannot have, this whole analysis is wrong and the change would be wrong with it.
+Apply on confirmation, not before.
+
 ## 2. Record what the email carried — BUILT
 
 `notification_logs.metadata` was **null on all 961 sends**. The only available
@@ -167,16 +186,32 @@ move a number, not to have worked.
 
 ## 3. "Will send separately" is a promise nothing keeps
 
-Not decided here — it is customer-facing copy. Two honest options:
+**Decided: make the copy accurate. Do not build a follow-up send.**
 
-- **Make it true.** A follow-up send when the outstanding document lands. The
-  existing design note in `confirmation-documents.ts` argues against a second
-  message titled "Confirmation"; a distinct "Title documents for <file>" is not
-  that, and would keep the promise.
-- **Make it accurate.** Say what actually happens — the documents follow by
-  hand — or drop the sentence and let the absence speak.
+A follow-up send is new machinery — which documents, to whom, deduped against
+the existing double-send guard — on the exact code path the pipeline rebuild
+removes. A dedupe rule built for a stopgap is the kind of thing that outlives
+its purpose. So the sentence gets corrected, not honoured.
 
-Leaving it is the worst of the three: the customer reads it and waits.
+**Also decided: name the grant deed in that sentence.** Today its absence is
+silent, which is why this reached us from the team instead of from a customer.
+A customer who is told what is coming will chase it — and given
+`notification_logs.metadata` was null on all 961 sends, that chase was the only
+monitoring this had.
+
+### Exact wording is BLOCKED on one operational question
+
+> **Does anyone at PCT send those documents by hand today?**
+
+- **If yes** — "our team will send these to you shortly" is true, and that is
+  the wording.
+- **If no** — then the sentence is not a copy problem. **45 orders in 14 days
+  had their legal vesting missing from the confirmation and, on that answer,
+  nobody ever sent it.** Better words would paper over an operational gap.
+  Escalate it as one.
+
+Nothing is reworded until that is answered, because the two answers produce
+different sentences and only one of them is honest.
 
 ---
 

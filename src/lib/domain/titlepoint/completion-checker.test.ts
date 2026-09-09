@@ -92,6 +92,43 @@ describe('getConfirmationReadiness / maybeEnqueueConfirmation (OC-3 legacy gate)
     }));
   });
 
+  /*
+    THE CLAIM A TIMEOUT RECOMMENDATION RESTS ON.
+
+    Raising the timeout from 10 to 25 minutes is only safe because it cannot
+    delay an order whose searches finish quickly — completion is checked first
+    and returns before the timeout is read. That is the difference between
+    "sends when ready, with an outer bound" and "waits 25 minutes".
+
+    Asserted by running the same fast order under an absurd timeout: if anyone
+    ever reorders those branches so the clock is consulted first, every order
+    starts waiting for the full window and this fails.
+  */
+  it('a completed order confirms immediately no matter how large the timeout is', async () => {
+    getSettingMock.mockImplementation(async (key: string) => {
+      if (key === 'open_order_confirmation_enabled') return 'true';
+      if (key === 'open_order_confirmation_timeout_minutes') return '1440';
+      return null;
+    });
+
+    const justStarted = new Date();
+    selectLimitMock
+      .mockReturnValueOnce(chainSelect([]))
+      .mockReturnValueOnce(chainSelect([{ emailStatus: 'pending' }]))
+      .mockReturnValueOnce(chainSelect([
+        { searchType: 'legal_vesting', status: 'completed', createdAt: justStarted },
+        { searchType: 'tax', status: 'completed', createdAt: justStarted },
+      ]));
+
+    const { maybeEnqueueConfirmation } = await import('./completion-checker');
+
+    expect(await maybeEnqueueConfirmation(50)).toBe(true);
+    expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+      // 'complete', not 'timeout' — the clock was never reached.
+      payload: expect.objectContaining({ enqueueReason: 'complete' }),
+    }));
+  });
+
   it('enqueues when Tax+LV are terminal even if one failed (no success required)', async () => {
     selectLimitMock
       .mockReturnValueOnce(chainSelect([]))

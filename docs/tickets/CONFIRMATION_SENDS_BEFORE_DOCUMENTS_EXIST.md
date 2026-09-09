@@ -184,7 +184,58 @@ versus listing-confirmed on the SoftPro side.
 **This is deliberately first.** Without it a timeout change can only be shown to
 move a number, not to have worked.
 
-## 3. "Will send separately" is a promise nothing keeps
+## 3. "Will send separately" — now kept, by an internal alert — BUILT
+
+**Gerard: nobody sends these today.** So the sentence was not a copy problem
+with an operational footnote; it was a promise with nothing behind it, on 60 of
+244 confirmations in 90 days.
+
+Built: `order.documents.outstanding`, an **internal** alert that tells PCT's
+team what to forward and to whom. Not a customer-facing follow-up — that would
+be new machinery on the code path the rebuild deletes, and its dedupe rule
+would outlive its purpose.
+
+### It fires on arrival, not on send
+
+At send time the document does not exist, so an alert then is unactionable —
+the reader has to remember to come back. Firing when the document lands means
+opening the alert and forwarding it in the same minute. The wait is short:
+
+```
+97 documents that arrived after their confirmation
+p50  1.0 min      p95  4.6 min      max  6.6 min
+```
+
+### It has a fallback, because "late" is not the only failure
+
+Of the 60 orders that sent with something outstanding, **47 got the document
+later and 13 never got it at all** — the search returned nothing or failed.
+Waiting only for arrivals would leave the worst case as the silent one, which
+is how this defect survived. After **2 hours** (18x the slowest observed
+arrival) the alert fires anyway and says the document was never produced.
+
+### What it will not do
+
+It does not report a grant deed that never came. A missing grant deed usually
+means no qualifying deed exists — nothing is coming, nothing was promised, and
+there is nothing to do. That is the distinction `CONFIRMATION_OPTIONAL_DOC_TYPES`
+already draws, read rather than reinvented. A grant deed that *does* turn up is
+still forwarded, which is the case the team originally reported.
+
+### The sentence
+
+> Our team will send the remaining title documents for this property to you shortly.
+
+"our team" because a person does this now. "shortly" is supported by the
+median of 1.0 minutes; a *number* still is not, and the test bans units while
+allowing the adverb. **The sentence and the alert are one feature** — disabling
+the alert in Admin returns the copy to being a lie, and both files say so.
+
+Volume: roughly 60 alerts per 90 days, under one a day.
+
+---
+
+## 3a. Original options, for the record
 
 **Decided: make the copy accurate. Do not build a follow-up send.**
 
@@ -199,19 +250,13 @@ A customer who is told what is coming will chase it — and given
 `notification_logs.metadata` was null on all 961 sends, that chase was the only
 monitoring this had.
 
-### Exact wording is BLOCKED on one operational question
+### The operational question, answered
 
-> **Does anyone at PCT send those documents by hand today?**
+> **Does anyone at PCT send those documents by hand today?** — **No.**
 
-- **If yes** — "our team will send these to you shortly" is true, and that is
-  the wording.
-- **If no** — then the sentence is not a copy problem. **45 orders in 14 days
-  had their legal vesting missing from the confirmation and, on that answer,
-  nobody ever sent it.** Better words would paper over an operational gap.
-  Escalate it as one.
-
-Nothing is reworded until that is answered, because the two answers produce
-different sentences and only one of them is honest.
+Which is why the answer was an alert and not a rewrite. Had anyone been sending
+them, "our team will send these to you shortly" would already have been true
+and this would have been a copy change. It was not.
 
 ---
 

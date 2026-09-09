@@ -64,6 +64,24 @@ export function hasOutstandingDocuments(attachedCategories: readonly string[]): 
  * three specific ones promises three specific ones. There is no measured
  * turnaround to honour either, and an unkept "within 24 hours" is worse than no
  * promise at all. "will send" states what happens; it is not an apology.
+ *
+ * ─── THIS SENTENCE WAS A LIE FOR THE WHOLE OF ITS LIFE ──────────────────────
+ *
+ * It said Pacific Coast Title "will send the title documents separately", and
+ * nothing did. No follow-up existed in code, and Gerard confirmed none existed
+ * in anyone's routine either — 60 of 244 confirmations over 90 days carried
+ * this sentence and no documents ever followed.
+ *
+ * It is true now because `outstanding-documents-alert.ts` tells the team what
+ * to send and to whom, the moment the document lands. **The sentence and that
+ * alert are one feature.** If the alert is ever disabled in Admin, this goes
+ * back to being a promise nothing keeps — do not turn one off and leave the
+ * other on.
+ *
+ * "our team" over "Pacific Coast Title" is the point of the rewrite: a person
+ * does this, and the customer should expect a person. "shortly" is supported —
+ * the median outstanding document arrives 1.0 minutes after the confirmation
+ * and the slowest on record took 6.6.
  */
 export const OUTSTANDING_DOCUMENTS_SENTENCE =
-  'Pacific Coast Title will send the title documents for this property separately.';
+  'Our team will send the remaining title documents for this property to you shortly.';

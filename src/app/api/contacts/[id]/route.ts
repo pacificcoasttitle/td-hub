@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { getContactById } from '@/lib/domain/contacts/service';
+import { updateUser } from '@/lib/integrations/softpro';
 import { db } from '@/lib/db/client';
 import { contacts } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -76,37 +77,52 @@ export async function PUT(
     const effectiveType = data.userType ?? existing.softproUserType ?? '';
     const isInternal = INTERNAL_TYPES.has(effectiveType);
 
-    // ─── EDITS THAT PUSH TO SOFTPRO ARE BLOCKED ─────────────────────────────
+    // ─── THE PAYLOAD IS THE STORED ROW MERGED WITH THE CHANGES ──────────────
     //
-    // The payload here was built from the REQUEST BODY, and the edit form has
-    // no address or zip field AT ALL — not empty, absent. So `data.address` was
-    // undefined on every request, `?? ''` made it an empty string, and
-    // UpdateUser overwrote whatever SoftPro held with nothing.
+    // It used to be built from the REQUEST BODY alone:
     //
-    // Evidenced on contact #12058, read from SoftPro's own lookup table:
-    //   Address1 "3700 Campus Drive #107"  City "Newport Beach"  Zip "92660"
-    // and our row holds none of it. 16,297 contacts push on edit, and every one
-    // would lose Address1 and Zip — plus City on 137 and State on 133 where our
-    // row is also empty.
+    //     Address1: data.address ?? '',   Zip: data.zip ?? '',
     //
-    // Nothing has been destroyed. There is no `update_user` call in the log,
-    // all time — this blocks the path before the first one. The edit button was
-    // made visible on 2026-09-09, which turned a latent path into a one-click
-    // one; that is what made this urgent rather than theoretical.
+    // and the edit form had no address or zip field AT ALL — not empty,
+    // absent. So every edit sent four empty strings and UpdateUser overwrote
+    // whatever SoftPro held. Evidenced on contact #12058: SoftPro holds
+    // "3700 Campus Drive #107, Newport Beach, CA 92660" and our row held none
+    // of it. 16,297 contacts would have lost Address1 and Zip on their next
+    // edit. Nothing was destroyed only because no update_user call had ever
+    // run.
     //
-    // THE FIX is read-modify-write: fetch SoftPro's current record, merge the
-    // changed fields into it, send everything else back byte-for-byte. Until
-    // that lands, an edit that would push is refused rather than silently
-    // destructive.
+    // THE DEFECT WAS TREATING A PARTIAL FORM AS A COMPLETE RECORD. SoftPro's
+    // UpdateUser replaces the whole contact, so anything the form cannot send
+    // must come from the row we already hold — which is fetched a few lines
+    // above for the existence check, so this costs nothing.
     //
-    // Internal types (title_officer, escrow_officer, sales_rep) never pushed,
-    // so those edits are untouched and still work.
+    // Legacy confirmed the same design: full payload every time, gaps filled
+    // from their own stored row, never a diff and never a vendor read.
+    //
+    // `?? ''` remains only as the last resort for a field neither the form nor
+    // our row has — 120 contacts today, being backfilled separately, and the
+    // form now requires address/city/state/zip so no new one can be created.
     if (!isInternal) {
-      return NextResponse.json({
-        error: 'Editing this contact is temporarily disabled.',
-        detail: 'Saving would erase the address SoftPro holds for this contact. '
-          + 'See docs/tickets/CONTACT_EDIT_BLANKS_SOFTPRO_ADDRESS.md',
-      }, { status: 503 });
+      const spPayload = {
+        FirstName: data.firstName,
+        LastName: data.lastName,
+        Phone: data.phone ?? existing.phone ?? '',
+        Email: data.email ?? existing.email ?? '',
+        ClientLookupCode: lookupCode,
+        CompanyLookupCode: data.companyLookupCode ?? existing.flookupCode ?? '',
+        Address1: data.address ?? existing.address1 ?? '',
+        City: data.city ?? existing.city ?? '',
+        State: data.state ?? existing.state ?? '',
+        Zip: data.zip ?? existing.zip ?? '',
+      };
+
+      const spResult = await updateUser(spPayload);
+      if (!spResult.success) {
+        return NextResponse.json(
+          { error: 'SoftPro UpdateUser failed', detail: spResult.error?.message },
+          { status: 502 },
+        );
+      }
     }
 
     await db.update(contacts).set({

@@ -85,3 +85,57 @@ it deletes whatever we never stored. The rule this belongs to: **ask what the
 mechanism reads, not what the change looks like.** The change looked like
 "update a phone number"; the mechanism reads the whole record and writes the
 whole record back.
+
+---
+
+## Fixed 2026-09-10: merge with the stored row
+
+**Legacy's design, confirmed by asking them:** full payload every time, gaps
+filled from their own stored row, never a diff and never a vendor read.
+
+```ts
+Address1: data.address ?? existing.address1 ?? '',
+City:     data.city    ?? existing.city     ?? '',
+State:    data.state   ?? existing.state    ?? '',
+Zip:      data.zip     ?? existing.zip      ?? '',
+```
+
+`existing` is already fetched a few lines above for the existence check, so the
+merge costs nothing. **The defect was treating a partial form as a complete
+record**; SoftPro's `UpdateUser` replaces the whole contact, so anything the
+form cannot send has to come from the row we hold.
+
+**And the form now has the fields it was missing.** `address` and `zip` were
+absent from `ContactRecord` entirely, and `city`/`state` were optional.
+All four are now present, **required**, and prefilled from the stored row —
+which is exactly why legacy never hit this: their edit screen required them, so
+no contact could be saved without them.
+
+`Contact` in the list page also gained `address1` and `zip`. The API had been
+returning whole contact rows all along; they were simply never declared, which
+is why there was no address to prefill.
+
+## Closed by avoidance, not answered: does omitting a field preserve it?
+
+Whether SoftPro's `UpdateUser` preserves a field that is omitted, or blanks it,
+is **unknown and will stay unknown**. Legacy cannot answer it — they always sent
+every field — and the vendor has not been asked.
+
+It no longer matters. With the stored-row merge, the required form fields, and
+the backfill of the remaining contacts, **an empty address is never sent**.
+
+Recorded so nobody reopens this hunting for a vendor reply that is not coming.
+The question is not answered; it is unreachable.
+
+## Remaining: contacts where we hold nothing either
+
+```
+contacts an edit would push : 16297
+   we hold address1         : 15620
+   we hold zip              : 15952
+   NEITHER                  :   120
+```
+
+120 rows, 0.7%. Being backfilled from SoftPro's own data as a one-time write —
+see the dry run in that work. Until it lands they fall to `?? ''`, which is why
+the backfill is part of closing this and not a separate nicety.

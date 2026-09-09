@@ -10,14 +10,22 @@ export interface ContactRecord {
   phone: string;
   cell: string;
   companyName: string;
+  /**
+   * Address and zip were absent from this form entirely — not empty, missing —
+   * so `data.address` was undefined on every request and the update blanked
+   * SoftPro's copy. Legacy's edit screen required both, which is why legacy
+   * never had this problem.
+   */
+  address: string;
   city: string;
   state: string;
+  zip: string;
   licenseNo: string;
   contactType: string;
   isActive: boolean;
 }
 
-const EMPTY: ContactRecord = { firstName: '', lastName: '', email: '', phone: '', cell: '', companyName: '', city: '', state: '', licenseNo: '', contactType: '', isActive: true };
+const EMPTY: ContactRecord = { firstName: '', lastName: '', email: '', phone: '', cell: '', companyName: '', address: '', city: '', state: '', zip: '', licenseNo: '', contactType: '', isActive: true };
 
 const TYPE_OPTIONS = [
   { value: 'title_officer', label: 'Title Officer' },
@@ -101,9 +109,13 @@ export function ContactFormModal({ open, onClose, onSuccess, contact, defaultTyp
             <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">Cell</label><input className={IN} value={form.cell} onChange={e => set('cell', e.target.value)} /></div>
           </div>
           <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">Company</label><input className={IN} value={form.companyName} onChange={e => set('companyName', e.target.value)} /></div>
+          {/* Required, as legacy's screen was. SoftPro's UpdateUser replaces the
+              whole contact, so a blank here erases what it holds. */}
+          <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">Address *</label><input className={IN} value={form.address} onChange={e => set('address', e.target.value)} required /></div>
+          <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">ZIP *</label><input className={IN} value={form.zip} onChange={e => set('zip', e.target.value)} required /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">City</label><input className={IN} value={form.city} onChange={e => set('city', e.target.value)} /></div>
-            <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">State</label><input className={IN} value={form.state} onChange={e => set('state', e.target.value)} /></div>
+            <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">City</label><input className={IN} value={form.city} onChange={e => set('city', e.target.value)} required /></div>
+            <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">State</label><input className={IN} value={form.state} onChange={e => set('state', e.target.value)} required /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">License #</label><input className={IN} value={form.licenseNo} onChange={e => set('licenseNo', e.target.value)} /></div>

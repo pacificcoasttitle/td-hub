@@ -139,14 +139,34 @@ everything; p99 is 61 minutes.
 **The code default is now 25 and that does not change production.** There is a
 stored `settings` row (`value: 10`, last written 2026-07-23), and a stored value
 always wins over the registered default, so the default only governs a fresh
-environment. The live lever is the row:
+environment. The live lever is that row, editable in Admin → Settings → Email.
 
-```sql
-UPDATE settings SET value = '25', updated_at = now()
-WHERE key = 'open_order_confirmation_timeout_minutes';
+### APPLIED — 2026-09-09, 10 → 25 in production
+
+Re-measured against live data immediately before writing, rather than applying
+the number above on trust. The window had moved (242 searches, not 236) and the
+answer had not:
+
+```
+p50 7.1   p75 11.1   p90 15.5   p95 24.6   p99 59.6   max 83.8
+
+  10 min  67.4%      25 min  95.5%  ← smallest ceiling clearing 95%
+  15 min  88.8%      30 min  97.5%
+  20 min  93.0%      45 min  98.3%
 ```
 
-Or Admin → Settings → Email, which is the same thing and needs no deploy.
+Written through `updateSetting`, not raw SQL. That key is registered `type:
+'number'`, so `parseValueForStorage` stores a jsonb number — the `UPDATE`
+sketched previously would have stored the *string* `'25'`, and while
+`Number('25')` survives it, the two are not the same value in the column. It
+also invalidates the 60-second settings cache, so the change took effect on the
+next sweep rather than the next cold start.
+
+Read back from a fresh process: `current: 25`.
+
+Reproduce or re-derive with `scripts/audit/confirmation-timeout-apply.ts`, which
+reports by default and only writes under `--apply`, and which refuses to write
+at all if no ceiling under an hour reaches 95%.
 
 **Deliberately not applied yet.** Raising the timeout is only correct if the
 race is real, and the confirming artefact — the CC'd copy of `20021993-GLT`,
@@ -183,6 +203,13 @@ versus listing-confirmed on the SoftPro side.
 
 **This is deliberately first.** Without it a timeout change can only be shown to
 move a number, not to have worked.
+
+**Live and recording since 2026-09-09 18:30 UTC** — 15 rows carrying a record
+within the first hour, against 990 historic rows that carry nothing. The
+baseline for the timeout change is therefore the 15 written *before* it, and
+everything after is measurable rather than inferred. Nothing backfills: the 975
+older sends are permanently unknowable, which is the point of having fixed the
+record before the bug.
 
 ## 3. "Will send separately" — now kept, by an internal alert — BUILT
 

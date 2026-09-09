@@ -19,8 +19,12 @@ interface Contact {
   roles: string[];
   sourceSystem: string | null;
   isActive: boolean;
+  // The API returns whole contact rows; these were simply never declared here,
+  // which is why the edit form had no address to prefill.
+  address1: string | null;
   city: string | null;
   state: string | null;
+  zip: string | null;
   licenseNo: string | null;
   contactType?: string | null;
   managerId?: number | null;
@@ -177,7 +181,8 @@ export function ContactListPage({
     setEditContact({
       id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '',
       email: c.email ?? '', phone: c.phone ?? '', cell: c.cell ?? '',
-      companyName: c.companyName ?? '', city: c.city ?? '', state: c.state ?? '',
+      companyName: c.companyName ?? '', address: c.address1 ?? '',
+      city: c.city ?? '', state: c.state ?? '', zip: c.zip ?? '',
       licenseNo: c.licenseNo ?? '', contactType: c.contactType ?? typeFilter, isActive: c.isActive,
     });
     setModalOpen(true);

@@ -15,7 +15,8 @@
  * that shipped simply cannot be alerted on, and that is the honest answer.
  */
 
-import { and, eq, gt, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, min, notExists, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/lib/db/client';
 import { documents, notificationLogs, orderProperties, orders } from '@/lib/db/schema';
 import { dispatchNotification } from '@/lib/domain/notifications/dispatch';
@@ -47,6 +48,21 @@ interface ConfirmationRow {
   clientEmail: string | null;
 }
 
+/**
+ * `min()` over jsonb has no operator class, so the record is aggregated as
+ * text and parsed back. One row per order is the reason an aggregate is needed
+ * at all, and every recipient row of one send carries the identical record —
+ * so "the minimum" here is just "the one".
+ */
+function parseMetadata(value: string | null): unknown {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 function readConfirmationMetadata(value: unknown): {
   attached: string[];
   clientName: string | null;
@@ -73,10 +89,12 @@ export async function handleOutstandingDocumentsAlert(): Promise<OutstandingAler
 
   const since = new Date(Date.now() - OUTSTANDING_ALERT_SCAN_WINDOW_HOURS * 60 * 60 * 1000);
 
+  const priorAlert = alias(notificationLogs, 'prior_alert');
+
   /*
-    One row per order, earliest send. A confirmation writes one log row per
-    recipient, so without the DISTINCT ON an order with four recipients would
-    be considered four times in a single run.
+    One row per order. A confirmation writes one log row per recipient, so
+    without the grouping an order with four recipients is considered four
+    times in a single run.
 
     NOT EXISTS on our own event type is the dedupe: dispatchNotification writes
     a log row per recipient with event_type = the slug, so a delivered alert
@@ -84,58 +102,63 @@ export async function handleOutstandingDocumentsAlert(): Promise<OutstandingAler
     recipients writes nothing and will be retried — until the order falls out
     of the scan window, which is what stops that being forever.
 
-    ─── TWO THINGS HERE ARE LOAD-BEARING, AND BOTH ARE ABOUT STARVATION ──────
+    ─── TWO CLAUSES HERE ARE LOAD-BEARING, BOTH ABOUT STARVATION ────────────
 
     `metadata IS NOT NULL` is a filter, not an optimisation. Confirmations sent
-    before the send record shipped can never be alerted on, and there are
-    hundreds of them inside any 24-hour window at cutover. Left in, they fill
-    MAX_ORDERS_PER_RUN with rows that can only be skipped, and a real alert
+    before the send record shipped can never be alerted on, and a 24-hour
+    window held hundreds of them at cutover. Left in, they fill
+    MAX_ORDERS_PER_RUN with rows that can only be skipped and a real alert
     waits behind them until they age out.
 
-    The outer ORDER BY sent_at DESC is the same concern. DISTINCT ON forces the
-    inner sort to lead with order_id, which is effectively oldest-first; without
-    re-sorting, a backlog would always be worked from the wrong end. Newest
-    first is right for an alert whose value decays.
+    Ordering by the send time DESCENDING is the same concern from the other
+    end: a backlog must be worked newest-first, because this alert's value
+    decays and the oldest entries are the least recoverable.
   */
-  const rows = await db.execute<{
-    order_id: number;
-    sent_at: Date;
-    metadata: unknown;
-  }>(sql`
-    SELECT * FROM (
-      SELECT DISTINCT ON (nl.order_id)
-        nl.order_id,
-        nl.sent_at,
-        nl.metadata
-      FROM ${notificationLogs} nl
-      WHERE nl.event_type = 'order.confirmation'
-        AND nl.status IN ('sent', 'sent_no_client')
-        AND nl.sent_at IS NOT NULL
-        AND nl.sent_at > ${since}
-        AND nl.metadata IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM ${notificationLogs} prior
-          WHERE prior.order_id = nl.order_id
-            AND prior.event_type = ${OUTSTANDING_ALERT_EVENT_TYPE}
-        )
-      ORDER BY nl.order_id, nl.sent_at ASC
-    ) c
-    ORDER BY c.sent_at DESC
-    LIMIT ${MAX_ORDERS_PER_RUN}
-  `);
+  const rows = await db
+    .select({
+      orderId: notificationLogs.orderId,
+      // ALIASED ON PURPOSE. Both aggregates render as bare `min(...)`, so
+      // Postgres returns two columns both called "min" and the second silently
+      // overwrites the first in a name-keyed row. The sent time would come back
+      // holding the metadata text, and every order would look like it had just
+      // been sent. Caught by executing the generated SQL, not by reading it.
+      sentAt: sql<string>`min(${notificationLogs.sentAt})`.as('first_sent_at'),
+      metadata: sql<string>`min(${notificationLogs.metadata}::text)`.as('send_record'),
+    })
+    .from(notificationLogs)
+    .where(and(
+      eq(notificationLogs.eventType, 'order.confirmation'),
+      inArray(notificationLogs.status, ['sent', 'sent_no_client']),
+      isNotNull(notificationLogs.orderId),
+      isNotNull(notificationLogs.sentAt),
+      gt(notificationLogs.sentAt, since),
+      isNotNull(notificationLogs.metadata),
+      notExists(
+        db.select({ one: sql`1` })
+          .from(priorAlert)
+          .where(and(
+            eq(priorAlert.orderId, notificationLogs.orderId),
+            eq(priorAlert.eventType, OUTSTANDING_ALERT_EVENT_TYPE),
+          )),
+      ),
+    ))
+    .groupBy(notificationLogs.orderId)
+    .orderBy(desc(min(notificationLogs.sentAt)))
+    .limit(MAX_ORDERS_PER_RUN);
 
   const candidates: ConfirmationRow[] = [];
   for (const row of rows) {
     result.scanned++;
-    const meta = readConfirmationMetadata(row.metadata);
+    if (row.orderId == null || row.sentAt == null) continue;
+    const meta = readConfirmationMetadata(parseMetadata(row.metadata));
     if (!meta) {
       result.skippedNoMetadata++;
       continue;
     }
     if (missingFromConfirmation(meta.attached).length === 0) continue;
     candidates.push({
-      orderId: row.order_id,
-      sentAt: new Date(row.sent_at),
+      orderId: row.orderId,
+      sentAt: new Date(row.sentAt),
       attached: meta.attached,
       clientName: meta.clientName,
       clientEmail: meta.clientEmail,

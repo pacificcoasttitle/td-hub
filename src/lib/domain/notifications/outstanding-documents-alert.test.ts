@@ -229,18 +229,33 @@ describe('wiring', () => {
 
   it('unalertable rows cannot starve the batch', () => {
     /*
-      Found by running the query rather than reading it. DISTINCT ON forces the
-      inner sort to lead with order_id, so the batch is filled oldest-first —
-      and at cutover a 24-hour window holds hundreds of confirmations with no
-      send record, none of which can ever produce an alert.
-
-      Without both of these, the first run took 25 rows that could only be
-      skipped and a genuine alert would have waited a day behind them.
+      At cutover a 24-hour window held hundreds of confirmations with no send
+      record, none of which can ever produce an alert. Without filtering them
+      at the source, a run takes 25 rows that can only be skipped and a genuine
+      alert waits a day behind them. Newest-first is the same concern from the
+      other end — this alert's value decays.
     */
     const scanner = readFileSync(
       join(root, 'src/lib/jobs/handlers/outstanding-documents-alert.ts'), 'utf8',
     );
-    expect(scanner).toContain('nl.metadata IS NOT NULL');
-    expect(scanner).toMatch(/ORDER BY c\.sent_at DESC/);
+    expect(scanner).toContain('isNotNull(notificationLogs.metadata)');
+    expect(scanner).toContain('desc(min(notificationLogs.sentAt))');
+  });
+
+  it('the two aggregates are aliased apart', () => {
+    /*
+      Both render as bare `min(...)`, so Postgres returns two columns named
+      "min" and the second silently overwrites the first in a name-keyed row —
+      the send time would arrive holding the metadata text, every order would
+      look freshly sent, and the fallback would never fire.
+
+      Caught by executing the generated SQL rather than reading it, which is
+      the only way this one was ever going to show up.
+    */
+    const scanner = readFileSync(
+      join(root, 'src/lib/jobs/handlers/outstanding-documents-alert.ts'), 'utf8',
+    );
+    expect(scanner).toContain(`.as('first_sent_at')`);
+    expect(scanner).toContain(`.as('send_record')`);
   });
 });

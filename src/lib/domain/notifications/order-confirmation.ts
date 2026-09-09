@@ -80,7 +80,12 @@ export async function handleOrderConfirmation(
   const tpShutOff = (await getSetting('titlepoint_shut_off')) === 'true';
 
   // Attach whatever LV/tax/grant-deed PDFs exist — never block on missing ones.
-  const { attachments, labels: attachedDocLabels, outstanding } = await buildAttachments(orderId);
+  const {
+    attachments,
+    labels: attachedDocLabels,
+    outstanding,
+    record: attachmentRecord,
+  } = await buildAttachments(orderId);
 
   const address = order.property.addressFormatted !== '—'
     ? order.property.addressFormatted
@@ -164,6 +169,7 @@ export async function handleOrderConfirmation(
         provider: 'sendgrid',
         errorMessage: 'Confirmation had zero TO recipients after resolver (unexpected)',
         sentAt: null,
+        metadata: attachmentRecord,
       });
     } catch { /* logging must never mask the failure */ }
     // Do NOT return quietly — outbox must not mark published/success for a non-send.
@@ -184,6 +190,20 @@ export async function handleOrderConfirmation(
       : 'sent';
   await db.update(orders).set({ emailStatus: status, updatedAt: new Date() }).where(eq(orders.id, orderId));
 
+  /*
+    RECORD WHAT THE MESSAGE CARRIED.
+
+    961 confirmations were sent before this line existed and not one of them
+    recorded its attachments, so the only way to ask "did this email have the
+    grant deed" was to compare the document's created_at against sent_at and
+    infer. That answers "the row did not exist yet" and cannot answer "the row
+    existed and did not attach" — which is exactly what an S3 download failure
+    looks like, and it is silent.
+
+    Stored per recipient row rather than once per send. The rows are already
+    per recipient, and a metadata column that is populated on some rows of a
+    send and null on others is worse to query than one that is always there.
+  */
   try {
     const allRecipients = [
       ...finalTo.map((e) => ({ email: e, recipientRole: 'to' })),
@@ -203,6 +223,7 @@ export async function handleOrderConfirmation(
         errorMessage: result.error?.message
           ?? (missingClient ? 'Sent without client recipient — openorders CC only guaranteed delivery' : null),
         sentAt: result.success ? new Date() : null,
+        metadata: attachmentRecord,
       });
     }
   } catch { /* notification logging must never break the send flow */ }
@@ -389,9 +410,54 @@ async function loadLegalDescription(orderId: number, fallback: string | null): P
   return fallback;
 }
 
+/**
+ * What the email carried, recorded as three separate facts.
+ *
+ * `eligible` is what existed in `documents` when we looked. `attached` is what
+ * actually went into the message. `dropped` is the difference — a row that
+ * existed and did not make it, which today means its S3 download failed.
+ *
+ * Kept apart rather than collapsed into a count, because "we had nothing to
+ * send" and "we had it and lost it" are different failures with different
+ * fixes, and a single number cannot tell them apart afterwards.
+ */
+export interface ConfirmationAttachmentRecord {
+  attached: string[];
+  eligible: string[];
+  dropped: string[];
+  filenames: string[];
+  outstanding: boolean;
+}
+
+/**
+ * Pure so it can be tested without a database or an S3 bucket. `dropped` is
+ * the whole point of the record and it is a derived value, so it is derived in
+ * one place rather than assembled at the call site.
+ */
+export function buildAttachmentRecord(args: {
+  presentCategories: readonly string[];
+  attachedCategories: readonly string[];
+  filenames: readonly string[];
+  outstanding: boolean;
+}): ConfirmationAttachmentRecord {
+  const eligible = CONFIRMATION_DOC_TYPES.filter((cat) => args.presentCategories.includes(cat));
+  return {
+    attached: [...args.attachedCategories],
+    eligible: [...eligible],
+    dropped: eligible.filter((cat) => !args.attachedCategories.includes(cat)),
+    filenames: [...args.filenames],
+    outstanding: args.outstanding,
+  };
+}
+
 async function buildAttachments(
   orderId: number,
-): Promise<{ attachments: SendGridAttachment[]; labels: string[]; outstanding: boolean }> {
+): Promise<{
+  attachments: SendGridAttachment[];
+  labels: string[];
+  outstanding: boolean;
+  record: ConfirmationAttachmentRecord;
+}> {
   const docRows = await db.select({
     storageKey: documents.storageKey,
     filename: documents.filename,
@@ -437,5 +503,17 @@ async function buildAttachments(
   // Outstanding is decided on what ACTUALLY ATTACHED, not on what exists in the
   // documents table — a row whose S3 download failed is not in this email, so
   // from the customer's side it is still coming.
-  return { attachments, labels, outstanding: hasOutstandingDocuments(attachedCategories) };
+  const outstanding = hasOutstandingDocuments(attachedCategories);
+
+  return {
+    attachments,
+    labels,
+    outstanding,
+    record: buildAttachmentRecord({
+      presentCategories: docRows.map((d) => d.category),
+      attachedCategories,
+      filenames: attachments.map((a) => a.filename),
+      outstanding,
+    }),
+  };
 }

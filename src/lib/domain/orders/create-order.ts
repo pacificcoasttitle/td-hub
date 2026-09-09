@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts, branches, orderDeliverableEmails } from '@/lib/db/schema';
+import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts, branches, orderDeliverableEmails, adminActivityLogs } from '@/lib/db/schema';
 import { validateDeliverableEmails } from '@/lib/domain/notifications/deliverable-emails';
 import { eq, and, inArray } from 'drizzle-orm';
 import { createOrder as softproCreateOrder } from '@/lib/integrations/softpro';
@@ -226,6 +226,69 @@ async function recoverAfterCreateUnknown(args: PersistArgs): Promise<CreateOrder
 
 // ─── Main Entry Point ───────────────────────────────────────────────────────
 
+/**
+ * Record why the local write failed, without ever failing itself.
+ *
+ * The operator still gets the create-lock message; this is so somebody can
+ * answer "why" tomorrow. Written to admin_activity_logs because the order row
+ * may or may not exist at this point — the inserts are not wrapped in a
+ * transaction, so a throw can leave a partial order behind — and a log keyed on
+ * the file number survives either way.
+ */
+async function recordCreateLocalFailure(
+  fileNumber: string,
+  err: unknown,
+  userId: string | null | undefined,
+  input: { property?: { address?: string | null; city?: string | null; state?: string | null; zip?: string | null } },
+): Promise<void> {
+  try {
+    const e = err as { message?: string; code?: string; constraint_name?: string; column_name?: string; table_name?: string; detail?: string };
+    // Which rows landed before the throw says WHERE it broke. The insert order
+    // is orders, then properties, then parties, then status history.
+    const [orderRow] = await db
+      .select({ id: orders.id })
+      .from(orders)
+      .where(eq(orders.fileNumber, fileNumber))
+      .limit(1);
+    const orderExists = !!orderRow;
+    const propertyExists = orderExists
+      ? (await db.select({ id: orderProperties.id }).from(orderProperties)
+          .where(eq(orderProperties.orderId, orderRow.id)).limit(1)).length > 0
+      : false;
+
+    await db.insert(adminActivityLogs).values({
+      userId: userId ?? 'system',
+      action: 'order_create_local_failed',
+      entityType: 'order',
+      entityId: fileNumber,
+      meta: {
+        // Postgres puts the useful part in these, and a bare `catch {}` threw
+        // all of them away.
+        message: e?.message ?? String(err),
+        code: e?.code ?? null,
+        constraint: e?.constraint_name ?? null,
+        column: e?.column_name ?? null,
+        table: e?.table_name ?? null,
+        detail: e?.detail ?? null,
+        // Where it got to, so the stage is known even if the message is not.
+        stage: !orderExists ? 'orders' : !propertyExists ? 'order_properties' : 'after_properties',
+        orderRowWritten: orderExists,
+        propertyRowWritten: propertyExists,
+        // The lengths that have caused this twice before, so an overflow is
+        // visible without needing the payload.
+        lengths: {
+          address: (input.property?.address ?? '').length,
+          city: (input.property?.city ?? '').length,
+          state: (input.property?.state ?? '').length,
+          zip: (input.property?.zip ?? '').length,
+        },
+      },
+    });
+  } catch {
+    // Recording the reason must never turn a recoverable create into a 500.
+  }
+}
+
 export async function createAndSendToSoftPro(raw: unknown, origin: OrderOrigin, userId?: string): Promise<CreateOrderResult> {
   const parsed = createOrderInputSchema.safeParse(raw);
   if (!parsed.success) {
@@ -328,7 +391,21 @@ export async function createAndSendToSoftPro(raw: unknown, origin: OrderOrigin, 
   let orderId: number;
   try {
     ({ orderId } = await createLocalRecords(input, fileNumber, sitexData, { apn, legal, county, fips }, resolved, origin, userId, underwriterId));
-  } catch {
+  } catch (err) {
+    // PERSIST, THEN THROW. This catch used to be bare — `} catch {` — and threw
+    // the error away. On 2026-09-10 order 20022014-GLT lost its property row
+    // here and the reason was unrecoverable: not a varchar overflow (every
+    // value was far inside its limit) and not a timeout (SoftPro returned 200
+    // immediately). A third cause, and the code was written so it could not be
+    // identified.
+    //
+    // This has happened about once a day since at least 2026-08-31 — ten
+    // hub-created orders with no property row — so the next one is tomorrow,
+    // and without this it would be equally unexplainable.
+    //
+    // Same rule as THROWING_ON_A_VENDOR_ERROR_DISCARDS_THE_BODY.md, applied to
+    // our own database rather than a vendor's response.
+    await recordCreateLocalFailure(fileNumber, err, userId, input);
     return foundDoNotReenter(fileNumber);
   }
 

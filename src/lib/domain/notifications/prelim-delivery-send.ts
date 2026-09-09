@@ -405,6 +405,11 @@ export async function sendPrelimDeliveryEmail(
   const replyTo = context.titleOfficerEmail?.trim() || FROM_EMAIL;
 
   const sendResult = await sendEmail({
+    // The order, so the delivery log is searchable by file number. Every prelim
+    // send before 2026-09-10 landed with order_id NULL and an unparseable
+    // subject, which is why "did the client get their prelim?" had no answer.
+    orderId,
+    fileNumber: context.fileNumber,
     to: testMode ? deliveryMode.testRecipient : reviewedRecipients.to.email,
     cc: testMode ? [] : reviewedRecipients.cc.map((recipient) => recipient.email),
     from: FROM_EMAIL,

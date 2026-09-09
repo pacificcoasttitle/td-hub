@@ -7,6 +7,7 @@ const {
   noteRows,
   orderRows,
   updateRows,
+  failTables,
 } = vi.hoisted(() => ({
   addNotes: vi.fn(),
   insertRows: [] as Array<{ table: string; values: Record<string, unknown> }>,
@@ -17,6 +18,8 @@ const {
     softproNoteId: string | null;
   }>,
   orderRows: [] as Array<{ id: number; fileNumber: string }>,
+  /** Tables the db mock should throw for, so one artefact can fail alone. */
+  failTables: new Set<string>(),
   updateRows: [] as Array<{ table: string; values: Record<string, unknown>; condition: unknown }>,
 }));
 
@@ -46,6 +49,11 @@ vi.mock('@/lib/db/client', () => ({
   db: {
     insert: vi.fn((table: { __table: string }) => ({
       values: vi.fn(async (values: Record<string, unknown>) => {
+        if (failTables.has(table.__table)) {
+          const err = new Error(`insert or update on table "${table.__table}" violates foreign key constraint`) as Error & { code?: string };
+          err.code = '23503';
+          throw err;
+        }
         insertRows.push({ table: table.__table, values });
         return [];
       }),
@@ -86,6 +94,69 @@ describe('prelim delivery writeback', () => {
     noteRows.splice(0, noteRows.length);
     orderRows.splice(0, orderRows.length);
     updateRows.splice(0, updateRows.length);
+    failTables.clear();
+  });
+
+  const systemInput = {
+    orderId: 8173,
+    fileNumber: '20021690-OCT',
+    documentId: 4471,
+    sendgridMessageId: 'sg-auto',
+    deliveredAt: new Date('2026-09-10T02:15:38.000Z'),
+    actor: { id: 'system:prelim_auto_delivery', name: 'TD Hub Auto Delivery', email: 'openorders@pct.com' },
+    deliveryMode: { mode: 'live', armed: true, message: 'LIVE' } as const,
+    recipients: {
+      to: { email: 'jenny@successescrow.net', name: 'Jenny', role: 'escrow_officer' },
+      cc: [],
+    },
+  };
+
+  // REGRESSION. order_notes.author_id is a foreign key onto profiles, and
+  // 'system:prelim_auto_delivery' is not a person. Sending it raised 23503 and
+  // took the whole writeback down 1,082 times without ever surfacing.
+  it('writes a system-authored note with a null author_id and keeps the actor elsewhere', async () => {
+    addNotes.mockResolvedValue({ success: true, data: [{ Status: 200, Message: 'Note added successfully' }] });
+
+    const result = await writePrelimDeliveryProofs(systemInput);
+
+    const note = insertRows.find((r) => r.table === 'order_notes');
+    expect(note?.values.authorId).toBeNull();
+    expect(note?.values.authorName).toBe('TD Hub Auto Delivery');
+
+    // No FK on these two, so they stay attributable to the system actor.
+    for (const table of ['admin_activity_logs', 'document_audit']) {
+      const row = insertRows.find((r) => r.table === table);
+      expect(row, `${table} row missing`).toBeDefined();
+    }
+    expect(insertRows.find((r) => r.table === 'admin_activity_logs')?.values.userId)
+      .toBe('system:prelim_auto_delivery');
+    expect(result.failedArtefacts).toEqual([]);
+    expect(result.warning).toBeUndefined();
+  });
+
+  // REGRESSION. The four artefacts used to be four bare awaits, so the first
+  // failure discarded the other three — including the proof row the delivery
+  // log reads. They must now stand or fall alone.
+  it('still writes the other three artefacts when one fails, and records the failure', async () => {
+    addNotes.mockResolvedValue({ success: true, data: [{ Status: 200, Message: 'Note added successfully' }] });
+    failTables.add('order_notes');
+
+    const result = await writePrelimDeliveryProofs(systemInput);
+
+    // The proof row the delivery log reads survives a failure below it.
+    const proof = insertRows.filter((r) => r.table === 'admin_activity_logs');
+    expect(proof.some((r) => r.values.action === 'prelim_delivered')).toBe(true);
+    expect(insertRows.some((r) => r.table === 'order_status_history')).toBe(true);
+    expect(insertRows.some((r) => r.table === 'document_audit')).toBe(true);
+
+    // And the failure is persisted rather than downgraded to a dropped string.
+    const recorded = proof.find((r) => r.values.action === 'prelim_delivery_writeback_failed');
+    expect(recorded).toBeDefined();
+    expect((recorded!.values.meta as { failed: { artefact: string; code: string }[] }).failed[0])
+      .toMatchObject({ artefact: 'order_notes', code: '23503' });
+
+    expect(result.failedArtefacts.map((f) => f.artefact)).toEqual(['order_notes']);
+    expect(result.warning).toContain('order_notes');
   });
 
   it('persists SendGrid and SoftPro AddNotes proofs with deterministic note id', async () => {

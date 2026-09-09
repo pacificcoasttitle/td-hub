@@ -37,6 +37,8 @@ export interface PrelimDeliveryWritebackResult {
   addNotesStatus: number | null;
   addNotesMessage: string | null;
   softproSynced: boolean;
+  /** Which proof rows did not get written, and why. Empty on a clean write. */
+  failedArtefacts: { artefact: string; message: string; code: string | null }[];
   warning?: string;
 }
 
@@ -80,6 +82,31 @@ function firstAddNotesItem(response: unknown): { Status?: number; Message?: stri
   return Array.isArray(response) && response.length > 0
     ? response[0] as { Status?: number; Message?: string; Id?: string }
     : null;
+}
+
+/**
+ * `order_notes.author_id` is a foreign key onto `profiles`. Auto-delivery's
+ * actor is `system:prelim_auto_delivery`, which is not a person and has no
+ * profile row, so the insert raised 23503 and took the whole writeback with it
+ * — 1,082 times in a row, silently.
+ *
+ * The column is nullable, so a system-authored note carries a NULL author_id
+ * and keeps its human-readable `author_name`. That was chosen over the two
+ * alternatives on purpose:
+ *
+ *   - Dropping the FK would weaken the constraint for the ~human authors it
+ *     exists to protect, and the same problem would come back on
+ *     `orders.created_by` and `title_production_uploads.uploaded_by`, which
+ *     carry the same FK.
+ *   - Inventing a profile row would create a login-shaped identity for
+ *     something that is not a user, in a table with RLS on it, and would need
+ *     a role from an enum that has no honest value for "the system".
+ *
+ * `admin_activity_logs.user_id` and `document_audit.by_user_id` have no such
+ * FK, so they keep the actor string and stay attributable.
+ */
+function profileAuthorId(actorId: string): string | null {
+  return actorId.startsWith('system:') ? null : actorId;
 }
 
 function recipientMeta(recipients: ReviewedPrelimRecipients) {
@@ -146,20 +173,56 @@ export async function writePrelimDeliveryProofs(
     delivery_mode: input.deliveryMode.mode,
   } as Record<string, unknown>;
 
-  await db.insert(orderNotes).values({
+  // ─── FOUR ARTEFACTS, WRITTEN INDEPENDENTLY ────────────────────────────────
+  //
+  // This used to be four bare awaits in a row inside a caller's try/catch. The
+  // first one threw on every auto-delivery, so the other three never ran and
+  // the error became a `warning` string nobody carried. Result: 1,083 prelims
+  // delivered, 1 recorded, and no trace of why.
+  //
+  // Now each artefact stands or falls alone, and the proof row goes FIRST
+  // because it is the one the delivery log reads and the only one with no
+  // foreign key to trip over. A failure is recorded, not downgraded.
+  //
+  // Same rule as create-order's recordCreateLocalFailure: persist the reason.
+  const failed: { artefact: string; message: string; code: string | null }[] = [];
+
+  async function write(artefact: string, fn: () => Promise<unknown>): Promise<void> {
+    try {
+      await fn();
+    } catch (err) {
+      const e = err as { message?: string; code?: string };
+      failed.push({
+        artefact,
+        message: e?.message ?? String(err),
+        code: e?.code ?? null,
+      });
+    }
+  }
+
+  await write('admin_activity_logs', () => db.insert(adminActivityLogs).values({
+    userId: input.actor.id,
+    action: 'prelim_delivered',
+    entityType: 'order',
+    entityId: String(input.orderId),
+    meta,
+    createdAt: deliveredAt,
+  }));
+
+  await write('order_notes', () => db.insert(orderNotes).values({
     orderId: input.orderId,
     subject: 'Prelim delivered',
     body: noteText,
     authorName: input.actor.name,
-    authorId: input.actor.id,
+    authorId: profileAuthorId(input.actor.id),
     isInternal: true,
     softproNoteId,
     isSyncedToSoftpro: softproSynced,
     syncedAt: deliveredAt,
     createdAt: deliveredAt,
-  });
+  }));
 
-  await db.insert(orderStatusHistory).values({
+  await write('order_status_history', () => db.insert(orderStatusHistory).values({
     orderId: input.orderId,
     status: `Prelim delivered → ${recipientCount} recipients`,
     source: 'system',
@@ -167,24 +230,41 @@ export async function writePrelimDeliveryProofs(
       ? `Delivered ${deliveredAtPt} to ${recipientCount} recipients · SendGrid ${input.sendgridMessageId}; SoftPro note added ${deliveredAtPt} ✓`
       : `Delivered ${deliveredAtPt} to ${recipientCount} recipients · SendGrid ${input.sendgridMessageId}; SoftPro note pending/failed ${deliveredAtPt}`,
     changedAt: deliveredAt,
-  });
+  }));
 
-  await db.insert(adminActivityLogs).values({
-    userId: input.actor.id,
-    action: 'prelim_delivered',
-    entityType: 'order',
-    entityId: String(input.orderId),
-    meta,
-    createdAt: deliveredAt,
-  });
-
-  await db.insert(documentAudit).values({
+  await write('document_audit', () => db.insert(documentAudit).values({
     documentId: input.documentId,
     action: 'delivered',
     byUserId: input.actor.id,
     meta,
     performedAt: deliveredAt,
-  });
+  }));
+
+  // A failed artefact is a result. Write it where somebody will find it, and
+  // never let recording the failure become a second failure.
+  if (failed.length > 0) {
+    try {
+      await db.insert(adminActivityLogs).values({
+        userId: input.actor.id,
+        action: 'prelim_delivery_writeback_failed',
+        entityType: 'order',
+        entityId: String(input.orderId),
+        meta: {
+          failed,
+          delivered_artefacts: 4 - failed.length,
+          sendgrid_message_id: input.sendgridMessageId,
+          document_id: input.documentId,
+          delivery_mode: input.deliveryMode.mode,
+          actor: input.actor.id,
+        },
+        createdAt: deliveredAt,
+      });
+    } catch { /* the email still went out; do not turn this into a 500 */ }
+  }
+
+  const writebackWarning = failed.length > 0
+    ? `Prelim delivery proof incomplete: ${failed.map((f) => f.artefact).join(', ')} failed`
+    : undefined;
 
   return {
     deliveredAt: deliveredAt.toISOString(),
@@ -195,7 +275,13 @@ export async function writePrelimDeliveryProofs(
     addNotesStatus,
     addNotesMessage,
     softproSynced,
-    warning: softproSynced ? undefined : 'SoftPro note writeback failed or is pending',
+    failedArtefacts: failed,
+    // Both conditions matter and they are different failures: SoftPro not
+    // taking the note, and our own proof rows not being written.
+    warning: [
+      writebackWarning,
+      softproSynced ? undefined : 'SoftPro note writeback failed or is pending',
+    ].filter(Boolean).join(' · ') || undefined,
   };
 }
 

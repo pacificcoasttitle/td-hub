@@ -195,6 +195,8 @@ export async function handleOrderConfirmation(
   }
 
   const result = await sendEmail({
+    orderId,
+    fileNumber: order.fileNumber,
     to: finalTo,
     cc: finalCc.length > 0 ? finalCc : undefined,
     subject, html, from: fromEmail,

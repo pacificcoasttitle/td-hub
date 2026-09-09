@@ -8,6 +8,7 @@ import {
   documentReceivedTemplate,
 } from '@/lib/domain/notifications/templates';
 import type { FullConfirmationData } from '@/lib/domain/notifications/confirmation-template';
+import { buildOutstandingAlertEmail } from '@/lib/domain/notifications/outstanding-documents-alert';
 
 const ALLOWED_ROLES = ['super_admin', 'admin'];
 
@@ -60,6 +61,24 @@ const SLUG_TEMPLATES: Record<string, () => TemplateResult> = {
   'order.document.received':      () => documentReceivedTemplate({ ...SAMPLE_ORDER, category: 'CPL' }),
   'prelim.summary':               () => documentReceivedTemplate({ fileNumber: '20003483-GLT', address: '123 Main St, Los Angeles, CA', category: 'prelim' }),
   'policy.delivery':              () => documentReceivedTemplate({ fileNumber: '20003483-GLT', address: '123 Main St, Los Angeles, CA', category: 'policy' }),
+
+  // Worth previewing even though it is internal: this is the one notification
+  // whose recipients an operator is expected to edit, and the arrived case is
+  // 47 of the 60 it fires on.
+  'order.documents.outstanding': () => buildOutstandingAlertEmail({
+    orderId: 8523,
+    fileNumber: '20015999-GLT',
+    address: '1234 Main St, Los Angeles, CA 90001',
+    clientName: 'Jane Doe',
+    clientEmail: 'jane@example.com',
+    decision: {
+      fire: true,
+      reason: 'arrived',
+      available: ['legal_vesting', 'grant_deed'],
+      neverCame: [],
+    },
+    sentAt: new Date('2026-03-15T15:53:31Z'),
+  }),
 };
 
 export async function GET(

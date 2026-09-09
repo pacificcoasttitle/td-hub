@@ -19,6 +19,59 @@ If the run looks degraded — worker start-up timeouts, far fewer test files tha
 usual — the machine is starved, not the code; re-run it before drawing any
 conclusion, and never report the summary line from a starved run as a result.
 
+## Source-level checks cannot see render-level failures (2026-09-10)
+
+Three sidebar entries were invisible in production — Mortgage Companies,
+Mortgage Employees, and the generic Companies page, the last of those for
+almost four months. The nav file was correct. All nine entries were present,
+permitted for every role that could see any of them, pointing at pages that
+existed and loaded. The container animated between `max-h-0` and `max-h-60`
+with `overflow-hidden`: a 240px ceiling on 340px of content, no scrollbar, no
+error. Entries seven, eight and nine were clipped away.
+
+**The check that missed it was a source-level check.** Nav labels had been
+verified pairwise against page titles, and all nine pairs passed — including
+the two that could not be seen. A label can be correct, permitted, routed and
+typed right and still sit 100px below a clipping boundary. **Nothing in the
+source says "row seven."**
+
+The only check that found it was rendering the real markup in a real browser
+and measuring what was on screen: six children fully visible, the seventh
+clipped to 10px, the eighth and ninth gone.
+
+So:
+
+- **When the question is "can a person see this?", the answer is not in the
+  source.** Render it and measure it. Reading the JSX, the classes, the
+  permissions and the routes will all say yes while the answer is no.
+- **This test environment has no DOM and no layout** — even with jsdom,
+  `getBoundingClientRect` returns zeroes. There is no browser runner in the
+  repo. Measuring means doing it by hand, which is cheap: a static HTML file
+  with the real classes, served over http (a `file://` page cannot be
+  scripted), and read with `getBoundingClientRect`.
+- **When you cannot assert the measurement, assert the invariant that makes
+  the measurement unnecessary.** `sidebar-nav.test.ts` does not assert that six
+  entries fit — that would encode the magic number that caused the bug. It
+  asserts that no fixed height cap exists at all, so the container sizes to its
+  content and a tenth entry cannot vanish the same way.
+- **Anchor an assertion on something other than what it is asserting.** The
+  first version of that test located the container by the classes the fix
+  introduced, so against the old markup it failed with "container not found"
+  rather than "cap reintroduced" — and a later rewrite would have made it stop
+  checking silently. It now anchors on `entry.children.map(`.
+- **Strip comments before an assertion reads source.** The second version
+  passed because the explanatory comment above the container contains the
+  literal strings the test was searching for. An assertion that reads its own
+  documentation asserts nothing.
+
+Related: the history is the reason the fix is not a bigger number. The cap has
+been `max-h-60` since April; the section grew into it at seven children on
+2026-05-19, #100 added two more entries into an already-overflowing section on
+2026-09-08, and #108 renamed two rows nobody could see on 2026-09-09. Raising
+240 to 400 buys another four months of silence. See
+`docs/tickets/REACHABILITY_SWEEP.md` for the wider pattern — four capabilities
+in one week that existed and could not be reached.
+
 ## Decide vs ask (2026-08-27)
 
 DECIDE ALONE — do not ask:

@@ -13,7 +13,7 @@ type NavEntry   = DirectLink | Section;
 
 /* ── Nav structure ─────────────────────────────────────────────────────────── */
 
-const NAV: NavEntry[] = [
+export const NAV: NavEntry[] = [
   { kind: 'link', label: 'Dashboard', href: '/dashboard', icon: <I d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm10-1a1 1 0 00-1 1v3a1 1 0 001 1h4a1 1 0 001-1V5a1 1 0 00-1-1h-4zm-10 9a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1H5a1 1 0 01-1-1v-3zm10 0a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1h-4a1 1 0 01-1-1v-5z" /> },
 
   { kind: 'section', label: 'Orders', icon: <I d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />, children: [
@@ -136,23 +136,55 @@ export function SidebarNav({ allowedPaths, displayName, role }: SidebarNavProps)
                 <Chevron expanded={expanded} />
               </button>
 
-              {/* Children (animated) */}
-              <div className={`overflow-hidden transition-all duration-200 ease-in-out ${expanded ? 'max-h-60 opacity-100' : 'max-h-0 opacity-0'}`}>
-                <div className="mt-0.5 space-y-0.5">
-                  {entry.children.map(child => {
-                    if (!canSee(child.href, allowedPaths)) return null;
-                    const active = isActive(child.href);
-                    return (
-                      <Link key={child.href} href={child.href}
-                        className={`flex items-center gap-2 pl-12 pr-4 py-2 rounded-lg text-sm transition-colors
-                          ${active
-                            ? 'text-white bg-white/10 border-l-[3px] border-[#C5A55A] pl-[45px]'
-                            : 'text-white/70 hover:text-white hover:bg-white/10'
-                          }`}>
-                        {child.label}
-                      </Link>
-                    );
-                  })}
+              {/*
+                Children (animated).
+
+                NO FIXED HEIGHT. This used to animate between `max-h-0` and
+                `max-h-60` with `overflow-hidden`, which is a 240px ceiling.
+                Nine children are 340px, so entries seven, eight and nine were
+                clipped away with no scrollbar and no error — invisible, not
+                merely hard to reach.
+
+                MEASURED 2026-09-10, real Tailwind classes in a real browser:
+                six children fully visible, the seventh clipped to 10px of
+                padding, the eighth and ninth gone entirely.
+
+                The cap has been `max-h-60` since the sidebar was written in
+                April; the Clients section grew into it:
+
+                  2026-04-02  5 children  nothing hidden
+                  2026-05-18  6 children  nothing hidden  (exactly at the limit)
+                  2026-05-19  7 children  Companies hidden      <- broke here
+                  2026-09-08  9 children  #100 added two more entries BEHIND the
+                                          cliff, into an already-overflowing
+                                          section
+                  2026-09-09  9 children  #108 renamed two rows nobody could see
+
+                So the generic Companies page was invisible for almost four
+                months, and the fix is deliberately not a bigger number — that
+                only moves the cliff and buys another four months of silence.
+                `grid-rows-[0fr]` → `grid-rows-[1fr]` animates identically and
+                sizes to its content, so a tenth entry added in December cannot
+                vanish the same way. Enforced by sidebar-nav.test.ts.
+              */}
+              <div className={`grid transition-all duration-200 ease-in-out ${expanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+                <div className="overflow-hidden">
+                  <div className="mt-0.5 space-y-0.5">
+                    {entry.children.map(child => {
+                      if (!canSee(child.href, allowedPaths)) return null;
+                      const active = isActive(child.href);
+                      return (
+                        <Link key={child.href} href={child.href}
+                          className={`flex items-center gap-2 pl-12 pr-4 py-2 rounded-lg text-sm transition-colors
+                            ${active
+                              ? 'text-white bg-white/10 border-l-[3px] border-[#C5A55A] pl-[45px]'
+                              : 'text-white/70 hover:text-white hover:bg-white/10'
+                            }`}>
+                          {child.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>

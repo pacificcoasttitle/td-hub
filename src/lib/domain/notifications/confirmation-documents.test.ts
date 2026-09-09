@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   hasOutstandingDocuments,
@@ -57,16 +59,50 @@ describe('a promise is only made when something is actually coming', () => {
 describe('the sentence a customer reads', () => {
   it('is exactly the approved wording', () => {
     expect(OUTSTANDING_DOCUMENTS_SENTENCE).toBe(
-      'Pacific Coast Title will send the title documents for this property separately.',
+      'Our team will send the remaining title documents for this property to you shortly.',
     );
   });
 
-  it('promises no count, no names and no timeframe', () => {
+  it('promises no count and names no document', () => {
+    // Unchanged and still the important half. When nothing has been generated
+    // we do not know which documents will exist, so naming three promises
+    // three — and a grant deed may legitimately never be produced.
     const s = OUTSTANDING_DOCUMENTS_SENTENCE;
     expect(s).not.toMatch(/three|3|Legal|Vesting|Grant|Tax/);
-    expect(s).not.toMatch(/hour|day|shortly|soon|within/i);
     // Not an apology, and not an error report.
     expect(s).not.toMatch(/sorry|apolog|unfortunately|error|failed|unable/i);
+  });
+
+  it('commits to no measurable deadline, but may say "shortly"', () => {
+    /*
+      THE BAN THAT MOVED, AND WHY.
+
+      "shortly" used to be banned alongside "within 24 hours", because at the
+      time NOTHING SENT THESE DOCUMENTS AT ALL — so every temporal word was a
+      lie of a different length, and the safest sentence made no time claim.
+
+      Two things changed. The alert in outstanding-documents-alert.ts now tells
+      a person to send them, so a human is actually acting. And we can measure
+      it: the median outstanding document lands 1.0 minutes after the
+      confirmation, the slowest on record 6.6. "shortly" is now a supported
+      qualitative claim.
+
+      A NUMBER still is not. "within 24 hours" is a commitment a customer can
+      hold a stopwatch to, and the 13 orders in 90 days whose documents were
+      never produced at all would break it every time. So the ban stays on
+      units and stays off adverbs.
+    */
+    const s = OUTSTANDING_DOCUMENTS_SENTENCE;
+    expect(s).not.toMatch(/\b(hour|hours|day|days|minute|minutes|business day)\b/i);
+    expect(s).not.toMatch(/\bwithin\b/i);
+  });
+
+  it('is only true while the alert that keeps it exists', () => {
+    // The sentence and the alert are one feature. This is a pointer, not a
+    // behavioural assertion — it exists so that anyone grepping for the copy
+    // finds the mechanism that makes it honest before they change either.
+    const src = readFileSync(join(__dirname, 'confirmation-documents.ts'), 'utf8');
+    expect(src).toContain('outstanding-documents-alert.ts');
   });
 });
 

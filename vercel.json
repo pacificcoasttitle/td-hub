@@ -33,6 +33,10 @@
       "schedule": "*/1 * * * *"
     },
     {
+      "path": "/api/jobs/run?name=notifications.outstanding_documents_alert",
+      "schedule": "*/2 * * * *"
+    },
+    {
       "path": "/api/jobs/run?name=softpro.verify_sync",
       "schedule": "0 6 * * *"
     },

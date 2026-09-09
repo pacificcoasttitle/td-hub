@@ -114,8 +114,16 @@ describe('the record actually reaches the log', () => {
     // worse to query than one that is always there, so this asserts count
     // rather than presence.
     const inserts = src.match(/insert\(notificationLogs\)/g) ?? [];
-    const metadataWrites = src.match(/metadata: attachmentRecord/g) ?? [];
+    const metadataWrites = src.match(/metadata: sendRecord/g) ?? [];
     expect(inserts.length).toBeGreaterThan(0);
     expect(metadataWrites.length).toBe(inserts.length);
+  });
+
+  it('records who the confirmation went to, not just what it carried', () => {
+    // The outstanding-documents alert has to name a customer to send to.
+    // Deriving it later from the order answers "who is the client now", which
+    // is a different question — parties get corrected after a send.
+    expect(src).toMatch(/clientName: opener\?\.name \?\? null/);
+    expect(src).toMatch(/clientEmail: opener\?\.email \?\? null/);
   });
 });

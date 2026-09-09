@@ -32,6 +32,7 @@ import type { SyncContactTypePayload } from '@/lib/jobs/handlers/sync-all-contac
 import { handleJobsWatchdog } from '@/lib/jobs/handlers/jobs-watchdog';
 import { handleOpsDailyReport } from '@/lib/jobs/handlers/ops-daily-report';
 import { handleRetrySoftProDocumentAttach } from '@/lib/jobs/handlers/retry-softpro-document-attach';
+import { handleOutstandingDocumentsAlert } from '@/lib/jobs/handlers/outstanding-documents-alert';
 import { handlePartyWizardInvite } from '@/lib/jobs/handlers/party-wizard-invite';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 
@@ -141,6 +142,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleOpsDailyReport(),
   'softpro.retry_document_attach': () =>
     handleRetrySoftProDocumentAttach(),
+  'notifications.outstanding_documents_alert': () =>
+    handleOutstandingDocumentsAlert(),
 };
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

@@ -316,7 +316,15 @@ export function ContactListPage({
                     </td>
                     {!readOnly && (
                       <td className="px-4 py-3">
-                        <button onClick={() => openEdit(c)} className="opacity-0 group-hover:opacity-100 text-[#6B7280] hover:text-[#1B2A4A] transition-all" title="Edit">
+                        {/* VISIBLE, not opacity-0 until hover.
+                            Editing has worked all along — it pushes to SoftPro
+                            first and refuses to save locally if SoftPro says no
+                            — but the control was a pencil that appeared only
+                            when the mouse crossed the row. Aileen asked for the
+                            ability to update records while the ability was
+                            already there and unreachable. A feature nobody can
+                            find is not a feature. */}
+                        <button onClick={() => openEdit(c)} className="text-[#6B7280] hover:text-[#1B2A4A] transition-colors" title="Edit">
                           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                         </button>
                       </td>

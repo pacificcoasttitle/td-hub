@@ -43,6 +43,27 @@ export const TERMINAL_TITLEPOINT_STATUSES = new Set([
 */
 const DEFAULT_CONFIRMATION_TIMEOUT_MINUTES = 25;
 
+/*
+  Fix-forward watermark for confirmations whose TitlePoint searches never
+  started.
+
+  Before this instant the sweep required `exists (title_point_data)`, making
+  getConfirmationReadiness's deliberate no-search fallback unreachable. Simply
+  removing that predicate would release 50 softpro_sync orders from the prior
+  seven days (and thousands historically); imported orders do not belong to the
+  Hub-created confirmation pipeline.
+
+  So the sweep admits no-search orders only when:
+    1. the Hub created them (`manual_entry` or `web_form`), and
+    2. they were created after Gerard authorized the fix.
+
+  Search-backed orders retain their existing behavior regardless of source.
+  The fixed timestamp is intentional: "fix forward" must remain true after
+  restarts and deployments without mutating historical rows to manufacture a
+  boundary.
+*/
+export const NO_SEARCH_CONFIRMATION_FIX_FORWARD_AT = '2026-09-10T01:35:00.000Z';
+
 export interface CompletionCheckResult {
   complete: boolean;
   missing?: string[];
@@ -271,8 +292,14 @@ export async function sweepPendingConfirmations(limit = 25): Promise<{ checked: 
     select o.id
     from orders o
     where o.operational_status in ('open', 'in_process', 'completed')
-      and exists (
-        select 1 from title_point_data t where t.order_id = o.id
+      and (
+        exists (
+          select 1 from title_point_data t where t.order_id = o.id
+        )
+        or (
+          o.source in ('manual_entry', 'web_form')
+          and o.created_at >= ${NO_SEARCH_CONFIRMATION_FIX_FORWARD_AT}::timestamp
+        )
       )
       and not exists (
         select 1 from event_outbox e

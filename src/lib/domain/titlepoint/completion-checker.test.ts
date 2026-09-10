@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const getSettingMock = vi.fn();
 const selectLimitMock = vi.fn();
 const insertValuesMock = vi.fn();
+const sqlMock = vi.fn((_strings: TemplateStringsArray, ..._parameters: unknown[]) => ({}));
 
 vi.mock('@/lib/domain/settings/service', () => ({
   getSetting: (...args: unknown[]) => getSettingMock(...args),
@@ -11,7 +12,7 @@ vi.mock('@/lib/domain/settings/service', () => ({
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),
-  sql: Object.assign(vi.fn(() => ({})), { raw: vi.fn() }),
+  sql: Object.assign(sqlMock, { raw: vi.fn() }),
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -252,6 +253,47 @@ describe('getConfirmationReadiness / maybeEnqueueConfirmation (OC-3 legacy gate)
     expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
       payload: expect.objectContaining({ enqueueReason: 'timeout', noDocuments: true }),
     }));
+  });
+
+  /*
+    The mechanism behind the live finding on 2026-09-09:
+
+      TitlePoint rows present   175 orders   175 confirmations
+      TitlePoint rows absent     55 orders     0 confirmations
+
+    getConfirmationReadiness already handled zero rows correctly (the test
+    above), but sweepPendingConfirmations excluded those orders before calling
+    it. Removing the EXISTS outright would have released 50 imported orders
+    from that seven-day sample. The bypass therefore has two independent
+    guards: an explicit Hub-created source allowlist and a fix-forward
+    watermark. Keep both in the SQL that selects candidates.
+  */
+  it('sweeps new Hub-created orders with no searches without releasing synced or historical rows', async () => {
+    const {
+      NO_SEARCH_CONFIRMATION_FIX_FORWARD_AT,
+      sweepPendingConfirmations,
+    } = await import('./completion-checker');
+
+    expect(await sweepPendingConfirmations()).toEqual({ checked: 0, enqueued: 0 });
+
+    const call = sqlMock.mock.calls.at(-1);
+    expect(call).toBeDefined();
+    const [strings, ...parameters] = call!;
+    const query = Array.from(strings)
+      .join('?')
+      .replace(/\s+/g, ' ');
+
+    // Search-backed orders keep their existing path regardless of source.
+    expect(query).toContain(
+      'exists ( select 1 from title_point_data t where t.order_id = o.id ) or',
+    );
+
+    // The no-search path is an allowlist, not `source <> softpro_sync`: a new
+    // source must not silently inherit customer-email behavior.
+    expect(query).toContain("o.source in ('manual_entry', 'web_form')");
+    expect(query).toContain('o.created_at >= ?::timestamp');
+    expect(parameters).toContain(NO_SEARCH_CONFIRMATION_FIX_FORWARD_AT);
+    expect(NO_SEARCH_CONFIRMATION_FIX_FORWARD_AT).toBe('2026-09-10T01:35:00.000Z');
   });
 
   it('double-send guard: skips when email_status already sent', async () => {

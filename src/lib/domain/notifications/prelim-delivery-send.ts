@@ -8,6 +8,7 @@ import { extractPdfText } from '@/lib/tessa/pdf-extract';
 import {
   identifyDocument,
   describeDocumentType,
+  isSafeToDeliver,
   type DocumentIdentity,
 } from '@/lib/domain/documents/document-identity';
 import {
@@ -322,6 +323,7 @@ async function loadPrelimPdfAttachment(orderId: number): Promise<PrelimDocumentA
       reason: 'no_extractable_text',
       candidates: [],
       textChars: 0,
+      validated: false,
     };
   }
 
@@ -407,7 +409,7 @@ export async function sendPrelimDeliveryEmail(
   // as a preliminary title report; anything else — a policy, an order summary,
   // a scan we cannot extract — is refused and routed to a human.
   if (options.requirePrelimContent
-      && prelimAttachment.identity.type !== 'clta_preliminary_report') {
+      && !isSafeToDeliver(prelimAttachment.identity, 'clta_preliminary_report')) {
     console.warn('[prelim-delivery] refused: document does not read as a prelim', {
       orderId,
       documentId: prelimAttachment.documentId,

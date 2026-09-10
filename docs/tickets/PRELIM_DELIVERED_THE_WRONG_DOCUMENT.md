@@ -138,6 +138,36 @@ without a prelim — `NOT IN (SELECT order_id FROM documents WHERE category =
 'prelim')` — so a naive change would trigger a large re-fetch. Flagged, not
 touched.
 
+### The likely fix, when we come to it
+
+`GetAttachedDocumentsPrelim` exists and returns prelims specifically. Cursor
+used it for the Update Prelim work because **the general endpoint is blind to
+Production Documents subfolders** — and the prelim ingest path is calling the
+general one.
+
+Measured 2026-09-10, both endpoints on the same 12 closed orders opened more
+than 90 days ago:
+
+```
+general endpoint total attachments : 5
+prelim  endpoint total attachments : 11
+```
+
+On **7 of the 12** the general endpoint returned nothing at all while the
+prelim endpoint returned the prelim. On one it was the reverse. On several they
+returned different filenames for the same order — e.g. 20018782-GLT gives
+`Revised 1_010710.pdf` from the general endpoint and
+`Preliminary Title Report- Update_010710.pdf` from the prelim one, same
+timestamp suffix.
+
+So the general endpoint is not merely mislabelling what it finds; it is missing
+more than half of what exists. Switching `fetchPrelimsForOrder` to
+`GetAttachedDocumentsPrelim` is probably the answer, and it would narrow what
+gets labelled `prelim` at the same time.
+
+Not done here: it changes what the job fetches for every order, so it wants its
+own change and its own re-fetch decision.
+
 ## Recurrence
 
 17 `dnu_` documents exist, plus an unknown number of `Revised N` and

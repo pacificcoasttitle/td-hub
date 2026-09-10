@@ -49,7 +49,36 @@ export interface DocumentIdentity {
   /** Every signature that matched — more than one means we refuse. */
   candidates: DocumentType[];
   textChars: number;
+  /**
+   * Has this signature ever matched a real document?
+   *
+   * FALSE means the pattern was written from a form-naming convention and has
+   * never been confirmed against a file we actually received. A caller that is
+   * about to email a legal document to a named individual MUST treat an
+   * unvalidated identification as a refusal — being probably right about who
+   * owns a property is not good enough.
+   *
+   * This is a field rather than a comment because a comment does not stop a
+   * send.
+   */
+  validated: boolean;
 }
+
+/**
+ * Signatures that have never matched a real document.
+ *
+ * `alta_owners_policy` is here because in every policy PCT has received into
+ * the hub there is not one owner's policy — all of them are loan policies.
+ * Measured 2026-09-10 across the whole corpus, and again live against SoftPro:
+ * neither document endpoint returned a single filename containing "policy" or
+ * "owner" for 30 closed and completed orders.
+ *
+ * Remove a type from this set only after a real document of that type has been
+ * seen and its opening text confirmed to match.
+ */
+export const UNVALIDATED_TYPES: ReadonlySet<DocumentType> = new Set<DocumentType>([
+  'alta_owners_policy',
+]);
 
 /**
  * Below this, the PDF is image-only or corrupt and there is nothing to read.
@@ -159,6 +188,7 @@ export function identifyDocument(rawText: string): DocumentIdentity {
       reason: 'no_extractable_text',
       candidates: [],
       textChars: text.length,
+      validated: false,
     };
   }
 
@@ -173,6 +203,7 @@ export function identifyDocument(rawText: string): DocumentIdentity {
       reason: 'no_signature_matched',
       candidates: [],
       textChars: text.length,
+      validated: false,
     };
   }
 
@@ -186,15 +217,29 @@ export function identifyDocument(rawText: string): DocumentIdentity {
       reason: 'multiple_signatures_matched',
       candidates: matched.map((m) => m.type),
       textChars: text.length,
+      validated: false,
     };
   }
 
+  const type = matched[0]!.type;
   return {
-    type: matched[0]!.type,
+    type,
     matchedOn: matched[0]!.label,
-    candidates: [matched[0]!.type],
+    candidates: [type],
     textChars: text.length,
+    validated: !UNVALIDATED_TYPES.has(type),
   };
+}
+
+/**
+ * May this document be sent to the type's intended recipient?
+ *
+ * Two ways to fail and both are refusals: we could not identify it, or we
+ * identified it with a signature that has never matched a real document. The
+ * caller routes a false to the internal alert, never to a substitute recipient.
+ */
+export function isSafeToDeliver(identity: DocumentIdentity, expected: DocumentType): boolean {
+  return identity.type === expected && identity.validated;
 }
 
 /** Human-readable, for an operator message or an internal alert. */

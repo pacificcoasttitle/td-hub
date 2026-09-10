@@ -120,6 +120,39 @@ The tell, in all five: the claim was about a *thing* ("the row", "the
 contacts", "the book") while the evidence was about a *view*. When those two
 nouns differ, stop and re-query.
 
+## Search the opening, not the document (2026-09-10)
+
+Classifying a document by looking for a phrase ANYWHERE in it finds every type
+the document MENTIONS. Looking in its opening finds the type it IS.
+
+The first version of `document-identity.ts` tested each signature against the
+whole extracted text. Unit tests on excerpts passed. Run against real PDFs it
+refused **31 of 40 genuine preliminary title reports** — because a prelim names
+the ALTA policy forms that will be issued from it, so the loan-policy signature
+matched inside every prelim and two types claimed the same file.
+
+The fix is a per-signature window: each type announces itself in its first line
+or two, and beyond that window a phrase is a reference to another document, not
+a claim about this one. After the change, 40 of 40.
+
+Generalisations worth keeping:
+
+- **A document that mentions X is not an X.** The same trap as counting shared
+  vocabulary, one level up: presence of a phrase says the subject came up, not
+  that it is the subject. Ask WHERE the phrase is, not just whether it is there.
+- **Excerpt fixtures cannot catch a whole-document bug.** The unit tests used
+  the first 200 characters, which is exactly the region where the design was
+  already correct. The failure lived in the other 40,000 characters. When a
+  function's input is a large real artefact, at least one check has to run on
+  the real artefact.
+- **A validation pass is not the same as a test suite.** The suite proved the
+  regexes; running over 92 real files proved the signatures. Both were needed
+  and only the second found anything.
+- **When a pattern has never matched real data, say so in the type, not in a
+  comment.** `DocumentIdentity.validated` is false for the owner's-policy
+  signature because no owner's policy has ever been received. A comment saying
+  "unvalidated" does not stop a send; a field the caller must handle does.
+
 ## Decide vs ask (2026-08-27)
 
 DECIDE ALONE — do not ask:

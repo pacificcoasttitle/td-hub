@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { identifyDocument, MIN_TEXT_CHARS } from './document-identity';
+import { identifyDocument, isSafeToDeliver, MIN_TEXT_CHARS } from './document-identity';
 
 /**
  * Every fixture below is the real opening text of a real document in
@@ -132,5 +132,33 @@ describe('identifyDocument', () => {
       + 'vesting title to said estate is vested in the parties named herein.',
     );
     expect(identifyDocument(shared).type).toBe('unidentified');
+  });
+});
+
+describe('unvalidated signatures', () => {
+  // An owner's policy is the one document in this system addressed to a named
+  // individual, and its signature has never matched a real file. Being
+  // probably right about who owns a property is not good enough.
+  it("marks an owner's policy identification as unvalidated", () => {
+    const owners = pad(
+      'Copyright 2021 American Land Title Association. All rights reserved. '
+      + "ALTA Owner's Policy of Title Insurance SCHEDULE A Name and Address of Title "
+      + 'Insurance Company',
+    );
+    const id = identifyDocument(owners);
+    expect(id.type).toBe('alta_owners_policy');
+    expect(id.validated).toBe(false);
+    expect(isSafeToDeliver(id, 'alta_owners_policy')).toBe(false);
+  });
+
+  it('marks a loan policy as validated — it has matched real documents', () => {
+    const id = identifyDocument(LOAN_POLICY);
+    expect(id.type).toBe('alta_loan_policy');
+    expect(id.validated).toBe(true);
+    expect(isSafeToDeliver(id, 'alta_loan_policy')).toBe(true);
+  });
+
+  it('refuses when the type is right but it is not the type asked for', () => {
+    expect(isSafeToDeliver(identifyDocument(ORDER_SUMMARY), 'clta_preliminary_report')).toBe(false);
   });
 });

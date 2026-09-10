@@ -135,27 +135,48 @@ describe('identifyDocument', () => {
   });
 });
 
-describe('unvalidated signatures', () => {
-  // An owner's policy is the one document in this system addressed to a named
-  // individual, and its signature has never matched a real file. Being
-  // probably right about who owns a property is not good enough.
-  it("marks an owner's policy identification as unvalidated", () => {
-    const owners = pad(
-      'Copyright 2021 American Land Title Association. All rights reserved. '
-      + "ALTA Owner's Policy of Title Insurance SCHEDULE A Name and Address of Title "
-      + 'Insurance Company',
-    );
-    const id = identifyDocument(owners);
+describe('real ALTA policies', () => {
+  // Both pulled 2026-09-10 from GetAttachedDocumentsPolicy on 20018796-OCT.
+  // They open with the SAME ALTA copyright block; the form code and the form
+  // title are what separate them.
+  const OWNERS = pad(
+    'Page 1 Copyright 2021 American Land Title Association. All rights reserved. The use of '
+    + 'this Form (or any derivative thereof) is restricted to ALTA licensees and ALTA members in '
+    + 'good standing as of the date of use. All other uses are prohibited. Reprinted under license '
+    + 'from the American Land Title Association. OP-54 ALTA 07-01-2021 Owner’s Policy of Title '
+    + 'Insurance (ALTA 07-01-2021) (WLTIC Edition 08/26/2021) POLICY NO.: ALTA OWNER’S POLICY OF '
+    + 'TITLE INSURANCE issued by WESTCOR LAND TITLE INSURANCE COMPANY',
+  );
+  const LENDERS = pad(
+    'Page 1 Copyright 2021 American Land Title Association. All rights reserved. The use of '
+    + 'this Form (or any derivative thereof) is restricted to ALTA licensees and ALTA members in '
+    + 'good standing as of the date of use. All other uses are prohibited. Reprinted under license '
+    + 'from the American Land Title Association. LP-152 ALTA 07-01-2021 Loan Policy of Title '
+    + 'Insurance ( ALTA 0 7-01-2021) (WLTIC Edition 9/15/2021) POLICY NO.: ALTA LOAN POLICY OF '
+    + 'TITLE INSURANCE issued by WESTCOR LAND TITLE INSURANCE COMPANY',
+  );
+
+  // REGRESSION. The first owner pattern used a straight apostrophe and the
+  // document uses a curly one, so it matched nothing and returned
+  // `no_signature_matched` — safe, but wrong, and silently so.
+  it("identifies an owner's policy that spells it Owner’s with a curly apostrophe", () => {
+    const id = identifyDocument(OWNERS);
     expect(id.type).toBe('alta_owners_policy');
-    expect(id.validated).toBe(false);
-    expect(isSafeToDeliver(id, 'alta_owners_policy')).toBe(false);
+    expect(id.validated).toBe(true);
+    expect(isSafeToDeliver(id, 'alta_owners_policy')).toBe(true);
   });
 
-  it('marks a loan policy as validated — it has matched real documents', () => {
-    const id = identifyDocument(LOAN_POLICY);
+  it("identifies a lender's loan policy from the same order", () => {
+    const id = identifyDocument(LENDERS);
     expect(id.type).toBe('alta_loan_policy');
-    expect(id.validated).toBe(true);
     expect(isSafeToDeliver(id, 'alta_loan_policy')).toBe(true);
+  });
+
+  // The two open identically for 300 characters. Mixing them up sends a legal
+  // document to the wrong named party, so neither may claim the other.
+  it('does not confuse the two', () => {
+    expect(identifyDocument(OWNERS).type).not.toBe('alta_loan_policy');
+    expect(identifyDocument(LENDERS).type).not.toBe('alta_owners_policy');
   });
 
   it('refuses when the type is right but it is not the type asked for', () => {

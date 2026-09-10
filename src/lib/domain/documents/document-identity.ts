@@ -67,18 +67,21 @@ export interface DocumentIdentity {
 /**
  * Signatures that have never matched a real document.
  *
- * `alta_owners_policy` is here because in every policy PCT has received into
- * the hub there is not one owner's policy — all of them are loan policies.
- * Measured 2026-09-10 across the whole corpus, and again live against SoftPro:
- * neither document endpoint returned a single filename containing "policy" or
- * "owner" for 30 closed and completed orders.
+ * Empty as of 2026-09-10. `alta_owners_policy` was here until a real Owner's
+ * Policy Jacket was pulled from `GetAttachedDocumentsPolicy?DocType=Owner` and
+ * the signature confirmed against it.
  *
- * Remove a type from this set only after a real document of that type has been
- * seen and its opening text confirmed to match.
+ * The earlier conclusion that owner's policies were never attached to SoftPro
+ * orders was wrong, and wrong for a specific reason: the corpus was searched
+ * and two document endpoints were probed, but the documented endpoint that
+ * actually serves policies was never called. Absence of evidence was reported
+ * as evidence of absence.
+ *
+ * Add a type here whenever a signature is written from a form convention
+ * rather than from a document in hand, and remove it only after a real one has
+ * been seen.
  */
-export const UNVALIDATED_TYPES: ReadonlySet<DocumentType> = new Set<DocumentType>([
-  'alta_owners_policy',
-]);
+export const UNVALIDATED_TYPES: ReadonlySet<DocumentType> = new Set<DocumentType>([]);
 
 /**
  * Below this, the PDF is image-only or corrupt and there is nothing to read.
@@ -134,20 +137,27 @@ const SIGNATURES: Signature[] = [
     // ALTA policies name their own form, in caps, repeatedly — 4 to 7 times in
     // every policy we hold. "Loan", never "Lender".
     type: 'alta_loan_policy',
-    rx: /(?:ALTA|OCT)[A-Z\s]{0,60}\bLOAN\s+POLICY\b|ALTA\s+Residential\s+Limited\s+Coverage\s+Junior\s+Loan\s+Policy/i,
-    label: 'ALTA … LOAN POLICY (self-named form)',
+    rx: /\bLP-\d{2,3}\b|Loan\s+Policy\s+of\s+Title\s+Insurance|(?:ALTA|OCT)[A-Z\s]{0,60}\bLOAN\s+POLICY\b|ALTA\s+Residential\s+Limited\s+Coverage\s+Junior\s+Loan\s+Policy/i,
+    label: 'LP-NNN / Loan Policy of Title Insurance (self-named ALTA form)',
     // The form names itself right after the ALTA copyright block. Measured at
     // offset 150-700 across every policy we hold.
     window: 1200,
   },
   {
-    // UNVALIDATED. We have never received an owner's policy — every policy in
-    // the corpus is a loan policy — so this pattern is written from the ALTA
-    // form naming convention and has never matched a real document. Treat a
-    // match as needing human confirmation until one is seen.
+    // VALIDATED 2026-09-10 against a real Owner's Policy Jacket pulled from
+    // GetAttachedDocumentsPolicy?DocType=Owner on 20018796-OCT.
+    //
+    // The first version of this pattern did not match it, for a reason worth
+    // recording: the document uses a CURLY apostrophe. "ALTA OWNER’S POLICY OF
+    // TITLE INSURANCE", U+2019, not U+0027. A pattern written from how the
+    // phrase is spoken rather than how the file spells it matches nothing —
+    // and it failed silently as `no_signature_matched`, which is safe but
+    // wrong. Both forms are accepted now, and so is the ALTA form code, which
+    // has no apostrophe to get wrong: OP-54 for an owner's policy against
+    // LP-152 / LP-158 for a lender's.
     type: 'alta_owners_policy',
-    rx: /(?:ALTA|OCT)[A-Z\s]{0,60}\bOWNER'?S?\s+POLICY\b|ALTA\s+Owner'?s\s+Policy\s+of\s+Title\s+Insurance/i,
-    label: "ALTA … OWNER'S POLICY (self-named form) — PATTERN NEVER VALIDATED",
+    rx: /\bOP-\d{2,3}\b|Owner[’']?s?\s+Policy\s+of\s+Title\s+Insurance|(?:ALTA|OCT)[A-Z\s]{0,60}\bOWNER[’']?S?\s+POLICY\b/i,
+    label: 'OP-NNN / Owner’s Policy of Title Insurance (self-named ALTA form)',
     window: 1200,
   },
   {

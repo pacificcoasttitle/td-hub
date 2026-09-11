@@ -9,6 +9,7 @@ import {
   joinIdentity,
 } from '@/components/admin/contact-picker';
 import { ModalShell } from './modal-shell';
+import { searchLenders, type LenderSearchResult } from './lender-search';
 
 type Underwriter = 'westcor' | 'fnf';
 
@@ -47,7 +48,7 @@ interface ExistingCpl {
   filename?: string | null;
   createdAt: string;
 }
-interface LenderResult { id: number; companyName: string; address?: string; city?: string; state?: string; zip?: string; }
+type LenderResult = LenderSearchResult;
 
 const UNDERWRITER_LABELS: Record<Underwriter, string> = {
   westcor: 'Westcor',
@@ -333,9 +334,11 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
     clearTimeout(lenderDebRef.current);
     if (v.length < 2) { setLenderResults([]); return; }
     lenderDebRef.current = setTimeout(() => {
-      fetch(`/api/contacts/search?q=${encodeURIComponent(v)}&type=lender`)
-        .then((r) => r.ok ? r.json() : { results: [] })
-        .then((d) => setLenderResults(d.results ?? d.contacts ?? []))
+      // Companies as well as contacts: a lender company with nobody attached
+      // was unfindable here. Staff only — /api/companies answers any session,
+      // and the client view of this search has never listed companies.
+      searchLenders(v, { includeCompanies: !isClient })
+        .then(setLenderResults)
         .catch(() => setLenderResults([]));
     }, 250);
   }
@@ -416,7 +419,7 @@ export function CplModal({ open, onClose, orderId, fileNumber, address, isClient
                       */}
                       {lenderResults.map((l) => (
                         <ContactResultButton
-                          key={l.id}
+                          key={l.key}
                           initial={contactInitial(l.companyName)}
                           title={l.companyName}
                           detail={joinIdentity([l.city, l.state])}

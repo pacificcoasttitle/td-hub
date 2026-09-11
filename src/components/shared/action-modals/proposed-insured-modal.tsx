@@ -9,6 +9,7 @@ import {
   joinIdentity,
 } from '@/components/admin/contact-picker';
 import { ModalShell } from './modal-shell';
+import { searchLenders, type LenderSearchResult } from './lender-search';
 import type { ProposedInsuredInput } from '@/lib/domain/documents/proposed-insured';
 
 interface Branch { id: number; code: string; name: string; }
@@ -34,7 +35,7 @@ interface ProposedInsuredPrefill {
   supplementalReportDate?: string;
 }
 interface ExistingDoc { id: number; fileName?: string | null; filename?: string | null; createdAt: string; }
-interface LenderResult { id: number; companyName: string; lookupCode?: string; assignmentClause?: string; address?: string; city?: string; state?: string; zip?: string; }
+type LenderResult = LenderSearchResult;
 
 export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, address, isClient, accentColor, onSuccess }: {
   open: boolean; onClose: () => void;
@@ -137,15 +138,19 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
     clearTimeout(lenderDebRef.current);
     if (v.length < 2) { setLenderResults([]); return; }
     lenderDebRef.current = setTimeout(() => {
-      fetch(`/api/contacts/search?q=${encodeURIComponent(v)}&type=lender`)
-        .then((r) => r.ok ? r.json() : { results: [] })
-        .then((d) => setLenderResults(d.results ?? d.contacts ?? []))
+      // Companies as well as contacts: a lender company with nobody attached
+      // was unfindable here. Staff only — /api/companies answers any session,
+      // and the client view of this search has never listed companies.
+      searchLenders(v, { includeCompanies: !isClient })
+        .then(setLenderResults)
         .catch(() => setLenderResults([]));
     }, 250);
   }
 
   function selectLender(l: LenderResult) {
-    setLenderCompanyId(l.id);
+    // Only a company row carries a companies.id. A contact row's id is a
+    // CONTACTS id, and used to be stored here as if it were a company.
+    setLenderCompanyId(l.kind === 'company' ? l.companyId : null);
     setLenderLookupCode(l.lookupCode ?? '');
     setLenderCompany(l.companyName ?? '');
     setAssignmentClause(l.assignmentClause ?? '');
@@ -243,7 +248,7 @@ export function ProposedInsuredModal({ open, onClose, orderId, fileNumber, addre
                       */}
                       {lenderResults.map((l) => (
                         <ContactResultButton
-                          key={l.id}
+                          key={l.key}
                           initial={contactInitial(l.companyName)}
                           title={l.companyName}
                           detail={joinIdentity([l.city, l.state])}

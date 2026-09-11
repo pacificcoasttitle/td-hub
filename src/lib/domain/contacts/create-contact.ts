@@ -3,7 +3,7 @@ import { db } from '@/lib/db/client';
 import { companies, contactCompanyLinks, contacts } from '@/lib/db/schema';
 import { createUser } from '@/lib/integrations/softpro';
 import { personLookupBase } from './lookup-code';
-import { sendWithUniqueLookupCode } from './lookup-code-store';
+import { findSamePersonInCodeFamily, sendWithUniqueLookupCode } from './lookup-code-store';
 
 /**
  * SoftPro person create. This module must not call addCompany.
@@ -57,11 +57,13 @@ export type KnownCompany = {
 };
 
 export type CreateContactResult =
-  | { ok: true; contact: CreatedContact }
+  /** `reused`: the person was already held, and that record is returned instead of a new one. */
+  | { ok: true; contact: CreatedContact; reused?: boolean }
   | { ok: false; code: 'COMPANY_REQUIRED'; error: string }
   | { ok: false; code: 'COMPANY_NOT_FOUND'; error: string }
   | { ok: false; code: 'VALIDATION'; error: string }
   | { ok: false; code: 'SOFTPRO'; error: string; companyKept: KnownCompany }
+  | { ok: false; code: 'SOFTPRO_EXISTS'; error: string; existingLookupCode: string; companyKept: KnownCompany }
   | { ok: false; code: 'LOCAL_WRITE'; error: string; lookupCode: string; companyKept: KnownCompany };
 
 function blankToNull(value: string | null | undefined): string | null {
@@ -77,6 +79,16 @@ function contactFlags(userType: CreatePersonUserType) {
     isRealEstateAgent: userType === 'realtor',
     roles: userType === 'realtor' ? ['agent'] : [userType],
   };
+}
+
+/** Only the one flag the operator asked for — never clear another. */
+function typeFlagUpdate(userType: CreatePersonUserType) {
+  switch (userType) {
+    case 'escrow': return { isEscrow: true };
+    case 'lender': return { isLender: true };
+    case 'mortgage_broker': return { isMortgageBroker: true };
+    case 'realtor': return { isRealEstateAgent: true };
+  }
 }
 
 export async function createContactInSoftPro(input: CreateContactInput): Promise<CreateContactResult> {
@@ -116,8 +128,49 @@ export async function createContactInSoftPro(input: CreateContactInput): Promise
   const phone = blankToNull(input.phone);
   const address1 = blankToNull(input.address);
 
+  const base = personLookupBase(firstName, lastName, company.name);
+
+  // ─── REUSE, DON'T DUPLICATE ────────────────────────────────────────────────
+  //
+  // Same email, same code family, already in our table: that is the person.
+  // Return the record we hold rather than minting a suffixed copy of it. The
+  // requested type flag is added so the page the operator came from finds them
+  // next time — a missing flag is how Ali Darian and Chris Newcomer were hidden
+  // and then created again on 2026-09-11. The held record's company stands; a
+  // change of firm is an edit to that record, made deliberately.
+  const existing = await findSamePersonInCodeFamily(base, email);
+  if (existing) {
+    await db.update(contacts).set(typeFlagUpdate(input.userType)).where(eq(contacts.id, existing.id));
+
+    const heldCompanyCode = existing.flookupCode ?? company.lookupCode;
+    const [heldCompany] = heldCompanyCode === company.lookupCode
+      ? [company]
+      : await db.select({ id: companies.id, lookupCode: companies.lookupCode, name: companies.name })
+        .from(companies).where(eq(companies.lookupCode, heldCompanyCode)).limit(1);
+    const existingFirst = existing.firstName ?? firstName;
+    const existingLast = existing.lastName ?? lastName;
+
+    return {
+      ok: true,
+      reused: true,
+      contact: {
+        id: existing.id,
+        lookupCode: existing.lookupCode,
+        fullName: existing.fullName ?? `${existingLast}, ${existingFirst}`,
+        firstName: existingFirst,
+        lastName: existingLast,
+        companyName: heldCompany?.name ?? existing.companyName ?? company.name,
+        companyLookupCode: heldCompanyCode,
+        email: existing.email,
+        phone: existing.phone,
+        address: existing.address1,
+        city: existing.city,
+      },
+    };
+  }
+
   const pushed = await sendWithUniqueLookupCode(
-    personLookupBase(firstName, lastName, company.name),
+    base,
     (lookupCode) => createUser({
       FirstName: firstName,
       LastName: lastName,
@@ -130,7 +183,18 @@ export async function createContactInSoftPro(input: CreateContactInput): Promise
       State: input.state?.trim() ?? '',
       Zip: input.zip?.trim() ?? '',
     }),
+    { onVendorCollision: 'refuse' },
   );
+
+  if (!pushed.ok && pushed.existsInSoftPro) {
+    return {
+      ok: false,
+      code: 'SOFTPRO_EXISTS',
+      error: pushed.error,
+      existingLookupCode: pushed.existsInSoftPro,
+      companyKept,
+    };
+  }
 
   if (!pushed.ok) {
     return {

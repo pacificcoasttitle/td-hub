@@ -15,7 +15,20 @@ const querySchema = z.object({
 
 function typeToSql(type: string) {
   switch (type) {
-    case 'escrow': return sql`c.is_escrow = true`;
+    // The Parties picker. is_escrow is what the hub sets on an escrow person it
+    // creates; is_escrow_officer is what SoftPro sync sets. Chris Newcomer was
+    // synced with only the second, so the picker could not find him and he was
+    // created again on 2026-09-11. The officer flag counts only for outside
+    // contacts — PCT's own escrow officers carry it too and are never the
+    // outside escrow party. Same rule as externalEscrowPersonFilter.
+    case 'escrow': return sql`(
+      c.is_escrow = true
+      OR (
+        c.is_escrow_officer = true
+        AND (c.email IS NULL OR c.email NOT ILIKE '%@pct.com')
+        AND NOT EXISTS (SELECT 1 FROM profiles pr WHERE pr.contact_id = c.id)
+      )
+    )`;
     case 'lender': return sql`c.is_lender = true`;
     case 'mortgage_broker': return sql`c.is_mortgage_broker = true`;
     case 'agent':

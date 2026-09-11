@@ -37,6 +37,31 @@ it and returns the same full page regardless — raised with the vendor in
 defect 3. If it is ever honoured, this design becomes unnecessary and should be
 removed rather than kept.
 
+## What not finishing costs — measured 2026-09-10
+
+A sync that never completes leaves people SoftPro holds and the hub does not:
+**1,476** of them on 2026-09-09. On 2026-09-10 one of them cost four records.
+
+Erika Valencia was in SoftPro as `EriValEscr`, and not in our table — so
+there was nothing for Aileen to find. She created her. CreateUser rejected the
+code as a duplicate key; the retry minted `EriValEscr1`, eleven characters,
+which failed the first order naming her; a second attempt minted `EriValEscr2`.
+Two permanent SoftPro records that can never go on an order, cleaned up by hand.
+
+**The contact backfill would have prevented this entirely.** Had this sync
+completed, Erika would have been in the hub, Aileen would have picked her, and
+none of it would have happened. That is what the gap costs.
+
+Stated precisely, because the same day produced three more duplicates the
+backfill would *not* have prevented. Chris Newcomer and Ali Darian were already
+in our table, hidden from the picker by their type flags (#123). Sandra Ruiz was
+created twice by the hub itself, 46 seconds apart. Those are fixed by #122 and
+#123, not by this ticket.
+
+Since #122 the Erika case no longer mints a duplicate: the hub refuses and tells
+the operator SoftPro already has the code. That stops the damage. It does not
+let the operator pick the person — only a completed sync does.
+
 ## The design
 
 **A page budget of six per run.** 6 x 67s ~= 6.7 minutes, leaving ~3 minutes of

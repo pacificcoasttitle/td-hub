@@ -291,6 +291,13 @@ export function CreatePartyWizard({
                 SoftPro type: {USER_TYPE_LABEL[userType]}.
               </p>
             )}
+            {/* ONE LIST. Same reason as CompanyFormModal: an operator added the
+                same lender on both company pages because nothing said they were
+                one list, or which one the CPL search reads. */}
+            <p className="text-xs text-[#6B7280]">
+              This is the same company list as the Companies page — a company added on either page appears on both, so add it once.
+              {userType === 'lender' && ' Lenders here are what the CPL and Proposed Insured lender search finds.'}
+            </p>
             {selectedCompany ? (
               <div className="px-3 py-2 bg-[#1B2A4A]/5 border border-[#1B2A4A]/15 rounded-lg text-sm">
                 <p className="font-medium text-[#1A1A2E]">{selectedCompany.name}</p>

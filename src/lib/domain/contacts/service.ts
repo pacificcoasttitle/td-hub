@@ -1,7 +1,7 @@
 import { db } from '@/lib/db/client';
 import { contacts, companies } from '@/lib/db/schema';
 import { eq, desc, asc, sql, ilike, or, and, SQL } from 'drizzle-orm';
-import { externalContactFilter, internalContactFilter, namedContactFilter } from '@/lib/domain/contacts/filters';
+import { externalContactFilter, externalEscrowPersonFilter, internalContactFilter, namedContactFilter } from '@/lib/domain/contacts/filters';
 
 // ─── Role → Boolean Flag Mapping ──────────────────────────────────────────────
 
@@ -85,7 +85,14 @@ export async function getContacts(params: ContactListParams = {}): Promise<Conta
   const conditions: SQL[] = [];
 
   if (params.role) {
-    const boolFilter = roleToBooleanFilter(params.role);
+    // Escrow Employees asks for escrow_officer with scope=external, and must see
+    // every outside escrow person — not only the ones sync flagged
+    // is_escrow_officer. See externalEscrowPersonFilter. The mapping itself is
+    // NOT widened: the internal Escrow Officers page and the client portal's
+    // escrow selector pass the same role and keep the narrow flag.
+    const boolFilter = params.role === 'escrow_officer' && params.scope === 'external'
+      ? externalEscrowPersonFilter()
+      : roleToBooleanFilter(params.role);
     if (boolFilter) {
       conditions.push(boolFilter);
     }

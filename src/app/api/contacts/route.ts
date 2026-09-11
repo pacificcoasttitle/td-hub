@@ -183,7 +183,21 @@ export async function POST(req: NextRequest) {
   });
 
   if (result.ok) {
-    return NextResponse.json(result.contact, { status: 201 });
+    // 200 with reused:true when the person was already held — nothing was created.
+    return NextResponse.json(
+      { ...result.contact, reused: result.reused === true },
+      { status: result.reused ? 200 : 201 },
+    );
+  }
+  if (result.code === 'SOFTPRO_EXISTS') {
+    // `error` carries the operator-facing sentence: the wizard shows body.error
+    // and would otherwise print "SoftPro CreateUser failed" and nothing useful.
+    return NextResponse.json({
+      error: result.error,
+      code: result.code,
+      existingLookupCode: result.existingLookupCode,
+      companyKept: result.companyKept,
+    }, { status: 409 });
   }
   if (result.code === 'COMPANY_REQUIRED' || result.code === 'COMPANY_NOT_FOUND' || result.code === 'VALIDATION') {
     return NextResponse.json({ error: result.error, code: result.code }, { status: 400 });

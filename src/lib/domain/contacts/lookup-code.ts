@@ -83,3 +83,28 @@ export function uniquifyLookupCode(base: string, existing: Iterable<string>): st
   }
   return capped;
 }
+
+/**
+ * Is `code` the lookup code `base` would produce, with or without a collision
+ * suffix?
+ *
+ * Two suffix shapes exist in the data. Before 2026-09-11 the digit was appended
+ * past the base (`EriValEscr1`, eleven characters). Since #121 it replaces the
+ * base's trailing characters to stay inside ten (`EriValEsc1`). Both belong to
+ * the same family, and both have to be recognised when asking "do we already
+ * hold this person?" — otherwise every pre-fix duplicate is invisible to the
+ * check that exists to stop duplicates.
+ *
+ * Case-insensitive, because SoftPro's unique index is.
+ */
+export function isInLookupCodeFamily(code: string, base: string): boolean {
+  const c = code.trim().toLowerCase();
+  const b = base.trim().toLowerCase();
+  if (!c || !b) return false;
+  const capped = b.slice(0, MAX_LOOKUP_CODE_LENGTH);
+  if (c === b || c === capped) return true;
+  const digits = c.match(/\d+$/)?.[0];
+  if (!digits) return false;
+  const stem = c.slice(0, c.length - digits.length);
+  return stem === b || stem === capped.slice(0, MAX_LOOKUP_CODE_LENGTH - digits.length);
+}

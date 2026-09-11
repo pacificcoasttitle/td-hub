@@ -4,12 +4,16 @@ import * as createContactModule from './create-contact';
 const {
   createUserMock,
   addCompanyMock,
+  findSamePersonMock,
   insertValues,
+  updateSets,
   companyRows,
 } = vi.hoisted(() => ({
   createUserMock: vi.fn(),
   addCompanyMock: vi.fn(),
+  findSamePersonMock: vi.fn(),
   insertValues: [] as Array<{ table: string; vals: Record<string, unknown> }>,
+  updateSets: [] as Array<Record<string, unknown>>,
   companyRows: [] as Array<{ id: number; lookupCode: string; name: string }>,
 }));
 
@@ -37,19 +41,30 @@ vi.mock('@/lib/db/client', () => ({
         };
       }),
     })),
+    update: vi.fn(() => ({
+      set: vi.fn((vals: Record<string, unknown>) => {
+        updateSets.push(vals);
+        return { where: vi.fn(async () => []) };
+      }),
+    })),
   },
 }));
 
 vi.mock('./lookup-code-store', () => ({
   allocateLookupCode: vi.fn(async (base: string) => base),
+  findSamePersonInCodeFamily: findSamePersonMock,
   sendWithUniqueLookupCode: vi.fn(async (
     base: string,
     send: (code: string) => Promise<{ success: boolean; error?: { message?: string } }>,
+    options?: { onVendorCollision?: 'suffix' | 'refuse' },
   ) => {
     const result = await send(base);
-    return result.success
-      ? { ok: true, lookupCode: base }
-      : { ok: false, error: result.error?.message ?? 'rejected', codesTried: [base], collision: false };
+    if (result.success) return { ok: true, lookupCode: base };
+    const message = result.error?.message ?? 'rejected';
+    if (options?.onVendorCollision === 'refuse' && /duplicate key/i.test(message)) {
+      return { ok: false, error: `SoftPro already has ${base}`, codesTried: [base], collision: true, existsInSoftPro: base };
+    }
+    return { ok: false, error: message, codesTried: [base], collision: false };
   }),
 }));
 
@@ -59,8 +74,58 @@ describe('createContactInSoftPro — review locks', () => {
   beforeEach(() => {
     createUserMock.mockReset();
     addCompanyMock.mockReset();
+    findSamePersonMock.mockReset();
+    findSamePersonMock.mockResolvedValue(null);
     insertValues.length = 0;
+    updateSets.length = 0;
     companyRows.length = 0;
+  });
+
+  // CHRIS NEWCOMER, 2026-09-11. Held as ChrNewNewc ("Christopher"), flagged so
+  // the picker could not see him, and minted again as ChrNewNewc1.
+  it('returns the held record instead of creating one when the same person is already in the hub', async () => {
+    companyRows.push({ id: 942, lookupCode: 'Newco1773', name: 'Newcomer Escrow, Inc.' });
+    findSamePersonMock.mockResolvedValue({
+      id: 15511, lookupCode: 'ChrNewNewc', firstName: 'Christopher', lastName: 'Newcomer', fullName: null,
+      email: 'chris@newcomerescrow.com', phone: '(714)599-7951', address1: '17731 Irvine Boulevard',
+      city: 'Tustin', flookupCode: 'Newco1773', companyName: null,
+    });
+
+    const result = await createContactInSoftPro({
+      firstName: 'Chris',
+      lastName: 'Newcomer',
+      companyLookupCode: 'Newco1773',
+      email: 'Chris@NewcomerEscrow.com',
+      userType: 'escrow',
+    });
+
+    expect(result).toMatchObject({ ok: true, reused: true, contact: { id: 15511, lookupCode: 'ChrNewNewc' } });
+    expect(findSamePersonMock).toHaveBeenCalledWith('ChrNewNewc', 'Chris@NewcomerEscrow.com');
+    expect(createUserMock).not.toHaveBeenCalled();
+    expect(insertValues).toHaveLength(0);
+    // The flag the operator asked for is added, so the picker finds him next time.
+    expect(updateSets).toEqual([{ isEscrow: true }]);
+  });
+
+  // ERIKA VALENCIA, 2026-09-10. SoftPro held EriValEscr; the hub did not.
+  it('refuses, and writes nothing, when SoftPro already has the code for someone the hub does not hold', async () => {
+    companyRows.push({ id: 6250, lookupCode: 'Escr805W', name: 'Escrow360 Inc.' });
+    createUserMock.mockResolvedValue({
+      success: false,
+      error: { message: "Cannot insert duplicate key row in object 'dbo.lkup_X'. The duplicate key value is (EriValEscr)." },
+    });
+
+    const result = await createContactInSoftPro({
+      firstName: 'Erika',
+      lastName: 'Valencia',
+      companyLookupCode: 'Escr805W',
+      email: 'Erika@escrow360inc.com',
+      userType: 'escrow',
+    });
+
+    expect(result).toMatchObject({ ok: false, code: 'SOFTPRO_EXISTS', existingLookupCode: 'EriValEscr' });
+    expect(createUserMock).toHaveBeenCalledTimes(1);
+    expect(insertValues).toHaveLength(0);
   });
 
   it('rejects a missing companyLookupCode before SoftPro — typed name is not enough', async () => {

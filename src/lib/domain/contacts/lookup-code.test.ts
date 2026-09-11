@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { companyLookupBase, isSoftProLookupCollision, personLookupBase, uniquifyLookupCode, ucfirst } from './lookup-code';
+import { companyLookupBase, isSoftProLookupCollision, personLookupBase, uniquifyLookupCode, ucfirst, isInLookupCodeFamily } from './lookup-code';
 
 describe('lookup-code', () => {
   it('company: Wells Fargo Bank + 123 Main Street → Well123M', () => {
@@ -68,5 +68,30 @@ describe('isSoftProLookupCollision', () => {
       "Cannot insert duplicate key row in object 'dbo.lkup_X' with unique index 'IX_lkup_X_KEY'. The duplicate key value is (PctHhxqq).",
     )).toBe(true);
     expect(isSoftProLookupCollision('Validation failed')).toBe(false);
+  });
+});
+
+describe('isInLookupCodeFamily', () => {
+  it('recognises the base, pre-fix suffixes past ten, and capped suffixes inside ten', () => {
+    expect(isInLookupCodeFamily('EriValEscr', 'EriValEscr')).toBe(true);
+    expect(isInLookupCodeFamily('EriValEscr1', 'EriValEscr')).toBe(true); // before #121
+    expect(isInLookupCodeFamily('EriValEscr12', 'EriValEscr')).toBe(true);
+    expect(isInLookupCodeFamily('EriValEsc1', 'EriValEscr')).toBe(true); // since #121
+    expect(isInLookupCodeFamily('EriValEs12', 'EriValEscr')).toBe(true);
+  });
+
+  it('is case-insensitive, as SoftPro\'s unique index is', () => {
+    expect(isInLookupCodeFamily('erivalescr1', 'EriValEscr')).toBe(true);
+  });
+
+  it('does not claim a different person whose code merely looks close', () => {
+    expect(isInLookupCodeFamily('EriValCent', 'EriValEscr')).toBe(false);
+    expect(isInLookupCodeFamily('EriValEsca', 'EriValEscr')).toBe(false);
+    expect(isInLookupCodeFamily('SanRuiAmer', 'EriValEscr')).toBe(false);
+  });
+
+  it('handles a base shorter than ten, where the suffix is simply appended', () => {
+    expect(isInLookupCodeFamily('AlLiWell', 'AlLiWell')).toBe(true);
+    expect(isInLookupCodeFamily('AlLiWell1', 'AlLiWell')).toBe(true);
   });
 });

@@ -77,3 +77,27 @@ export function namedContactFilter(): SQL {
     OR coalesce(${contacts.lastName}, '') <> ''
   )`;
 }
+
+/**
+ * An outside escrow person, however they came to be filed.
+ *
+ * Two flags mean the same thing here and were used inconsistently. Contacts
+ * synced from SoftPro's escrow feeds carry `is_escrow_officer`; contacts the hub
+ * creates through the Parties flow carry `is_escrow`. The Escrow Employees page
+ * filtered the first and the Parties picker searched the second.
+ *
+ * MEASURED 2026-09-11: of 4,230 active outside escrow people, the page showed
+ * 721 — 17% — and not one the hub had ever created. Aileen searched there for
+ * Erika Valencia, was told she did not exist, and created her again. The picker
+ * had the mirror-image gap: 381 synced escrow people it could not find, one of
+ * them Chris Newcomer, created again the same day.
+ *
+ * External only. `is_escrow_officer` is also set on PCT's own escrow officers,
+ * who are never an outside escrow party.
+ */
+export function externalEscrowPersonFilter(): SQL {
+  return sql`(
+    (${contacts.isEscrow} = true OR ${contacts.isEscrowOfficer} = true)
+    AND ${externalContactFilter()}
+  )`;
+}

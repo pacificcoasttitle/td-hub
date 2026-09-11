@@ -240,7 +240,32 @@ is ~5 SiteX credits and ~70 TitlePoint calls per night.
 
 ---
 
-## 6. Staging isolation — VERIFIED, not assumed
+## 6. Staging isolation — VERIFIED, and CLOSED 2026-09-11
+
+**Closed with Aashima.** Orders are isolated. Contacts and companies are not.
+
+| | Staging `:8081` | Production `:3000` |
+|---|---|---|
+| Orders | SoftPro's test profile, file numbers prefixed `TEST-` | never sees them |
+| Contacts (lookup tables) | shared master table | the same table |
+| Companies | shared master table | the same table |
+
+Both halves were measured here before they were agreed. The order checks below
+are from 2026-09-02. The master tables returned identical counts from both
+ports on 2026-09-10 (`GetSyncStats`: Order Contact - Person 15,625, Title
+Officer 7, Escrow Officer 6 on each).
+
+**This ticket had it right, and so did Aashima.** Her "completely separate
+environments" was about orders, and so was this section. The 2026-09-10 report
+that called staging "NOT isolated" and said it contradicted her was measuring
+the contact tables, which nobody had claimed were separate. Two different
+tables, not a contradiction.
+
+**What it changes for this test.** Any staging step that creates or edits a
+contact or company — `CreateUser`, `UpdateUser`, `AddCompany`, `UpdateCompany`
+— writes production's master data. The E2E run picks existing contacts and
+companies and never mints new ones, unless contact creation is the thing under
+test and the record is meant to exist in production afterwards.
 
 Gerard said `:8081` lands in SoftPro's test profile and the vendor prefixes the
 file number with `TEST-`. Checked rather than taken, 2026-09-02.
@@ -272,9 +297,10 @@ switch (`softpro/client.ts:61`), and the base URL carries the `/api/` suffix:
 
 ### What this removes from the scope
 
-**The distinguishing problem is gone.** No test flag on the orders table, no
-marking step, no separate deployment, and no shared-database concern — the
-vendor separates the environments and names the files for us.
+**The distinguishing problem is gone for orders.** No test flag on the orders
+table, no marking step, no separate deployment — the vendor separates order
+files and names them for us. Contacts and companies are shared with production;
+see the closure note at the top of this section.
 
 ```sql
 WHERE file_number NOT LIKE 'TEST-%'
@@ -299,8 +325,10 @@ nightly run should budget ~1 minute for that stage alone.
 2. **The unit prices** — SiteX credit and TitlePoint per-search, for the cost
    line in section 5.
 
-Not needed, now that the vendor separates them: any answer about cleanup.
-Test files accumulate in SoftPro's test profile, which is what it is for.
+Not needed, now that the vendor separates them: any answer about cleanup of
+orders. Test files accumulate in SoftPro's test profile, which is what it is
+for. A contact or company created by a test does not — it lands in production's
+lookup tables and stays there.
 
 ## 7. What this does not cover
 

@@ -10,6 +10,27 @@ import { COMPANY_TYPE_MAP, DISPLAY_TO_TYPE } from '@/lib/domain/contacts/company
 
 const ADMIN_ROLES = ['super_admin', 'admin', 'cs_admin'];
 
+/**
+ * A blank field from the edit form means "not changed here" — never "erase".
+ *
+ * The form posts every input it has as a string, so an untouched empty input
+ * arrives as `''`, not as a missing key, and `data.zip ?? existing.zip` would
+ * still send the blank. The generic Companies page made that worse by
+ * hard-coding `zip: ''` into every edit.
+ */
+function provided(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+/** Stored company_type → the update schema's userType, for UserType fallback. */
+const STORED_TYPE_TO_USER_TYPE: Record<string, 'escrow' | 'lender' | 'mortgage_broker' | 'realtor'> = {
+  escrow_company: 'escrow',
+  lender: 'lender',
+  mortgage_broker: 'mortgage_broker',
+  real_estate_company: 'realtor',
+};
+
 const updateSchema = z.object({
   name: z.string().min(1).max(200),
   email: z.string().email().max(200).optional().nullable().or(z.literal('')),
@@ -81,17 +102,40 @@ export async function PUT(
 
     const data = parsed.data;
     const lookupCode = existing.lookupCode ?? '';
-    const spUserType = data.userType ? (COMPANY_TYPE_MAP[data.userType] ?? data.userType) : '';
+
+    // ─── THE PAYLOAD IS THE STORED ROW MERGED WITH THE CHANGES ──────────────
+    //
+    // It used to be built from the form alone — `Address1: data.address ?? ''`
+    // — and the edit form had no address field at all. SoftPro's UpdateCompany
+    // replaces the whole company, so every edit erased the address SoftPro held.
+    //
+    // MEASURED 2026-09-12. The first company edit ever made, on Private Money
+    // Solutions (Priv1503), sent `"Address1": ""` 74 seconds after the company
+    // was created and got back "Company updated". SoftPro's copy had no address
+    // afterwards; ours still showed 15030 Ventura Blvd because the local save
+    // already fell back to the stored row. The same defect was fixed for
+    // contacts on 2026-09-09 and nobody looked for it here.
+    const userType = data.userType ?? STORED_TYPE_TO_USER_TYPE[existing.companyType ?? ''];
+    const spUserType = userType ? (COMPANY_TYPE_MAP[userType] ?? userType) : '';
+    const merged = {
+      name: data.name.trim(),
+      phone: provided(data.phone) ?? existing.phone ?? '',
+      email: provided(data.email) ?? existing.email ?? '',
+      address1: provided(data.address) ?? existing.address1 ?? '',
+      city: provided(data.city) ?? existing.city ?? '',
+      state: provided(data.state) ?? existing.state ?? '',
+      zip: provided(data.zip) ?? existing.zip ?? '',
+    };
 
     const spPayload = {
-      Name: data.name,
-      Phone: data.phone ?? '',
-      Email: data.email ?? '',
+      Name: merged.name,
+      Phone: merged.phone,
+      Email: merged.email,
       LookupCode: lookupCode,
-      Address1: data.address ?? '',
-      City: data.city ?? '',
-      State: data.state ?? '',
-      Zip: data.zip ?? '',
+      Address1: merged.address1,
+      City: merged.city,
+      State: merged.state,
+      Zip: merged.zip,
       ...(spUserType ? { UserType: spUserType } : {}),
     };
 
@@ -104,18 +148,18 @@ export async function PUT(
     }
 
     await db.update(companies).set({
-      name: data.name,
-      email: data.email ?? existing.email,
-      phone: data.phone ?? existing.phone,
-      address1: data.address ?? existing.address1,
-      city: data.city ?? existing.city,
-      state: data.state ?? existing.state,
-      zip: data.zip ?? existing.zip,
+      name: merged.name,
+      email: merged.email || null,
+      phone: merged.phone || null,
+      address1: merged.address1 || null,
+      city: merged.city || null,
+      state: merged.state || null,
+      zip: merged.zip || null,
       companyType: data.userType ?? existing.companyType,
       updatedAt: new Date(),
     }).where(eq(companies.id, companyId));
 
-    return NextResponse.json({ id: companyId, lookupCode, name: data.name });
+    return NextResponse.json({ id: companyId, lookupCode, name: merged.name });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

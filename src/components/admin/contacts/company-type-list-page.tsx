@@ -176,6 +176,7 @@ export function CompanyTypeListPage({ title, subtitle, companyType, syncUserType
                           setEditCompany({
                             id: co.id, name: co.name, companyType,
                             lookupCode: co.lookupCode ?? '',
+                            address1: co.address1 ?? '',
                             city: co.city ?? '', state: co.state ?? '', zip: co.zip ?? '',
                             phone: co.phone ?? '', email: co.email ?? '', isActive: co.isActive,
                           });

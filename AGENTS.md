@@ -120,6 +120,36 @@ The tell, in all five: the claim was about a *thing* ("the row", "the
 contacts", "the book") while the evidence was about a *view*. When those two
 nouns differ, stop and re-query.
 
+## When you fix a class, name the class and go looking (2026-09-12)
+
+Three times in one week a fix landed in one place and the same defect stayed
+live somewhere else:
+
+- **Payload built from the form.** The contact edit sent SoftPro a payload
+  built from the request alone and would have blanked addresses; fixed
+  2026-09-09. The company edit had the identical defect. Nobody looked, and on
+  2026-09-12 the first company edit ever made blanked a lender's address in
+  SoftPro.
+- **A record visible on one screen and not another.** Escrow Employees filtered
+  one flag while the Parties flow set another (fixed 2026-09-11). The CPL lender
+  search had the same shape — it read contacts, and a company with nobody
+  attached could not be found (fixed 2026-09-12).
+
+Each fix was correct. Each was scoped to the file where the bug was reported,
+and the bug was never the file.
+
+So, before a fix is called done:
+
+1. **Write the class in one sentence that does not name the file.** "A vendor
+   write that replaces a record, built from request data alone" — not "the
+   contact PUT route sends a blank address".
+2. **Search for the sentence, not the file.** By operation, by call site, by
+   what the logs show was sent — every other place that sentence is true.
+3. **List every instance in the ticket with a status**: fixed, safe and why, or
+   open. "Did not look" is not a status.
+
+The sweep for the first class is `docs/tickets/VENDOR_WRITES_BUILT_FROM_THE_FORM.md`.
+
 ## Decide vs ask (2026-08-27)
 
 DECIDE ALONE — do not ask:

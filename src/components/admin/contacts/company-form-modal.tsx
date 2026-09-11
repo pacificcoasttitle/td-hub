@@ -23,6 +23,14 @@ export interface CompanyRecord {
 
 const EMPTY: CompanyRecord = { name: '', companyType: '', lookupCode: '', address1: '', city: '', state: '', zip: '', phone: '', email: '', isActive: true };
 const TYPE_OPTS = ['Escrow Company', 'Lender', 'Title Company', 'Real Estate', 'Mortgage Broker', 'Other'];
+
+/** The type page a company created with this type also appears on. */
+const TYPE_PAGE: Record<string, string> = {
+  'Escrow Company': 'Escrow Companies',
+  Lender: 'Lender Companies',
+  'Real Estate': 'Real Estate Companies',
+  'Mortgage Broker': 'Mortgage Companies',
+};
 const IN = 'w-full h-10 px-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A]';
 
 interface Props {
@@ -78,6 +86,18 @@ export function CompanyFormModal({ open, onClose, onSuccess, company }: Props) {
             </div>
           )}
           {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">{error}</div>}
+          {/* ONE LIST. On 2026-09-12 Aileen added Private Money Solutions on both
+              Companies and Lender Companies, because nothing said they were the
+              same list — and nothing said which one the CPL search used. */}
+          {!isEdit && (
+            <p className="text-xs text-[#6B7280]">
+              There is one list of companies.{' '}
+              {TYPE_PAGE[form.companyType]
+                ? `A company added here also appears on ${TYPE_PAGE[form.companyType]}, so add it once.`
+                : 'A company added here also appears on its type page, so add it once.'}
+              {form.companyType === 'Lender' && ' Lenders here are what the CPL and Proposed Insured lender search finds.'}
+            </p>
+          )}
           <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">Company Name *</label><input className={IN} value={form.name} onChange={e => set('name', e.target.value)} required /></div>
           <div className="grid grid-cols-2 gap-3">
             <div>

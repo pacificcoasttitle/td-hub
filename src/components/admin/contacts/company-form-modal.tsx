@@ -7,6 +7,12 @@ export interface CompanyRecord {
   name: string;
   companyType: string;
   lookupCode: string;
+  /**
+   * The form had no address field at all, so every edit sent a blank Address1
+   * and SoftPro's UpdateCompany erased the one it held. Prefill it from the
+   * stored row on edit.
+   */
+  address1: string;
   city: string;
   state: string;
   zip: string;
@@ -15,7 +21,7 @@ export interface CompanyRecord {
   isActive: boolean;
 }
 
-const EMPTY: CompanyRecord = { name: '', companyType: '', lookupCode: '', city: '', state: '', zip: '', phone: '', email: '', isActive: true };
+const EMPTY: CompanyRecord = { name: '', companyType: '', lookupCode: '', address1: '', city: '', state: '', zip: '', phone: '', email: '', isActive: true };
 const TYPE_OPTS = ['Escrow Company', 'Lender', 'Title Company', 'Real Estate', 'Mortgage Broker', 'Other'];
 const IN = 'w-full h-10 px-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]/20 focus:border-[#1B2A4A]';
 
@@ -45,7 +51,8 @@ export function CompanyFormModal({ open, onClose, onSuccess, company }: Props) {
     try {
       const url = isEdit ? `/api/companies/${company!.id}` : '/api/companies';
       const method = isEdit ? 'PUT' : 'POST';
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      // Create reads `address1`; update reads `address`. Send both names.
+      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, address: form.address1 }) });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? `Failed (${res.status})`);
       onSuccess(); onClose();
@@ -82,6 +89,7 @@ export function CompanyFormModal({ open, onClose, onSuccess, company }: Props) {
             </div>
             <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">Lookup Code</label><input className={IN} value={form.lookupCode} onChange={e => set('lookupCode', e.target.value)} /></div>
           </div>
+          <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">Address</label><input className={IN} value={form.address1} onChange={e => set('address1', e.target.value)} /></div>
           <div className="grid grid-cols-3 gap-3">
             <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">City</label><input className={IN} value={form.city} onChange={e => set('city', e.target.value)} /></div>
             <div><label className="block text-xs font-medium text-[#1A1A2E] mb-1">State</label><input className={IN} value={form.state} onChange={e => set('state', e.target.value)} /></div>

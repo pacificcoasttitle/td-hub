@@ -95,7 +95,9 @@ export default function CompaniesPage() {
   }
 
   function openEdit(c: Company) {
-    setEditCompany({ id: c.id, name: c.name, companyType: c.companyType ?? '', lookupCode: c.lookupCode ?? '', city: c.city ?? '', state: c.state ?? '', zip: '', phone: c.phone ?? '', email: c.email ?? '', isActive: c.isActive });
+    // zip was hard-coded to '' here, so every edit from this page also blanked
+    // the zip. Both come from the stored row now.
+    setEditCompany({ id: c.id, name: c.name, companyType: c.companyType ?? '', lookupCode: c.lookupCode ?? '', address1: c.address1 ?? '', city: c.city ?? '', state: c.state ?? '', zip: c.zip ?? '', phone: c.phone ?? '', email: c.email ?? '', isActive: c.isActive });
     setModalOpen(true);
   }
 

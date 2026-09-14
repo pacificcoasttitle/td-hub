@@ -86,7 +86,7 @@ every time, because the projection was mistaken for the thing itself.
 | 3 | "4,630 distinct person codes from 18,700 rows" | `Filter: LookupCode`, the *company* code | the person code gives 17,163 |
 | 4 | "Our row holds none of Gerard's address" | a SELECT with no `address1`/`city`/`state`/`zip` | the row had the full address |
 | 5 | "All 120 of these contacts have no name" | `first_name`, `last_name` — printing `(no name)` when both were null | **106 of the 120 are named**; the name is in `full_name` |
-| 6 | "SoftPro now holds no address for `Priv1503`" | SoftPro's `GetCompanies`, which returns `Address1: ""` for **all 1,486 lender rows** — Rocket Mortgage included | `GetLookuptable?userType=Lender` returns the address; the field is simply not in the other endpoint's projection |
+| 6 | "SoftPro now holds no address for `Priv1503`" | SoftPro's `GetCompanies`, which returns `Address1: ""` for **every lender row** — 0 of 1,487 across all 3 pages on 2026-09-14, Rocket Mortgage included. (The first draft of this row said "all 1,486" having read one page of 500: the count came from the other endpoint. Same error, inside the note about it.) | `GetLookuptable?userType=Lender` returns the address; the field is simply not in the other endpoint's projection |
 
 **Where the fifth one landed is the point.** It was in the dry run whose entire
 purpose was to decide whether to write to 74 live rows — and it was used to

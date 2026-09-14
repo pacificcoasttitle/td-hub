@@ -66,7 +66,9 @@ export const contacts = pgTable('contacts', {
   suffix: varchar('suffix', { length: 50 }),
   title: varchar('title', { length: 100 }),
 
-  companyName: varchar('company_name', { length: 200 }),
+  // text, not varchar(200): SoftPro company names run past 200 (lender PLML5446
+  // is 235) and the sync failed on it silently. Migration 0049.
+  companyName: text('company_name'),
   officerName: varchar('officer_name', { length: 200 }),
   closerExaminer: varchar('closer_examiner', { length: 200 }),
   officeLookupCode: varchar('office_lookup_code', { length: 100 }),
@@ -136,7 +138,8 @@ export const companies = pgTable('companies', {
   sourceSystem: varchar('source_system', { length: 50 }).default('softpro'),
   sourceId: varchar('source_id', { length: 100 }),
 
-  name: varchar('name', { length: 200 }).notNull(),
+  // text — see companyName on contacts. Migration 0049.
+  name: text('name').notNull(),
   companyType: varchar('company_type', { length: 100 }),
   lookupCode: varchar('lookup_code', { length: 100 }),
 

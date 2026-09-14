@@ -339,6 +339,19 @@ describe('a unique violation is named, not buried', () => {
       .toContain('unique violation on contacts_pkey');
     expect(describeSyncError(new Error('plain failure'))).toBe('plain failure');
   });
+
+  // PLML5446: the lender sync failed eleven times on a 235-character name, and
+  // every stored error was the wrapper's SQL dump. Postgres gives an overflow no
+  // detail, so the reason is the driver's own message on cause.
+  it('names an overflow from cause, not the SQL dump', () => {
+    const overflow = Object.assign(
+      new Error('Failed query: insert into "contacts" ("company_name") values ($1)\nparams: PLML5446'),
+      { cause: Object.assign(new Error('value too long for type character varying(200)'), { code: '22001' }) },
+    );
+    const message = describeSyncError(overflow);
+    expect(message).toBe('postgres 22001: value too long for type character varying(200)');
+    expect(message).not.toContain('Failed query');
+  });
 });
 
 // ── The shape guard ─────────────────────────────────────────────────────────

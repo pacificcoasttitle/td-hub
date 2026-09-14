@@ -187,8 +187,11 @@ export function describeSyncError(err: unknown): string {
       + 'so the officer was not updated. Two contacts rows share one SoftPro identity.';
   }
   if (code) {
+    // pg.message before top.message: for a 22001 Postgres gives no detail, and
+    // top.message is the wrapper's SQL dump — the thing this function exists to
+    // replace. PLML5446's lender sync failed eleven times stored that way.
     return `postgres ${code}${pg?.constraint_name ? ` on ${pg.constraint_name}` : ''}: `
-      + `${pg?.detail ?? top?.message ?? 'no detail'}`;
+      + `${pg?.detail ?? (pg !== top ? pg?.message : undefined) ?? top?.message ?? 'no detail'}`;
   }
   return err instanceof Error ? err.message : 'Unknown';
 }
@@ -330,7 +333,7 @@ async function syncOpenContacts(items: SyncRow[]): Promise<SyncContactsResult> {
         .where(eq(contacts.id, existing.id));
       updated++;
     } catch (err) {
-      errors.push({ lookupCode: code, error: err instanceof Error ? err.message : 'Unknown' });
+      errors.push({ lookupCode: code, error: describeSyncError(err) });
     }
   }
 
@@ -349,7 +352,7 @@ async function syncOpenContacts(items: SyncRow[]): Promise<SyncContactsResult> {
         } catch (inner) {
           errors.push({
             lookupCode: String(row.lookupCode ?? '?'),
-            error: inner instanceof Error ? inner.message : 'Unknown',
+            error: describeSyncError(inner),
           });
         }
       }
@@ -570,7 +573,7 @@ async function syncSalesRepRows(
         created++;
       }
     } catch (err) {
-      errors.push({ lookupCode: code, error: err instanceof Error ? err.message : 'Unknown' });
+      errors.push({ lookupCode: code, error: describeSyncError(err) });
     }
   }
 
@@ -726,7 +729,7 @@ async function syncCompanyType(config: CompanySyncConfig, items: SyncRow[]): Pro
         created++;
       }
     } catch (err) {
-      errors.push({ lookupCode: code, error: err instanceof Error ? err.message : 'Unknown' });
+      errors.push({ lookupCode: code, error: describeSyncError(err) });
     }
   }
 

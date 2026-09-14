@@ -67,6 +67,8 @@ vi.mock('@/lib/db/client', () => ({
 }));
 
 vi.mock('./sync-contacts', () => ({
+  // The real helper is pure; a plain message is all these tests read.
+  describeSyncError: (err: unknown) => (err instanceof Error ? err.message : 'Unknown'),
   fetchSyncContactRows: fetchSyncContactRowsMock,
   getSyncContactLookupCode: getSyncContactLookupCodeMock,
   sortSyncContactRows: sortSyncContactRowsMock,

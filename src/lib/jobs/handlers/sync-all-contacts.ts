@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import { contactSyncState, jobs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import {
+  describeSyncError,
   fetchSyncContactRows,
   getSyncContactLookupCode,
   sortSyncContactRows,
@@ -322,7 +323,7 @@ export async function handleSyncContactType(
 
     return response;
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown sync contacts failure';
+    const message = err ? describeSyncError(err) : 'Unknown sync contacts failure';
     await db.update(contactSyncState)
       .set({
         status: 'failed',

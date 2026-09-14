@@ -1,0 +1,25 @@
+-- 0049 — Company name columns from varchar(200) to text.
+--
+-- WHY
+--   The lender and other company syncs copy SoftPro's lookup-table `Name` into
+--   `contacts.company_name` and `companies.name` unchecked. SoftPro holds a
+--   lender, PLML5446, whose Name is 235 characters. Its insert throws 22001, the
+--   sync records the failure and moves on, and the lender has never reached the
+--   book: `softpro.sync_contacts.lender` stored that failure 11 times between
+--   2026-08-27 and 2026-09-12. Nobody noticed, because every stored error was
+--   Drizzle's SQL dump rather than the reason (fixed alongside this migration).
+--
+--   Same class as 0047 (order_properties.property_type): vendor free text into
+--   a bounded column. See docs/tickets/VENDOR_TEXT_INTO_BOUNDED_COLUMNS.md.
+--
+-- WHY TEXT AND NOT A BIGGER NUMBER
+--   A larger limit is a guess at the longest name SoftPro will ever hold. The
+--   operator create forms keep their own length checks; this only stops the
+--   database refusing what the vendor already has.
+--
+-- COST
+--   varchar -> text is binary-coercible: no table rewrite, and the btree index
+--   companies_name_idx is not rebuilt. No view depends on either table (checked
+--   2026-09-14).
+ALTER TABLE contacts ALTER COLUMN company_name TYPE text;
+ALTER TABLE companies ALTER COLUMN name TYPE text;

@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import { contacts } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { getLookupTable, mapLookupTableEntry } from '@/lib/integrations/softpro';
+import { describeSyncError } from './sync-contacts';
 
 export interface SyncNewUsersResult {
   newContacts: number;
@@ -77,7 +78,7 @@ export async function handleSyncNewUsers(): Promise<SyncNewUsersResult> {
     } catch (err) {
       errors.push({
         entityType: entityType.userType,
-        error: err instanceof Error ? err.message : 'Unknown error',
+        error: describeSyncError(err),
       });
     }
   }

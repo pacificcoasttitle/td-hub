@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
+import { canReadContactBook } from '@/lib/security/contact-book-access';
 import { getCompanies } from '@/lib/domain/contacts/service';
 import { ADD_COMPANY_USER_TYPES, DISPLAY_TO_TYPE } from '@/lib/domain/contacts/company-constants';
 import { canCreateSoftProRecords } from '@/lib/domain/contacts/create-roles';
@@ -45,6 +46,10 @@ export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  if (!canReadContactBook(session.role)) {
+    // The master book is internal. See contact-book-access.ts.
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {

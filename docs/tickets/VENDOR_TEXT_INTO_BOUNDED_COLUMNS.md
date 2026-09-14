@@ -18,7 +18,7 @@ fixed — `CREATE_LOCAL_FAILURE_IS_UNDIAGNOSABLE.md`, "Why it came back".
 | Column | Evidence | Status |
 |---|---|---|
 | `order_properties.property_type` (50) | 8 recorded create failures; replayed: `22001`; 54–57 character values | **Fixed** (#130, migration 0047) |
-| `contacts.company_name` / `full_name` (200) | Lender `PLML5446`: SoftPro `Name` is **235** characters. `softpro.sync_contacts.lender` has stored a Drizzle-wrapped `insert into "contacts"` failure 11 times, latest 2026-09-12. The stored error never names the reason (wrapper), but the value cannot fit either column. | **Open.** That lender has not synced |
+| `contacts.company_name` / `full_name` (200) | Lender `PLML5446`: SoftPro `Name` is **235** characters. `softpro.sync_contacts.lender` has stored a Drizzle-wrapped `insert into "contacts"` failure 11 times, latest 2026-09-12. The stored error never names the reason (wrapper), but the value cannot fit either column. | **Fixed** (migration 0049, 2026-09-14): `contacts.company_name` and `companies.name` to `text`, and the contact syncs now store the Postgres reason instead of the SQL. Closed only when the next lender sync is seen to create PLML5446 |
 
 ## Why "no 22001 recorded" means nothing here
 

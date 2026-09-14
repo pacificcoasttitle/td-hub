@@ -130,6 +130,55 @@ those two nouns differ, stop and re-query.
 
 ## When you fix a class, name the class and go looking (2026-09-12)
 
+### Closed is not the same as handled (2026-09-14) — read this first
+
+On 2026-09-01 `CREATE_ORDER_ORPHANS_2026-08-31.md` diagnosed a `varchar(50)`
+overflow on `order_properties.property_type` — right column, right SiteX field —
+and called the defect "closed in code". **Nothing ever changed the column.** No
+branch, no commit, no worktree. What shipped that day (#80) was the *handling*:
+lock Create and tell the operator not to re-enter, behind a bare `catch {}` that
+threw the error away. Its test throws `new Error('value too long for type
+character varying(50)')` — the cause, by name, used as a fixture for the
+treatment. The test passed because it asserted the handling, and the handling
+was all there was.
+
+**Then the handling hid the cause.** On 2026-09-10 the same overflow half-created
+`20022014-GLT`. With the error discarded, the investigation checked five other
+field lengths, found them all in range, and concluded "a third cause" — while the
+ticket naming the column sat on main. Eight more orders half-created before it
+was found on 2026-09-14. The fix that hid the problem is why it took two weeks to
+rediscover.
+
+It is the third fix this month that did not take, and all three have one shape —
+*fixed* was attached to something other than proof in production:
+
+| Fix | Declared | What was true |
+|---|---|---|
+| Lookup-code overflow | fixed 2 Sep (`902df82`) | sat on a branch until 10 Sep (#121) |
+| Address blanking | fixed on contacts 9 Sep (#115) | companies had the identical defect until 12 Sep (#126) |
+| `property_type` overflow | "closed in code" 1 Sep | only the handling shipped; the column was untouched until 14 Sep (#130) |
+
+So:
+
+- **A fix is not closed until something in production proves the failure cannot
+  recur.** Merged and deployed, and then the thing itself observed: the migration
+  applied and the column read back, the value that failed inserted into the real
+  column's shape, the vendor record read back after the write. For #130 that was
+  `property_type` reading back as `text` and the 54- and 57-character
+  descriptions inserting.
+- **A test that mocks the error does not count.** It proves what happens *after*
+  the failure, which is the handling. It says nothing about whether the failure
+  can still occur.
+- **Handling that ships before the cause is removed keeps the ticket open,** and
+  says so in the ticket. "Closed in code" on a ticket whose cause is still live
+  is how the next investigation starts from nothing.
+- **Handling must record the reason, not swallow it** — and record the real one:
+  the recorder added on 2026-09-09 read Drizzle's wrapper instead of `cause` and
+  stored `code: null` ten times. Check that a recorder captures a real failure
+  before trusting what it has not recorded.
+
+### The same defect somewhere else
+
 Three times in one week a fix landed in one place and the same defect stayed
 live somewhere else:
 

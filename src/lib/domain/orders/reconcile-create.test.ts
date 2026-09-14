@@ -98,6 +98,15 @@ describe('reconcile a half-created order', () => {
     expect(await getReconcileState(8687)).toEqual({ needed: false, reason: 'canceled' });
   });
 
+  it('is not offered for a file marked duplicate — the one being cancelled', async () => {
+    rowsFor.orders = [{ ...ORDER, operationalStatus: 'duplicate' }];
+    rowsFor.admin_activity_logs = [FAILURE];
+    rowsFor.vendor_api_logs = [PAYLOAD];
+    expect(await getReconcileState(8687)).toEqual({ needed: false, reason: 'duplicate' });
+    expect(await reconcileFailedCreate(8687, 'user-1')).toMatchObject({ ok: false, code: 'NOT_NEEDED' });
+    expect(autoTriggerMock).not.toHaveBeenCalled();
+  });
+
   it('refuses rather than guess when no SoftPro payload is logged', async () => {
     rowsFor.admin_activity_logs = [FAILURE];
     const result = await reconcileFailedCreate(8687, 'user-1');

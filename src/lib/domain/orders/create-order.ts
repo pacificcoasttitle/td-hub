@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts, branches, orderDeliverableEmails, adminActivityLogs } from '@/lib/db/schema';
+import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts, branches, orderDeliverableEmails, adminActivityLogs, profiles } from '@/lib/db/schema';
+import { buildCreateFailureAlertEmail, CREATE_FAILURE_ALERT_EVENT_TYPE } from './create-failure';
 import { validateDeliverableEmails } from '@/lib/domain/notifications/deliverable-emails';
 import { eq, and, inArray } from 'drizzle-orm';
 import { pgErrorFields } from '@/lib/db/pg-error';
@@ -257,7 +258,8 @@ async function recordCreateLocalFailure(
     // reason: on 20022044-GLT and 20022165-OCT the SoftPro sync had imported the
     // file first, so stage read "after_properties" while the statement that
     // failed was the orders insert.
-    const failedStatement = /^Failed query: (insert into|update) "([a-z_]+)"/i.exec(wrapperMessage);
+    const statementMatch = /^Failed query: (insert into|update) "([a-z_]+)"/i.exec(wrapperMessage);
+    const failedStatement = statementMatch ? `${statementMatch[1].toLowerCase()} ${statementMatch[2]}` : null;
     // Which rows landed before the throw says WHERE it broke. The insert order
     // is orders, then properties, then parties, then status history.
     const [orderRow] = await db
@@ -270,6 +272,7 @@ async function recordCreateLocalFailure(
       ? (await db.select({ id: orderProperties.id }).from(orderProperties)
           .where(eq(orderProperties.orderId, orderRow.id)).limit(1)).length > 0
       : false;
+    const stage = !orderExists ? 'orders' : !propertyExists ? 'order_properties' : 'after_properties';
 
     await db.insert(adminActivityLogs).values({
       userId: userId ?? 'system',
@@ -285,12 +288,12 @@ async function recordCreateLocalFailure(
         column: pg.column,
         table: pg.table,
         detail: pg.detail,
-        failedStatement: failedStatement ? `${failedStatement[1].toLowerCase()} ${failedStatement[2]}` : null,
+        failedStatement,
         // The statement and its parameters. Kept because it is everything a
         // reconcile needs to finish the write, whatever the code turns out to be.
         sql: wrapperMessage === pg.message ? null : wrapperMessage,
         // Where it got to, so the stage is known even if the message is not.
-        stage: !orderExists ? 'orders' : !propertyExists ? 'order_properties' : 'after_properties',
+        stage,
         orderRowWritten: orderExists,
         propertyRowWritten: propertyExists,
         // The lengths that have caused this twice before, so an overflow is
@@ -303,6 +306,40 @@ async function recordCreateLocalFailure(
         },
       },
     });
+
+    // TELL SOMEONE. Before this, a half-created order was found by the operator
+    // who hit it, and reached Gerard as a Slack message. Queued, not sent inline:
+    // the create request should not wait on an email, and the outbox job retries.
+    // Its own try so a failed enqueue cannot lose the reason recorded above.
+    // No order row means nothing to open and no order id to dispatch on —
+    // the activity row above still records it.
+    if (orderRow) {
+      try {
+        const [operator] = userId
+          ? await db.select({ email: profiles.email }).from(profiles).where(eq(profiles.id, userId)).limit(1)
+          : [];
+        const { subject, html } = buildCreateFailureAlertEmail({
+          orderId: orderRow.id,
+          fileNumber,
+          address: [input.property?.address, input.property?.city, input.property?.state, input.property?.zip]
+            .filter(Boolean).join(', ') || null,
+          failure: {
+            code: pg.code, message: pg.message, column: pg.column, constraint: pg.constraint,
+            failedStatement,
+            stage,
+          },
+          operatorEmail: operator?.email ?? null,
+          failedAt: new Date(),
+        });
+        await db.insert(eventOutbox).values({
+          eventType: CREATE_FAILURE_ALERT_EVENT_TYPE,
+          orderId: orderRow.id,
+          payload: { subject, html, fileNumber, code: pg.code },
+        });
+      } catch {
+        // The reason is recorded; the alert is best-effort.
+      }
+    }
   } catch {
     // Recording the reason must never turn a recoverable create into a 500.
   }

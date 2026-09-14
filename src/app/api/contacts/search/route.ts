@@ -3,9 +3,8 @@ import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { sql } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
+import { canReadContactBook } from '@/lib/security/contact-book-access';
 
-const ALLOWED_ROLES = ['super_admin', 'admin', 'cs_admin', 'open_order_team', 'escrow_assistant',
-  'sales_rep', 'title_officer', 'escrow_officer'];
 
 const querySchema = z.object({
   q: z.string().min(2).max(100),
@@ -59,7 +58,7 @@ function deriveClientType(row: {
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
-  if (!session || !ALLOWED_ROLES.includes(session.role)) {
+  if (!session || !canReadContactBook(session.role)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

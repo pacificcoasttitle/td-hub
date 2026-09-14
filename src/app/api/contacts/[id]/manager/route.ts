@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
+import { canReadContactBook } from '@/lib/security/contact-book-access';
 import { db } from '@/lib/db/client';
 import { contacts, profiles } from '@/lib/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
@@ -106,6 +107,10 @@ export async function GET(
 ) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!canReadContactBook(session.role)) {
+    // The master book is internal. See contact-book-access.ts.
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   const { id } = await params;
   const contactId = parseInt(id, 10);

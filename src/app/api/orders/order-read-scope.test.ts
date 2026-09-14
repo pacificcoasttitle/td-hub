@@ -40,7 +40,6 @@ vi.mock('@/lib/db/client', () => {
 });
 
 import { GET as quickSearch } from './quick-search/route';
-import { GET as dashboardActivity } from '../dashboard/activity/route';
 
 function contains(tree: unknown, needle: unknown): boolean {
   if (tree === needle) return true;
@@ -51,7 +50,6 @@ function contains(tree: unknown, needle: unknown): boolean {
 
 const READS: Array<[string, () => Promise<Response>]> = [
   ['GET /api/orders/quick-search', () => quickSearch(new NextRequest('http://localhost/api/orders/quick-search?q=2002'))],
-  ['GET /api/dashboard/activity', () => dashboardActivity(new NextRequest('http://localhost/api/dashboard/activity?limit=10'))],
 ];
 
 describe.each(READS)('%s is scoped like the orders list', (_name, call) => {

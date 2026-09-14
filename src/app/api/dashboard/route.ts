@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
+import { isStaff } from '@/lib/security/permissions';
 import { db } from '@/lib/db/client';
 import { orders, jobs, orderProperties, eventOutbox, documents, vendorApiLogs } from '@/lib/db/schema';
 import { eq, sql, desc, count, gte, and, isNotNull } from 'drizzle-orm';
@@ -14,6 +15,10 @@ async function safeQuery<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // Order totals, failed jobs and recent order addresses across every order. The
+  // only caller is the admin ops dashboard, which the page renders for these
+  // three roles alone. Locked 2026-09-14.
+  if (!isStaff(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();

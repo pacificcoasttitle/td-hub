@@ -72,9 +72,9 @@ been `max-h-60` since April; the section grew into it at seven children on
 `docs/tickets/REACHABILITY_SWEEP.md` for the wider pattern — four capabilities
 in one week that existed and could not be reached.
 
-## A projection is not the row (2026-09-10)
+## A projection is not the row (2026-09-10, sixth instance 2026-09-12)
 
-Five times now, a conclusion about the data has been drawn from a **subset of
+Six times now, a conclusion about the data has been drawn from a **subset of
 columns that a script happened to select**, and stated as a fact about the
 record. The query was correct every time. The reasoning on top of it was wrong
 every time, because the projection was mistaken for the thing itself.
@@ -86,6 +86,7 @@ every time, because the projection was mistaken for the thing itself.
 | 3 | "4,630 distinct person codes from 18,700 rows" | `Filter: LookupCode`, the *company* code | the person code gives 17,163 |
 | 4 | "Our row holds none of Gerard's address" | a SELECT with no `address1`/`city`/`state`/`zip` | the row had the full address |
 | 5 | "All 120 of these contacts have no name" | `first_name`, `last_name` — printing `(no name)` when both were null | **106 of the 120 are named**; the name is in `full_name` |
+| 6 | "SoftPro now holds no address for `Priv1503`" | SoftPro's `GetCompanies`, which returns `Address1: ""` for **every lender row** — 0 of 1,487 across all 3 pages on 2026-09-14, Rocket Mortgage included. (The first draft of this row said "all 1,486" having read one page of 500: the count came from the other endpoint. Same error, inside the note about it.) | `GetLookuptable?userType=Lender` returns the address; the field is simply not in the other endpoint's projection |
 
 **Where the fifth one landed is the point.** It was in the dry run whose entire
 purpose was to decide whether to write to 74 live rows — and it was used to
@@ -116,9 +117,97 @@ So:
   columns a different script had selected is how #5 and the reachability
   conclusion both went wrong at once.
 
-The tell, in all five: the claim was about a *thing* ("the row", "the
-contacts", "the book") while the evidence was about a *view*. When those two
-nouns differ, stop and re-query.
+- **A vendor endpoint is a projection too, and you cannot read its source.**
+  `GetCompanies` returns `Address1` for nobody; `GetLookuptable` returns it for
+  everybody. Before reading a blank as a loss, check the same field on a record
+  nothing has touched — Rocket Mortgage came back blank too, and that was the
+  whole answer. Absence in a vendor response means *this endpoint does not carry
+  it* until a control says otherwise.
+
+The tell, in all six: the claim was about a *thing* ("the row", "the
+contacts", "the book", "SoftPro") while the evidence was about a *view*. When
+those two nouns differ, stop and re-query.
+
+## When you fix a class, name the class and go looking (2026-09-12)
+
+### Closed is not the same as handled (2026-09-14) — read this first
+
+On 2026-09-01 `CREATE_ORDER_ORPHANS_2026-08-31.md` diagnosed a `varchar(50)`
+overflow on `order_properties.property_type` — right column, right SiteX field —
+and called the defect "closed in code". **Nothing ever changed the column.** No
+branch, no commit, no worktree. What shipped that day (#80) was the *handling*:
+lock Create and tell the operator not to re-enter, behind a bare `catch {}` that
+threw the error away. Its test throws `new Error('value too long for type
+character varying(50)')` — the cause, by name, used as a fixture for the
+treatment. The test passed because it asserted the handling, and the handling
+was all there was.
+
+**Then the handling hid the cause.** On 2026-09-10 the same overflow half-created
+`20022014-GLT`. With the error discarded, the investigation checked five other
+field lengths, found them all in range, and concluded "a third cause" — while the
+ticket naming the column sat on main. Eight more orders half-created before it
+was found on 2026-09-14. The fix that hid the problem is why it took two weeks to
+rediscover.
+
+It is the third fix this month that did not take, and all three have one shape —
+*fixed* was attached to something other than proof in production:
+
+| Fix | Declared | What was true |
+|---|---|---|
+| Lookup-code overflow | fixed 2 Sep (`902df82`) | sat on a branch until 10 Sep (#121) |
+| Address blanking | fixed on contacts 9 Sep (#115) | companies had the identical defect until 12 Sep (#126) |
+| `property_type` overflow | "closed in code" 1 Sep | only the handling shipped; the column was untouched until 14 Sep (#130) |
+
+So:
+
+- **A fix is not closed until something in production proves the failure cannot
+  recur.** Merged and deployed, and then the thing itself observed: the migration
+  applied and the column read back, the value that failed inserted into the real
+  column's shape, the vendor record read back after the write. For #130 that was
+  `property_type` reading back as `text` and the 54- and 57-character
+  descriptions inserting.
+- **A test that mocks the error does not count.** It proves what happens *after*
+  the failure, which is the handling. It says nothing about whether the failure
+  can still occur.
+- **Handling that ships before the cause is removed keeps the ticket open,** and
+  says so in the ticket. "Closed in code" on a ticket whose cause is still live
+  is how the next investigation starts from nothing.
+- **Handling must record the reason, not swallow it** — and record the real one:
+  the recorder added on 2026-09-09 read Drizzle's wrapper instead of `cause` and
+  stored `code: null` ten times. Check that a recorder captures a real failure
+  before trusting what it has not recorded.
+
+### The same defect somewhere else
+
+Three times in one week a fix landed in one place and the same defect stayed
+live somewhere else:
+
+- **Payload built from the form.** The contact edit sent SoftPro a payload
+  built from the request alone and would have blanked addresses; fixed
+  2026-09-09. The company edit had the identical defect. Nobody looked, and on
+  2026-09-12 the first company edit ever made sent SoftPro `Address1: ""` for a
+  lender. (Whether SoftPro acted on it is unknown — see the sixth row of the
+  projection note — but the payload is in the log, and a second write built the
+  correct way was needed to be sure.)
+- **A record visible on one screen and not another.** Escrow Employees filtered
+  one flag while the Parties flow set another (fixed 2026-09-11). The CPL lender
+  search had the same shape — it read contacts, and a company with nobody
+  attached could not be found (fixed 2026-09-12).
+
+Each fix was correct. Each was scoped to the file where the bug was reported,
+and the bug was never the file.
+
+So, before a fix is called done:
+
+1. **Write the class in one sentence that does not name the file.** "A vendor
+   write that replaces a record, built from request data alone" — not "the
+   contact PUT route sends a blank address".
+2. **Search for the sentence, not the file.** By operation, by call site, by
+   what the logs show was sent — every other place that sentence is true.
+3. **List every instance in the ticket with a status**: fixed, safe and why, or
+   open. "Did not look" is not a status.
+
+The sweep for the first class is `docs/tickets/VENDOR_WRITES_BUILT_FROM_THE_FORM.md`.
 
 ## Decide vs ask (2026-08-27)
 

@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts, branches, orderDeliverableEmails, adminActivityLogs } from '@/lib/db/schema';
+import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts, branches, orderDeliverableEmails, adminActivityLogs, profiles } from '@/lib/db/schema';
+import { buildCreateFailureAlertEmail, CREATE_FAILURE_ALERT_EVENT_TYPE } from './create-failure';
 import { validateDeliverableEmails } from '@/lib/domain/notifications/deliverable-emails';
 import { eq, and, inArray } from 'drizzle-orm';
+import { pgErrorFields } from '@/lib/db/pg-error';
 import { createOrder as softproCreateOrder } from '@/lib/integrations/softpro';
 import {
   CREATE_TIMEOUT_LOOKUP_FAILED,
@@ -242,7 +244,22 @@ async function recordCreateLocalFailure(
   input: { property?: { address?: string | null; city?: string | null; state?: string | null; zip?: string | null } },
 ): Promise<void> {
   try {
-    const e = err as { message?: string; code?: string; constraint_name?: string; column_name?: string; table_name?: string; detail?: string };
+    // READ THE CAUSE, NOT THE WRAPPER. The first version of this read `code`,
+    // `constraint_name` and friends off the thrown object. Drizzle throws a
+    // DrizzleQueryError whose own fields are empty and whose `cause` is the
+    // postgres.js error — so all ten failures from 2026-09-09 to 2026-09-14
+    // were recorded with code, constraint, column and detail null, and the
+    // reason (22001 on order_properties.property_type) was only recoverable by
+    // replaying the parameters out of the message. See pg-error.ts.
+    const pg = pgErrorFields(err);
+    const wrapperMessage = err instanceof Error ? err.message : String(err);
+    // Which statement failed, from the wrapper's SQL. `stage` below is inferred
+    // from which rows exist AFTER the throw, and a row can exist for another
+    // reason: on 20022044-GLT and 20022165-OCT the SoftPro sync had imported the
+    // file first, so stage read "after_properties" while the statement that
+    // failed was the orders insert.
+    const statementMatch = /^Failed query: (insert into|update) "([a-z_]+)"/i.exec(wrapperMessage);
+    const failedStatement = statementMatch ? `${statementMatch[1].toLowerCase()} ${statementMatch[2]}` : null;
     // Which rows landed before the throw says WHERE it broke. The insert order
     // is orders, then properties, then parties, then status history.
     const [orderRow] = await db
@@ -255,6 +272,7 @@ async function recordCreateLocalFailure(
       ? (await db.select({ id: orderProperties.id }).from(orderProperties)
           .where(eq(orderProperties.orderId, orderRow.id)).limit(1)).length > 0
       : false;
+    const stage = !orderExists ? 'orders' : !propertyExists ? 'order_properties' : 'after_properties';
 
     await db.insert(adminActivityLogs).values({
       userId: userId ?? 'system',
@@ -264,14 +282,18 @@ async function recordCreateLocalFailure(
       meta: {
         // Postgres puts the useful part in these, and a bare `catch {}` threw
         // all of them away.
-        message: e?.message ?? String(err),
-        code: e?.code ?? null,
-        constraint: e?.constraint_name ?? null,
-        column: e?.column_name ?? null,
-        table: e?.table_name ?? null,
-        detail: e?.detail ?? null,
+        message: pg.message,
+        code: pg.code,
+        constraint: pg.constraint,
+        column: pg.column,
+        table: pg.table,
+        detail: pg.detail,
+        failedStatement,
+        // The statement and its parameters. Kept because it is everything a
+        // reconcile needs to finish the write, whatever the code turns out to be.
+        sql: wrapperMessage === pg.message ? null : wrapperMessage,
         // Where it got to, so the stage is known even if the message is not.
-        stage: !orderExists ? 'orders' : !propertyExists ? 'order_properties' : 'after_properties',
+        stage,
         orderRowWritten: orderExists,
         propertyRowWritten: propertyExists,
         // The lengths that have caused this twice before, so an overflow is
@@ -284,6 +306,40 @@ async function recordCreateLocalFailure(
         },
       },
     });
+
+    // TELL SOMEONE. Before this, a half-created order was found by the operator
+    // who hit it, and reached Gerard as a Slack message. Queued, not sent inline:
+    // the create request should not wait on an email, and the outbox job retries.
+    // Its own try so a failed enqueue cannot lose the reason recorded above.
+    // No order row means nothing to open and no order id to dispatch on —
+    // the activity row above still records it.
+    if (orderRow) {
+      try {
+        const [operator] = userId
+          ? await db.select({ email: profiles.email }).from(profiles).where(eq(profiles.id, userId)).limit(1)
+          : [];
+        const { subject, html } = buildCreateFailureAlertEmail({
+          orderId: orderRow.id,
+          fileNumber,
+          address: [input.property?.address, input.property?.city, input.property?.state, input.property?.zip]
+            .filter(Boolean).join(', ') || null,
+          failure: {
+            code: pg.code, message: pg.message, column: pg.column, constraint: pg.constraint,
+            failedStatement,
+            stage,
+          },
+          operatorEmail: operator?.email ?? null,
+          failedAt: new Date(),
+        });
+        await db.insert(eventOutbox).values({
+          eventType: CREATE_FAILURE_ALERT_EVENT_TYPE,
+          orderId: orderRow.id,
+          payload: { subject, html, fileNumber, code: pg.code },
+        });
+      } catch {
+        // The reason is recorded; the alert is best-effort.
+      }
+    }
   } catch {
     // Recording the reason must never turn a recoverable create into a 500.
   }

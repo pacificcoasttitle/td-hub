@@ -10,6 +10,7 @@ import { PartiesPanel } from './parties-panel';
 import { NotesStrip } from './notes-strip';
 import { DeliverableEmailsPanel } from './deliverable-emails-panel';
 import { useOrderExtras } from './use-order-extras';
+import { ReconcileBanner } from './reconcile-banner';
 
 // ─── The detail pane ─────────────────────────────────────────────────────────
 //
@@ -41,6 +42,8 @@ export interface OrderDetailProps {
   /** Posting a note. Owned by the pane's parent so the composer can disable. */
   savingNote?: boolean;
   onAddNote?: (orderId: number, text: string) => void;
+  /** After Finish saving writes the property, so the list row re-reads it. */
+  onReconciled?: () => void;
 }
 
 export function OrderDetail({
@@ -118,6 +121,14 @@ export function OrderDetail({
             </div>
           </Banner>
         )}
+
+        {/* Above "Incomplete": for a half-created order, Resync is the wrong
+            button — it re-reads SoftPro and cannot insert the missing property. */}
+        <ReconcileBanner
+          orderId={order.id}
+          hasAddress={!missing.includes('address')}
+          onReconciled={() => d.onReconciled?.()}
+        />
 
         {missing.length > 0 && (
           <Banner tone="warning">

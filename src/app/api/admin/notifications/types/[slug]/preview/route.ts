@@ -9,6 +9,7 @@ import {
 } from '@/lib/domain/notifications/templates';
 import type { FullConfirmationData } from '@/lib/domain/notifications/confirmation-template';
 import { buildOutstandingAlertEmail } from '@/lib/domain/notifications/outstanding-documents-alert';
+import { buildCreateFailureAlertEmail } from '@/lib/domain/orders/create-failure';
 
 const ALLOWED_ROLES = ['super_admin', 'admin'];
 
@@ -78,6 +79,21 @@ const SLUG_TEMPLATES: Record<string, () => TemplateResult> = {
       neverCame: [],
     },
     sentAt: new Date('2026-03-15T15:53:31Z'),
+  }),
+
+  // Internal too, and recipient-edited for the same reason. The sample is the
+  // real failure that prompted it.
+  'order.create.local_failed': () => buildCreateFailureAlertEmail({
+    orderId: 8687,
+    fileNumber: '20022166-GLT',
+    address: '1222 N Coast Highway 101, Encinitas, CA, 92024',
+    failure: {
+      code: '22001',
+      message: 'value too long for type character varying(50)',
+      failedStatement: 'insert into order_properties',
+    },
+    operatorEmail: 'operator@pct.com',
+    failedAt: new Date('2026-09-15T00:04:19Z'),
   }),
 };
 

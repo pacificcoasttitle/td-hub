@@ -1,6 +1,7 @@
 import { db } from '@/lib/db/client';
 import { orders, orderParties, contacts, companies, vendorApiLogs, jobs } from '@/lib/db/schema';
 import { eq, and, isNull, or, sql } from 'drizzle-orm';
+import { isUniqueViolation } from '@/lib/db/pg-error';
 import { getOrderContacts, mapOrderContacts } from '@/lib/integrations/softpro';
 import { budgetMsFor } from '@/lib/jobs/time-budget';
 import type { MappedOrderContacts, MappedResolvedParty } from '@/lib/integrations/softpro';
@@ -1137,6 +1138,10 @@ async function upsertResolvedParty(orderId: number, row: PartyUpsert): Promise<b
     // POST /api/orders/[id]/enrich, and re-enriching 96 orders must not abort
     // part-way because one of them was also enriched by hand at that moment.
     // The lost race means the row now exists, so converge onto it.
+    //
+    // Until 2026-09-14 this checked `err.code` on the thrown object. Drizzle
+    // throws a wrapper with the Postgres code on `cause`, so the check never
+    // matched and the race it exists for rethrew. pg-error.ts reads the cause.
     if (!isUniqueViolation(err)) throw err;
     await db.update(orderParties).set(values).where(and(
       eq(orderParties.orderId, orderId),
@@ -1146,9 +1151,4 @@ async function upsertResolvedParty(orderId: number, row: PartyUpsert): Promise<b
   }
 
   return true;
-}
-
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === 'object' && err !== null
-    && (err as { code?: unknown }).code === '23505';
 }

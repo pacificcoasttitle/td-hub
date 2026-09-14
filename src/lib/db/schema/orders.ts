@@ -143,7 +143,10 @@ export const orderProperties = pgTable('order_properties', {
    */
   unitNumber: varchar('unit_number', { length: 30 }),
   legalDescription: text('legal_description'),
-  propertyType: varchar('property_type', { length: 50 }),
+  // text, not varchar(50): SiteX's UseCodeDescription runs to 57+ characters
+  // and the overflow half-created hub orders after SoftPro had the file.
+  // Migration 0047.
+  propertyType: text('property_type'),
 
   cplAddress: varchar('cpl_address', { length: 500 }),
   cplCity: varchar('cpl_city', { length: 100 }),

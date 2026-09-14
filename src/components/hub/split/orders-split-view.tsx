@@ -488,6 +488,7 @@ export function OrdersSplitView({
           onGenerateDocument={fireAction}
           savingNote={savingNote}
           onAddNote={addNote}
+          onReconciled={() => setReloadToken((n) => n + 1)}
         />
       </div>
 

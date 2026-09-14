@@ -1,0 +1,28 @@
+-- 0047 — order_properties.property_type from varchar(50) to text.
+--
+-- WHY
+--   The column holds SiteX's free-text UseCodeDescription, unchecked. SiteX
+--   sends descriptions longer than 50 characters:
+--
+--     "Retail Stores (Personal Services, Photography, Travel)"        54
+--     "Mobile/Manufactured Home (regardless of Land ownership)"       55
+--     "Religious, Church, Worship (Synagogue, Temple, Parsonage)"     57
+--     "Single Family Residential - Two or more SFR on one parcel"     57
+--
+--   Each one throws 22001 on the property insert of a hub create, AFTER SoftPro
+--   has already created the file. The order is left with no property row, no
+--   parties and no status — no address, no title search, no documents. Eight
+--   of the ten half-created orders between 2026-09-09 and 2026-09-14, and the
+--   same overflow was named on 2026-09-01 (CREATE_ORDER_ORPHANS_2026-08-31.md)
+--   without the column ever being changed.
+--
+-- WHY TEXT AND NOT A BIGGER NUMBER
+--   A larger limit is a guess at the longest description a vendor will ever
+--   send, and the next one longer than the guess fails the same way, after the
+--   same SoftPro write. The value is displayed, never indexed or searched on.
+--
+-- COST
+--   varchar -> text is binary-coercible in Postgres: no table rewrite, a brief
+--   ACCESS EXCLUSIVE lock. No view depends on order_properties (checked
+--   2026-09-14).
+ALTER TABLE order_properties ALTER COLUMN property_type TYPE text;

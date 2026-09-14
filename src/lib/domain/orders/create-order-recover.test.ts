@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
 import {
   ORDER_NOT_CREATED_SAFE_TO_RETRY,
   softProCreatedDoNotReenter,
@@ -58,6 +59,7 @@ vi.mock('@/lib/db/schema', () => ({
   contacts: { id: 'contacts.id', isTitleOfficer: 'c.is_title_officer', officeLookupCode: 'c.office_lookup_code' },
   branches: {},
   orderDeliverableEmails: {},
+  adminActivityLogs: { name: 'admin_activity_logs' },
 }));
 
 vi.mock('@/lib/db/client', () => {
@@ -192,5 +194,35 @@ describe('create recover — timeout and post-200 share one treatment', () => {
       submitLocked: true,
       error: softProCreatedDoNotReenter('20021683-OCT'),
     });
+  });
+
+  // The test above throws a plain Error. Production never does: Drizzle throws
+  // a DrizzleQueryError with the Postgres error on `cause`. The recorder added
+  // on 2026-09-09 read the wrapper and stored code/constraint/column null for
+  // every failure that followed. This throws what production throws.
+  it('records the Postgres code from cause when Drizzle wraps the failure', async () => {
+    softproCreateMock.mockResolvedValue({ success: true, data: { orderNumber: '20022166-GLT' } });
+    const pgError = Object.assign(new Error('value too long for type character varying(50)'), {
+      code: '22001', routine: 'varchar',
+    });
+    returningMock.mockRejectedValue(new DrizzleQueryError(
+      'insert into "order_properties" ("id", "order_id", "property_type") values (default, $1, $2)',
+      [8687, 'Retail Stores (Personal Services, Photography, Travel)'],
+      pgError,
+    ));
+
+    const result = await createAndSendToSoftPro(input, 'manual_entry');
+    expect(result.submitLocked).toBe(true);
+
+    const recorded = insertValuesMock.mock.calls
+      .map(([values]) => values as { action?: string; meta?: Record<string, unknown> })
+      .find((v) => v.action === 'order_create_local_failed');
+    expect(recorded?.meta).toMatchObject({
+      code: '22001',
+      message: 'value too long for type character varying(50)',
+      failedStatement: 'insert into order_properties',
+    });
+    // The statement and its parameters survive, for a reconcile to finish the write.
+    expect(recorded?.meta?.sql).toContain('Retail Stores (Personal Services, Photography, Travel)');
   });
 });

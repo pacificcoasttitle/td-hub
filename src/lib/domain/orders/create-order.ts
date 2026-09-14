@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client';
 import { orders, orderProperties, orderParties, orderStatusHistory, eventOutbox, companies, contacts, branches, orderDeliverableEmails, adminActivityLogs } from '@/lib/db/schema';
 import { validateDeliverableEmails } from '@/lib/domain/notifications/deliverable-emails';
 import { eq, and, inArray } from 'drizzle-orm';
+import { pgErrorFields } from '@/lib/db/pg-error';
 import { createOrder as softproCreateOrder } from '@/lib/integrations/softpro';
 import {
   CREATE_TIMEOUT_LOOKUP_FAILED,
@@ -242,7 +243,21 @@ async function recordCreateLocalFailure(
   input: { property?: { address?: string | null; city?: string | null; state?: string | null; zip?: string | null } },
 ): Promise<void> {
   try {
-    const e = err as { message?: string; code?: string; constraint_name?: string; column_name?: string; table_name?: string; detail?: string };
+    // READ THE CAUSE, NOT THE WRAPPER. The first version of this read `code`,
+    // `constraint_name` and friends off the thrown object. Drizzle throws a
+    // DrizzleQueryError whose own fields are empty and whose `cause` is the
+    // postgres.js error — so all ten failures from 2026-09-09 to 2026-09-14
+    // were recorded with code, constraint, column and detail null, and the
+    // reason (22001 on order_properties.property_type) was only recoverable by
+    // replaying the parameters out of the message. See pg-error.ts.
+    const pg = pgErrorFields(err);
+    const wrapperMessage = err instanceof Error ? err.message : String(err);
+    // Which statement failed, from the wrapper's SQL. `stage` below is inferred
+    // from which rows exist AFTER the throw, and a row can exist for another
+    // reason: on 20022044-GLT and 20022165-OCT the SoftPro sync had imported the
+    // file first, so stage read "after_properties" while the statement that
+    // failed was the orders insert.
+    const failedStatement = /^Failed query: (insert into|update) "([a-z_]+)"/i.exec(wrapperMessage);
     // Which rows landed before the throw says WHERE it broke. The insert order
     // is orders, then properties, then parties, then status history.
     const [orderRow] = await db
@@ -264,12 +279,16 @@ async function recordCreateLocalFailure(
       meta: {
         // Postgres puts the useful part in these, and a bare `catch {}` threw
         // all of them away.
-        message: e?.message ?? String(err),
-        code: e?.code ?? null,
-        constraint: e?.constraint_name ?? null,
-        column: e?.column_name ?? null,
-        table: e?.table_name ?? null,
-        detail: e?.detail ?? null,
+        message: pg.message,
+        code: pg.code,
+        constraint: pg.constraint,
+        column: pg.column,
+        table: pg.table,
+        detail: pg.detail,
+        failedStatement: failedStatement ? `${failedStatement[1].toLowerCase()} ${failedStatement[2]}` : null,
+        // The statement and its parameters. Kept because it is everything a
+        // reconcile needs to finish the write, whatever the code turns out to be.
+        sql: wrapperMessage === pg.message ? null : wrapperMessage,
         // Where it got to, so the stage is known even if the message is not.
         stage: !orderExists ? 'orders' : !propertyExists ? 'order_properties' : 'after_properties',
         orderRowWritten: orderExists,

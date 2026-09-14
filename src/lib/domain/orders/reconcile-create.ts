@@ -57,7 +57,7 @@ export type ReconcileState =
       /** The logged SoftPro payload is what the property is rebuilt from. */
       payloadAvailable: boolean;
     }
-  | { needed: false; reason: 'not_found' | 'canceled' | 'no_failure_recorded' | 'property_present' };
+  | { needed: false; reason: 'not_found' | 'canceled' | 'duplicate' | 'no_failure_recorded' | 'property_present' };
 
 export type ReconcileResult =
   | {
@@ -117,7 +117,11 @@ export async function loadLoggedCreatePayload(fileNumber: string): Promise<SoftP
 export async function getReconcileState(orderId: number): Promise<ReconcileState> {
   const order = await loadOrder(orderId);
   if (!order) return { needed: false, reason: 'not_found' };
+  // Not for a file someone is closing out. 20022160-GLT — one of the two Fontana
+  // files for a single property — was marked duplicate the day this shipped;
+  // finishing it would start a title search on the file being cancelled.
   if (order.operationalStatus === 'canceled') return { needed: false, reason: 'canceled' };
+  if (order.operationalStatus === 'duplicate') return { needed: false, reason: 'duplicate' };
   const failure = await latestFailure(order.fileNumber);
   if (!failure) return { needed: false, reason: 'no_failure_recorded' };
   if (await hasProperty(order.id)) return { needed: false, reason: 'property_present' };
@@ -207,6 +211,7 @@ function notNeededMessage(reason: Exclude<ReconcileState, { needed: true }>['rea
   switch (reason) {
     case 'not_found': return 'Order not found.';
     case 'canceled': return 'This order is canceled — it is not reconciled.';
+    case 'duplicate': return 'This order is marked duplicate — finish the file that is being kept, not this one.';
     case 'no_failure_recorded': return 'No failed hub create is recorded for this order, so there is nothing to finish.';
     case 'property_present': return 'This order already has its property — there is nothing to finish.';
   }

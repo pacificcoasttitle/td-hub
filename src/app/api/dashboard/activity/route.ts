@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { db } from '@/lib/db/client';
 import { orders, orderStatusHistory } from '@/lib/db/schema';
-import { eq, desc, ne } from 'drizzle-orm';
+import { and, eq, desc, ne } from 'drizzle-orm';
 import { LOOKBACK_STATUS_SOURCE } from '@/lib/domain/orders/lookback-diff';
+import { buildScopeFilter } from '@/lib/domain/orders/scope';
 
 const querySchema = z.object({
   limit: z.coerce.number().min(1).max(50).default(10),
@@ -19,6 +20,11 @@ export async function GET(req: NextRequest) {
   try {
     const rawParams = Object.fromEntries(req.nextUrl.searchParams);
     const { limit } = querySchema.parse(rawParams);
+
+    // SCOPED LIKE THE ORDERS LIST. Until 2026-09-14 this returned status
+    // history — notes included — across every order to any logged-in session.
+    // Same row-level predicate as /api/orders now.
+    const scopeFilter = await buildScopeFilter(session);
 
     const rows = await db
       .select({
@@ -40,7 +46,7 @@ export async function GET(req: NextRequest) {
       // A typed enum comparison, not a string match on notes. `source` is
       // NOT NULL, so ne() cannot silently drop rows the way a nullable column
       // would (NULL != 'x' is NULL, i.e. excluded).
-      .where(ne(orderStatusHistory.source, LOOKBACK_STATUS_SOURCE))
+      .where(and(scopeFilter ?? undefined, ne(orderStatusHistory.source, LOOKBACK_STATUS_SOURCE)))
       .orderBy(desc(orderStatusHistory.changedAt))
       .limit(limit);
 

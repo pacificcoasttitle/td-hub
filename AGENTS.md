@@ -72,9 +72,9 @@ been `max-h-60` since April; the section grew into it at seven children on
 `docs/tickets/REACHABILITY_SWEEP.md` for the wider pattern — four capabilities
 in one week that existed and could not be reached.
 
-## A projection is not the row (2026-09-10)
+## A projection is not the row (2026-09-10, sixth instance 2026-09-12)
 
-Five times now, a conclusion about the data has been drawn from a **subset of
+Six times now, a conclusion about the data has been drawn from a **subset of
 columns that a script happened to select**, and stated as a fact about the
 record. The query was correct every time. The reasoning on top of it was wrong
 every time, because the projection was mistaken for the thing itself.
@@ -86,6 +86,7 @@ every time, because the projection was mistaken for the thing itself.
 | 3 | "4,630 distinct person codes from 18,700 rows" | `Filter: LookupCode`, the *company* code | the person code gives 17,163 |
 | 4 | "Our row holds none of Gerard's address" | a SELECT with no `address1`/`city`/`state`/`zip` | the row had the full address |
 | 5 | "All 120 of these contacts have no name" | `first_name`, `last_name` — printing `(no name)` when both were null | **106 of the 120 are named**; the name is in `full_name` |
+| 6 | "SoftPro now holds no address for `Priv1503`" | SoftPro's `GetCompanies`, which returns `Address1: ""` for **all 1,486 lender rows** — Rocket Mortgage included | `GetLookuptable?userType=Lender` returns the address; the field is simply not in the other endpoint's projection |
 
 **Where the fifth one landed is the point.** It was in the dry run whose entire
 purpose was to decide whether to write to 74 live rows — and it was used to
@@ -116,9 +117,16 @@ So:
   columns a different script had selected is how #5 and the reachability
   conclusion both went wrong at once.
 
-The tell, in all five: the claim was about a *thing* ("the row", "the
-contacts", "the book") while the evidence was about a *view*. When those two
-nouns differ, stop and re-query.
+- **A vendor endpoint is a projection too, and you cannot read its source.**
+  `GetCompanies` returns `Address1` for nobody; `GetLookuptable` returns it for
+  everybody. Before reading a blank as a loss, check the same field on a record
+  nothing has touched — Rocket Mortgage came back blank too, and that was the
+  whole answer. Absence in a vendor response means *this endpoint does not carry
+  it* until a control says otherwise.
+
+The tell, in all six: the claim was about a *thing* ("the row", "the
+contacts", "the book", "SoftPro") while the evidence was about a *view*. When
+those two nouns differ, stop and re-query.
 
 ## When you fix a class, name the class and go looking (2026-09-12)
 
@@ -128,8 +136,10 @@ live somewhere else:
 - **Payload built from the form.** The contact edit sent SoftPro a payload
   built from the request alone and would have blanked addresses; fixed
   2026-09-09. The company edit had the identical defect. Nobody looked, and on
-  2026-09-12 the first company edit ever made blanked a lender's address in
-  SoftPro.
+  2026-09-12 the first company edit ever made sent SoftPro `Address1: ""` for a
+  lender. (Whether SoftPro acted on it is unknown — see the sixth row of the
+  projection note — but the payload is in the log, and a second write built the
+  correct way was needed to be sure.)
 - **A record visible on one screen and not another.** Escrow Employees filtered
   one flag while the Parties flow set another (fixed 2026-09-11). The CPL lender
   search had the same shape — it read contacts, and a company with nobody

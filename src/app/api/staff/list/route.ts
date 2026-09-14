@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
+import { canReadContactBook } from '@/lib/security/contact-book-access';
 import { db } from '@/lib/db/client';
 import { contacts } from '@/lib/db/schema';
 import { sql } from 'drizzle-orm';
@@ -11,6 +12,14 @@ export async function GET() {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  // PCT's staff directory, with emails (and phones on staff/list), is internal.
+  // Locked 2026-09-14 while no client account exists; the client new-order form's
+  // escrow officer picker falls back to free text. When the picker is rebuilt it
+  // should return only the names it shows — see
+  // docs/tickets/VENDOR_WRITES_BUILT_FROM_THE_FORM.md, "Reads of the master book".
+  if (!canReadContactBook(session.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   if (cached && cached.expiresAt > Date.now()) {

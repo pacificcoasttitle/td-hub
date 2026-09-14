@@ -167,8 +167,9 @@ feel like recall rather than claims, which is exactly why they escape checking.
 - `ORDER BY col ASC` → `NULLS LAST`. `DESC` → `NULLS FIRST`. Always write the
   clause explicitly when nulls are meaningful.
 - `NULL != 'x'` is `NULL`, i.e. excluded — a `ne()` filter on a nullable column
-  silently drops null rows. (`dashboard/activity/route.ts` documents this
-  correctly; it is the counter-example to copy.)
+  silently drops null rows. (`dashboard/activity/route.ts` documented this
+  correctly and was the counter-example to copy; the route was deleted on
+  2026-09-14 as unused — read it at `git show 948c65c:src/app/api/dashboard/activity/route.ts`.)
 - `NOT IN (subquery)` returns no rows if the subquery yields a single NULL.
 - A `DEFAULT` on a column the vendor may not populate manufactures data rather
   than recording absence.
@@ -232,6 +233,7 @@ In practice:
 - `docs/tickets/ORDERS_NEVER_INGESTED.md` — the investigation these came out of
 - `src/lib/jobs/handlers/fetch-prelims.ts` — #7, fixed, with the reasoning inline
 - `src/lib/db/schema/orders.ts` — #6, fixed, `opened_at` nullable with no default
-- `src/app/api/dashboard/activity/route.ts` — correct handling of the nullable
-  `ne()` trap, worth copying
+- `src/app/api/dashboard/activity/route.ts` (deleted 2026-09-14; `git show
+  948c65c:src/app/api/dashboard/activity/route.ts`) — correct handling of the
+  nullable `ne()` trap, worth copying
 - `watch-outs/silent-job-failures.md` — #1 in its own entry, predates this

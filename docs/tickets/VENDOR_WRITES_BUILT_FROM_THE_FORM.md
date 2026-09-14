@@ -120,19 +120,57 @@ March to 2 September; its history has 28 entries. Null does not erase `cpl` or
   provable from here.** The hub never writes them. The SDN results themselves
   are kept inside `history[].raw`, and history is intact.
 
-## Reads of the master book (found 2026-09-14, not fixed)
+## Reads of the master book (found 2026-09-14, closed 2026-09-14)
 
-The class: **a read endpoint that returns our master company or contact book to
-any logged-in session, clients included.**
+The class: **a read endpoint that returns data beyond what the session may see —
+the contact and company book, the staff directory, or other customers' orders —
+to any logged-in session, clients included.** Middleware checks only that a user
+is logged in, never the role.
 
-| Endpoint | Guard | Non-staff caller |
+No client account existed in production when these were closed (all 71 logins
+were staff), so nothing was exposed to a client and nothing a client used broke.
+
+| Endpoint | What it returned | Closed with |
 |---|---|---|
-| `GET /api/companies` | any session | **client portal** party step, company typeahead (`step-add-parties.tsx:171`) |
-| `GET /api/contacts` | any session — names, emails, phones | **client portal** party step, name typeahead (`step-add-parties.tsx:165`) |
-| `GET /api/companies/[id]` | any session — sequential ids | none found |
-| `GET /api/companies/near-match` | any session | none found (admin wizard) |
-| `GET /api/contacts/search` | internal-role list | — (already correct) |
+| `GET /api/contacts` | contact book, names, emails, phones | internal roles (#133) |
+| `GET /api/contacts/[id]` | one contact, sequential ids | internal roles (#133) |
+| `GET /api/contacts/[id]/manager` | a manager's reps with emails | internal roles (#133) |
+| `GET /api/companies` | company book | internal roles (#133) |
+| `GET /api/companies/[id]` | one company, sequential ids | internal roles (#133) |
+| `GET /api/companies/near-match` | company matches | internal roles (#133) |
+| `GET /api/contacts/search` | contact search | already internal roles; now shares the list (#133) |
+| `GET /api/orders/quick-search` | every order's file number and address | the orders list's per-role scope (#134) |
+| `GET /api/dashboard/activity` | status history and notes across all orders | scoped (#134), then **deleted** — no caller |
+| `GET /api/orders/confirm/[fileNumber]` | party names, emails, phones, opener email, property, owners — sequential file numbers | order-access check |
+| `GET /api/dashboard` | order totals, failed jobs, recent order addresses | staff roles (the only page that calls it is admin-only) |
+| `GET /api/form-options` | staff directory: sales reps, title and escrow officers with emails | internal roles |
+| `GET /api/staff/list` | staff directory with emails and phones | internal roles |
 
-Locking only `/api/companies` would leave the larger exposure — people, with
-emails and phones — open, and would break the portal's company typeahead
-while doing it.
+"Internal roles" is `CONTACT_BOOK_READ_ROLES` in
+`src/lib/security/contact-book-access.ts`. `sales_manager` and
+`title_production` are not on it; neither reaches a page that calls these.
+
+### Follow-up: the client portal's party pickers
+
+Locking these removed three things from the client new-order form, none used yet
+because no client account exists:
+
+- the name and company typeahead in the party step (searched the book),
+- the escrow officer picker (read `form-options`; falls back to a free-text field),
+- the sales rep and title officer options on the transaction step (same source).
+
+**When the first client account is planned, rebuild these narrowly:** suggestions
+drawn from the parties on that client's own orders, and an officer picker that
+returns only the names it displays — never the full directory with emails and
+phone numbers.
+
+### Sweep status: closed
+
+Every `GET` route under `src/app/api` was checked on 2026-09-14 for a handler
+that checks only the login. The rest were found safe: access checked in a shared
+helper (`sales/clients/*`, `deliverable-emails`, `reconcile`), the session's own
+data (`client/profile`, `client/orders`), signed URL or job secret (`fetch-doc`,
+`jobs/run`), public by design (`health`), or non-sensitive configuration and
+status (`branches`, `roles`, `cpl-branches`, `orders/statuses`,
+`settings/tessa-prelim`, `orders/recent-activity` — order ids and timestamps only,
+`titlepoint/pre-initiate/status` — search statuses behind a random nine-digit id).

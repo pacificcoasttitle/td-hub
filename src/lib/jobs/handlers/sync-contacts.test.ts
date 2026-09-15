@@ -652,6 +652,28 @@ describe('syncContactRows preserve-on-empty + sales-rep deactivate guard', () =>
     expect(set).not.toHaveProperty('state');
   });
 
+  // 3 SoftPro person codes existed here only as inactive rows on 2026-09-15.
+  // isActive was not a compared field, so a matching inactive row counted as
+  // unchanged and was never reactivated.
+  it('reactivates an inactive row whose fields already match SoftPro', async () => {
+    contactSelectQueue.push([{ id: 22, lookupCode: 'OC-2', email: 'same@example.com', isActive: false } as never]);
+
+    const result = await syncContactRows('Order Contact - Person', [{ LookupCode: 'OC-2', Email: 'same@example.com' }]);
+
+    expect(result.updated).toBe(1);
+    expect(updateSets).toHaveLength(1);
+    expect(updateSets[0]!.isActive).toBe(true);
+  });
+
+  it('still writes nothing for an active row whose fields already match', async () => {
+    contactSelectQueue.push([{ id: 23, lookupCode: 'OC-3', email: 'same@example.com', isActive: true } as never]);
+
+    const result = await syncContactRows('Order Contact - Person', [{ LookupCode: 'OC-3', Email: 'same@example.com' }]);
+
+    expect(result.updated).toBe(0);
+    expect(updateSets).toHaveLength(0);
+  });
+
   it('does not deactivate sales reps on empty SoftPro response', async () => {
     activeRepCount.value = 12;
 

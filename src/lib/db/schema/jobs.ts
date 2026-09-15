@@ -1,6 +1,7 @@
 import {
   pgTable, pgEnum, serial, text, varchar, integer,
   timestamp, jsonb, index,
+  boolean,
 } from 'drizzle-orm/pg-core';
 
 // ─── Jobs ────────────────────────────────────────────────────────────────────
@@ -32,7 +33,26 @@ export const contactSyncState = pgTable('contact_sync_state', {
   entityType: varchar('entity_type', { length: 100 }).primaryKey(),
   jobType: varchar('job_type', { length: 100 }).notNull(),
   status: varchar('status', { length: 20 }).notNull().default('idle'),
+  /**
+   * The last lookup code of the last completed page — the page boundary the
+   * resumable sync compares the next page against. Null between sweeps.
+   */
   cursorLookupCode: varchar('cursor_lookup_code', { length: 200 }),
+  /** Resumable sync (migration 0050): the page the next run starts at. */
+  nextPage: integer('next_page').notNull().default(1),
+  /** Pagination.TotalPages as of the current sweep's latest page. */
+  totalPages: integer('total_pages'),
+  /** When the current sweep read its first page. Null between sweeps. */
+  sweepStartedAt: timestamp('sweep_started_at'),
+  /** Pagination.TotalRows when the current sweep began. */
+  sweepTotalRows: integer('sweep_total_rows'),
+  /** When a sweep last read every page. */
+  lastSweepCompletedAt: timestamp('last_sweep_completed_at'),
+  /**
+   * TotalRows fell during the sweep: a deletion before the cursor shifts rows
+   * left and one can be skipped until the next sweep. Recorded, not repaired.
+   */
+  driftSuspected: boolean('drift_suspected').notNull().default(false),
   lastSyncedAt: timestamp('last_synced_at'),
   lastStartedAt: timestamp('last_started_at'),
   lastCompletedAt: timestamp('last_completed_at'),

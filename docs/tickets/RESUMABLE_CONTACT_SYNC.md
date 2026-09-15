@@ -145,3 +145,58 @@ the cursor — followed by two more that complete the sweep
 
 Three consecutive runs, cursor reaching total_pages, and the row count in
 `contacts` for that type reconciling against `Pagination.TotalRows`.
+
+---
+
+## Built — 2026-09-15, with four corrections to this design
+
+**1. The ceiling is 300 seconds, not ten minutes.** The job route has
+`maxDuration = 300`, and Vercel kills the function there; the ten-minute
+watchdog only reaps the row afterwards. Six pages at 67s is 402s. The page
+budget is therefore the clock, via `createDeadline('softpro.sync_contacts_page')`:
+a page is allowed 125s (the 120s fetch timeout plus processing), which leaves a
+145s budget, so a run normally starts **three** pages. Six remains a hard cap.
+A full person sweep is about six hourly runs, roughly six hours, not three.
+
+**2. The client aborted every page at 60 seconds.** `getLookupTable` had
+`AbortSignal.timeout(60_000)`; pages take 65-95s (all 16 person pages read on
+2026-09-15: average 70.8s, max 95.4s). That, not only the sweep length, is why
+the person sync last completed on 2026-09-03 — and why lender, title officer,
+escrow officer and underwriter were failing too. Raised to 120s
+(`LOOKUP_PAGE_TIMEOUT_MS`).
+
+**3. The page-drift note had the direction backwards.** An *insertion* before
+the cursor shifts rows right: the previous page's last row reappears first on
+the next page — a harmless re-read, which the boundary comparison detects and
+counts (`boundaryShifts`). A *deletion* before the cursor shifts rows left: one
+row moves back into a page already read and is skipped for that sweep, and no
+comparison of codes can see it. What can be seen is `Pagination.TotalRows`
+falling during the sweep, so that is recorded (`drift_suspected`) rather than
+re-read. The next sweep reads the skipped row.
+
+**4. The gap this ticket quoted was not 1,476.** Read in full on 2026-09-15 and
+matched the way the sync matches (exact `lookup_code`, rows with an email):
+**70** SoftPro people are missing, all 70 have an email, none collide by case.
+On 2026-09-09, by the same key, the gap was **91**. The 1,476 could not be
+reproduced against `lookup_code`, `softpro_lookup_code` or both, and the scan
+that produced it did not record its key. A completed sweep inserts all 70, so
+**no backfill is needed.**
+
+Also found and fixed: 3 SoftPro person codes existed here only as inactive
+rows, and the sync compared every field except `is_active`, so it counted them
+unchanged and never reactivated them. `isActive` is now a compared field.
+
+**What shipped.** Migration 0050 adds `next_page`, `total_pages`,
+`sweep_started_at`, `sweep_total_rows`, `last_sweep_completed_at` and
+`drift_suspected` to `contact_sync_state`; `cursor_lookup_code` is the boundary
+code. The cursor is saved after every page. A failed page puts no cooldown on
+the retry. A run that started within the function ceiling owns its entity type
+(the per-type cron and `softpro.sync_all_contacts` can both reach one). Sales
+Rep stays a single request — it is not paged, and the deactivate guard needs the
+whole roster at once.
+
+**How we will know it works — unchanged, and not yet met:** runs that each read
+pages and advance `next_page`, reaching `total_pages`, `last_sweep_completed_at`
+stamped, and `contacts` for that type reconciling against TotalRows — plus
+PLML5446 arriving from the lender sweep and the 70 missing people arriving from
+the person sweep.

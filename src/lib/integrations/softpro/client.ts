@@ -731,6 +731,19 @@ export async function uploadDocument(params: {
   });
 }
 
+/**
+ * How long one GetLookuptable page may take.
+ *
+ * It was 60s. SoftPro takes 65-95s to return a 1,000-row page (all 16 person
+ * pages read on 2026-09-15: average 70.8s, max 95.4s), so every page was
+ * aborted: the person sync last completed on 2026-09-03 and the lender, title
+ * officer, escrow officer and underwriter syncs failed the same way. Smaller
+ * pages cost more per row, so the page size is not the lever. The job's own
+ * page budget (time-budget.ts, softpro.sync_contacts_page) is sized against
+ * this value, so the two move together.
+ */
+export const LOOKUP_PAGE_TIMEOUT_MS = 120_000;
+
 export async function getLookupTable(userType: string): Promise<VendorResult<SoftProLookupItem[]>>;
 export async function getLookupTable(params: SoftProLookupTableRequest): Promise<VendorResult<SoftProLookupTablePage>>;
 export async function getLookupTable(
@@ -765,7 +778,7 @@ export async function getLookupTable(
         'Content-Type': 'application/json',
         ...buildSoftProHeaders({ requireToken: false }),
       },
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(LOOKUP_PAGE_TIMEOUT_MS),
     });
 
     let parsed: unknown;

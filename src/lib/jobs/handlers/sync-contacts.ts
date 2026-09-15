@@ -214,6 +214,10 @@ const OPEN_CONTACT_FIELDS = [
   'flookupCode', 'courtesyTitle', 'firstName', 'middleName', 'lastName', 'email',
   'phone', 'phoneExt', 'suffix', 'title', 'fax', 'cell', 'pager', 'genderId',
   'address1', 'address2', 'city', 'state', 'zip', 'note', 'licenseNo',
+  // isActive, so a row SoftPro still holds is reactivated. Without it an
+  // inactive row whose fields match was counted unchanged and left hidden: 3 of
+  // the SoftPro person codes on 2026-09-15 existed here only as inactive rows.
+  'isActive',
 ] as const;
 
 const INSERT_CHUNK = 500;
@@ -301,6 +305,7 @@ async function syncOpenContacts(items: SyncRow[]): Promise<SyncContactsResult> {
       genderId: contacts.genderId, address1: contacts.address1,
       address2: contacts.address2, city: contacts.city, state: contacts.state,
       zip: contacts.zip, note: contacts.note, licenseNo: contacts.licenseNo,
+      isActive: contacts.isActive,
     })
     .from(contacts)
     .where(inArray(contacts.lookupCode, codes));
@@ -874,6 +879,41 @@ export async function fetchSyncContactRows(
   }
 
   return { items, error: null };
+}
+
+export interface SyncContactPage {
+  items: SyncRow[];
+  /** Pagination.TotalPages — null when the vendor omits the envelope. */
+  totalPages: number | null;
+  /** Pagination.TotalRows — null when the vendor omits the envelope. */
+  totalRows: number | null;
+  error: string | null;
+}
+
+/**
+ * ONE page of a lookup table, for the resumable sync.
+ *
+ * No retry here: a page takes 65-95s, a retry inside one run spends a whole
+ * page of the run's budget on the same request, and the cursor makes retrying
+ * free — the next scheduled run starts at this page again. No modifiedSince:
+ * SoftPro accepts it and returns the same full page regardless.
+ */
+export async function fetchSyncContactPage(
+  entityType: Exclude<SyncContactEntityType, 'Sales Rep'>,
+  page: number,
+  pageSize = 1000,
+): Promise<SyncContactPage> {
+  const userType = COMPANY_CONFIGS[entityType]?.userType ?? entityType;
+  const result = await getLookupTable({ userType, Page: page, pageSize });
+  if (!result.success || !result.data) {
+    return { items: [], totalPages: null, totalRows: null, error: result.error?.message ?? 'Failed to fetch lookup table' };
+  }
+  return {
+    items: result.data.items,
+    totalPages: result.data.totalPages,
+    totalRows: result.data.totalRows,
+    error: null,
+  };
 }
 
 export function getSyncContactLookupCode(

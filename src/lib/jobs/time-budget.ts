@@ -72,6 +72,13 @@ export const UNIT_P99_MS = {
    * put the run past the ceiling on any bad vendor day.
    */
   'softpro.lookback_sync': 31_000,
+  /**
+   * One GetLookuptable page of the resumable contact sync: the fetch, capped at
+   * LOOKUP_PAGE_TIMEOUT_MS (120s) by the client, plus processing the page — one
+   * SELECT for its codes and the few writes that differ. Observed fetch 65-95s.
+   * At 125s the budget is 145s, so a run normally starts three pages.
+   */
+  'softpro.sync_contacts_page': 125_000,
 } as const;
 
 export type BudgetedJob = keyof typeof UNIT_P99_MS;

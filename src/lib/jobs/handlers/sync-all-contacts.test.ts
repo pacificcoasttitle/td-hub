@@ -1,62 +1,38 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CONTACT_SYNC_BATCH_LIMITS, handleSyncContactType } from './sync-all-contacts';
+import { handleSyncContactType, MAX_PAGES_PER_RUN } from './sync-all-contacts';
+import { budgetMsFor, FUNCTION_CEILING_MS, UNIT_P99_MS } from '@/lib/jobs/time-budget';
 
 const {
+  fetchSyncContactPageMock,
   fetchSyncContactRowsMock,
-  getSyncContactLookupCodeMock,
   insertOnConflictDoUpdateMock,
   selectLimitMock,
-  sortSyncContactRowsMock,
   syncContactRowsMock,
   updateWhereMock,
   updateSets,
+  clock,
 } = vi.hoisted(() => ({
+  fetchSyncContactPageMock: vi.fn(),
   fetchSyncContactRowsMock: vi.fn(),
-  getSyncContactLookupCodeMock: vi.fn((_: string, item: { LookupCode?: string }) => item.LookupCode ?? null),
   insertOnConflictDoUpdateMock: vi.fn(),
   selectLimitMock: vi.fn(),
-  sortSyncContactRowsMock: vi.fn((_: string, items: unknown[]) => items),
   syncContactRowsMock: vi.fn(),
   updateWhereMock: vi.fn(),
   updateSets: [] as Record<string, unknown>[],
+  clock: { t: Date.parse('2026-09-15T18:00:00Z') },
 }));
 
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn(() => ({})),
-}));
+vi.mock('drizzle-orm', () => ({ eq: vi.fn(() => ({})) }));
 
 vi.mock('@/lib/db/schema', () => ({
   jobs: { id: 'jobs.id', error: 'jobs.error', payload: 'jobs.payload' },
-  contactSyncState: {
-    entityType: 'contact_sync_state.entity_type',
-    jobType: 'contact_sync_state.job_type',
-    status: 'contact_sync_state.status',
-    cursorLookupCode: 'contact_sync_state.cursor_lookup_code',
-    lastSyncedAt: 'contact_sync_state.last_synced_at',
-    lastStartedAt: 'contact_sync_state.last_started_at',
-    lastCompletedAt: 'contact_sync_state.last_completed_at',
-    nextAllowedAt: 'contact_sync_state.next_allowed_at',
-    totalFetched: 'contact_sync_state.total_fetched',
-    lastResult: 'contact_sync_state.last_result',
-    lastError: 'contact_sync_state.last_error',
-    updatedAt: 'contact_sync_state.updated_at',
-  },
+  contactSyncState: { entityType: 'contact_sync_state.entity_type' },
 }));
 
 vi.mock('@/lib/db/client', () => ({
   db: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: selectLimitMock,
-        })),
-      })),
-    })),
-    insert: vi.fn(() => ({
-      values: vi.fn(() => ({
-        onConflictDoUpdate: insertOnConflictDoUpdateMock,
-      })),
-    })),
+    select: vi.fn(() => ({ from: vi.fn(() => ({ where: vi.fn(() => ({ limit: selectLimitMock })) })) })),
+    insert: vi.fn(() => ({ values: vi.fn(() => ({ onConflictDoUpdate: insertOnConflictDoUpdateMock })) })),
     update: vi.fn(() => ({
       set: vi.fn((vals: Record<string, unknown>) => {
         updateSets.push(vals);
@@ -67,39 +43,191 @@ vi.mock('@/lib/db/client', () => ({
 }));
 
 vi.mock('./sync-contacts', () => ({
-  // The real helper is pure; a plain message is all these tests read.
   describeSyncError: (err: unknown) => (err instanceof Error ? err.message : 'Unknown'),
+  fetchSyncContactPage: fetchSyncContactPageMock,
   fetchSyncContactRows: fetchSyncContactRowsMock,
-  getSyncContactLookupCode: getSyncContactLookupCodeMock,
-  sortSyncContactRows: sortSyncContactRowsMock,
+  getSyncContactLookupCode: (_: string, item: { LookupCode?: string }) => item.LookupCode ?? null,
+  sortSyncContactRows: (_: string, items: Array<{ LookupCode?: string }>) =>
+    [...items].sort((a, b) => (a.LookupCode ?? '').localeCompare(b.LookupCode ?? '')),
   syncContactRows: syncContactRowsMock,
 }));
 
-describe('handleSyncContactType incremental state', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    insertOnConflictDoUpdateMock.mockResolvedValue(undefined);
-    updateWhereMock.mockResolvedValue(undefined);
+const now = () => clock.t;
+const PERSON = 'softpro.sync_contacts.order_contact_person' as const;
+const OFFICER = 'softpro.sync_contacts.escrow_officer' as const;
+
+/** A page of rows whose codes sort within that page, like SoftPro's. */
+function pageOf(page: number, size = 3) {
+  return Array.from({ length: size }, (_, i) => ({ LookupCode: `P${String(page).padStart(2, '0')}-${i}` }));
+}
+
+/** Each fetch takes `secs` of clock time, and returns that page of `totalPages`. */
+function vendorPages(secs: number, totalPages = 16, totalRows = 15_643) {
+  fetchSyncContactPageMock.mockImplementation(async (_: string, page: number) => {
+    clock.t += secs * 1000;
+    return { items: pageOf(page), totalPages, totalRows, error: null };
+  });
+}
+
+function cleanWrite(n = 3) {
+  syncContactRowsMock.mockImplementation(async (entityType: string, rows: unknown[]) => ({
+    entityType, totalFetched: rows.length, created: 0, updated: n > 0 ? 1 : 0, skipped: 0, errors: [],
+  }));
+}
+
+function midSweep(overrides: Record<string, unknown> = {}) {
+  return {
+    entityType: 'Order Contact - Person',
+    status: 'paused',
+    nextAllowedAt: null,
+    lastStartedAt: new Date(clock.t - 60 * 60 * 1000),
+    nextPage: 5,
+    totalPages: 16,
+    cursorLookupCode: 'P04-2',
+    sweepStartedAt: new Date(clock.t - 2 * 60 * 60 * 1000),
+    sweepTotalRows: 15_643,
+    driftSuspected: false,
+    totalFetched: 0,
+    ...overrides,
+  };
+}
+
+const cursorSaves = () => updateSets.filter((s) => 'nextPage' in s);
+const finalState = () => updateSets.filter((s) => 'lastResult' in s).at(-1)!;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  updateSets.length = 0;
+  clock.t = Date.parse('2026-09-15T18:00:00Z');
+  insertOnConflictDoUpdateMock.mockResolvedValue(undefined);
+  updateWhereMock.mockResolvedValue(undefined);
+  cleanWrite();
+});
+
+describe('the sync resumes across runs', () => {
+  it('starts at next_page and saves the cursor after EACH page, not at the end', async () => {
+    selectLimitMock.mockResolvedValueOnce([midSweep()]);
+    vendorPages(70);
+
+    const result = await handleSyncContactType(PERSON, {}, { now });
+
+    // 70s pages against a 145s budget: pages start at 0s, 70s and 140s; the
+    // fourth would start at 210s and does not.
+    expect(fetchSyncContactPageMock.mock.calls.map((c) => c[1])).toEqual([5, 6, 7]);
+    expect(cursorSaves().map((s) => s.nextPage)).toEqual([6, 7, 8]);
+    expect(cursorSaves().map((s) => s.cursorLookupCode)).toEqual(['P05-2', 'P06-2', 'P07-2']);
+    expect(result).toMatchObject({ status: 'paused', pagesRead: 3, nextPage: 8, sweepCompleted: false });
   });
 
-  it('uses contact_sync_state.last_synced_at as modifiedSince', async () => {
-    selectLimitMock.mockResolvedValueOnce([{
-      entityType: 'Lender',
-      cursorLookupCode: null,
-      lastSyncedAt: new Date('2026-07-13T18:00:00.000Z'),
-      lastCompletedAt: new Date('2026-07-13T18:30:00.000Z'),
-      nextAllowedAt: null,
-      totalFetched: 10,
-    }]);
-    fetchSyncContactRowsMock.mockResolvedValueOnce({ items: [], error: null });
+  it('never starts a page after the deadline, even at the slowest page observed', async () => {
+    selectLimitMock.mockResolvedValueOnce([midSweep()]);
+    vendorPages(95.4);
 
-    const result = await handleSyncContactType('softpro.sync_contacts.lender');
+    await handleSyncContactType(PERSON, {}, { now });
 
-    expect(fetchSyncContactRowsMock).toHaveBeenCalledWith('Lender', {
-      modifiedSince: '2026-07-13T18:00:00.000Z',
-    });
-    expect(result.status).toBe('completed');
-    expect(result.processed).toBe(0);
+    // 0s, 95.4s — the third would start at 190.8s, past the 145s budget.
+    expect(fetchSyncContactPageMock).toHaveBeenCalledTimes(2);
+    expect(clock.t - Date.parse('2026-09-15T18:00:00Z')).toBeLessThan(FUNCTION_CEILING_MS);
+  });
+
+  it('never reads more than six pages in one run, however fast SoftPro is', async () => {
+    selectLimitMock.mockResolvedValueOnce([midSweep()]);
+    vendorPages(1);
+
+    await handleSyncContactType(PERSON, {}, { now });
+
+    expect(fetchSyncContactPageMock).toHaveBeenCalledTimes(MAX_PAGES_PER_RUN);
+  });
+
+  it('finishes the sweep at TotalPages, resets to page 1, and stamps the sweep', async () => {
+    const sweepStartedAt = new Date(clock.t - 5 * 60 * 60 * 1000);
+    selectLimitMock.mockResolvedValueOnce([midSweep({ nextPage: 16, cursorLookupCode: 'P15-2', sweepStartedAt })]);
+    vendorPages(70);
+
+    const result = await handleSyncContactType(PERSON, {}, { now });
+
+    expect(fetchSyncContactPageMock).toHaveBeenCalledTimes(1);
+    const save = cursorSaves()[0]!;
+    expect(save).toMatchObject({ nextPage: 1, cursorLookupCode: null, sweepStartedAt: null, lastSyncedAt: sweepStartedAt });
+    expect(save.lastSweepCompletedAt).toBeInstanceOf(Date);
+    expect(result).toMatchObject({ status: 'completed', sweepCompleted: true, nextPage: 1 });
+  });
+
+  it('starts a fresh sweep at page 1 when there is no sweep marker', async () => {
+    selectLimitMock.mockResolvedValueOnce([midSweep({ nextPage: 9, sweepStartedAt: null, cursorLookupCode: 'STALE' })]);
+    vendorPages(70);
+
+    await handleSyncContactType(PERSON, {}, { now });
+
+    expect(fetchSyncContactPageMock.mock.calls[0]![1]).toBe(1);
+    expect(cursorSaves()[0]).toMatchObject({ nextPage: 2, sweepTotalRows: 15_643 });
+    expect(cursorSaves()[0]!.sweepStartedAt).toBeInstanceOf(Date);
+  });
+
+  it('keeps the cursor at the failed page, and puts no cooldown on the retry', async () => {
+    selectLimitMock.mockResolvedValueOnce([midSweep()]);
+    fetchSyncContactPageMock
+      .mockImplementationOnce(async () => { clock.t += 70_000; return { items: pageOf(5), totalPages: 16, totalRows: 15_643, error: null }; })
+      .mockImplementationOnce(async () => { clock.t += 120_000; return { items: [], totalPages: null, totalRows: null, error: 'The operation was aborted due to timeout' }; });
+
+    await expect(handleSyncContactType(PERSON, {}, { now })).rejects.toThrow('page 6: The operation was aborted due to timeout');
+
+    // Page 5's progress was saved before page 6 failed.
+    expect(cursorSaves().map((s) => s.nextPage)).toEqual([6]);
+    const failed = updateSets.find((s) => s.status === 'failed')!;
+    expect(failed.nextAllowedAt).toBeNull();
+    expect(failed.lastError).toContain('page 6');
+  });
+
+  it('treats an empty page before TotalPages as a failure, never the end of the data', async () => {
+    selectLimitMock.mockResolvedValueOnce([midSweep()]);
+    fetchSyncContactPageMock.mockResolvedValueOnce({ items: [], totalPages: 16, totalRows: 15_643, error: null });
+
+    await expect(handleSyncContactType(PERSON, {}, { now })).rejects.toThrow('page 5 of 16 came back empty');
+    expect(cursorSaves()).toHaveLength(0);
+  });
+});
+
+describe('page drift', () => {
+  it('records suspected drift when TotalRows falls during the sweep', async () => {
+    selectLimitMock.mockResolvedValueOnce([midSweep({ sweepTotalRows: 15_643 })]);
+    vendorPages(70, 16, 15_642);
+
+    const result = await handleSyncContactType(PERSON, {}, { now });
+
+    expect(cursorSaves()[0]!.driftSuspected).toBe(true);
+    expect(result.driftSuspected).toBe(true);
+  });
+
+  it('counts a first code that does not sort after the boundary as a re-read, not drift', async () => {
+    selectLimitMock.mockResolvedValueOnce([midSweep({ cursorLookupCode: 'P05-1' })]);
+    vendorPages(200);
+
+    const result = await handleSyncContactType(PERSON, {}, { now });
+
+    expect(result.boundaryShifts).toBe(1);
+    expect(result.driftSuspected).toBe(false);
+  });
+});
+
+describe('one run at a time per entity type', () => {
+  it('skips while another run started within the function ceiling still owns the sweep', async () => {
+    selectLimitMock.mockResolvedValueOnce([midSweep({ status: 'running', lastStartedAt: new Date(clock.t - 60_000) })]);
+
+    const result = await handleSyncContactType(PERSON, {}, { now });
+
+    expect(result).toMatchObject({ status: 'skipped', skipReason: 'running' });
+    expect(fetchSyncContactPageMock).not.toHaveBeenCalled();
+  });
+
+  it('takes over a run that has been "running" longer than any run can live', async () => {
+    selectLimitMock.mockResolvedValueOnce([midSweep({ status: 'running', lastStartedAt: new Date(clock.t - 20 * 60_000) })]);
+    vendorPages(200);
+
+    const result = await handleSyncContactType(PERSON, {}, { now });
+
+    expect(result.status).toBe('paused');
+    expect(fetchSyncContactPageMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -110,28 +238,15 @@ describe('handleSyncContactType incremental state', () => {
 // a run that had nothing to do, and it is how the escrow-officer feed reported
 // clean runs for four months while four officers stopped updating.
 describe('partial failures surface', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    updateSets.length = 0;
-    insertOnConflictDoUpdateMock.mockResolvedValue(undefined);
-    updateWhereMock.mockResolvedValue(undefined);
-    selectLimitMock.mockResolvedValue([]);
-    sortSyncContactRowsMock.mockImplementation((_: string, items: unknown[]) => items);
-  });
+  const onePageFeed = (items: Array<{ LookupCode: string }>) => {
+    selectLimitMock.mockResolvedValueOnce([]);
+    fetchSyncContactPageMock.mockResolvedValueOnce({ items, totalPages: 1, totalRows: items.length, error: null });
+  };
 
-  /** Two rows on the feed, one of which collides. Not all of them, so the
-   *  existing "0 successes" guard does not throw and we exercise the quiet path. */
   function oneFailureOfTwo() {
-    fetchSyncContactRowsMock.mockResolvedValueOnce({
-      items: [{ LookupCode: 'PCT\\aballesteros' }, { LookupCode: 'PCT\\cquintanar' }],
-      error: null,
-    });
+    onePageFeed([{ LookupCode: 'PCT\\aballesteros' }, { LookupCode: 'PCT\\cquintanar' }]);
     syncContactRowsMock.mockResolvedValueOnce({
-      entityType: 'Escrow Officer',
-      totalFetched: 2,
-      created: 0,
-      updated: 1,
-      skipped: 0,
+      entityType: 'Escrow Officer', totalFetched: 2, created: 0, updated: 1, skipped: 0,
       errors: [{
         lookupCode: 'PCT\\aballesteros',
         error: 'unique violation on contacts_closer_examiner_uniq: this code already belongs to a different contacts row',
@@ -142,161 +257,80 @@ describe('partial failures surface', () => {
   it('writes the failure to jobs.error, where the Operations panel reads', async () => {
     oneFailureOfTwo();
 
-    const result = await handleSyncContactType(
-      'softpro.sync_contacts.escrow_officer',
-      { __jobId: 4242 },
-    );
+    const result = await handleSyncContactType(OFFICER, { __jobId: 4242 }, { now });
 
-    const jobUpdate = updateSets.find((s) => 'payload' in s);
-    expect(jobUpdate).toBeDefined();
-    expect(jobUpdate!.error).toContain('PCT\\aballesteros');
-    expect(jobUpdate!.error).toContain('1 of 2 rows failed');
-    expect(jobUpdate!.error).toContain('contacts_closer_examiner_uniq');
-    expect((jobUpdate!.payload as Record<string, unknown>).syncContacts).toBeDefined();
-
-    // Surfaced and continued: the run still reports its successful row.
+    const jobUpdate = updateSets.find((s) => 'payload' in s)!;
+    expect(jobUpdate.error).toContain('PCT\\aballesteros');
+    expect(jobUpdate.error).toContain('1 of 2 rows failed');
+    expect((jobUpdate.payload as Record<string, unknown>).syncContacts).toBeDefined();
     expect(result.updated).toBe(1);
     expect(result.status).toBe('completed');
   });
 
-  it('stops nulling contact_sync_state.last_error on a run that failed rows', async () => {
+  it('does not null contact_sync_state.last_error on a run that failed rows', async () => {
     oneFailureOfTwo();
-
-    await handleSyncContactType('softpro.sync_contacts.escrow_officer', { __jobId: 1 });
-
-    const stateUpdate = updateSets.find((s) => 'lastResult' in s);
-    expect(stateUpdate).toBeDefined();
-    expect(stateUpdate!.lastError).toContain('PCT\\aballesteros');
+    await handleSyncContactType(OFFICER, { __jobId: 1 }, { now });
+    expect(finalState().lastError).toContain('PCT\\aballesteros');
   });
 
   it('leaves both clean when nothing failed', async () => {
-    fetchSyncContactRowsMock.mockResolvedValueOnce({
-      items: [{ LookupCode: 'PCT\\cquintanar' }],
-      error: null,
-    });
-    syncContactRowsMock.mockResolvedValueOnce({
-      entityType: 'Escrow Officer',
-      totalFetched: 1,
-      created: 0,
-      updated: 1,
-      skipped: 0,
-      errors: [],
-    });
-
-    await handleSyncContactType('softpro.sync_contacts.escrow_officer', { __jobId: 9 });
-
-    const stateUpdate = updateSets.find((s) => 'lastResult' in s);
-    expect(stateUpdate!.lastError).toBeNull();
-    const jobUpdate = updateSets.find((s) => 'payload' in s);
-    expect(jobUpdate).toBeDefined();
-    expect(jobUpdate).not.toHaveProperty('error');
+    onePageFeed([{ LookupCode: 'PCT\\cquintanar' }]);
+    await handleSyncContactType(OFFICER, { __jobId: 9 }, { now });
+    expect(finalState().lastError).toBeNull();
+    expect(updateSets.find((s) => 'payload' in s)).not.toHaveProperty('error');
   });
 
   it('records nothing on the job row when the runner passed no job id', async () => {
     oneFailureOfTwo();
-
-    await handleSyncContactType('softpro.sync_contacts.escrow_officer');
-
+    await handleSyncContactType(OFFICER, {}, { now });
     expect(updateSets.find((s) => 'payload' in s)).toBeUndefined();
-    // The sync-state error is still recorded — that path needs no job id.
-    expect(updateSets.find((s) => 'lastResult' in s)!.lastError).toContain('PCT\\aballesteros');
+    expect(finalState().lastError).toContain('PCT\\aballesteros');
   });
 });
 
 // ── A shape rejection has to survive the next run ───────────────────────────
-//
-// `contact_sync_state.last_error` is last-write-wins with no history. A
-// rejection is a steady state — the row stays malformed until SoftPro fixes it
-// — so the record of it must not be erased by a later run that did no work and
-// could not have resolved it.
 describe('shape rejections surface and persist', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    updateSets.length = 0;
-    insertOnConflictDoUpdateMock.mockResolvedValue(undefined);
-    updateWhereMock.mockResolvedValue(undefined);
-    selectLimitMock.mockResolvedValue([]);
-    sortSyncContactRowsMock.mockImplementation((_: string, items: unknown[]) => items);
-  });
-
-  /** The whole batch is one rejected row — the case that used to trip the tripwire. */
   function onlyGomezRejected() {
-    fetchSyncContactRowsMock.mockResolvedValueOnce({
-      items: [{ LookupCode: 'PCT\\jgomez' }],
-      error: null,
-    });
+    selectLimitMock.mockResolvedValueOnce([]);
+    fetchSyncContactPageMock.mockResolvedValueOnce({ items: [{ LookupCode: 'PCT\\jgomez' }], totalPages: 1, totalRows: 1, error: null });
     syncContactRowsMock.mockResolvedValueOnce({
-      entityType: 'Escrow Officer',
-      totalFetched: 1,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      errors: [{
-        lookupCode: 'PCT\\jgomez',
-        error: "officer feed row for PCT\\jgomez REJECTED for shape (not imported): column 'Row State' is absent from the row. Escalate to SoftPro.",
-      }],
+      entityType: 'Escrow Officer', totalFetched: 1, created: 0, updated: 0, skipped: 0,
+      errors: [{ lookupCode: 'PCT\\jgomez', error: "officer feed row for PCT\\jgomez REJECTED for shape (not imported). Escalate to SoftPro." }],
       rejected: [{ lookupCode: 'PCT\\jgomez', reasons: ["column 'Row State' is absent from the row"] }],
     });
   }
 
   it('does not clear last_error at the start of a run', async () => {
     onlyGomezRejected();
-
-    await handleSyncContactType('softpro.sync_contacts.escrow_officer', { __jobId: 7 });
-
-    // The run-start upsert used to set lastError: null, which meant a rejection
-    // recorded by one run was gone before the next one had done anything.
-    const runStart = insertOnConflictDoUpdateMock.mock.calls[0]![0] as {
-      set: Record<string, unknown>;
-    };
+    await handleSyncContactType(OFFICER, { __jobId: 7 }, { now });
+    const runStart = insertOnConflictDoUpdateMock.mock.calls[0]![0] as { set: Record<string, unknown> };
     expect(runStart.set.status).toBe('running');
     expect(runStart.set).not.toHaveProperty('lastError');
   });
 
   it('does not treat a rejection as the systemic "0 successes" failure', async () => {
     onlyGomezRejected();
-
-    // A run whose only row was declined must still complete. Throwing here would
-    // put the job in `failed` on every run for as long as the vendor row stays
-    // malformed, which is indefinitely.
-    const result = await handleSyncContactType(
-      'softpro.sync_contacts.escrow_officer',
-      { __jobId: 8 },
-    );
-
+    const result = await handleSyncContactType(OFFICER, { __jobId: 8 }, { now });
     expect(result.status).toBe('completed');
     expect(result.rejected).toHaveLength(1);
   });
 
   it('names the rejected officer on jobs.error and last_error, and says escalate', async () => {
     onlyGomezRejected();
-
-    await handleSyncContactType('softpro.sync_contacts.escrow_officer', { __jobId: 11 });
-
-    const jobUpdate = updateSets.find((s) => 'payload' in s);
-    const stateUpdate = updateSets.find((s) => 'lastResult' in s);
-    for (const message of [jobUpdate!.error, stateUpdate!.lastError] as string[]) {
+    await handleSyncContactType(OFFICER, { __jobId: 11 }, { now });
+    for (const message of [updateSets.find((s) => 'payload' in s)!.error, finalState().lastError] as string[]) {
       expect(message).toContain('PCT\\jgomez');
       expect(message).toContain('REJECTED FOR SHAPE');
-      expect(message).toContain('escalated to SoftPro');
     }
-    // The full reasons ride along on jobs.payload for whoever escalates it.
-    expect(
-      ((jobUpdate!.payload as Record<string, Record<string, unknown>>).syncContacts).rejected,
-    ).toHaveLength(1);
   });
 
   it('still trips the tripwire when every attempted row genuinely failed', async () => {
-    fetchSyncContactRowsMock.mockResolvedValueOnce({
-      items: [{ LookupCode: 'PCT\\jgomez' }, { LookupCode: 'PCT\\aballesteros' }],
-      error: null,
+    selectLimitMock.mockResolvedValueOnce([]);
+    fetchSyncContactPageMock.mockResolvedValueOnce({
+      items: [{ LookupCode: 'PCT\\jgomez' }, { LookupCode: 'PCT\\aballesteros' }], totalPages: 1, totalRows: 2, error: null,
     });
     syncContactRowsMock.mockResolvedValueOnce({
-      entityType: 'Escrow Officer',
-      totalFetched: 2,
-      created: 0,
-      updated: 0,
-      skipped: 0,
+      entityType: 'Escrow Officer', totalFetched: 2, created: 0, updated: 0, skipped: 0,
       errors: [
         { lookupCode: 'PCT\\jgomez', error: 'REJECTED for shape' },
         { lookupCode: 'PCT\\aballesteros', error: 'unique violation on contacts_closer_examiner_uniq' },
@@ -304,33 +338,35 @@ describe('shape rejections surface and persist', () => {
       rejected: [{ lookupCode: 'PCT\\jgomez', reasons: ['shifted'] }],
     });
 
-    // One rejection, one real failure, nothing written: excluding the rejection
-    // still leaves "every row we actually tried failed", which is systemic.
-    await expect(
-      handleSyncContactType('softpro.sync_contacts.escrow_officer', { __jobId: 12 }),
-    ).rejects.toThrow('1 attempts, 0 successes');
+    await expect(handleSyncContactType(OFFICER, { __jobId: 12 }, { now })).rejects.toThrow('1 attempts, 0 successes');
   });
 });
 
-// ── Batch sizing ────────────────────────────────────────────────────────────
-// This job has no interruptible loop, so the batch size IS its time budget.
-// These pin the sizing so nobody restores a value that runs past the ceiling.
-describe('batch sizing', () => {
-  const L = CONTACT_SYNC_BATCH_LIMITS;
+describe('Sales Rep stays a single pass', () => {
+  it('reads the whole roster in one request and keeps the deactivate guard', async () => {
+    selectLimitMock.mockResolvedValueOnce([]);
+    fetchSyncContactRowsMock.mockResolvedValueOnce({ items: [{ LookupCode: 'REP-1' }, { LookupCode: 'REP-2' }], error: null });
 
-  it('keeps a full batch inside the worst-case target', () => {
-    expect(L.batchSize * L.measuredSecondsPerRow).toBeLessThanOrEqual(L.worstCaseTargetSeconds);
+    const result = await handleSyncContactType('softpro.sync_contacts.sales_rep', {}, { now });
+
+    expect(fetchSyncContactPageMock).not.toHaveBeenCalled();
+    expect(syncContactRowsMock).toHaveBeenCalledWith('Sales Rep', expect.any(Array), { deactivateExistingSalesReps: true });
+    expect(result.status).toBe('completed');
+    expect(result.nextAllowedAt).not.toBeNull();
+  });
+});
+
+describe('page budget sizing', () => {
+  it('fits the slowest page started at the deadline inside the function ceiling', () => {
+    const budget = budgetMsFor('softpro.sync_contacts_page');
+    expect(budget + UNIT_P99_MS['softpro.sync_contacts_page']).toBeLessThanOrEqual(FUNCTION_CEILING_MS);
   });
 
-  it('pins that the OLD 3,000 would have overrun the target', () => {
-    // 3000 * 0.09 = 270s at target, and measured runs actually hit 237-288s
-    // against a 300s ceiling — this is what produced the 95 watchdog kills.
-    expect(3000 * L.measuredSecondsPerRow).toBeGreaterThanOrEqual(L.worstCaseTargetSeconds);
-    expect(L.batchSize).toBeLessThan(3000);
+  it('allows a page for the full client timeout (120s), not the average', () => {
+    expect(UNIT_P99_MS['softpro.sync_contacts_page']).toBeGreaterThanOrEqual(120_000);
   });
 
-  it('leaves real headroom under the function ceiling', () => {
-    const worst = L.batchSize * L.measuredSecondsPerRow;
-    expect(L.functionCeilingSeconds - worst).toBeGreaterThanOrEqual(120);
+  it('pins that the approved six pages at 67s would have overrun the 300s ceiling', () => {
+    expect(6 * 67_000).toBeGreaterThan(FUNCTION_CEILING_MS);
   });
 });

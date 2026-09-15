@@ -1,8 +1,10 @@
 import { db } from '@/lib/db/client';
 import { contactSyncState, jobs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { createDeadline, FUNCTION_CEILING_MS } from '@/lib/jobs/time-budget';
 import {
   describeSyncError,
+  fetchSyncContactPage,
   fetchSyncContactRows,
   getSyncContactLookupCode,
   sortSyncContactRows,
@@ -11,38 +13,44 @@ import {
   type SyncContactsResult,
 } from './sync-contacts';
 
+/** Sales Rep only: one request, synced whole, then left alone this long. */
 const CONTACT_SYNC_COOLDOWN_MS = 16 * 60 * 60 * 1000;
 
-/**
- * Rows processed per invocation.
- *
- * This job has no interruptible per-item loop at this level — it hands the
- * whole batch to syncContactRows() as one bulk operation and commits the
- * cursor once afterwards. So unlike the other long-runners it cannot be
- * protected by a deadline guard (see src/lib/jobs/time-budget.ts); the batch
- * size IS its time budget.
- *
- * At the previous 3,000 a full batch measured 237–288s against a 300s Vercel
- * ceiling — which is why softpro.sync_all_contacts accounts for all 95 of the
- * watchdog kills recorded between Apr 3 and Jul 13, while the per-type jobs
- * (which sync one smaller lookup table each) have never been killed.
- *
- * At the measured ~0.09s/row, 1,000 rows lands near 90s — comfortably inside
- * the same ~270s worst-case target the deadline-guarded jobs use.
- *
- * Throughput is unaffected: progress is cursor-based, and the per-type jobs
- * run hourly or 3-hourly, so the drain rate is 8,000–24,000 rows/day/type
- * against ~21,600 total contacts.
- */
-const CONTACT_SYNC_BATCH_SIZE = 1000;
+// ─── THE CONTACT SYNC RESUMES ACROSS RUNS, ONE PAGE AT A TIME ───────────────
+//
+// SoftPro takes 65-95s to return one 1,000-row GetLookuptable page (all 16
+// person pages read on 2026-09-15: average 70.8s, max 95.4s). The previous
+// design fetched EVERY page before processing any, under a 60s per-request
+// timeout and Vercel's 300s ceiling. It could not finish: `Order Contact -
+// Person` last completed on 2026-09-03, and the lender, title officer, escrow
+// officer and underwriter syncs failed the same way. Runs that "completed"
+// in 0.0s were cooldown skips that fetched nothing.
+//
+// So a run reads pages from where the last one stopped, writes each, and
+// advances the cursor after EACH page — a failure costs one page, not the run.
+// A sweep that reaches TotalPages resets to page 1, and the next run starts the
+// next sweep. See docs/tickets/RESUMABLE_CONTACT_SYNC.md.
 
-/** Ceiling this batch size is sized against; exported for the sizing test. */
-export const CONTACT_SYNC_BATCH_LIMITS = {
-  batchSize: CONTACT_SYNC_BATCH_SIZE,
-  measuredSecondsPerRow: 0.09,
-  worstCaseTargetSeconds: 270,
-  functionCeilingSeconds: 300,
-} as const;
+/**
+ * Hard cap on pages per run, whatever the clock says.
+ *
+ * The approved design said six pages per run against a ten-minute watchdog.
+ * The real limit is the job route's 300s maxDuration, so the clock decides —
+ * createDeadline('softpro.sync_contacts_page') stops starting pages after
+ * 145s, which is normally three. Six stays as the ceiling on a fast day.
+ */
+export const MAX_PAGES_PER_RUN = 6;
+
+/**
+ * A run that started less than this long ago still owns its entity type.
+ *
+ * Two crons can reach the same type: its own `softpro.sync_contacts.<type>`
+ * job and `softpro.sync_all_contacts`. With cursors that would be two runs
+ * reading and advancing one sweep at once. A run cannot outlive the function
+ * ceiling, so anything older than ceiling + a minute is a dead run whose
+ * `running` status was never cleared, and is taken over.
+ */
+const RUN_OWNERSHIP_MS = FUNCTION_CEILING_MS + 60_000;
 
 export const CONTACT_SYNC_JOB_CONFIGS = {
   'softpro.sync_contacts.order_contact_person': 'Order Contact - Person',
@@ -67,13 +75,30 @@ export interface SyncContactTypeResult extends SyncContactsResult {
   jobType: string;
   status: 'completed' | 'paused' | 'skipped';
   processed: number;
+  /** The boundary code: last lookup code of the last page this sweep completed. */
   cursorLookupCode: string | null;
   nextAllowedAt: string | null;
+  /** Pages read by this run. */
+  pagesRead?: number;
+  /** The page the next run starts at (1 when a sweep just finished). */
+  nextPage?: number;
+  totalPages?: number | null;
+  sweepCompleted?: boolean;
+  /** TotalRows fell during the sweep; a row may have been skipped until the next one. */
+  driftSuspected?: boolean;
+  /** Pages whose first code did not sort after the stored boundary: a harmless re-read. */
+  boundaryShifts?: number;
+  skipReason?: 'cooldown' | 'running';
 }
 
 export interface SyncContactTypePayload {
   /** Injected by the job runner so a partial failure can record itself. */
   __jobId?: number;
+}
+
+export interface SyncContactTypeDeps {
+  /** Injectable clock, for the page deadline. */
+  now?: () => number;
 }
 
 /**
@@ -153,185 +178,283 @@ export async function handleSyncAllContacts(): Promise<SyncAllContactsResult> {
   };
 }
 
+type SyncState = typeof contactSyncState.$inferSelect;
+
+function skippedResult(
+  jobType: string,
+  entityType: SyncContactEntityType,
+  state: SyncState,
+  skipReason: 'cooldown' | 'running',
+): SyncContactTypeResult {
+  return {
+    jobType,
+    entityType,
+    status: 'skipped',
+    skipReason,
+    totalFetched: state.totalFetched,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    errors: [],
+    processed: 0,
+    cursorLookupCode: state.cursorLookupCode,
+    nextAllowedAt: state.nextAllowedAt?.toISOString() ?? null,
+    nextPage: state.nextPage,
+    totalPages: state.totalPages,
+  };
+}
+
+/**
+ * "Every row we tried to write failed" means something systemic — the
+ * unique-index collision that broke four officers looked exactly like this.
+ * Rows the shape guard declined were never attempted, so they are excluded
+ * from both sides of the comparison. Counting them as attempts would let a
+ * single permanently-malformed vendor row hold this job in `failed` forever,
+ * and a rejection is an expected steady state until SoftPro fixes the feed.
+ */
+function assertNotSystemic(jobType: string, processed: number, result: SyncContactsResult): void {
+  const rejectedCount = result.rejected?.length ?? 0;
+  const attempted = processed - rejectedCount;
+  const unexpectedFailures = result.errors.length - rejectedCount;
+  if (attempted > 0 && result.created === 0 && result.updated === 0 && unexpectedFailures === attempted) {
+    throw new Error(`${jobType}: ${attempted} attempts, 0 successes`);
+  }
+}
+
 export async function handleSyncContactType(
   jobType: keyof typeof CONTACT_SYNC_JOB_CONFIGS,
   payload: SyncContactTypePayload = {},
+  deps: SyncContactTypeDeps = {},
 ): Promise<SyncContactTypeResult> {
   const entityType = CONTACT_SYNC_JOB_CONFIGS[jobType];
-  const now = new Date();
-  const [existingState] = await db
+  const now = deps.now ?? Date.now;
+  const startedAt = new Date(now());
+  const [state] = await db
     .select()
     .from(contactSyncState)
     .where(eq(contactSyncState.entityType, entityType))
     .limit(1);
 
-  if (existingState?.nextAllowedAt && existingState.nextAllowedAt > now) {
-    return {
-      jobType,
-      entityType,
-      status: 'skipped',
-      totalFetched: existingState.totalFetched,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      errors: [],
-      processed: 0,
-      cursorLookupCode: existingState.cursorLookupCode,
-      nextAllowedAt: existingState.nextAllowedAt.toISOString(),
-    };
+  if (state?.nextAllowedAt && state.nextAllowedAt > startedAt) {
+    return skippedResult(jobType, entityType, state, 'cooldown');
+  }
+  if (
+    state?.status === 'running'
+    && state.lastStartedAt
+    && startedAt.getTime() - state.lastStartedAt.getTime() < RUN_OWNERSHIP_MS
+  ) {
+    return skippedResult(jobType, entityType, state, 'running');
   }
 
   // `lastError` is deliberately NOT cleared here.
   //
   // It used to be nulled at the start of every run, which meant a recorded
-  // failure survived only until the next invocation. That is fatal for a
-  // rejection: the officer feed fetches with `modifiedSince = last_synced_at`,
-  // so the run after a rejection usually returns zero rows and takes the
-  // empty-batch path, which records nothing — the rejection would be erased by
-  // a run that did no work and could not have resolved it. `last_error` is
-  // last-write-wins with no history, so it has to mean "the last thing that
-  // went wrong and has not been superseded by a run that actually succeeded".
-  // The completion path below clears it on a genuinely clean run.
+  // failure survived only until the next invocation — a shape rejection would
+  // be erased by a run that did no work and could not have resolved it.
+  // `last_error` is last-write-wins with no history, so it has to mean "the last
+  // thing that went wrong and has not been superseded by a run that actually
+  // succeeded". The completion paths below clear it on a genuinely clean run.
   await db
     .insert(contactSyncState)
-    .values({
-      entityType,
-      jobType,
-      status: 'running',
-      lastStartedAt: now,
-      updatedAt: now,
-    })
+    .values({ entityType, jobType, status: 'running', lastStartedAt: startedAt, updatedAt: startedAt })
     .onConflictDoUpdate({
       target: contactSyncState.entityType,
-      set: {
-        jobType,
-        status: 'running',
-        lastStartedAt: now,
-        updatedAt: now,
-      },
+      set: { jobType, status: 'running', lastStartedAt: startedAt, updatedAt: startedAt },
     });
 
   try {
-    const syncStartedAt = new Date();
-    const fetched = await fetchSyncContactRows(entityType, {
-      modifiedSince: existingState?.lastSyncedAt?.toISOString() ?? null,
-    });
-    if (fetched.error) {
-      throw new Error(`${jobType}: ${fetched.error}`);
-    }
-
-    const cursor = existingState?.cursorLookupCode ?? null;
-    const orderedRows = sortSyncContactRows(entityType, fetched.items)
-      .map((item) => ({ item, lookupCode: getSyncContactLookupCode(entityType, item) }))
-      .filter((row) => row.lookupCode !== null && (!cursor || row.lookupCode > cursor));
-
-    const batch = orderedRows.slice(0, CONTACT_SYNC_BATCH_SIZE);
-    if (batch.length === 0) {
-      const nextAllowedAt = new Date(Date.now() + CONTACT_SYNC_COOLDOWN_MS);
-      const empty = {
-        jobType,
-        entityType,
-        status: 'completed' as const,
-        totalFetched: fetched.items.length,
-        created: 0,
-        updated: 0,
-        skipped: 0,
-        errors: [],
-        processed: 0,
-        cursorLookupCode: null,
-        nextAllowedAt: nextAllowedAt.toISOString(),
-      };
-
-      await db.update(contactSyncState)
-        .set({
-          status: 'completed',
-          cursorLookupCode: null,
-          lastSyncedAt: now,
-          lastCompletedAt: new Date(),
-          nextAllowedAt,
-          totalFetched: fetched.items.length,
-          lastResult: empty,
-          updatedAt: new Date(),
-        })
-        .where(eq(contactSyncState.entityType, entityType));
-
-      return empty;
-    }
-
-    const result = await syncContactRows(
-      entityType,
-      batch.map((row) => row.item),
-      { deactivateExistingSalesReps: entityType === 'Sales Rep' && !cursor },
-    );
-
-    const processed = batch.length;
-    const lastCursor = batch[batch.length - 1]?.lookupCode ?? cursor;
-    const completed = processed === orderedRows.length;
-    const nextAllowedAt = completed ? new Date(Date.now() + CONTACT_SYNC_COOLDOWN_MS) : null;
-    const status = completed ? 'completed' : 'paused';
-    const response: SyncContactTypeResult = {
-      ...result,
-      jobType,
-      status,
-      totalFetched: fetched.items.length,
-      processed,
-      cursorLookupCode: completed ? null : lastCursor,
-      nextAllowedAt: nextAllowedAt?.toISOString() ?? null,
-    };
-
-    // "Every row we tried to write failed" means something systemic — the
-    // unique-index collision that broke four officers looked exactly like this.
-    // Rows the shape guard declined were never attempted, so they are excluded
-    // from both sides of the comparison. Counting them as attempts would let a
-    // single permanently-malformed vendor row hold this job in `failed` forever,
-    // and a rejection is an expected steady state until SoftPro fixes the feed.
-    const rejectedCount = result.rejected?.length ?? 0;
-    const attempted = processed - rejectedCount;
-    const unexpectedFailures = result.errors.length - rejectedCount;
-    if (attempted > 0 && result.created === 0 && result.updated === 0 && unexpectedFailures === attempted) {
-      throw new Error(`${jobType}: ${attempted} attempts, 0 successes`);
-    }
-
-    // A row the shape guard rejected still advances `lastSyncedAt`, and that is
-    // intended. The next fetch sends `modifiedSince = lastSyncedAt`, so the
-    // rejected row will not come back — but it also cannot become well-formed on
-    // its own, because only SoftPro can fix a column-shifted feed row. When they
-    // do fix it they modify it, which moves the row's own `LastModifiedAt` (the
-    // field the feed filters on) into the new window, and the row returns and is
-    // retried automatically. Holding the cursor back instead would re-fetch and
-    // re-reject the same row on every run forever without ever repairing it.
-    await db.update(contactSyncState)
-      .set({
-        status,
-        cursorLookupCode: completed ? null : lastCursor,
-        lastSyncedAt: completed ? syncStartedAt : existingState?.lastSyncedAt ?? null,
-        lastCompletedAt: completed ? new Date() : existingState?.lastCompletedAt ?? null,
-        nextAllowedAt,
-        totalFetched: fetched.items.length,
-        lastResult: response,
-        // A run that failed some rows must not clear the error column on its way
-        // out. Nulling it here is what made a partial failure invisible in the
-        // one table that tracks this sync's health.
-        lastError: result.errors.length > 0
-          ? summarizeSyncErrors(result, processed)
-          : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(contactSyncState.entityType, entityType));
-
+    const response = entityType === 'Sales Rep'
+      ? await syncSalesRepRoster(jobType, entityType, now)
+      : await syncPagedRun(jobType, entityType, state, now);
     await recordRun(payload, response);
-
     return response;
   } catch (err) {
+    // No cooldown on failure. The cursor was saved after every completed page,
+    // so the next scheduled run resumes at the page that failed.
     const message = err ? describeSyncError(err) : 'Unknown sync contacts failure';
     await db.update(contactSyncState)
       .set({
         status: 'failed',
         lastError: message,
-        nextAllowedAt: new Date(Date.now() + 6 * 60 * 60 * 1000),
-        updatedAt: new Date(),
+        nextAllowedAt: null,
+        updatedAt: new Date(now()),
       })
       .where(eq(contactSyncState.entityType, entityType));
     throw err;
   }
+}
+
+/**
+ * Sales Rep comes from GetOrderMarketingRep: one request, ~48 rows, not paged.
+ * It stays a single pass because the deactivate-then-reactivate guard needs the
+ * whole roster in hand at once.
+ */
+async function syncSalesRepRoster(
+  jobType: string,
+  entityType: SyncContactEntityType,
+  now: () => number,
+): Promise<SyncContactTypeResult> {
+  const fetched = await fetchSyncContactRows(entityType);
+  if (fetched.error) throw new Error(`${jobType}: ${fetched.error}`);
+
+  const rows = sortSyncContactRows(entityType, fetched.items)
+    .filter((item) => getSyncContactLookupCode(entityType, item) !== null);
+  const result = await syncContactRows(entityType, rows, { deactivateExistingSalesReps: true });
+  assertNotSystemic(jobType, rows.length, result);
+
+  const nextAllowedAt = new Date(now() + CONTACT_SYNC_COOLDOWN_MS);
+  const response: SyncContactTypeResult = {
+    ...result,
+    jobType,
+    status: 'completed',
+    totalFetched: fetched.items.length,
+    processed: rows.length,
+    cursorLookupCode: null,
+    nextAllowedAt: nextAllowedAt.toISOString(),
+  };
+  await db.update(contactSyncState)
+    .set({
+      status: 'completed',
+      cursorLookupCode: null,
+      lastSyncedAt: new Date(now()),
+      lastCompletedAt: new Date(now()),
+      nextAllowedAt,
+      totalFetched: fetched.items.length,
+      lastResult: response,
+      lastError: result.errors.length > 0 ? summarizeSyncErrors(result, rows.length) : null,
+      updatedAt: new Date(now()),
+    })
+    .where(eq(contactSyncState.entityType, entityType));
+  return response;
+}
+
+async function syncPagedRun(
+  jobType: string,
+  entityType: Exclude<SyncContactEntityType, 'Sales Rep'>,
+  state: SyncState | undefined,
+  now: () => number,
+): Promise<SyncContactTypeResult> {
+  const deadline = createDeadline('softpro.sync_contacts_page', now);
+
+  // A sweep with no start marker is a fresh one, whatever next_page says.
+  let sweepStartedAt = state?.sweepStartedAt ?? null;
+  let nextPage = sweepStartedAt ? (state?.nextPage ?? 1) : 1;
+  let boundary = sweepStartedAt ? (state?.cursorLookupCode ?? null) : null;
+  let totalPages = state?.totalPages ?? null;
+  let sweepTotalRows = sweepStartedAt ? (state?.sweepTotalRows ?? null) : null;
+  let driftSuspected = sweepStartedAt ? (state?.driftSuspected ?? false) : false;
+
+  const totals: SyncContactsResult = { entityType, totalFetched: 0, created: 0, updated: 0, skipped: 0, errors: [], rejected: [] };
+  let pagesRead = 0;
+  let boundaryShifts = 0;
+  let sweepCompleted = false;
+
+  const saveCursor = async () => {
+    await db.update(contactSyncState)
+      .set({
+        nextPage: sweepCompleted ? 1 : nextPage,
+        totalPages,
+        cursorLookupCode: sweepCompleted ? null : boundary,
+        sweepStartedAt: sweepCompleted ? null : sweepStartedAt,
+        sweepTotalRows: sweepCompleted ? null : sweepTotalRows,
+        driftSuspected,
+        ...(sweepCompleted
+          ? { lastSweepCompletedAt: new Date(now()), lastCompletedAt: new Date(now()), lastSyncedAt: sweepStartedAt }
+          : {}),
+        updatedAt: new Date(now()),
+      })
+      .where(eq(contactSyncState.entityType, entityType));
+  };
+
+  while (pagesRead < MAX_PAGES_PER_RUN && !deadline.exceeded()) {
+    const page = nextPage;
+    const fetched = await fetchSyncContactPage(entityType, page);
+    if (fetched.error) throw new Error(`${jobType}: page ${page}: ${fetched.error}`);
+
+    if (page === 1) {
+      sweepStartedAt = new Date(now());
+      sweepTotalRows = fetched.totalRows;
+      driftSuspected = false;
+      boundary = null;
+    }
+    totalPages = fetched.totalPages ?? totalPages;
+
+    if (fetched.items.length === 0) {
+      // Empty is the end of the data only when the vendor's own count agrees.
+      // During the pagination investigation Page=1 returned zero rows once and
+      // 1,000 on the next call; believing a single empty page is how a sync
+      // silently truncates.
+      if (totalPages !== null && page <= totalPages) {
+        throw new Error(`${jobType}: page ${page} of ${totalPages} came back empty`);
+      }
+      sweepCompleted = true;
+      await saveCursor();
+      break;
+    }
+
+    const rows = sortSyncContactRows(entityType, fetched.items);
+    const firstCode = getSyncContactLookupCode(entityType, rows[0]!);
+    const lastCode = getSyncContactLookupCode(entityType, rows[rows.length - 1]!);
+
+    // PAGE DRIFT. Paging is offset over a sort by lookup code. An INSERTION
+    // before the cursor shifts rows right: the last row of the previous page
+    // reappears as this page's first — a re-read, harmless, counted here. A
+    // DELETION before the cursor shifts rows left: one row moves back into a page
+    // already read and is skipped until the next sweep, and no comparison of
+    // codes can see it. What can be seen is TotalRows falling, so that is what
+    // is recorded. The next sweep reads the row.
+    if (boundary !== null && firstCode !== null && firstCode <= boundary) boundaryShifts++;
+    if (sweepTotalRows !== null && fetched.totalRows !== null && fetched.totalRows < sweepTotalRows) {
+      driftSuspected = true;
+    }
+
+    const result = await syncContactRows(entityType, rows);
+    assertNotSystemic(jobType, rows.length, result);
+
+    totals.totalFetched += rows.length;
+    totals.created += result.created;
+    totals.updated += result.updated;
+    totals.skipped += result.skipped;
+    totals.errors.push(...result.errors);
+    totals.rejected!.push(...(result.rejected ?? []));
+    pagesRead++;
+
+    boundary = lastCode ?? boundary;
+    nextPage = page + 1;
+    sweepCompleted = totalPages !== null && page >= totalPages;
+    await saveCursor();
+    if (sweepCompleted) break;
+  }
+
+  const status = sweepCompleted ? 'completed' : 'paused';
+  const response: SyncContactTypeResult = {
+    ...totals,
+    jobType,
+    status,
+    processed: totals.totalFetched,
+    cursorLookupCode: sweepCompleted ? null : boundary,
+    nextAllowedAt: null,
+    pagesRead,
+    nextPage: sweepCompleted ? 1 : nextPage,
+    totalPages,
+    sweepCompleted,
+    driftSuspected,
+    boundaryShifts,
+  };
+
+  await db.update(contactSyncState)
+    .set({
+      status,
+      nextAllowedAt: null,
+      totalFetched: totals.totalFetched,
+      lastResult: response,
+      // A run that failed some rows must not clear the error column on its way
+      // out. Nulling it here is what made a partial failure invisible in the one
+      // table that tracks this sync's health.
+      lastError: totals.errors.length > 0 ? summarizeSyncErrors(totals, totals.totalFetched) : null,
+      updatedAt: new Date(now()),
+    })
+    .where(eq(contactSyncState.entityType, entityType));
+
+  return response;
 }

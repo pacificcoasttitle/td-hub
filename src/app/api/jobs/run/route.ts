@@ -35,6 +35,7 @@ import { handleRetrySoftProDocumentAttach } from '@/lib/jobs/handlers/retry-soft
 import { handleOutstandingDocumentsAlert } from '@/lib/jobs/handlers/outstanding-documents-alert';
 import { handlePartyWizardInvite } from '@/lib/jobs/handlers/party-wizard-invite';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
+import { recordJobCompletion } from '@/lib/jobs/record-result';
 
 function formatTodayForImport(): string {
   const d = new Date();
@@ -237,7 +238,9 @@ async function executeJob(req: NextRequest, payload: Record<string, unknown>) {
       ? { ...payload, __jobId: jobId }
       : payload;
     const result = await handler(handlerPayload);
-    try { await db.update(jobs).set({ status: 'completed', endedAt: new Date() }).where(eq(jobs.id, jobId)); } catch { /* tracking */ }
+    // Saves the handler's result on the row as well as the status. The result
+    // used to reach only this HTTP response, which nobody reads for a cron run.
+    await recordJobCompletion(jobId, result);
     return NextResponse.json({ success: true, job: jobName, jobId, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Job execution failed';

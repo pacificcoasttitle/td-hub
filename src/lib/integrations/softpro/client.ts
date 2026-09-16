@@ -665,11 +665,15 @@ export async function getOrderDetails(params: {
 }
 
 export async function getOrderContacts(
-  orderNumber: string
+  orderNumber: string,
+  options: { timeoutMs?: number } = {},
 ): Promise<VendorResult<SoftProOrderContactsData>> {
   return makeRequest<SoftProOrderContactsData>('GET', SOFTPRO_ENDPOINTS.getOrderContacts, {
     queryParams: { OrderNumber: orderNumber },
     operation: 'get_order_contacts',
+    // Optional: the pre-send refresh caps this so a slow vendor cannot hold a
+    // delivery for the default 60s. Everyone else keeps the default.
+    ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
   });
 }
 

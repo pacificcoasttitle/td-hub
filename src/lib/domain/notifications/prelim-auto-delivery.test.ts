@@ -170,6 +170,25 @@ describe('maybeAutoDeliverPrelim', () => {
     expect(latestOutcome()).toMatchObject({ outcome: 'delivered', message_id: 'sg-message-id' });
   });
 
+  it("holds for a human when SoftPro has no escrow email — ours is not used in its place", async () => {
+    // Pre-send rule (2026-09-16): SoftPro is the system of record. If it holds no
+    // recipient, the prelim is not sent to our address instead. That is the same
+    // outcome as having no recipient at all, not a failed send.
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+
+    const { PreSendRecipientUnresolvedError } = await import('./pre-send-errors');
+    sendPrelimDeliveryEmailMock.mockRejectedValueOnce(new PreSendRecipientUnresolvedError('escrow', '12345-PCT'));
+
+    const result = await maybeAutoDeliverPrelim({ ...baseInput });
+
+    expect(result.sent).toBe(false);
+    expect(result.outcome).toBe('blocked_no_recipient');
+    expect(result.needsManualDelivery).toBe(true);
+    expect(result.reason).toContain('SoftPro holds no escrow email');
+    expect(latestOutcome()).toMatchObject({ outcome: 'blocked_no_recipient', needs_manual_delivery: true });
+  });
+
   it('routes a refused document to manual review — never sent, never silently skipped', async () => {
     // The Aug 11 case: an internal bundle that does not read as a prelim. The
     // send throws PrelimContentCheckFailedError, and auto-delivery must record a

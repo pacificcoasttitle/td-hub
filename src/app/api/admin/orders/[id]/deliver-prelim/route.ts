@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { PreSendRecipientUnresolvedError } from '@/lib/domain/notifications/pre-send-errors';
 import { z } from 'zod';
 import { getSession } from '@/lib/security/auth';
 import { canAccessOrder } from '@/lib/security/permissions';
@@ -109,6 +110,9 @@ export async function POST(
       warnings: result.resolvedRecipients.warnings,
     });
   } catch (err) {
+    if (err instanceof PreSendRecipientUnresolvedError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
     if (err instanceof Error && err.message === PRELIM_DELIVERY_NOT_ARMED) {
       return NextResponse.json({ error: PRELIM_DELIVERY_NOT_ARMED }, { status: 409 });
     }

@@ -45,13 +45,13 @@ export async function getOrderDetails(params: Parameters<typeof import('./client
   return client.getOrderDetails(params);
 }
 
-export async function getOrderContacts(orderNumber: string) {
+export async function getOrderContacts(orderNumber: string, options: { timeoutMs?: number } = {}) {
   if (useMock) {
     const mock = await import('./mock');
     return mock.getOrderContacts(orderNumber);
   }
   const client = await import('./client');
-  return client.getOrderContacts(orderNumber);
+  return client.getOrderContacts(orderNumber, options);
 }
 
 export async function getAttachedDocuments(orderNumber: string) {

@@ -1,4 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
+import { PreSendRecipientUnresolvedError } from './pre-send-errors';
 import { db } from '@/lib/db/client';
 import { adminActivityLogs, orders } from '@/lib/db/schema';
 import { getPrelimDeliveryMode } from './prelim-delivery-mode';
@@ -250,6 +251,16 @@ export async function maybeAutoDeliverPrelim(input: PrelimAutoDeliveryInput): Pr
     // A refused document is not a failed send — it never left. Distinct outcome
     // so the ops panel can tell "the vendor broke" from "we caught a wrong
     // document", which need completely different responses.
+    // SoftPro holds no escrow email. Not a failed send — the rule is not to use
+    // ours in its place — so it is the same outcome as having no recipient.
+    if (err instanceof PreSendRecipientUnresolvedError) {
+      return finish(input, {
+        outcome: 'blocked_no_recipient',
+        sent: false,
+        needsManualDelivery: true,
+        reason: err.message,
+      });
+    }
     if (err instanceof PrelimContentCheckFailedError) {
       return finish(input, {
         outcome: 'blocked_content_check',

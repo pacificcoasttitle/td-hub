@@ -213,6 +213,46 @@ parties, no client contact, or none of the four company FKs, and a hub-created
 order is born with all three. 482 orders had never had their contacts read from
 SoftPro as of 2026-09-16.
 
+## Could `modifiedSince` replace the 7-day rotation? Deferred (2026-09-16)
+
+`GetOrderDetails` now accepts `modifiedSince`, which would let the sweep re-read
+only the orders SoftPro changed since the last run instead of cycling all of
+them. **That only works if an order's `ModifiedDate` moves when its contacts
+change, and that is not yet known.** Deferred by Gerard: it decides how efficient
+the measurement job is, not whether a wrong send is prevented, and the pre-send
+refresh already covers the harm. Build the sweep as designed above; revisit this
+when someone can run the test slowly.
+
+**The test, when it runs.** Snapshot `GetOrderContacts` for the active orders,
+wait a business afternoon, snapshot again, and pull every order modified in
+between. Any contact change on an order whose `ModifiedDate` did not move means
+`modifiedSince` cannot replace the rotation. A first attempt on 2026-09-16 was
+abandoned half-way: a firewall blocked the workstation after 523 of 1,143 reads
+(AGENTS.md, "Bulk reads of a vendor"). Give it a stated rate and ceiling.
+
+**Already measured about the endpoint, 2026-09-16** (so nobody re-derives it):
+
+- The request needs the legacy parameters present and empty, or it returns 400:
+  `?modifiedSince=YYYY-MM-DDTHH:MM:SS&DateFrom=&DateTo=&OrderNumber=&Page=1&pageSize=100`.
+- `pageSize` is capped at 100. Pages took 23–30s each. The trailing 7 days were
+  1,404 changed orders over 15 pages, about 200 a day.
+- `ModifiedDate` is **UTC**, and `modifiedSince` is **inclusive, to the second**.
+- Rows come back **oldest change first**. An order edited mid-pull moves to the
+  end, and every later row shifts up a slot, so **page-number paging skips rows**:
+  in one 7-day pull 4 orders came back twice and 2 orders modified before the pull
+  started (20022151-GLT, 20022230-OCT) never came back at all. Page by keyset
+  instead: always `Page=1`, with `modifiedSince` set to the last `ModifiedDate`
+  seen, de-duplicating by order number.
+- The response now carries `LoanAmount`, `PrimaryContact`, `TitleOfficerContact`,
+  `SalesRepContact` and, on Title & Escrow and Escrow only orders,
+  `EscrowOfficerContact` (with lookup code). `EscrowOfficer` and
+  `EscrowOfficerContact` are omitted, not empty, when an order has no PCT escrow
+  officer. It has no escrow company, lender, buyer or agent: those still need
+  `GetOrderContacts`.
+- It is also what the order sync needs: of 1,265 orders changed that week that
+  we hold, 230 (18%) had moved status in SoftPro while we still showed the old
+  one, 181 of them older than the sync's 7-day window. Not yet taken up.
+
 ## Phase 2 — decided from the data, not built now
 
 After two weeks, per `kind`: apply automatically, propose to an operator, or

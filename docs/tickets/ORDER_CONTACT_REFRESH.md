@@ -146,27 +146,56 @@ takes an order id, re-reads SoftPro, applies the comparison below, and returns
 the recipients with any difference attached. Four copies of "refresh before
 send" drift, and the direction they drift is a document sent to a stale address.
 
-**THE DECISION THIS NEEDS.** When the pre-send read disagrees with us for the
-role being sent to:
+**DECIDED (Gerard, 2026-09-16): send to SoftPro's address, always. No hold
+queue.** SoftPro is the system of record, so when the two disagree its address
+is the right answer, not the risky one.
 
-- **(a) Send to SoftPro's address**, record the drift. Best chance of reaching
-  the right firm; an operator learns afterwards, and a malformed vendor row
-  becomes a misdelivery.
-- **(b) Hold the send and alert** the open order team with both addresses. No
-  wrong delivery, at the cost of a delayed one. Fail-closed, and the same shape
-  as the prelim gate, which refuses rather than guesses.
-- **(c) Send to ours**, record the drift. Today's behaviour, made visible.
+| The pre-send read | What happens |
+|---|---|
+| Agrees with ours (the person's or the firm's email) | send to it; close any open drift row as `converged` |
+| Differs | **send to SoftPro's address**; record the disagreement and alert, regardless |
+| SoftPro holds no email for that recipient | **do not substitute ours.** The existing fail-closed path: unresolved, internal alert, no send |
+| SoftPro cannot be reached | retry once, then send as today, and record that the refresh did not happen |
 
-**Recommended: (b) for the prelim and the policy, (a) for the confirmation.**
-The first two are the documents a wrong recipient actually harms. A confirmation
-to a superseded contact is embarrassing rather than damaging, and holding every
-confirmation on a vendor disagreement would stall order opening.
+My recommendation was hold-and-alert for the prelim and the policy. It was
+overruled: a hold queue depends on somebody working it, and SoftPro's address is
+the correct one.
 
-**If SoftPro cannot be reached in time,** send as we would today and record that
-the refresh did not happen. A vendor timeout must not block a delivery — that is
-the one failure worse than a stale address.
+**Built and merged: #143, migration 0052, 2026-09-16.**
 
-**This is the half to build first.** If only one of the two ships, it is this one.
+- `pre-send-refresh.ts`: one `GetOrderContacts` call per send, 15s cap, retried
+  once. The decision is a pure function. Recording never blocks a send.
+- **Prelim delivery**, automatic and manual, after the content gate. "Has none"
+  becomes `blocked_no_recipient` on the automatic path and a 409 on the manual
+  route.
+- **Policy delivery**: escrow TO and lender CC for the lender's policy, the owner
+  for the owner's policy, escrow for the supplement. "Has none" on a required
+  role fails closed and names the role. Policy delivery is off in production.
+- `order_contact_drift` (0052) and the internal `order.contacts.drift` alert.
+- Unreachable: an `admin_activity_logs` row, action `pre_send_refresh_unavailable`.
+
+**As built, the table is narrower than the sweep below needs.** It has `kind` =
+`differs` | `softpro_has_none`, `source` = `pre_send`, and `send_kind`, but no
+`is_primary` or `confirmed_locally`. The weekly sweep adds those columns and its
+own kinds; the open-row index then widens to include `is_primary`.
+
+**Measured before building.** The 39 orders that got a prelim in the 30 days to
+2026-09-16, against SoftPro that day: 35 agree, 4 differ (three a different
+escrow firm), 0 where SoftPro has no email. That compares SoftPro now with the
+address used then, so it is about 10% drift, not four wrong sends.
+
+**The order confirmation is not wired, pending a separate decision.** The 60
+most recent confirmed orders, against SoftPro:
+
+| Role | What the rule would do |
+|---|---|
+| Escrow | **53 of 60:** we hold no escrow recipient and SoftPro does, so the rule would **add** one. **2 of 60:** confirmed within two minutes of creation, before SoftPro had the escrow person, so the rule would **drop** ours. |
+| Listing agent | 8 SoftPro-only (adds), 0 disagreements |
+| Buyer's agent | never present |
+
+On the confirmation, the rule would change who receives it on most orders and
+would correct no disagreements. That is a change to who gets confirmations, not a
+contact refresh.
 
 ## Phase 2 — decided from the data, not built now
 
@@ -190,16 +219,20 @@ an officer change should apply but keep the previous value.
    closing.
 3. ~~Is a 7-day cycle acceptable?~~ **Answered: yes**, with the pre-send refresh
    as the part that prevents the harm.
-4. **OPEN — what happens when a pre-send read disagrees?** (a) send to SoftPro's
-   address, (b) hold and alert, or (c) send to ours. Recommended: (b) for the
-   prelim and the policy, (a) for the confirmation.
+4. ~~What happens when a pre-send read disagrees?~~ **Answered 2026-09-16:** send
+   to SoftPro's address, always, with no hold queue. Record and alert regardless.
+   SoftPro has none: do not substitute ours, fail closed. Unreachable: retry once,
+   send as today, record it. Built in #143.
+5. **OPEN — should the order confirmation get the same refresh?** Measured above:
+   on most orders it would add a recipient rather than correct one.
 
 ## How we will know it works
 
 - Within 7 days of shipping, every in-scope order has
   `last_contacts_verified_at` inside the last 7 days.
-- Every prelim, policy and confirmation send is preceded by a refresh for that
-  order, or by a recorded reason it was skipped.
+- Every prelim and policy send is preceded by a refresh for that order, or by
+  a `pre_send_refresh_unavailable` row saying it did not happen. (The
+  confirmation waits on question 5.)
 - `order_contact_drift` holds rows with a per-kind rate, and the job rows show it
   trending.
 - No `order_parties` or `orders` write attributable to this job.

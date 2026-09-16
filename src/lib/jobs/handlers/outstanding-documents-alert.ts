@@ -103,7 +103,12 @@ export async function handleOutstandingDocumentsAlert(): Promise<OutstandingAler
     failed: 0,
   };
 
-  const since = new Date(Date.now() - OUTSTANDING_ALERT_SCAN_WINDOW_HOURS * 60 * 60 * 1000);
+  // A STRING, not a Date. A Date interpolated into raw `sql` is rejected by the
+  // driver before the query runs (src/lib/db/driver-bind.ts). This exact defect
+  // was fixed in #110 and reintroduced by #139; the query then failed on every
+  // run for 14 hours. driver-bind.test.ts binds this query the way production
+  // does, so a Date here fails the build instead.
+  const since = new Date(Date.now() - OUTSTANDING_ALERT_SCAN_WINDOW_HOURS * 60 * 60 * 1000).toISOString();
 
   /*
     One row per order. A confirmation writes one log row per recipient, so
@@ -322,7 +327,8 @@ export async function handleOutstandingDocumentsAlert(): Promise<OutstandingAler
 
 /** Read-only counterpart for scripts and the ops panel. */
 export async function countPendingOutstandingAlerts(): Promise<number> {
-  const since = new Date(Date.now() - OUTSTANDING_ALERT_SCAN_WINDOW_HOURS * 60 * 60 * 1000);
+  // A string, not a Date — see handleOutstandingDocumentsAlert.
+  const since = new Date(Date.now() - OUTSTANDING_ALERT_SCAN_WINDOW_HOURS * 60 * 60 * 1000).toISOString();
   const [row] = await db.execute(sql`
     select count(*)::int as n
     from (

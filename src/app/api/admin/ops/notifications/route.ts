@@ -20,6 +20,10 @@ export async function GET(req: NextRequest) {
     const monthEnd = new Date(year, month, 1);
     const outboxMonth = and(gte(eventOutbox.createdAt, monthStart), lt(eventOutbox.createdAt, monthEnd));
     const logsMonth = and(gte(notificationLogs.createdAt, monthStart), lt(notificationLogs.createdAt, monthEnd));
+    // Raw `sql` gets strings: a Date interpolated there is rejected by the driver
+    // (src/lib/db/driver-bind.ts). The builder calls above map Dates themselves.
+    const monthStartIso = monthStart.toISOString();
+    const monthEndIso = monthEnd.toISOString();
 
     const [outboxStats, outboxByType, deliveryStats, recentLogs, emailCount, smsCount] = await Promise.all([
       db
@@ -70,12 +74,12 @@ export async function GET(req: NextRequest) {
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(notificationLogs)
-        .where(sql`${notificationLogs.channel} = 'email' and ${notificationLogs.status} = 'sent' and ${notificationLogs.createdAt} >= ${monthStart} and ${notificationLogs.createdAt} < ${monthEnd}`),
+        .where(sql`${notificationLogs.channel} = 'email' and ${notificationLogs.status} = 'sent' and ${notificationLogs.createdAt} >= ${monthStartIso} and ${notificationLogs.createdAt} < ${monthEndIso}`),
 
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(notificationLogs)
-        .where(sql`${notificationLogs.channel} = 'sms' and ${notificationLogs.status} = 'sent' and ${notificationLogs.createdAt} >= ${monthStart} and ${notificationLogs.createdAt} < ${monthEnd}`),
+        .where(sql`${notificationLogs.channel} = 'sms' and ${notificationLogs.status} = 'sent' and ${notificationLogs.createdAt} >= ${monthStartIso} and ${notificationLogs.createdAt} < ${monthEndIso}`),
     ]);
 
     const o = outboxStats[0]!;

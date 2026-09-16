@@ -79,6 +79,9 @@ export async function GET() {
 
   const checks: Record<string, Check> = {};
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  // Raw `sql` gets a string: a Date interpolated there is rejected by the driver
+  // (src/lib/db/driver-bind.ts). `gte(column, cutoff)` maps the Date itself.
+  const cutoffIso = cutoff.toISOString();
   let schemaMeta: {
     table: string;
     liveColumns: string[];
@@ -153,8 +156,8 @@ export async function GET() {
   try {
     const [row] = await db
       .select({
-        successCount: sql<number>`count(*) filter (where ${prelimAnalyses.status} = 'complete' and ${prelimAnalyses.createdAt} >= ${cutoff})::int`,
-        failCount: sql<number>`count(*) filter (where ${prelimAnalyses.status} = 'failed' and ${prelimAnalyses.createdAt} >= ${cutoff})::int`,
+        successCount: sql<number>`count(*) filter (where ${prelimAnalyses.status} = 'complete' and ${prelimAnalyses.createdAt} >= ${cutoffIso})::int`,
+        failCount: sql<number>`count(*) filter (where ${prelimAnalyses.status} = 'failed' and ${prelimAnalyses.createdAt} >= ${cutoffIso})::int`,
       })
       .from(prelimAnalyses);
 

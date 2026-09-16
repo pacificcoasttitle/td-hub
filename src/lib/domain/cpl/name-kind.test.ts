@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPartyName } from './borrower-resolution';
+import { classifyPartyName, isJunkNameFragment, splitTypedNames, stripVestingClauses } from './borrower-resolution';
 
 // These import the REAL export. An earlier check of this regex was written by
 // hand-copying the pattern into a scratch script, which tested a different
@@ -12,6 +12,10 @@ describe('trusts get their own field', () => {
     'WERNER AND DONNA STEFFEN FAMILY TRUST',
     'SMITH FAMILY TRUST',
     'THE JOHNSON LIVING TRUST',
+    'GORDON FAMILY TRUST 2006',
+    'SHERIDAN DONNA LYN TRUST 2024',
+    '2026 HOI NHU LE & MY LINH THI PHAM REV T,',
+    'FREVERT JOYCE G 2000 REV TR (4/5/00) & JOYCE G 2000 RE',
   ])('%s is a trust', (n) => expect(classifyPartyName(n)).toBe('trust'));
 
   it('a TRUSTEE is a person, not a trust', () => {
@@ -53,5 +57,33 @@ describe('people are untouched — the classifier only ADDS a route', () => {
   it('an empty name is a person, so nothing changes for a blank', () => {
     expect(classifyPartyName('')).toBe('person');
     expect(classifyPartyName('   ')).toBe('person');
+  });
+});
+
+describe('vesting clauses are not a name', () => {
+  it('strips joint tenants so the last word is not Tenants', () => {
+    expect(stripVestingClauses(
+      'Matthew Robert Nelms and Isabel Junco-Nelms, husband and wife as joint tenants',
+    )).toBe('Matthew Robert Nelms and Isabel Junco-Nelms');
+  });
+
+  it('strips tenants in common', () => {
+    expect(stripVestingClauses(
+      'Keith Eng, an Unmarried Man, as to an undivided 50% interest and Cristina Eng, a Single Woman, as to an undivided 50% interest, As Tenants In Common',
+    )).not.toMatch(/tenants/i);
+  });
+
+  it('a year alone is junk, not a borrower', () => {
+    expect(isJunkNameFragment('2016')).toBe(true);
+    expect(isJunkNameFragment('tenants')).toBe(true);
+    expect(isJunkNameFragment('Kevin Dell')).toBe(false);
+  });
+
+  it('does not comma-split a dated trust into a person named 2016', () => {
+    expect(splitTypedNames(
+      'Lucille T. Kowalski, as Surviving Trustee of The Tran Kowalski Family Trust Dated September 01, 2016',
+    )).toEqual([
+      'Lucille T. Kowalski, as Surviving Trustee of The Tran Kowalski Family Trust Dated September 01, 2016',
+    ]);
   });
 });

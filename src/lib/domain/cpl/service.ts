@@ -1,5 +1,5 @@
 import { db } from '@/lib/db/client';
-import { resolveBorrowers } from './borrower-resolution';
+import { resolveBorrowers, splitTypedNames } from './borrower-resolution';
 import {
   cplBranches,
   orderExternalRefs,
@@ -224,8 +224,7 @@ function buildOrderDetail(
 
   // Same rule as the borrower: what the operator typed wins, because they can
   // see the letter. Split on the separator the field's own placeholder uses.
-  const typedSellers = (sellerNamesOverride ?? '')
-    .split(/;|,/).map((n) => n.trim()).filter((n) => n !== '');
+  const typedSellers = splitTypedNames(sellerNamesOverride);
   const sellers = typedSellers.length > 0
     ? typedSellers
     : order.parties

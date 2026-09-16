@@ -11,6 +11,10 @@ describe('SoftPro company name columns', () => {
   it.each([
     ['contacts.company_name', getTableConfig(contacts), 'company_name'],
     ['companies.name', getTableConfig(companies), 'name'],
+    // Not a name, same class: SoftPro stores a template expression here, not a
+    // ledger code. Underwriter CW is 204 characters and failed every sweep.
+    // Migration 0051.
+    ['companies.fee_transfer_ledger', getTableConfig(companies), 'fee_transfer_ledger'],
   ])('%s has no length limit', (_label, table, column) => {
     expect(table.columns.find((c) => c.name === column)?.getSQLType()).toBe('text');
   });

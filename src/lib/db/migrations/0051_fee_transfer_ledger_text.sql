@@ -1,0 +1,29 @@
+-- 0051 — companies.fee_transfer_ledger from varchar(200) to text.
+--
+-- WHY
+--   The underwriter sweep has failed on one row since it started completing:
+--
+--     Underwriter: 1 of 2 rows failed — CW.
+--     postgres 22001: value too long for type character varying(200)
+--
+--   SoftPro does not store a ledger code in this field. It stores a template
+--   expression — underwriter CW holds 204 characters of
+--   `If ( {{Order.OwnershipProfile.Name}} = "Test & Training - Title") Then …`
+--   and its Agency ID is a 504-character formula of the same kind. The value is
+--   genuine vendor content, not a column-shifted row (checked 2026-09-16).
+--
+--   Measured across every company lookup type the sync reads — Escrow Company,
+--   Lender, Mortgage Broker, Selling Agent/Broker, Underwriter, 6,399 rows —
+--   this is the ONLY value that overflows its column. Lender `State` reaches
+--   exactly its 10-character limit without exceeding it.
+--
+-- WHY TEXT AND NOT A BIGGER NUMBER
+--   Same as 0047 and 0049: a larger limit is a guess at the longest template
+--   SoftPro will ever hold. The column is written only by the contact sync and
+--   read by nothing (4 non-null values in 6,415 companies, one of which — WC —
+--   is already a formula). Nothing should be built on it: see the ticket.
+--
+-- COST
+--   varchar -> text is binary-coercible: no table rewrite, no index on this
+--   column.
+ALTER TABLE companies ALTER COLUMN fee_transfer_ledger TYPE text;

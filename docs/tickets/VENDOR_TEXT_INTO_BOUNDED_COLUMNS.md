@@ -20,6 +20,38 @@ fixed — `CREATE_LOCAL_FAILURE_IS_UNDIAGNOSABLE.md`, "Why it came back".
 | `order_properties.property_type` (50) | 8 recorded create failures; replayed: `22001`; 54–57 character values | **Fixed** (#130, migration 0047) |
 | `contacts.company_name` / `full_name` (200) | Lender `PLML5446`: SoftPro `Name` is **235** characters. `softpro.sync_contacts.lender` has stored a Drizzle-wrapped `insert into "contacts"` failure 11 times, latest 2026-09-12. The stored error never names the reason (wrapper), but the value cannot fit either column. | **Fixed** (migration 0049, 2026-09-14): `contacts.company_name` and `companies.name` to `text`, and the contact syncs now store the Postgres reason instead of the SQL. Closed only when the next lender sync is seen to create PLML5446 |
 
+## The sweep, now that the syncs complete (2026-09-16)
+
+The resumable sync (#137) made these visible: a sweep that finishes actually
+attempts every row, so an overflow is reported rather than hidden behind a
+timeout. Two appeared on the first completed sweeps, and both are now measured
+rather than guessed at.
+
+**Every company lookup type the sync reads, every mapped field, against the
+column it lands in** — Escrow Company, Lender, Mortgage Broker, Selling
+Agent/Broker, Underwriter; 6,399 rows on 2026-09-16:
+
+```
+overflowing values                                     1
+  Underwriter CW  fee_transfer_ledger  204 > 200       fixed by migration 0051
+closest non-overflowing                  lender State  10 of 10
+```
+
+`fee_transfer_ledger` does not hold a ledger code: SoftPro stores a template
+expression (`If ( {{Order.OwnershipProfile.Name}} = …`), and CW's Agency ID is a
+504-character formula of the same kind. The column is written only by the sync
+and read by nothing — 4 non-null values in 6,415 companies. **Open, smaller
+alternative: stop mapping the field at all.** Widening keeps the row importable
+without deciding that; dropping it would remove a write nobody consumes.
+
+**The person feed, 15,645 rows on 2026-09-15**: 7 rows hold a non-email in
+`Email` — 6 are column-shifted test records (`AasNarApp` and siblings, yopmail),
+1 is a real contact whose address is missing its `@` (`ChrFCO`,
+`theforeclosureco.gmail.com`, already in our book since March and undeliverable
+either way). Those rows were previously stopped only by
+`contacts.gender_id` being too short for the email that had shifted into it;
+they are now rejected for shape and reported (#140), not caught by accident.
+
 ## Why "no 22001 recorded" means nothing here
 
 Searched 2026-09-14: `jobs.error`, `jobs.payload`, `contact_sync_state`,

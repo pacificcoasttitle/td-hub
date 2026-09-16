@@ -1,4 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
+import { refreshBeforeSend, type PreSendDecision } from './pre-send-refresh';
+import { PreSendRecipientUnresolvedError } from './pre-send-errors';
 import { db } from '@/lib/db/client';
 import { documents } from '@/lib/db/schema';
 import { downloadFile, getSignedUrl } from '@/lib/integrations/s3/client';
@@ -43,6 +45,8 @@ export interface PrelimDeliveryActor {
 }
 
 export interface PrelimDeliveryResult {
+  /** What the pre-send SoftPro check decided about the TO. See pre-send-refresh.ts. */
+  preSendRefresh: PreSendDecision;
   messageId: string;
   deliveryMode: PrelimDeliveryMode;
   testMode: boolean;
@@ -395,11 +399,31 @@ export async function sendPrelimDeliveryEmail(
     );
   }
 
+  // ─── PRE-SEND REFRESH ─────────────────────────────────────────────────────
+  //
+  // Re-read the order's escrow contact from SoftPro immediately before sending.
+  // SoftPro is the system of record: if it holds a different recipient, the
+  // prelim goes there, and the disagreement is recorded and alerted. If it holds
+  // none, the prelim is NOT sent to ours in its place. If SoftPro cannot be
+  // reached after one retry, we send as we would have and record that.
+  //
+  // After the content gate, so a document we are refusing never costs a call.
+  const [preSendRefresh] = await refreshBeforeSend({
+    orderId,
+    fileNumber: context.fileNumber,
+    sendKind: 'prelim',
+    candidates: [{ role: 'escrow', email: reviewedRecipients.to.email, name: reviewedRecipients.to.name }],
+  });
+  if (preSendRefresh!.status === 'softpro_has_none') {
+    throw new PreSendRecipientUnresolvedError('escrow', context.fileNumber);
+  }
+  const recipients = applyPreSendRefresh(reviewedRecipients, preSendRefresh!);
+
   const testMode = deliveryMode.mode === 'test';
   const { html, text, subject } = buildEmailContent({
     context,
     attachment: prelimAttachment,
-    intendedRecipients: reviewedRecipients,
+    intendedRecipients: recipients,
     testMode,
   });
   const replyTo = context.titleOfficerEmail?.trim() || FROM_EMAIL;
@@ -410,8 +434,8 @@ export async function sendPrelimDeliveryEmail(
     // subject, which is why "did the client get their prelim?" had no answer.
     orderId,
     fileNumber: context.fileNumber,
-    to: testMode ? deliveryMode.testRecipient : reviewedRecipients.to.email,
-    cc: testMode ? [] : reviewedRecipients.cc.map((recipient) => recipient.email),
+    to: testMode ? deliveryMode.testRecipient : recipients.to.email,
+    cc: testMode ? [] : recipients.cc.map((recipient) => recipient.email),
     from: FROM_EMAIL,
     replyTo,
     subject,
@@ -432,7 +456,7 @@ export async function sendPrelimDeliveryEmail(
       fileNumber: context.fileNumber,
       documentId: prelimAttachment.documentId,
       sendgridMessageId: sendResult.data.messageId,
-      recipients: reviewedRecipients,
+      recipients: recipients,
       actor,
       deliveryMode,
     });
@@ -445,10 +469,11 @@ export async function sendPrelimDeliveryEmail(
     messageId: sendResult.data.messageId,
     deliveryMode,
     testMode,
-    sentTo: [testMode ? deliveryMode.testRecipient : reviewedRecipients.to.email],
-    sentCc: testMode ? [] : reviewedRecipients.cc.map((recipient) => recipient.email),
-    intendedRecipients: reviewedRecipients,
+    sentTo: [testMode ? deliveryMode.testRecipient : recipients.to.email],
+    sentCc: testMode ? [] : recipients.cc.map((recipient) => recipient.email),
+    intendedRecipients: recipients,
     resolvedRecipients,
+    preSendRefresh: preSendRefresh!,
     from: FROM_EMAIL,
     replyTo,
     subject,
@@ -461,4 +486,17 @@ export async function sendPrelimDeliveryEmail(
     writeback,
     warning,
   };
+}
+
+/**
+ * The TO SoftPro says this prelim should go to. Only a DIFFERS decision changes
+ * anything; a CC that is now the TO is dropped so nobody gets it twice.
+ */
+function applyPreSendRefresh(
+  reviewed: ReviewedPrelimRecipients,
+  decision: PreSendDecision,
+): ReviewedPrelimRecipients {
+  if (decision.status !== 'differs') return reviewed;
+  const to = { ...reviewed.to, email: decision.email, name: decision.name ?? reviewed.to.name };
+  return { to, cc: reviewed.cc.filter((c) => c.email.trim().toLowerCase() !== decision.email) };
 }

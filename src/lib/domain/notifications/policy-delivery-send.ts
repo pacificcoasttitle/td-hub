@@ -1,4 +1,5 @@
 import { and, desc, eq } from 'drizzle-orm';
+import { refreshBeforeSend, type PreSendDecision, type PreSendRole } from './pre-send-refresh';
 import { db } from '@/lib/db/client';
 import {
   adminActivityLogs,
@@ -219,10 +220,23 @@ export async function deliverPolicyDocument(input: {
     return failClosed(input.orderId, order.fileNumber, propertyAddress, resolved);
   }
 
-  const line = policySendLine(resolved);
-  if (!line) {
+  const resolvedLine = policySendLine(resolved);
+  if (!resolvedLine) {
     return failClosed(input.orderId, order.fileNumber, propertyAddress, resolved);
   }
+
+  // PRE-SEND REFRESH — the same rule as the prelim (pre-send-refresh.ts): send to
+  // SoftPro's recipient when it differs, record and alert; if SoftPro holds none
+  // for a recipient this policy needs, fail closed rather than use ours.
+  const refreshed = await refreshPolicyLine(input.orderId, order.fileNumber, input.kind, resolvedLine);
+  if (!refreshed.ok) {
+    return failClosed(input.orderId, order.fileNumber, propertyAddress, {
+      ...resolved,
+      ok: false,
+      missing: refreshed.missing,
+    });
+  }
+  const line = refreshed.line;
 
   const attachment = await loadPolicyAttachment(input.documentId);
   const { subject, html, text } = buildPolicyDeliveryEmail({
@@ -450,4 +464,36 @@ export function policyDeliverySampleTemplate(): { subject: string; html: string;
     sizeBytes: 240_000,
     downloadUrl: 'https://example.com/sample-policy.pdf',
   });
+}
+
+const PRE_SEND_ROLE: Record<string, PreSendRole> = {
+  escrow_officer: 'escrow',
+  escrow_company: 'escrow',
+  lender: 'lender',
+  buyer: 'owner',
+  borrower: 'owner',
+};
+
+export async function refreshPolicyLine(
+  orderId: number,
+  fileNumber: string,
+  kind: PolicyKind,
+  line: { to: PolicyParty; cc: PolicyParty[] },
+): Promise<{ ok: true; line: { to: PolicyParty; cc: PolicyParty[] } } | { ok: false; missing: string[] }> {
+  const parties = [line.to, ...line.cc];
+  const decisions = await refreshBeforeSend({
+    orderId,
+    fileNumber,
+    sendKind: kind,
+    candidates: parties.map((p) => ({ role: PRE_SEND_ROLE[p.role] ?? 'escrow', email: p.email, name: p.name })),
+  });
+
+  const missing = decisions.filter((d) => d.status === 'softpro_has_none').map((d) => d.role);
+  if (missing.length > 0) return { ok: false, missing };
+
+  const apply = (p: PolicyParty, d: PreSendDecision | undefined): PolicyParty =>
+    d?.status === 'differs' ? { ...p, email: d.email, name: d.name ?? p.name } : p;
+  const to = apply(line.to, decisions[0]);
+  const cc = line.cc.map((p, i) => apply(p, decisions[i + 1])).filter((p) => p.email !== to.email);
+  return { ok: true, line: { to, cc } };
 }

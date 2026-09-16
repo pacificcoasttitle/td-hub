@@ -1,15 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendPrelimDeliveryEmail } from './prelim-delivery-send';
+import { PreSendRecipientUnresolvedError } from './pre-send-errors';
 
 const {
   downloadFile,
   getSignedUrl,
   getOrderReadModelMock,
   prelimDocRows,
+  refreshBeforeSend,
   resolvePrelimRecipients,
   sendEmail,
   writePrelimDeliveryProofs,
 } = vi.hoisted(() => ({
+  refreshBeforeSend: vi.fn(),
   downloadFile: vi.fn(),
   getSignedUrl: vi.fn(),
   getOrderReadModelMock: vi.fn(),
@@ -108,11 +111,20 @@ vi.mock('./prelim-delivery-writeback', () => ({
   writePrelimDeliveryProofs,
 }));
 
+// The SoftPro check before sending. Default: SoftPro agrees with the TO we were
+// given, so the existing tests keep testing what they tested.
+vi.mock('./pre-send-refresh', () => ({
+  refreshBeforeSend,
+}));
+
 describe('sendPrelimDeliveryEmail', () => {
   const originalOverride = process.env.PRELIM_DELIVERY_TEST_RECIPIENT;
   const originalLive = process.env.PRELIM_DELIVERY_LIVE;
 
   beforeEach(() => {
+    refreshBeforeSend.mockReset();
+    refreshBeforeSend.mockImplementation(async (input: { candidates: Array<{ role: string; email: string; name: string | null }> }) =>
+      input.candidates.map((c) => ({ role: c.role, status: 'agrees', email: c.email, name: c.name })));
     process.env.PRELIM_DELIVERY_TEST_RECIPIENT = 'safe-test@example.com';
     delete process.env.PRELIM_DELIVERY_LIVE;
     getOrderReadModelMock.mockResolvedValue({
@@ -315,6 +327,69 @@ describe('sendPrelimDeliveryEmail', () => {
       testMode: false,
       sentTo: ['eo@example.com'],
       sentCc: ['title@example.com', 'assistant@example.com'],
+    });
+  });
+
+  describe('the SoftPro check before sending', () => {
+    const reviewed = {
+      to: { email: 'm@premierpropertiesescrow.com', name: 'Old Officer', role: 'escrow_company' },
+      cc: [
+        { email: 'kim@inlandempireescrow.com', name: 'Kim', role: 'ad_hoc', source: 'ad_hoc' },
+        { email: 'rep@pct.com', name: 'Rep', role: 'sales_rep', source: 'sales_rep' },
+      ],
+    };
+    const actor = { id: 'system:prelim_auto_delivery', name: 'Auto' };
+
+    beforeEach(() => {
+      delete process.env.PRELIM_DELIVERY_TEST_RECIPIENT;
+      process.env.PRELIM_DELIVERY_LIVE = 'true';
+    });
+
+    it('asks SoftPro about the TO, for this order, after the content gate', async () => {
+      await sendPrelimDeliveryEmail(123, reviewed, actor);
+      expect(refreshBeforeSend).toHaveBeenCalledWith({
+        orderId: 123,
+        fileNumber: '12345-PCT',
+        sendKind: 'prelim',
+        candidates: [{ role: 'escrow', email: 'm@premierpropertiesescrow.com', name: 'Old Officer' }],
+      });
+    });
+
+    it("DIFFERS: sends to SoftPro's address, not ours, and drops it from CC", async () => {
+      refreshBeforeSend.mockResolvedValueOnce([{
+        role: 'escrow', status: 'differs', email: 'kim@inlandempireescrow.com', name: 'Kim Hoh', ours: 'm@premierpropertiesescrow.com',
+      }]);
+
+      const result = await sendPrelimDeliveryEmail(123, reviewed, actor);
+
+      expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+        to: 'kim@inlandempireescrow.com',
+        cc: ['rep@pct.com'],
+      }));
+      expect(result.sentTo).toEqual(['kim@inlandempireescrow.com']);
+      expect(result.preSendRefresh).toMatchObject({ status: 'differs' });
+      // The delivery proof names who it actually went to.
+      expect(writePrelimDeliveryProofs).toHaveBeenCalledWith(expect.objectContaining({
+        recipients: expect.objectContaining({ to: expect.objectContaining({ email: 'kim@inlandempireescrow.com' }) }),
+      }));
+    });
+
+    it('SOFTPRO HAS NONE: sends nothing, and does not fall back to ours', async () => {
+      refreshBeforeSend.mockResolvedValueOnce([{ role: 'escrow', status: 'softpro_has_none', ours: 'm@premierpropertiesescrow.com' }]);
+
+      await expect(sendPrelimDeliveryEmail(123, reviewed, actor)).rejects.toBeInstanceOf(PreSendRecipientUnresolvedError);
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it('UNREACHABLE: sends as it would have, to ours', async () => {
+      refreshBeforeSend.mockResolvedValueOnce([{
+        role: 'escrow', status: 'unreachable', email: 'm@premierpropertiesescrow.com', name: 'Old Officer', error: 'timeout',
+      }]);
+
+      const result = await sendPrelimDeliveryEmail(123, reviewed, actor);
+
+      expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: 'm@premierpropertiesescrow.com' }));
+      expect(result.preSendRefresh).toMatchObject({ status: 'unreachable' });
     });
   });
 

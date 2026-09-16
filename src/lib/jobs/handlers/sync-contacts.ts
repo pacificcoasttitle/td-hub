@@ -9,6 +9,10 @@ import {
   describeOfficerRowRejection,
   validateOfficerRowShape,
 } from '@/lib/domain/contacts/officer-row-shape';
+import {
+  describePersonRowRejection,
+  validatePersonRowShape,
+} from '@/lib/domain/contacts/person-row-shape';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -256,6 +260,7 @@ const INSERT_CHUNK = 500;
 async function syncOpenContacts(items: SyncRow[]): Promise<SyncContactsResult> {
   let created = 0, updated = 0, skipped = 0, unchanged = 0;
   const errors: SyncContactsResult['errors'] = [];
+  const rejected: NonNullable<SyncContactsResult['rejected']> = [];
 
   // Build every row first; nothing touches the database until they are ready.
   const wanted = new Map<string, Record<string, unknown>>();
@@ -263,6 +268,21 @@ async function syncOpenContacts(items: SyncRow[]): Promise<SyncContactsResult> {
     const code = str(item, 'LookupCode');
     if (!code) { skipped++; continue; }
     if (!str(item, 'Email')) { skipped++; continue; }
+
+    // Shape guard, same contract as the officer feed. Five rows on page 1 of the
+    // 2026-09-15 sweep were column-shifted — Email held a phone number, GenderID
+    // held the email — and the only thing stopping them being written was that
+    // the email did not fit contacts.gender_id. Recorded as an error, not a
+    // silent skip, so it reaches jobs.error and contact_sync_state.last_error
+    // and somebody can escalate it.
+    const shape = validatePersonRowShape(item as Record<string, string | undefined>);
+    if (!shape.ok) {
+      const message = describePersonRowRejection(code, shape.reasons);
+      console.error('[sync-contacts] person row rejected for shape', { lookupCode: code, reasons: shape.reasons });
+      errors.push({ lookupCode: code, error: message });
+      rejected.push({ lookupCode: code, reasons: shape.reasons });
+      continue;
+    }
     wanted.set(code, {
       lookupCode: code,
       flookupCode: str(item, 'Filter: LookupCode') ?? str(item, 'FLookupCode'),
@@ -290,7 +310,7 @@ async function syncOpenContacts(items: SyncRow[]): Promise<SyncContactsResult> {
       isActive: true,
     });
   }
-  if (wanted.size === 0) return { entityType: 'Order Contact - Person', totalFetched: items.length, created, updated, skipped, errors };
+  if (wanted.size === 0) return { entityType: 'Order Contact - Person', totalFetched: items.length, created, updated, skipped, errors, rejected };
 
   // ONE read for the whole page.
   const codes = [...wanted.keys()];
@@ -369,7 +389,7 @@ async function syncOpenContacts(items: SyncRow[]): Promise<SyncContactsResult> {
   // writes nothing reads as a no-op rather than as a failure.
   skipped += unchanged;
 
-  return { entityType: 'Order Contact - Person', totalFetched: items.length, created, updated, skipped, errors };
+  return { entityType: 'Order Contact - Person', totalFetched: items.length, created, updated, skipped, errors, rejected };
 }
 
 // ─── Sync 2: Title Officers (userType=Title Officer) ─────────────────────

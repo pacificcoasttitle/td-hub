@@ -237,6 +237,42 @@ You have CI, branch protection, and required checks; use them. Confirm app + scr
 
 Nothing that writes to production runs from uncommitted code. Not a one-shot, not a backfill, not a repair script. If it touches production it goes through a branch and a review first, even when the change is obviously right.
 
+## Bulk reads of a vendor: a rate and a ceiling, before it starts (2026-09-16)
+
+At 19:02 UTC on 2026-09-16 a FortiGuard intrusion-prevention rule began refusing
+every SoftPro call from the workstation the diagnostics ran on. It followed a week
+of diagnostic pulls from that machine, ending with a 15-page `GetOrderDetails`
+change pull and a `GetOrderContacts` snapshot of 1,143 orders at concurrency 3.
+The block cost the half-finished snapshot (620 of 1,143 reads failed) and every
+later read from that machine. Production was unaffected, because the hub's own
+calls leave from a different network, but only by luck: a block on the right
+address would have stopped order creation.
+
+From a firewall's side, a week of diagnostic scans looks like an attack. So any
+bulk read of a vendor — SoftPro, TitlePoint, SiteX, an underwriter — from a script
+or a job gets two numbers **written in the script and stated in the plan before
+the first call**:
+
+- **A rate:** calls per minute, enforced in the code with a sleep between calls,
+  not implied by a concurrency setting. Start at one call at a time with a pause;
+  concurrency above 1 needs a reason.
+- **A ceiling:** the total number of calls the run may make, after which it stops
+  even if it has not finished. Size it from the population, and say what it is.
+
+Also:
+
+- **Count the week, not the run.** Several "small" pulls on the same day add up.
+  Before starting another, check what has already gone out from that machine.
+- **Stop on the first sign of a block.** An HTML page where JSON was expected, a
+  403 in under a second, or a run of fast failures means stop and report. Never
+  retry through it, and never look for a way around it.
+- **Prefer the data you already have.** A saved snapshot, `vendor_api_logs`, or
+  the job rows often answer the question without a single new call. The enrich
+  preview for PR "enrich reads hub-created orders" was run on an existing
+  snapshot after the block, and needed none.
+- **A diagnostic is not a reason to ship code to production.** If a question can
+  only be answered by a long vendor read and nobody can run it slowly, it waits.
+
 ## Reverting (2026-09-09)
 
 **Revert by naming the files you changed. Never by naming a directory.**

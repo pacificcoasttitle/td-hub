@@ -76,8 +76,62 @@ export const OUTSTANDING_ALERT_FALLBACK_MINUTES = 120;
  * How far back the scanner looks. An order past this is abandoned rather than
  * rescanned forever — without it, one order whose recipients are misconfigured
  * would be retried every two minutes indefinitely.
+ *
+ * Counted from `alertClock().anchor`, not always from the confirmation. A
+ * title search that starts after the confirmation has already gone out
+ * restarts this window from that search — otherwise the documents land
+ * outside the 24 hours and nobody is told.
  */
 export const OUTSTANDING_ALERT_SCAN_WINDOW_HOURS = 24;
+
+export interface AlertClock {
+  /** 24-hour window and two-hour wait both count from here. */
+  anchor: Date;
+  /**
+   * True when an existing outstanding alert still covers this generation.
+   * False when a title search started after that alert (or after the
+   * confirmation, with no alert yet) — the once-only rule restarts.
+   */
+  priorAlertCounts: boolean;
+  restartedFromSearch: boolean;
+}
+
+/**
+ * Where the alert's clocks start.
+ *
+ * Default: the confirmation send. When a title search starts *after* that
+ * send, the 24-hour window, the two-hour wait, and the once-only latch all
+ * restart from the first such search. That is the seven-order case:
+ * confirmation went out with nothing attached, the search began later, the
+ * documents arrived, and the confirmation-anchored clocks had already
+ * closed or already fired `never_arrived`.
+ */
+export function alertClock(input: {
+  confirmationSentAt: Date;
+  searchStartedAts: readonly Date[];
+  lastAlertAt: Date | null;
+}): AlertClock {
+  const searchesAfterConfirm = input.searchStartedAts
+    .filter((started) => started.getTime() > input.confirmationSentAt.getTime())
+    .sort((a, b) => a.getTime() - b.getTime());
+  const generationStart = searchesAfterConfirm[0] ?? null;
+
+  if (!generationStart) {
+    return {
+      anchor: input.confirmationSentAt,
+      priorAlertCounts: input.lastAlertAt != null,
+      restartedFromSearch: false,
+    };
+  }
+
+  return {
+    anchor: generationStart,
+    priorAlertCounts:
+      input.lastAlertAt != null
+      && input.lastAlertAt.getTime() >= generationStart.getTime(),
+    restartedFromSearch: true,
+  };
+}
 
 function isOptional(category: string): boolean {
   return (CONFIRMATION_OPTIONAL_DOC_TYPES as readonly string[]).includes(category);

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { adminActivityLogs, notificationLogs, orderNotes, orders, vendorApiLogs } from '@/lib/db/schema';
 
@@ -138,7 +138,7 @@ function prelimOrderId(row: { entityId: string | null; orderId: number | null })
 export async function getDeliveryLog(params: DeliveryLogParams): Promise<DeliveryLogResult> {
   const from = dateFromInput(params.dateFrom);
   const to = dateFromInput(params.dateTo, true);
-  const prelimConditions: SQL[] = [eq(adminActivityLogs.action, 'prelim_delivered')];
+  const prelimConditions: SQL[] = [inArray(adminActivityLogs.action, ['prelim_delivered', 'policy_delivered'])];
   const vendorConditions: SQL[] = [eq(vendorApiLogs.vendor, 'sendgrid')];
   const notificationConditions: SQL[] = [];
 

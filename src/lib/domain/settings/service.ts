@@ -83,6 +83,14 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     type: 'boolean',
     defaultValue: 'true',
   },
+  {
+    key: 'policy_delivery_enabled',
+    label: 'Policy Delivery Email',
+    description: 'When ON, the hub emails a title policy to a named person: lender\'s policy to escrow and the lender, owner\'s policy to the owner, supplement to escrow. When OFF, incoming policies are stored and nobody is emailed. Default OFF — this has never sent from the hub. Turn ON only for a watched first send: one policy, one order, someone reading the email that goes out and confirming it reached the right firm. Fail-closed still applies after that; a missing owner does not invent a recipient.',
+    category: 'Email',
+    type: 'boolean',
+    defaultValue: 'false',
+  },
   // ── Notification Shutoffs ──
   {
     key: 'lookback_sync_shut_off',

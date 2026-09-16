@@ -12,6 +12,7 @@ import {
   type OrderConfirmationData,
 } from '@/lib/domain/notifications/templates';
 import { prelimDeliverySampleTemplate } from '@/lib/domain/notifications/prelim-delivery-send';
+import { policyDeliverySampleTemplate } from '@/lib/domain/notifications/policy-delivery-send';
 import { buildInviteHtml, buildInviteSubject } from '@/lib/domain/notifications/invite-email';
 import {
   buildPartyWizardEmail,
@@ -172,7 +173,7 @@ export function buildAllSampleEmails(): SampleEmail[] {
     {
       key: 'document_received_policy',
       label: 'Document ready (policy delivery)',
-      ...documentReceivedTemplate({ ...orderData, category: 'policy' }),
+      ...policyDeliverySampleTemplate(),
     },
     {
       key: 'prelim_delivery',

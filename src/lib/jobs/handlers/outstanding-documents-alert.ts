@@ -13,17 +13,25 @@
  * inference that cannot tell "never generated" from "generated and dropped",
  * which is the whole reason the record was added. A confirmation sent before
  * that shipped simply cannot be alerted on, and that is the honest answer.
+ *
+ * ─── WHEN THE SEARCH STARTS AFTER THE CONFIRMATION ──────────────────────────
+ *
+ * The 24-hour window, the two-hour wait, and the once-only latch all restart
+ * from the first title search that begins after the confirmation. Without
+ * that, an order whose search starts after send ages out — or already fired
+ * `never_arrived` — and the documents land with nobody told. That is the
+ * seven-order case. `alertClock` is the rule; this query feeds it.
  */
 
-import { and, desc, eq, gt, inArray, isNotNull, min, notExists, sql } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/pg-core';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { documents, notificationLogs, orderProperties, orders } from '@/lib/db/schema';
+import { documents, notificationLogs, orderProperties, orders, titlePointData } from '@/lib/db/schema';
 import { dispatchNotification } from '@/lib/domain/notifications/dispatch';
 import { CONFIRMATION_DOC_TYPES } from '@/lib/domain/notifications/confirmation-documents';
 import {
   OUTSTANDING_ALERT_EVENT_TYPE,
   OUTSTANDING_ALERT_SCAN_WINDOW_HOURS,
+  alertClock,
   buildOutstandingAlertEmail,
   decideOutstandingAlert,
   missingFromConfirmation,
@@ -78,6 +86,14 @@ function readConfirmationMetadata(value: unknown): {
   };
 }
 
+interface CandidateSqlRow {
+  order_id: number;
+  first_sent_at: string;
+  send_record: string | null;
+  first_search_after: string | null;
+  last_alert_at: string | null;
+}
+
 export async function handleOutstandingDocumentsAlert(): Promise<OutstandingAlertRunResult> {
   const result: OutstandingAlertRunResult = {
     scanned: 0,
@@ -89,20 +105,14 @@ export async function handleOutstandingDocumentsAlert(): Promise<OutstandingAler
 
   const since = new Date(Date.now() - OUTSTANDING_ALERT_SCAN_WINDOW_HOURS * 60 * 60 * 1000);
 
-  const priorAlert = alias(notificationLogs, 'prior_alert');
-
   /*
     One row per order. A confirmation writes one log row per recipient, so
     without the grouping an order with four recipients is considered four
     times in a single run.
 
-    NOT EXISTS on our own event type is the dedupe: dispatchNotification writes
-    a log row per recipient with event_type = the slug, so a delivered alert
-    excludes its order from every later scan. An alert that resolved zero
-    recipients writes nothing and will be retried — until the order falls out
-    of the scan window, which is what stops that being forever.
-
-    ─── TWO CLAUSES HERE ARE LOAD-BEARING, BOTH ABOUT STARVATION ────────────
+    The window and the once-only latch are both on `alertClock().anchor`,
+    not on the confirmation send. A title search that starts after send
+    restarts all three clocks from that search.
 
     `metadata IS NOT NULL` is a filter, not an optimisation. Confirmations sent
     before the send record shipped can never be alerted on, and a 24-hour
@@ -110,55 +120,77 @@ export async function handleOutstandingDocumentsAlert(): Promise<OutstandingAler
     MAX_ORDERS_PER_RUN with rows that can only be skipped and a real alert
     waits behind them until they age out.
 
-    Ordering by the send time DESCENDING is the same concern from the other
+    Ordering by the clock DESCENDING is the same concern from the other
     end: a backlog must be worked newest-first, because this alert's value
     decays and the oldest entries are the least recoverable.
+
+    ALIASED ON PURPOSE. Both confirmation aggregates render as bare `min(...)`,
+    so Postgres returns two columns both called "min" and the second silently
+    overwrites the first in a name-keyed row. The sent time would come back
+    holding the metadata text, and every order would look like it had just
+    been sent. Caught by executing the generated SQL, not by reading it.
   */
-  const rows = await db
-    .select({
-      orderId: notificationLogs.orderId,
-      // ALIASED ON PURPOSE. Both aggregates render as bare `min(...)`, so
-      // Postgres returns two columns both called "min" and the second silently
-      // overwrites the first in a name-keyed row. The sent time would come back
-      // holding the metadata text, and every order would look like it had just
-      // been sent. Caught by executing the generated SQL, not by reading it.
-      sentAt: sql<string>`min(${notificationLogs.sentAt})`.as('first_sent_at'),
-      metadata: sql<string>`min(${notificationLogs.metadata}::text)`.as('send_record'),
-    })
-    .from(notificationLogs)
-    .where(and(
-      eq(notificationLogs.eventType, 'order.confirmation'),
-      inArray(notificationLogs.status, ['sent', 'sent_no_client']),
-      isNotNull(notificationLogs.orderId),
-      isNotNull(notificationLogs.sentAt),
-      gt(notificationLogs.sentAt, since),
-      isNotNull(notificationLogs.metadata),
-      notExists(
-        db.select({ one: sql`1` })
-          .from(priorAlert)
-          .where(and(
-            eq(priorAlert.orderId, notificationLogs.orderId),
-            eq(priorAlert.eventType, OUTSTANDING_ALERT_EVENT_TYPE),
-          )),
-      ),
-    ))
-    .groupBy(notificationLogs.orderId)
-    .orderBy(desc(min(notificationLogs.sentAt)))
-    .limit(MAX_ORDERS_PER_RUN);
+  const rows = await db.execute(sql`
+    with confirms as (
+      select
+        order_id,
+        min(sent_at) as first_sent_at,
+        min(metadata::text) as send_record
+      from notification_logs
+      where event_type = 'order.confirmation'
+        and status in ('sent', 'sent_no_client')
+        and order_id is not null
+        and sent_at is not null
+        and metadata is not null
+      group by order_id
+    ),
+    searches as (
+      select t.order_id, min(t.created_at) as first_search_after
+      from title_point_data t
+      join confirms c on c.order_id = t.order_id
+      where t.created_at > c.first_sent_at
+      group by t.order_id
+    ),
+    last_alert as (
+      select order_id, max(sent_at) as last_alert_at
+      from notification_logs
+      where event_type = ${OUTSTANDING_ALERT_EVENT_TYPE}
+      group by order_id
+    )
+    select
+      c.order_id,
+      c.first_sent_at,
+      c.send_record,
+      s.first_search_after,
+      a.last_alert_at
+    from confirms c
+    left join searches s on s.order_id = c.order_id
+    left join last_alert a on a.order_id = c.order_id
+    where (
+        c.first_sent_at > ${since}
+        or s.first_search_after > ${since}
+      )
+      and (
+        a.last_alert_at is null
+        or (s.first_search_after is not null and s.first_search_after > a.last_alert_at)
+      )
+    order by coalesce(s.first_search_after, c.first_sent_at) desc
+    limit ${MAX_ORDERS_PER_RUN}
+  `) as unknown as CandidateSqlRow[];
 
   const candidates: ConfirmationRow[] = [];
   for (const row of rows) {
     result.scanned++;
-    if (row.orderId == null || row.sentAt == null) continue;
-    const meta = readConfirmationMetadata(parseMetadata(row.metadata));
+    if (row.order_id == null || row.first_sent_at == null) continue;
+    const meta = readConfirmationMetadata(parseMetadata(row.send_record));
     if (!meta) {
       result.skippedNoMetadata++;
       continue;
     }
     if (missingFromConfirmation(meta.attached).length === 0) continue;
     candidates.push({
-      orderId: row.orderId,
-      sentAt: new Date(row.sentAt),
+      orderId: row.order_id,
+      sentAt: new Date(row.first_sent_at),
       attached: meta.attached,
       clientName: meta.clientName,
       clientEmail: meta.clientEmail,
@@ -169,14 +201,39 @@ export async function handleOutstandingDocumentsAlert(): Promise<OutstandingAler
 
   const orderIds = candidates.map((c) => c.orderId);
 
-  const presentRows = await db
-    .select({ orderId: documents.orderId, category: documents.category })
-    .from(documents)
-    .where(and(
-      inArray(documents.orderId, orderIds),
-      inArray(documents.category, [...CONFIRMATION_DOC_TYPES]),
-      eq(documents.status, 'active'),
-    ));
+  const [presentRows, searchRows, alertRows, orderRows] = await Promise.all([
+    db
+      .select({ orderId: documents.orderId, category: documents.category })
+      .from(documents)
+      .where(and(
+        inArray(documents.orderId, orderIds),
+        inArray(documents.category, [...CONFIRMATION_DOC_TYPES]),
+        eq(documents.status, 'active'),
+      )),
+    db
+      .select({ orderId: titlePointData.orderId, createdAt: titlePointData.createdAt })
+      .from(titlePointData)
+      .where(inArray(titlePointData.orderId, orderIds)),
+    db
+      .select({
+        orderId: notificationLogs.orderId,
+        sentAt: notificationLogs.sentAt,
+      })
+      .from(notificationLogs)
+      .where(and(
+        inArray(notificationLogs.orderId, orderIds),
+        eq(notificationLogs.eventType, OUTSTANDING_ALERT_EVENT_TYPE),
+      )),
+    db
+      .select({
+        id: orders.id,
+        fileNumber: orders.fileNumber,
+        address: orderProperties.fullAddress,
+      })
+      .from(orders)
+      .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
+      .where(inArray(orders.id, orderIds)),
+  ]);
 
   const presentByOrder = new Map<number, string[]>();
   for (const row of presentRows) {
@@ -185,26 +242,42 @@ export async function handleOutstandingDocumentsAlert(): Promise<OutstandingAler
     presentByOrder.set(row.orderId, list);
   }
 
-  const orderRows = await db
-    .select({
-      id: orders.id,
-      fileNumber: orders.fileNumber,
-      address: orderProperties.fullAddress,
-    })
-    .from(orders)
-    .leftJoin(orderProperties, eq(orders.id, orderProperties.orderId))
-    .where(inArray(orders.id, orderIds));
+  const searchesByOrder = new Map<number, Date[]>();
+  for (const row of searchRows) {
+    if (row.orderId == null) continue;
+    const list = searchesByOrder.get(row.orderId) ?? [];
+    list.push(row.createdAt);
+    searchesByOrder.set(row.orderId, list);
+  }
+
+  const lastAlertByOrder = new Map<number, Date>();
+  for (const row of alertRows) {
+    if (row.orderId == null || row.sentAt == null) continue;
+    const prev = lastAlertByOrder.get(row.orderId);
+    if (!prev || row.sentAt > prev) lastAlertByOrder.set(row.orderId, row.sentAt);
+  }
 
   const orderById = new Map(orderRows.map((o) => [o.id, o]));
+  const now = Date.now();
+  const windowMs = OUTSTANDING_ALERT_SCAN_WINDOW_HOURS * 60 * 60 * 1000;
 
   for (const candidate of candidates) {
     const order = orderById.get(candidate.orderId);
     if (!order) continue;
 
+    const clock = alertClock({
+      confirmationSentAt: candidate.sentAt,
+      searchStartedAts: searchesByOrder.get(candidate.orderId) ?? [],
+      lastAlertAt: lastAlertByOrder.get(candidate.orderId) ?? null,
+    });
+
+    if (clock.priorAlertCounts) continue;
+    if (now - clock.anchor.getTime() > windowMs) continue;
+
     const decision = decideOutstandingAlert({
       missingAtSend: missingFromConfirmation(candidate.attached),
       presentNow: presentByOrder.get(candidate.orderId) ?? [],
-      minutesSinceSend: (Date.now() - candidate.sentAt.getTime()) / 60_000,
+      minutesSinceSend: (now - clock.anchor.getTime()) / 60_000,
     });
 
     if (!decision.fire) {
@@ -232,6 +305,7 @@ export async function handleOutstandingDocumentsAlert(): Promise<OutstandingAler
           reason: decision.reason,
           available: decision.available,
           neverCame: decision.neverCame,
+          restartedFromSearch: clock.restartedFromSearch,
         },
       });
       if (dispatched.sent > 0) result.alerted++;
@@ -249,13 +323,33 @@ export async function handleOutstandingDocumentsAlert(): Promise<OutstandingAler
 /** Read-only counterpart for scripts and the ops panel. */
 export async function countPendingOutstandingAlerts(): Promise<number> {
   const since = new Date(Date.now() - OUTSTANDING_ALERT_SCAN_WINDOW_HOURS * 60 * 60 * 1000);
-  const [row] = await db
-    .select({ n: sql<number>`count(DISTINCT ${notificationLogs.orderId})::int` })
-    .from(notificationLogs)
-    .where(and(
-      eq(notificationLogs.eventType, 'order.confirmation'),
-      isNotNull(notificationLogs.metadata),
-      gt(notificationLogs.sentAt, since),
-    ));
+  const [row] = await db.execute(sql`
+    select count(*)::int as n
+    from (
+      select c.order_id
+      from (
+        select order_id, min(sent_at) as first_sent_at
+        from notification_logs
+        where event_type = 'order.confirmation'
+          and metadata is not null
+          and order_id is not null
+        group by order_id
+      ) c
+      left join (
+        select t.order_id, min(t.created_at) as first_search_after
+        from title_point_data t
+        join (
+          select order_id, min(sent_at) as first_sent_at
+          from notification_logs
+          where event_type = 'order.confirmation'
+          group by order_id
+        ) conf on conf.order_id = t.order_id
+        where t.created_at > conf.first_sent_at
+        group by t.order_id
+      ) s on s.order_id = c.order_id
+      where c.first_sent_at > ${since}
+         or s.first_search_after > ${since}
+    ) q
+  `) as unknown as Array<{ n: number }>;
   return row?.n ?? 0;
 }

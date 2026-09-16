@@ -72,6 +72,21 @@ export async function getAttachedDocumentsPrelim(orderNumber: string) {
   return client.getAttachedDocumentsPrelim(orderNumber);
 }
 
+export async function getAttachedDocumentsPolicy(
+  orderNumber: string,
+  docType?: import('./client').SoftProPolicyDocType,
+) {
+  if (useMock) {
+    const { vendorSuccess } = await import('../types');
+    return vendorSuccess([] as import('./types').SoftProAttachedDocument[], {
+      requestId: 'mock-' + crypto.randomUUID(),
+      durationMs: 0,
+    });
+  }
+  const client = await import('./client');
+  return client.getAttachedDocumentsPolicy(orderNumber, docType);
+}
+
 export async function getLookupTable(userType: string): Promise<VendorResult<SoftProLookupItem[]>>;
 export async function getLookupTable(params: SoftProLookupTableRequest): Promise<VendorResult<SoftProLookupTablePage>>;
 export async function getLookupTable(

@@ -9,6 +9,7 @@ import {
 } from '@/lib/domain/notifications/templates';
 import type { FullConfirmationData } from '@/lib/domain/notifications/confirmation-template';
 import { buildOutstandingAlertEmail } from '@/lib/domain/notifications/outstanding-documents-alert';
+import { policyDeliverySampleTemplate } from '@/lib/domain/notifications/policy-delivery-send';
 import { buildCreateFailureAlertEmail } from '@/lib/domain/orders/create-failure';
 
 const ALLOWED_ROLES = ['super_admin', 'admin'];
@@ -61,7 +62,7 @@ const SLUG_TEMPLATES: Record<string, () => TemplateResult> = {
   'order.milestone.disbursement': () => milestoneDisbursementTemplate(SAMPLE_ORDER),
   'order.document.received':      () => documentReceivedTemplate({ ...SAMPLE_ORDER, category: 'CPL' }),
   'prelim.summary':               () => documentReceivedTemplate({ fileNumber: '20003483-GLT', address: '123 Main St, Los Angeles, CA', category: 'prelim' }),
-  'policy.delivery':              () => documentReceivedTemplate({ fileNumber: '20003483-GLT', address: '123 Main St, Los Angeles, CA', category: 'policy' }),
+  'policy.delivery':              () => policyDeliverySampleTemplate(),
 
   // Worth previewing even though it is internal: this is the one notification
   // whose recipients an operator is expected to edit, and the arrived case is

@@ -206,6 +206,7 @@ export const SOFTPRO_ENDPOINTS = {
   updateCompany: 'ordercreation/UpdateCompany',
   getAttachedDocuments: 'ordercreation/GetAttachedDocuments',
   getAttachedDocumentsPrelim: 'ordercreation/GetAttachedDocumentsPrelim',
+  getAttachedDocumentsPolicy: 'ordercreation/GetAttachedDocumentsPolicy',
   getFees: 'ordercreation/GetFees',
   updateTask: 'ordercreation/AddTask',
   getOrderStatus: 'ordercreation/GetOrderStatus',

@@ -20,6 +20,7 @@ const DANGEROUS_KEYS: Record<string, string> = {
   maintenance_mode: 'Are you sure? This will show a maintenance message to all non-admin users.',
   tessa_prelim_enabled: 'Are you sure? Turning this ON exposes AI-generated prelim interpretation to all users (sales reps) and resumes new AI analysis (LLM cost). Turning it OFF hides the feature and stops new analysis. Existing stored analyses are not affected.',
   party_wizard_invite_enabled: 'Are you sure? Turning this ON sends real emails to escrow officers and external escrow companies on the next cron run — people outside PCT. Run the dry run on the Operations page first and read the recipient list. Turning it OFF stops new invites; links already sent keep working.',
+  policy_delivery_enabled: 'Are you sure? Turning this ON emails a title policy — a legal document — to a named person outside PCT. The first send must be watched: one policy, one order, someone reading the email that goes out and confirming it reached the right firm. Turning it OFF stores incoming policies and emails nobody.',
 };
 
 /* ── Panel ─────────────────────────────────────────────────────────────────── */

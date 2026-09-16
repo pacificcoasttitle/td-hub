@@ -184,7 +184,7 @@ own kinds; the open-row index then widens to include `is_primary`.
 escrow firm), 0 where SoftPro has no email. That compares SoftPro now with the
 address used then, so it is about 10% drift, not four wrong sends.
 
-**The order confirmation is not wired, pending a separate decision.** The 60
+**The order confirmation is not wired, and will not be (Gerard, 2026-09-16).** The 60
 most recent confirmed orders, against SoftPro:
 
 | Role | What the rule would do |
@@ -193,9 +193,25 @@ most recent confirmed orders, against SoftPro:
 | Listing agent | 8 SoftPro-only (adds), 0 disagreements |
 | Buyer's agent | never present |
 
-On the confirmation, the rule would change who receives it on most orders and
-would correct no disagreements. That is a change to who gets confirmations, not a
-contact refresh.
+On the confirmation the rule corrects no wrong addresses, so there is nothing
+for it to prevent. What it would do is add a recipient to most confirmations and
+hold two that send fine today. Who PCT copies on its confirmations is a business
+decision to make deliberately, not a side effect of a drift guard.
+
+**What the 53 actually are.** 58 of the 60 are Title only orders, where PCT has no
+escrow officer; SoftPro's `EscrowCompanies` contact there is the *outside* escrow
+firm. So this is not a missing PCT escrow officer. PCT's own escrow officer is
+well covered: of 158 Title & Escrow / Escrow only orders in a 7-day
+`GetOrderDetails` pull that we hold, 155 carry the same officer as SoftPro's
+`EscrowOfficerContact`, 2 a different one, 1 none.
+
+The gap the sample exposed is different and is tracked separately: 48 of the 58
+had no `escrow_company` party row at all, because orders created in the hub
+(`source = manual_entry`, the main creation path since 2026-08-31) are never
+picked up by `softpro.enrich_orders`. Its selector only takes orders with no
+parties, no client contact, or none of the four company FKs, and a hub-created
+order is born with all three. 482 orders had never had their contacts read from
+SoftPro as of 2026-09-16.
 
 ## Phase 2 — decided from the data, not built now
 
@@ -223,16 +239,17 @@ an officer change should apply but keep the previous value.
    to SoftPro's address, always, with no hold queue. Record and alert regardless.
    SoftPro has none: do not substitute ours, fail closed. Unreachable: retry once,
    send as today, record it. Built in #143.
-5. **OPEN — should the order confirmation get the same refresh?** Measured above:
-   on most orders it would add a recipient rather than correct one.
+5. ~~Should the order confirmation get the same refresh?~~ **Answered 2026-09-16:
+   no.** Zero wrong addresses corrected; adding the escrow contact to 53 of 60
+   confirmations is a change to who PCT copies, which is decided on its own.
 
 ## How we will know it works
 
 - Within 7 days of shipping, every in-scope order has
   `last_contacts_verified_at` inside the last 7 days.
 - Every prelim and policy send is preceded by a refresh for that order, or by
-  a `pre_send_refresh_unavailable` row saying it did not happen. (The
-  confirmation waits on question 5.)
+  a `pre_send_refresh_unavailable` row saying it did not happen. The
+  confirmation is out of scope (question 5).
 - `order_contact_drift` holds rows with a per-kind rate, and the job rows show it
   trending.
 - No `order_parties` or `orders` write attributable to this job.

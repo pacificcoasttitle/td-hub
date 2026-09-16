@@ -357,19 +357,7 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
   return { success: errors.length === 0, processed, errors, outcomes };
 }
 
-// ─── Policy Classification ──────────────────────────────────────────────────
-
-type PolicySubType = 'lender_policy' | 'owner_policy' | 'supplement' | 'policy';
-
-function classifyPolicyDocument(fileName: string): PolicySubType {
-  const lower = fileName.toLowerCase();
-  if (lower.includes('supplement')) return 'supplement';
-  if (lower.includes('policy') && lower.includes('lender')) return 'lender_policy';
-  if (lower.includes('policy')) return 'owner_policy';
-  return 'policy';
-}
-
-const SENT_FLAG_MAP: Partial<Record<PolicySubType, 'lenderPolicySent' | 'ownerPolicySent' | 'supplementStatementSent'>> = {
+const SENT_FLAG_MAP: Record<string, 'lenderPolicySent' | 'ownerPolicySent' | 'supplementStatementSent'> = {
   lender_policy: 'lenderPolicySent',
   owner_policy: 'ownerPolicySent',
   supplement: 'supplementStatementSent',
@@ -398,7 +386,9 @@ export async function handlePolicyWebhook(payload: PolicyPayload): Promise<Webho
 
   for (const item of payload.data) {
     try {
-      const subType = classifyPolicyDocument(item.FileName);
+      const { classifyPolicyFile } = await import('@/lib/domain/notifications/policy-fetch');
+      const { deliverPolicyDocument } = await import('@/lib/domain/notifications/policy-delivery-send');
+      const kind = await classifyPolicyFile(order.fileNumber, item.FileName);
 
       const { buffer } = await downloadFromUrl(item.FileUrl);
       const { documentId } = await storeDocument({
@@ -410,21 +400,21 @@ export async function handlePolicyWebhook(payload: PolicyPayload): Promise<Webho
         sourceUrl: item.FileUrl,
       });
 
-      const flagKey = SENT_FLAG_MAP[subType];
+      const flagKey = kind ? SENT_FLAG_MAP[kind] : undefined;
       if (flagKey && orderFlags?.[flagKey] === true) {
         try {
           await db.insert(vendorApiLogs).values({
             vendor: 'softpro', operation: 'policy_outbox_skipped', orderId: order.id,
             requestId: crypto.randomUUID(), startedAt: new Date(), endedAt: new Date(),
             success: true,
-            requestMeta: { reason: `${String(flagKey)} already true`, subType, fileName: item.FileName } as Record<string, unknown>,
+            requestMeta: { reason: `${String(flagKey)} already true`, kind, fileName: item.FileName } as Record<string, unknown>,
           });
         } catch { /* logging must not break the flow */ }
       } else {
-        await db.insert(eventOutbox).values({
-          eventType: 'order.document.received',
+        await deliverPolicyDocument({
           orderId: order.id,
-          payload: { documentId, category: 'policy', subType, fileNumber: order.fileNumber } as Record<string, unknown>,
+          documentId,
+          kind,
         });
       }
 

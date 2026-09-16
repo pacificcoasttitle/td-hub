@@ -12,6 +12,11 @@ import {
   documentReceivedTemplate,
   type OrderEmailData,
 } from './templates';
+import {
+  isPolicyDeliveryEnabled,
+  isPolicyDispatchEvent,
+  POLICY_DELIVERY_ENABLED_SETTING,
+} from './policy-delivery-flag';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -128,7 +133,22 @@ export async function dispatchNotification(params: DispatchParams): Promise<Disp
     .where(eq(notificationTypes.slug, slug))
     .limit(1);
 
-  if (!notifType || !notifType.isEnabled) {
+  if (isPolicyDispatchEvent(eventType, data)) {
+    if (!(await isPolicyDeliveryEnabled())) {
+      try {
+        await insertNotificationLog({
+          eventType, orderId, channel: 'skip', status: 'skipped',
+          metadata: { reason: 'policy_delivery_disabled', setting: POLICY_DELIVERY_ENABLED_SETTING, slug },
+        });
+      } catch { /* logging failure should not block */ }
+      return { sent: 0, failed: 0, skipped: true, logs: [] };
+    }
+    if (!notifType) {
+      return { sent: 0, failed: 1, skipped: false, logs: [] };
+    }
+    // is_enabled is ignored. The type stays disabled so applying 0050
+    // before this sender ships cannot start the old generic document path.
+  } else if (!notifType || !notifType.isEnabled) {
     if (notifType) {
       try {
         await insertNotificationLog({
@@ -324,6 +344,28 @@ async function handleDocumentDispatch(
   notifType: typeof notificationTypes.$inferSelect,
 ): Promise<DispatchResult> {
   const category = (params.data.category as string) ?? 'general';
+  if (category === 'policy' || category === 'supplement') {
+    const { deliverPolicyDocument } = await import('./policy-delivery-send');
+    const documentId = Number(params.data.documentId);
+    const kindRaw = params.data.subType ?? params.data.kind;
+    const kind = kindRaw === 'lender_policy' || kindRaw === 'owner_policy' || kindRaw === 'supplement'
+      ? kindRaw
+      : category === 'supplement' ? 'supplement' : null;
+    if (!Number.isInteger(documentId) || documentId <= 0) {
+      return { sent: 0, failed: 1, skipped: false, logs: [] };
+    }
+    const result = await deliverPolicyDocument({
+      orderId: params.orderId,
+      documentId,
+      kind,
+    });
+    return {
+      sent: result.sent ? 1 : 0,
+      failed: result.outcome === 'failed' ? 1 : 0,
+      skipped: result.outcome === 'unresolved' || result.outcome === 'unclassified' || result.outcome === 'disabled',
+      logs: [],
+    };
+  }
   const orderData = await loadOrderEmailData(params.orderId);
   const { subject, html } = documentReceivedTemplate({ ...orderData, category });
 

@@ -691,6 +691,24 @@ export async function getAttachedDocumentsPrelim(
   });
 }
 
+export type SoftProPolicyDocType = 'Lender' | 'Owner' | 'Supplement';
+
+/**
+ * Policies already classified by SoftPro. One call returns Lender and Owner
+ * (and Supplement when present) with a type on the row — no filename guess.
+ */
+export async function getAttachedDocumentsPolicy(
+  orderNumber: string,
+  docType?: SoftProPolicyDocType,
+): Promise<VendorResult<SoftProAttachedDocument[]>> {
+  const queryParams: Record<string, string> = { orderNumber };
+  if (docType) queryParams.DocType = docType;
+  return makeRequest<SoftProAttachedDocument[]>('GET', SOFTPRO_ENDPOINTS.getAttachedDocumentsPolicy, {
+    queryParams,
+    operation: 'get_attached_documents_policy',
+  });
+}
+
 export interface SoftProUploadFile {
   folderName: string;
   fileUrl: string;

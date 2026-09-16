@@ -21,6 +21,7 @@ vi.mock('drizzle-orm', () => ({
   desc: (field: unknown) => ({ op: 'desc', field }),
   eq: (field: unknown, value: unknown) => ({ op: 'eq', field, value }),
   gte: (field: unknown, value: unknown) => ({ op: 'gte', field, value }),
+  inArray: (field: unknown, value: unknown) => ({ op: 'inArray', field, value }),
   lte: (field: unknown, value: unknown) => ({ op: 'lte', field, value }),
   sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ sql: strings.join('?'), values }),
 }));

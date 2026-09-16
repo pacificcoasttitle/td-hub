@@ -211,6 +211,26 @@ describe('order 6142: a trust seller reaches Westcor with an identity', () => {
   });
 });
 
+describe('vesting language is not a borrower name', () => {
+  it('does not print Tenants as Last', () => {
+    const b = buildOrderBodyForTest([
+      'Matthew Robert Nelms and Isabel Junco-Nelms, husband and wife as joint tenants',
+    ]);
+    expect(String(b.Last)).not.toMatch(/tenants/i);
+    expect(b.First).toContain('Matthew');
+    expect(b.Last).toBe('Junco-Nelms');
+  });
+
+  it('a dated trust stays a trust — 2016 is not a person', () => {
+    const b = buildOrderBodyForTest([
+      'Lucille T. Kowalski, as Surviving Trustee of The Tran Kowalski Family Trust Dated September 01, 2016',
+    ]);
+    expect(b.Trust).toContain('Family Trust');
+    expect(b.Last).toBe('');
+    expect(String(b.First)).not.toBe('2016');
+  });
+});
+
 describe('the identity rule blocks before the vendor does', () => {
   // A name that survives to the payload with nothing in it cannot come from
   // nameFields any more, so this drives the guard with the empty string that

@@ -535,3 +535,78 @@ describe('confirmed listing agent outranks SoftPro enrich', () => {
     expect(written[0]).not.toHaveProperty('externalEmail');
   });
 });
+
+// ─── A hub-created order's client, and the read stamp ───────────────────────
+//
+// SoftPro has no client field; resolveClientContactId infers one. On a
+// hub-created order the operator already recorded who placed it, and the
+// inference can differ with nothing changed in SoftPro (20021670-OCT: broker
+// chosen by the operator, escrow officer inferred). The client decides who gets
+// the order confirmation, so the inference must not replace the choice.
+describe('enrichSingleOrder — recorded client and contacts_read_at', () => {
+  function orderRow(overrides: Record<string, unknown>) {
+    selectLimitMock.mockImplementation(async (_limit: number | undefined, table: { __table?: string } | undefined) => (
+      table?.__table === 'orders'
+        ? [{ id: ORDER_ID, fileNumber: '20021670-OCT', orderType: 'Title only', ...overrides }]
+        : []
+    ));
+  }
+  const setCalls = () => updateSetMock.mock.calls.map((c) => c[0] as Record<string, unknown>);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    updateSetMock.mockReturnValue({ where: updateWhereMock });
+    updateWhereMock.mockResolvedValue(undefined);
+    insertValuesMock.mockResolvedValue(undefined);
+    resolveClientContactIdMock.mockResolvedValue(17648);
+    getOrderContactsMock.mockResolvedValue({ success: true, data: softProLenderPayload });
+  });
+
+  it('keeps the client contact an operator recorded on a hub-created order', async () => {
+    orderRow({ source: 'manual_entry', clientContactId: 7963 });
+    const { enrichSingleOrder } = await import('./enrich-orders');
+
+    await enrichSingleOrder(ORDER_ID);
+
+    expect(resolveClientContactIdMock).not.toHaveBeenCalled();
+    expect(setCalls().some((v) => 'clientContactId' in v)).toBe(false);
+  });
+
+  it('still fills the client on a hub-created order that has none', async () => {
+    orderRow({ source: 'manual_entry', clientContactId: null });
+    const { enrichSingleOrder } = await import('./enrich-orders');
+
+    await enrichSingleOrder(ORDER_ID);
+
+    expect(setCalls()).toContainEqual(expect.objectContaining({ clientContactId: 17648 }));
+  });
+
+  it('leaves a synced order as before: the resolver is the only source of its client', async () => {
+    orderRow({ source: 'softpro_sync', clientContactId: 7963 });
+    const { enrichSingleOrder } = await import('./enrich-orders');
+
+    await enrichSingleOrder(ORDER_ID);
+
+    expect(setCalls()).toContainEqual(expect.objectContaining({ clientContactId: 17648 }));
+  });
+
+  it('stamps contacts_read_at when SoftPro returns contacts', async () => {
+    orderRow({ source: 'manual_entry', clientContactId: 7963 });
+    const { enrichSingleOrder } = await import('./enrich-orders');
+
+    await enrichSingleOrder(ORDER_ID);
+
+    expect(setCalls()).toContainEqual({ contactsReadAt: expect.any(Date) });
+  });
+
+  it('does NOT stamp contacts_read_at when the read fails, so the order is selected again', async () => {
+    orderRow({ source: 'manual_entry', clientContactId: 7963 });
+    getOrderContactsMock.mockResolvedValue({ success: false, error: { message: 'The operation was aborted due to timeout' } });
+    const { enrichSingleOrder } = await import('./enrich-orders');
+
+    const result = await enrichSingleOrder(ORDER_ID);
+
+    expect(result.outcome).toBe('failed');
+    expect(setCalls().some((v) => 'contactsReadAt' in v)).toBe(false);
+  });
+});

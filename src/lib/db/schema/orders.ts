@@ -95,7 +95,10 @@ export const orders = pgTable('orders', {
   detailsAttemptCount: integer('details_attempt_count').notNull().default(0),
   lastSitexFetchAt: timestamp('last_sitex_fetch_at'),
   sitexAttemptCount: integer('sitex_attempt_count').notNull().default(0),
+  /** Last GetOrderContacts ATTEMPT — the enrich retry cooldown. Stamped before the call. */
   lastContactsFetchAt: timestamp('last_contacts_fetch_at'),
+  /** Last time GetOrderContacts RETURNED data. NULL = never read (migration 0053). */
+  contactsReadAt: timestamp('contacts_read_at'),
   contactsEmptyConfirmed: boolean('contacts_empty_confirmed').notNull().default(false),
   isImported: boolean('is_imported').notNull().default(false),
 

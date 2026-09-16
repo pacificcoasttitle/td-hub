@@ -60,6 +60,25 @@ interface EnrichOrdersPayload {
   __jobId?: unknown;
 }
 
+/**
+ * Write this run's counts onto its own jobs row.
+ *
+ * The runner marks a job completed and discards what the handler returned, so
+ * for two weeks this job reported "completed" every 15 minutes while it read no
+ * hub-created order at all, and the per-order errors it collected were thrown
+ * away. The counts are the only way to see what a run did. Best-effort: a
+ * failure to record never fails the run.
+ */
+async function recordEnrichRun(payload: EnrichOrdersPayload, result: EnrichOrdersResult): Promise<void> {
+  const jobId = typeof payload.__jobId === 'number' ? payload.__jobId : null;
+  if (jobId === null) return;
+  try {
+    await db.update(jobs).set({ payload: { enrichOrders: result } }).where(eq(jobs.id, jobId));
+  } catch {
+    /* the record is best-effort */
+  }
+}
+
 const ENRICH_ORDERS_MAX_DURATION_MS = 300_000;
 const DEFAULT_ENRICH_ORDERS_BATCH_SIZE = 25;
 
@@ -160,7 +179,13 @@ async function findPriorRunningEnrichOrderJob(currentJobId: number | null): Prom
 // ─── Single Order Enrichment ─────────────────────────────────────────────────
 
 export async function enrichSingleOrder(orderId: number): Promise<EnrichSingleResult> {
-  const [order] = await db.select({ id: orders.id, fileNumber: orders.fileNumber, orderType: orders.orderType })
+  const [order] = await db.select({
+    id: orders.id,
+    fileNumber: orders.fileNumber,
+    orderType: orders.orderType,
+    source: orders.source,
+    clientContactId: orders.clientContactId,
+  })
     .from(orders).where(eq(orders.id, orderId)).limit(1);
 
   if (!order) {
@@ -180,7 +205,32 @@ export async function enrichSingleOrder(orderId: number): Promise<EnrichSingleRe
   return enrichOrder(order);
 }
 
-async function enrichOrder(order: { id: number; fileNumber: string; orderType: string | null }): Promise<EnrichSingleResult> {
+interface EnrichTarget {
+  id: number;
+  fileNumber: string;
+  orderType: string | null;
+  source?: string | null;
+  clientContactId?: number | null;
+}
+
+/**
+ * Whether the client contact on this order was chosen by a person and must not
+ * be replaced by the one the resolver derives from SoftPro's contacts.
+ *
+ * SoftPro has no "client" field. `resolveClientContactId` infers one from the
+ * contacts payload (for a Title only order, the escrow person). On a synced order
+ * that inference is the only source. On a hub-created order the operator already
+ * recorded who placed it, and the inference can disagree without anything having
+ * changed in SoftPro — measured 2026-09-16, 20021670-OCT: the operator's client
+ * was the mortgage broker who ordered it, the resolver would have put the outside
+ * escrow officer in her place. The client contact decides who is sent the order
+ * confirmation, so a guess must not overwrite a choice.
+ */
+export function keepsRecordedClient(order: EnrichTarget): boolean {
+  return order.source != null && order.source !== 'softpro_sync' && order.clientContactId != null;
+}
+
+async function enrichOrder(order: EnrichTarget): Promise<EnrichSingleResult> {
   const result: EnrichSingleResult = {
     success: false,
     orderId: order.id,
@@ -200,6 +250,10 @@ async function enrichOrder(order: { id: number; fileNumber: string; orderType: s
     await logEnrichAttempt(order.id, order.fileNumber, startedAt, result);
     return result;
   }
+
+  // SoftPro answered. Recorded apart from the before-the-call attempt stamp so an
+  // order whose read failed is still "never read" and is selected again.
+  await db.update(orders).set({ contactsReadAt: new Date() }).where(eq(orders.id, order.id));
 
   const data = apiResult.data;
   const mapped = mapOrderContacts(data);
@@ -259,7 +313,9 @@ async function enrichOrder(order: { id: number; fileNumber: string; orderType: s
     else result.unresolved.push(`Underwriters.CompanyLookUpCode=${underwriterCode}`);
   }
 
-  const clientContactId = await resolveClientContactId(order.orderType, data);
+  const clientContactId = keepsRecordedClient(order)
+    ? null
+    : await resolveClientContactId(order.orderType, data);
   if (clientContactId) {
     updates.clientContactId = clientContactId;
     result.resolved.clientContactId = clientContactId;
@@ -316,18 +372,32 @@ export async function handleEnrichOrders(payload: EnrichOrdersPayload = {}): Pro
   const runningJob = await findPriorRunningEnrichOrderJob(currentJobId);
 
   if (runningJob) {
-    return emptyEnrichOrdersResult(batchLimit, timeBudgetMs, {
+    const skipped = emptyEnrichOrdersResult(batchLimit, timeBudgetMs, {
       singleFlightSkipped: true,
       runningJobId: runningJob.id,
     });
+    await recordEnrichRun(payload, skipped);
+    return skipped;
   }
 
   const unenriched = await db
-    .select({ id: orders.id, fileNumber: orders.fileNumber, orderType: orders.orderType })
+    .select({
+      id: orders.id,
+      fileNumber: orders.fileNumber,
+      orderType: orders.orderType,
+      source: orders.source,
+      clientContactId: orders.clientContactId,
+    })
     .from(orders)
     .where(
       and(
         or(
+          // Never read. Without this arm a hub-created order — born with a
+          // client contact, an underwriter and buyer/seller rows — matched none
+          // of the "missing something" arms below and was never read at all
+          // (482 orders on 2026-09-16). The attempt cooldown in
+          // contactsFetchDue still spaces out retries of a failing read.
+          isNull(orders.contactsReadAt),
           and(
             isNull(orders.lenderId),
             isNull(orders.listingAgentId),
@@ -403,6 +473,7 @@ export async function handleEnrichOrders(payload: EnrichOrdersPayload = {}): Pro
     }
   }
 
+  await recordEnrichRun(payload, stats);
   return stats;
 }
 

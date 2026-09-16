@@ -11,6 +11,8 @@ import { describe, expect, it } from 'vitest';
 import {
   OUTSTANDING_ALERT_EVENT_TYPE,
   OUTSTANDING_ALERT_FALLBACK_MINUTES,
+  OUTSTANDING_ALERT_SCAN_WINDOW_HOURS,
+  alertClock,
   buildOutstandingAlertEmail,
   decideOutstandingAlert,
   missingFromConfirmation,
@@ -118,6 +120,61 @@ describe('the fallback — the case that used to stay silent forever', () => {
     expect(d.fire).toBe(true);
     expect(d.reason).toBe('arrived');
     expect(d.available).toEqual(['grant_deed']);
+  });
+});
+
+describe('when a title search starts after the confirmation', () => {
+  const confirm = new Date('2026-09-10T12:00:00Z');
+  const search = new Date('2026-09-11T18:00:00Z');
+  const neverArrivedAlert = new Date('2026-09-10T14:00:00Z');
+
+  it('restarts the 24-hour window, the two-hour wait, and the once-only latch from that search', () => {
+    // Confirmation already gone. Search starts later. A never_arrived alert
+    // already fired on the confirmation clock. Without the restart, the
+    // documents that then land are the seven-order case: delivered, nobody told.
+    const clock = alertClock({
+      confirmationSentAt: confirm,
+      searchStartedAts: [search],
+      lastAlertAt: neverArrivedAlert,
+    });
+    expect(clock.restartedFromSearch).toBe(true);
+    expect(clock.anchor).toEqual(search);
+    expect(clock.priorAlertCounts).toBe(false);
+
+    const minutesSinceSearch = 30;
+    expect(minutesSinceSearch).toBeLessThan(OUTSTANDING_ALERT_FALLBACK_MINUTES);
+    expect(OUTSTANDING_ALERT_SCAN_WINDOW_HOURS).toBe(24);
+  });
+
+  it('keeps the confirmation clock when the search started before send', () => {
+    const clock = alertClock({
+      confirmationSentAt: confirm,
+      searchStartedAts: [new Date('2026-09-10T11:50:00Z')],
+      lastAlertAt: null,
+    });
+    expect(clock.restartedFromSearch).toBe(false);
+    expect(clock.anchor).toEqual(confirm);
+    expect(clock.priorAlertCounts).toBe(false);
+  });
+
+  it('still treats a later alert for this search as once-only', () => {
+    const clock = alertClock({
+      confirmationSentAt: confirm,
+      searchStartedAts: [search],
+      lastAlertAt: new Date('2026-09-11T19:00:00Z'),
+    });
+    expect(clock.priorAlertCounts).toBe(true);
+    expect(clock.anchor).toEqual(search);
+  });
+
+  it('uses the first search after send, not a later sibling', () => {
+    const laterTax = new Date('2026-09-11T18:05:00Z');
+    const clock = alertClock({
+      confirmationSentAt: confirm,
+      searchStartedAts: [laterTax, search],
+      lastAlertAt: null,
+    });
+    expect(clock.anchor).toEqual(search);
   });
 });
 
@@ -248,8 +305,8 @@ describe('wiring', () => {
     const scanner = readFileSync(
       join(root, 'src/lib/jobs/handlers/outstanding-documents-alert.ts'), 'utf8',
     );
-    expect(scanner).toContain('isNotNull(notificationLogs.metadata)');
-    expect(scanner).toContain('desc(min(notificationLogs.sentAt))');
+    expect(scanner).toContain('and metadata is not null');
+    expect(scanner).toContain('order by coalesce(s.first_search_after, c.first_sent_at) desc');
   });
 
   it('the two aggregates are aliased apart', () => {
@@ -265,7 +322,17 @@ describe('wiring', () => {
     const scanner = readFileSync(
       join(root, 'src/lib/jobs/handlers/outstanding-documents-alert.ts'), 'utf8',
     );
-    expect(scanner).toContain(`.as('first_sent_at')`);
-    expect(scanner).toContain(`.as('send_record')`);
+    expect(scanner).toContain('as first_sent_at');
+    expect(scanner).toContain('as send_record');
+  });
+
+  it('restarts the clocks from a title search that starts after send', () => {
+    const scanner = readFileSync(
+      join(root, 'src/lib/jobs/handlers/outstanding-documents-alert.ts'), 'utf8',
+    );
+    expect(scanner).toContain('alertClock');
+    expect(scanner).toContain('title_point_data');
+    expect(scanner).toContain('first_search_after');
+    expect(scanner).toContain('minutesSinceSend: (now - clock.anchor.getTime()) / 60_000');
   });
 });

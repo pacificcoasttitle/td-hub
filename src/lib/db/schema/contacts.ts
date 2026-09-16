@@ -155,7 +155,10 @@ export const companies = pgTable('companies', {
 
   assignmentClause: text('assignment_clause'),
   signatureLine: text('signature_line'),
-  feeTransferLedger: varchar('fee_transfer_ledger', { length: 200 }),
+  // text, not varchar(200): SoftPro stores a template expression here, not a
+  // ledger code. Underwriter CW is 204 characters of If/Then referencing
+  // {{Order.DisbursementDate}}. Migration 0051. Nothing reads this column.
+  feeTransferLedger: text('fee_transfer_ledger'),
   stateOfIncorporation: varchar('state_of_incorporation', { length: 100 }),
   marketingRep: varchar('marketing_rep', { length: 200 }),
   specialInstructions: text('special_instructions'),

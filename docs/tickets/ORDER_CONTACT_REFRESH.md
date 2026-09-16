@@ -21,8 +21,15 @@ active, contacts not read in 30 days            3,239
 completed (not in scope, see open questions)    2,339
 ```
 
-**The 3,650 could not be reproduced** under any of these definitions. This design
-uses 4,069 and states it so the number can be argued with.
+**The 3,650 is withdrawn** (Gerard, 2026-09-15): it came from an earlier
+measurement nobody can reproduce, and is not to be reconciled. The measured
+figures above are what this design uses.
+
+**Completed orders are in scope** (Gerard, 2026-09-15). Policies are delivered
+after closing, so a completed order with a stale escrow contact sends a title
+policy to the wrong firm — the Green Forest failure, on the document that
+matters most. The cycle population is therefore **6,348**: open, in_process and
+completed orders that enrich never re-reads.
 
 ## What already exists, and is reused
 
@@ -43,8 +50,13 @@ uses 4,069 and states it so the number can be argued with.
 
 ## How often
 
-**Every active order re-read once every 7 days, oldest first.** 4,069 / 7 ≈
-**580 orders a day**, +25% on the ~2,319 GetOrderContacts calls a day made now.
+**Every in-scope order re-read once every 7 days, oldest first.** 6,348 / 7 ≈
+**907 orders a day**, +39% on the ~2,319 GetOrderContacts calls a day made now.
+
+A weekly sweep narrows the window; it does not close it. An order swept on
+Monday and delivered on Friday is four days stale at the moment that matters.
+**The pre-send refresh below is what closes it, and is the more important half
+of this design.**
 
 This is a starting cadence, not a conclusion. The first two weeks exist to
 measure how often contacts actually change, by order age band (0-7, 8-30, 31-90,
@@ -61,8 +73,8 @@ last 7 days (16,234 calls):
 p50 2.0s   p95 3.7s   p99 32.5s   max 60.0s (the client timeout)   failed 280 (1.7%)
 ```
 
-- A new job, **`softpro.verify_order_contacts`, hourly, 30 orders a run** —
-  720/day of capacity against 580 needed, so failures and slow days still keep
+- A new job, **`softpro.verify_order_contacts`, hourly, 45 orders a run** —
+  1,080/day of capacity against 907 needed, so failures and slow days still keep
   up with the cycle.
 - Same safeguards as `verify_sync`: **concurrency 3, 250ms launch spacing, 30s
   per-call cap** (8x normal p95), plus a `createDeadline` budget sized on that
@@ -103,9 +115,58 @@ resolved_at, resolution   (filled when a later read agrees, or a human acts)
   and kept out of the headline rate.** The human's word wins by invariant; what
   is worth seeing is how often SoftPro disagrees with it, not a proposal to
   overwrite it.
+- **`contacts.updated_at` cannot be used as a change signal.** The company syncs
+  restamp every row they match whether anything changed or not — 2,585 contact
+  rows on 2026-09-15 alone (`COMPANY_SYNC_RESTAMPS_UPDATED_AT.md`), and they
+  report those rows as `updated`. Drift is measured by comparing values, never
+  timestamps, and the rate must not be derived from `updated_at` or from a
+  sync's own `updated` count.
 - **Per-run counts on the job's own row** (checked, unchecked, with drift, by
   kind, by age band), the way `verify_sync` does, so the Operations panel can
   trend the rate without querying the table.
+
+## Refresh immediately before we send (Gerard, 2026-09-15)
+
+**"One call, two seconds, right when it matters."** Before a send that goes to an
+order's own contacts, re-read that order's contacts from SoftPro. A 2.0s median
+call, against a document that cannot be unsent.
+
+The sends that go to order contacts, and what a stale contact costs each:
+
+| Send | Resolves recipients through | A stale contact sends to |
+|---|---|---|
+| Prelim delivery (auto and manual) | `resolvePrelimRecipients` — escrow officer FK, else the `escrow_company` party row | the wrong escrow firm |
+| Order confirmation | `loadRecipientEmails` plus the client contact | the wrong client |
+| `notification_types` dispatch — `order.closed`, document ready, and policy delivery when it ships | `resolveRecipients` over officer FKs and party rows | the wrong firm, on a policy |
+| Party wizard invite | the same two-step escrow recipient | the wrong firm |
+
+**One place, not four.** All four already funnel through a small number of
+recipient helpers, and the refresh belongs in front of those: one function that
+takes an order id, re-reads SoftPro, applies the comparison below, and returns
+the recipients with any difference attached. Four copies of "refresh before
+send" drift, and the direction they drift is a document sent to a stale address.
+
+**THE DECISION THIS NEEDS.** When the pre-send read disagrees with us for the
+role being sent to:
+
+- **(a) Send to SoftPro's address**, record the drift. Best chance of reaching
+  the right firm; an operator learns afterwards, and a malformed vendor row
+  becomes a misdelivery.
+- **(b) Hold the send and alert** the open order team with both addresses. No
+  wrong delivery, at the cost of a delayed one. Fail-closed, and the same shape
+  as the prelim gate, which refuses rather than guesses.
+- **(c) Send to ours**, record the drift. Today's behaviour, made visible.
+
+**Recommended: (b) for the prelim and the policy, (a) for the confirmation.**
+The first two are the documents a wrong recipient actually harms. A confirmation
+to a superseded contact is embarrassing rather than damaging, and holding every
+confirmation on a vendor disagreement would stall order opening.
+
+**If SoftPro cannot be reached in time,** send as we would today and record that
+the refresh did not happen. A vendor timeout must not block a delivery — that is
+the one failure worse than a stale address.
+
+**This is the half to build first.** If only one of the two ships, it is this one.
 
 ## Phase 2 — decided from the data, not built now
 
@@ -123,18 +184,22 @@ an officer change should apply but keep the previous value.
 
 ## Open questions for Gerard
 
-1. **Which population is the 3,650?** If it is narrower than 4,069 — say, active
-   orders with a delivery still ahead — the cycle can be faster for the same
-   call budget.
-2. **Include completed orders (2,339)?** Some still have policies and recording
-   ahead of them; contacts on those matter for delivery.
-3. **Is a 7-day starting cycle acceptable**, knowing it adds ~25% to
-   GetOrderContacts volume?
+1. ~~Which population is the 3,650?~~ **Answered 2026-09-15:** withdrawn, not to
+   be reconciled; use the measured figures.
+2. ~~Include completed orders?~~ **Answered: yes** — policies are delivered after
+   closing.
+3. ~~Is a 7-day cycle acceptable?~~ **Answered: yes**, with the pre-send refresh
+   as the part that prevents the harm.
+4. **OPEN — what happens when a pre-send read disagrees?** (a) send to SoftPro's
+   address, (b) hold and alert, or (c) send to ours. Recommended: (b) for the
+   prelim and the policy, (a) for the confirmation.
 
 ## How we will know it works
 
-- Within 7 days of shipping, every active order has `last_contacts_verified_at`
-  inside the last 7 days.
+- Within 7 days of shipping, every in-scope order has
+  `last_contacts_verified_at` inside the last 7 days.
+- Every prelim, policy and confirmation send is preceded by a refresh for that
+  order, or by a recorded reason it was skipped.
 - `order_contact_drift` holds rows with a per-kind rate, and the job rows show it
   trending.
 - No `order_parties` or `orders` write attributable to this job.

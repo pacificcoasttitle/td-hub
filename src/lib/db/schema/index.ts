@@ -12,3 +12,4 @@ export * from './tessa';
 export * from './surveys';
 export * from './crm';
 export * from './concierge';
+export * from './reports';

@@ -108,6 +108,11 @@ export const conciergeProfiles = pgTable('concierge_profiles', {
   status: varchar('status', { length: 20 }).notNull().default('pending'),
   errorMessage: text('error_message'),
 
+  /** As the Reports list prints them (migration 0058); rewritten on re-render. */
+  listSubject: varchar('list_subject', { length: 300 }),
+  listSubjectDetail: varchar('list_subject_detail', { length: 300 }),
+  listSettings: varchar('list_settings', { length: 300 }),
+
   createdAt: timestamp('created_at').notNull().defaultNow(),
   createdBy: varchar('created_by', { length: 100 }),
 }, (t) => ({

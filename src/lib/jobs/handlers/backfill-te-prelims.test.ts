@@ -62,8 +62,10 @@ describe('the T&E prelim backfill cannot reach maybeAutoDeliverPrelim', () => {
     expect(vercel.crons.some((c) => c.path.includes('backfill_te') || c.path.includes('backfill-te'))).toBe(false);
   });
 
-  it('the live fetch_prelims path still hardcodes deliver: true', () => {
-    expect(liveSrc).toMatch(/deliver:\s*true/);
+  it('the live fetch_prelims path hardcodes deliver: false — same belt as this backfill', () => {
+    expect(liveSrc).toMatch(/deliver:\s*false/);
+    expect(liveSrc).not.toMatch(/deliver:\s*true/);
+    expect(liveSrc).not.toMatch(/deliver:\s*input/);
     expect(liveSrc).toContain('handleFetchPrelims');
     expect(liveSrc).toMatch(/getAttachedDocuments\(/);
     expect(liveSrc).not.toContain('getAttachedDocumentsPrelim');

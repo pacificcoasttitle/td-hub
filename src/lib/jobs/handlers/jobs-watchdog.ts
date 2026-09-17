@@ -1,10 +1,29 @@
 import { db } from '@/lib/db/client';
 import { jobs } from '@/lib/db/schema';
 import { sql, and, eq, lt } from 'drizzle-orm';
+import { runJobHealthCheck, type JobHealthCheckResult } from '@/lib/domain/ops/job-health';
 
 export interface JobsWatchdogResult {
   staleJobsFound: number;
   staleJobsByType: Record<string, number>;
+  /** The reader: which jobs are failing or stalled, and whether anyone was told. */
+  health: JobHealthCheckResult | null;
+  /** A failure of the health check itself. Reported as "completed with errors". */
+  errors: string[];
+}
+
+/**
+ * The health check runs after reaping, so a job the watchdog just marked failed
+ * counts. Its own failure never stops the reaping, and is returned in `errors`
+ * so the run records as completed-with-errors and the daily summary reports it.
+ */
+async function checkHealth(): Promise<Pick<JobsWatchdogResult, 'health' | 'errors'>> {
+  try {
+    const health = await runJobHealthCheck();
+    return { health, errors: health.sendError ? [`job health alert not sent: ${health.sendError}`] : [] };
+  } catch (err) {
+    return { health: null, errors: [`job health check failed: ${err instanceof Error ? err.message : String(err)}`] };
+  }
 }
 
 const STALE_THRESHOLD_MS = 10 * 60 * 1000;
@@ -31,7 +50,7 @@ export async function handleJobsWatchdog(): Promise<JobsWatchdogResult> {
     ));
 
   if (staleJobs.length === 0) {
-    return { staleJobsFound: 0, staleJobsByType: {} };
+    return { staleJobsFound: 0, staleJobsByType: {}, ...(await checkHealth()) };
   }
 
   await db.update(jobs)
@@ -55,5 +74,6 @@ export async function handleJobsWatchdog(): Promise<JobsWatchdogResult> {
   return {
     staleJobsFound: staleJobs.length,
     staleJobsByType,
+    ...(await checkHealth()),
   };
 }

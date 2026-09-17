@@ -33,6 +33,7 @@ import { handleJobsWatchdog } from '@/lib/jobs/handlers/jobs-watchdog';
 import { handleOpsDailyReport } from '@/lib/jobs/handlers/ops-daily-report';
 import { handleRetrySoftProDocumentAttach } from '@/lib/jobs/handlers/retry-softpro-document-attach';
 import { handleOutstandingDocumentsAlert } from '@/lib/jobs/handlers/outstanding-documents-alert';
+import { handleRetryHeldPrelimWatchedTen } from '@/lib/jobs/handlers/retry-held-prelim-watched-ten';
 import { handlePartyWizardInvite } from '@/lib/jobs/handlers/party-wizard-invite';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 import { recordJobCompletion } from '@/lib/jobs/record-result';
@@ -74,6 +75,7 @@ const NEEDS_JOB_ID = new Set([
   // Needs its row to record a REFUSAL. A run that declined to send otherwise
   // looks exactly like a run that found nothing to do.
   'party_wizard.invite',
+  'prelim.retry_held_watched_ten',
   // Need their rows to record a PARTIAL failure. These handlers collect
   // per-row errors and return normally, so the runner marks them `completed`
   // and writes no error — which is how the escrow-officer feed reported clean
@@ -145,6 +147,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleRetrySoftProDocumentAttach(),
   'notifications.outstanding_documents_alert': () =>
     handleOutstandingDocumentsAlert(),
+  'prelim.retry_held_watched_ten': () =>
+    handleRetryHeldPrelimWatchedTen(),
 };
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

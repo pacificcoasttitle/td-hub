@@ -300,6 +300,8 @@ export async function handlePrelimWebhook(payload: PrelimPayload): Promise<Webho
         reason: result.delivery?.reason ?? null,
       }, delivered || result.delivery?.outcome === 'skipped_already_delivered'
         || result.delivery?.outcome === 'skipped_before_cutoff'
+        || result.delivery?.outcome === 'skipped_older_than_window'
+        || result.delivery?.outcome === 'skipped_backfilled_order'
         || result.delivery?.outcome === 'not_armed'
         || result.delivery?.outcome === 'blocked_no_recipient');
 

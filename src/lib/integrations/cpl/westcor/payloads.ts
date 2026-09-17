@@ -1,6 +1,6 @@
 import type { CplOrderDetail, CplGenerateInput, CplForm, TransactionType } from '../types';
 import { countyFipsFrom } from '../county-fips';
-import { classifyPartyName, isJunkNameFragment, stripVestingClauses } from '@/lib/domain/cpl/borrower-resolution';
+import { classifyPartyName } from '@/lib/domain/cpl/borrower-resolution';
 
 const TIMEOUT_MS = 15_000;
 const CPL_TIMEOUT_MS = 30_000;
@@ -372,16 +372,10 @@ function nameFields(fullName: string): Record<string, unknown> {
   if (kind === 'company') {
     return { Last: '', First: '', CompanyName: name, Trust: '' };
   }
-  // Vesting clauses are not a surname. The last-space split would otherwise
-  // print "Tenants" or "2016" on the letter.
-  const person = stripVestingClauses(name);
-  if (!person || isJunkNameFragment(person)) {
-    return { Last: '', First: '', CompanyName: '', Trust: '' };
-  }
   // Person — Westcor needs BOTH First and Last, so the name is split at its
   // last space. See the block above `PERSON_PLACEHOLDER` for why, and for what
   // the old placeholder was printing on 65 issued letters.
-  const parts = person.split(/\s+/).filter(Boolean);
+  const parts = name.split(/\s+/).filter(Boolean);
   if (parts.length >= 2) {
     return {
       Last: parts[parts.length - 1]!,
@@ -393,7 +387,7 @@ function nameFields(fullName: string): Record<string, unknown> {
   // One word, so there is no last name to give. The placeholder stays: it is
   // the only shape Westcor accepts, and a one-word person name is rare enough
   // that the alternative — rejecting the CPL — is plainly worse.
-  return { Last: PERSON_PLACEHOLDER, First: person, CompanyName: '', Trust: '' };
+  return { Last: PERSON_PLACEHOLDER, First: name, CompanyName: '', Trust: '' };
 }
 
 /**

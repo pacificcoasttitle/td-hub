@@ -31,7 +31,11 @@ export interface IngestPrelimFromSoftProInput {
   occurredAt?: Date | null;
   source: SoftProPrelimIngestSource;
   createdBy: string;
-  /** When true (webhook update path), call maybeAutoDeliverPrelim after ingest. Cron always delivers. */
+  /**
+   * When true, call maybeAutoDeliverPrelim after ingest. Live fetch and the
+   * webhook pass true. The T&E backfill hardcodes false. Age is enforced
+   * inside maybeAutoDeliverPrelim (SoftPro date, else order open date).
+   */
   deliver: boolean;
   triggeredBy: 'fetch_prelims' | 'softpro_webhook';
 }
@@ -289,6 +293,7 @@ export async function ingestPrelimFromSoftPro(
       orderId: input.orderId,
       documentId: doc!.id,
       documentCreatedAt: doc!.createdAt,
+      softproDocumentAt: input.occurredAt ?? null,
       triggeredBy: input.triggeredBy,
     });
   }

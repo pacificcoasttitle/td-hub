@@ -277,6 +277,10 @@ export async function fetchPrelimsForOrder(
         documentUrl: url,
         source: 'softpro_fetch',
         createdBy: 'job:fetch_prelims',
+        // Fetch is the live send path. The webhook has never fired once.
+        // Age is SoftPro's document date, else the order open date — never
+        // hub created_at. Older than three Pacific days is held; recent
+        // prelims mail. See docs/tickets/PRELIM_AGE_GUARD.md.
         deliver: true,
         triggeredBy: 'fetch_prelims',
       });

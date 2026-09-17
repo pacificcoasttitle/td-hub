@@ -13,6 +13,10 @@ describe('the T&E prelim backfill cannot reach maybeAutoDeliverPrelim', () => {
     'utf8',
   );
   const liveSrc = readFileSync(join(__dirname, 'fetch-prelims.ts'), 'utf8');
+  const autoSrc = readFileSync(
+    join(__dirname, '../../domain/notifications/prelim-auto-delivery.ts'),
+    'utf8',
+  );
   const jobsRun = readFileSync(
     join(process.cwd(), 'src/app/api/jobs/run/route.ts'),
     'utf8',
@@ -62,10 +66,19 @@ describe('the T&E prelim backfill cannot reach maybeAutoDeliverPrelim', () => {
     expect(vercel.crons.some((c) => c.path.includes('backfill_te') || c.path.includes('backfill-te'))).toBe(false);
   });
 
-  it('the live fetch_prelims path still hardcodes deliver: true', () => {
+  it('the live fetch_prelims path hardcodes deliver: true — age is the belt, not a second deliver: false', () => {
     expect(liveSrc).toMatch(/deliver:\s*true/);
+    expect(liveSrc).not.toMatch(/deliver:\s*false/);
+    expect(liveSrc).not.toMatch(/deliver:\s*input/);
     expect(liveSrc).toContain('handleFetchPrelims');
     expect(liveSrc).toMatch(/getAttachedDocuments\(/);
     expect(liveSrc).not.toContain('getAttachedDocumentsPrelim');
+  });
+
+  it('the age rule is three Pacific days on SoftPro date else opened_at, never hub created_at', () => {
+    expect(autoSrc).toMatch(/PRELIM_AUTO_DELIVERY_MAX_AGE_DAYS = 3/);
+    expect(autoSrc).toContain('skipped_older_than_window');
+    expect(autoSrc).toMatch(/issued\.at < windowStart/);
+    expect(autoSrc).not.toMatch(/if \(input\.documentCreatedAt < windowStart\)/);
   });
 });

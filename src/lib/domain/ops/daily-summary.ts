@@ -120,7 +120,7 @@ export function composeAttention(input: {
   }>;
   /** Real SendGrid outcomes — see getEmailsSection. */
   emails: SectionResult<{ sent: number; failed: number }>;
-  syncHealth: SectionResult<{ rows: Array<{ jobType: string; failed: number }> }>;
+  syncHealth: SectionResult<{ rows: Array<{ jobType: string; failed: number; completedWithErrors?: number }> }>;
   vendorApiHealth: SectionResult<{ rows: Array<{ vendor: string; successRate: number; calls: number }> }>;
   cpls: SectionResult<{ failedByVendor: Array<{ vendor: string; count: number }> }>;
 }): string[] {
@@ -165,20 +165,30 @@ export function composeAttention(input: {
   if (input.syncHealth.ok) {
     // Several job types share a friendly name (the two enrich jobs are both
     // "order detail lookup"); merge them so the sentence never repeats itself.
-    const byFriendly = new Map<string, number>();
-    for (const r of input.syncHealth.data.rows) {
-      if (r.failed <= 0) continue;
-      const name = friendlyJobName(r.jobType);
-      byFriendly.set(name, (byFriendly.get(name) ?? 0) + r.failed);
-    }
-    const failing = [...byFriendly.entries()].sort((a, b) => b[1] - a[1]);
+    type JobRow = { jobType: string; failed: number; completedWithErrors?: number };
+    const byFriendly = (count: (r: JobRow) => number | undefined) => {
+      const merged = new Map<string, number>();
+      for (const r of input.syncHealth.ok ? input.syncHealth.data.rows : []) {
+        const n = count(r) ?? 0;
+        if (n <= 0) continue;
+        const name = friendlyJobName(r.jobType);
+        merged.set(name, (merged.get(name) ?? 0) + n);
+      }
+      return [...merged.entries()].sort((a, b) => b[1] - a[1]);
+    };
+    const listed = (entries: Array<[string, number]>) => entries.slice(0, 3).map(([name, n]) => `${name} (${n})`).join(', ')
+      + (entries.length > 3 ? `, and ${entries.length - 3} more` : '');
+
+    // No reassurance about vendors "briefly unreachable": the sentence used to
+    // say failures normally clear on their own, and on 2026-09-16 the
+    // outstanding-documents alert failed 538 runs in a row on a bug of ours.
+    const failing = byFriendly((r) => r.failed);
     if (failing.length > 0) {
-      const worst = failing.slice(0, 3).map(([name, n]) => `${name} (${n})`);
-      out.push(
-        `Some background work failed and retried: ${worst.join(', ')}`
-        + `${failing.length > 3 ? `, and ${failing.length - 3} more` : ''}. `
-        + `This is usually a vendor being briefly unreachable and normally clears on its own.`,
-      );
+      out.push(`Some background jobs failed: ${listed(failing)}. The Operations panel shows the error for each.`);
+    }
+    const withErrors = byFriendly((r) => r.completedWithErrors);
+    if (withErrors.length > 0) {
+      out.push(`Some background jobs finished but reported errors inside the run: ${listed(withErrors)}.`);
     }
   }
 

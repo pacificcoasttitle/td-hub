@@ -53,6 +53,9 @@ export async function GET(req: NextRequest) {
         runs: sql<number>`count(*)::int`,
         completed: sql<number>`count(*) filter (where ${jobs.status} = 'completed')::int`,
         failed: sql<number>`count(*) filter (where ${jobs.status} = 'failed')::int`,
+        // Runs that returned normally but reported failures inside them. The
+        // runner records those on `error` while the status stays `completed`.
+        completedWithErrors: sql<number>`count(*) filter (where ${jobs.status} = 'completed' and ${jobs.error} is not null)::int`,
         avgDurationMs: sql<number>`coalesce(avg(extract(epoch from (${jobs.endedAt} - ${jobs.startedAt})) * 1000)::int, 0)`,
         lastRun: sql<string>`max(${jobs.startedAt})`,
         lastStatus: sql<string>`(
@@ -62,7 +65,8 @@ export async function GET(req: NextRequest) {
         )`,
         lastError: sql<string>`(
           select ${jobs.error} from ${jobs} j2
-          where j2.job_type = ${jobs.jobType} and j2.status = 'failed'
+          where j2.job_type = ${jobs.jobType}
+            and (j2.status = 'failed' or (j2.status = 'completed' and j2.error is not null))
           order by j2.created_at desc limit 1
         )`,
       })
@@ -78,7 +82,7 @@ export async function GET(req: NextRequest) {
       lastRun: r.lastRun ?? null,
       lastStatus: r.lastStatus ?? null,
       lastError: r.lastError ?? null,
-      monthly: { runs: r.runs, completed: r.completed, failed: r.failed },
+      monthly: { runs: r.runs, completed: r.completed, failed: r.failed, completedWithErrors: r.completedWithErrors },
       avgDurationMs: r.avgDurationMs,
     }));
 

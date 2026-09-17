@@ -81,9 +81,67 @@ export function serializeResult(result: unknown): string | null {
   return text;
 }
 
+export const ERROR_SUMMARY_CHARS = 500;
+
+function describeError(item: unknown): string {
+  if (typeof item === 'string') return item;
+  if (item && typeof item === 'object') {
+    const o = item as Record<string, unknown>;
+    const where = o.fileNumber ?? o.lookupCode ?? o.orderId ?? o.documentId ?? o.id;
+    const what = o.error ?? o.message ?? o.reason;
+    if (what !== undefined) return where !== undefined ? `${String(where)}: ${String(what)}` : String(what);
+  }
+  try {
+    return JSON.stringify(item);
+  } catch {
+    return String(item);
+  }
+}
+
+/**
+ * "Completed with errors": what went wrong inside a run that returned normally.
+ *
+ * Handlers collect per-item failures and return, so the runner marks the run
+ * `completed` and, until now, recorded no error. That is how a contact feed
+ * reported clean runs while four officers stopped updating, and how
+ * `import-orders` and `softpro.sync_contacts` report `completed` when the
+ * vendor call itself failed. The run stays `completed` (it did finish), but
+ * `jobs.error` now says what did not work, in the shapes handlers return:
+ *
+ * - `errors: [...]`        per-item failures (most handlers)
+ * - `failed: n`            a count of failed items (outbox, drain, alerts, enrich)
+ * - `totalErrors: n`       the all-contacts sweep
+ * - `status: 'failed'`     a work item that returned failure (titlepoint.poll)
+ *
+ * Returns null when the result reports nothing wrong.
+ */
+export function summarizeResultErrors(result: unknown): string | null {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+  const r = result as Record<string, unknown>;
+  const parts: string[] = [];
+
+  if (r.status === 'failed') {
+    parts.push(`returned failed${r.error !== undefined ? `: ${describeError(r.error)}` : ''}`);
+  }
+  if (Array.isArray(r.errors) && r.errors.length > 0) {
+    parts.push(`${r.errors.length} ${r.errors.length === 1 ? 'error' : 'errors'}, first: ${describeError(r.errors[0])}`);
+  }
+  if (typeof r.failed === 'number' && r.failed > 0) {
+    parts.push(`${r.failed} failed`);
+  }
+  if (typeof r.totalErrors === 'number' && r.totalErrors > 0) {
+    parts.push(`${r.totalErrors} total errors`);
+  }
+
+  if (parts.length === 0) return null;
+  const text = `Completed with errors: ${parts.join('; ')}`;
+  return text.length > ERROR_SUMMARY_CHARS ? `${text.slice(0, ERROR_SUMMARY_CHARS)}…` : text;
+}
+
 /** The single statement that closes a successful run and saves its result. */
 export function completionUpdate(jobId: number, result: unknown) {
   const text = serializeResult(result);
+  const errorSummary = summarizeResultErrors(result);
   return db
     .update(jobs)
     .set({
@@ -92,6 +150,8 @@ export function completionUpdate(jobId: number, result: unknown) {
       ...(text === null
         ? {}
         : { payload: sql`coalesce(${jobs.payload}, '{}'::jsonb) || jsonb_build_object('result', ${text}::jsonb)` }),
+      // A handler that already wrote its own error (the contact syncs do) keeps it.
+      ...(errorSummary === null ? {} : { error: sql`coalesce(${jobs.error}, ${errorSummary})` }),
     })
     .where(eq(jobs.id, jobId));
 }

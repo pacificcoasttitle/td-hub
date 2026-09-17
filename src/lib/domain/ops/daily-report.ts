@@ -52,6 +52,8 @@ export interface SyncHealthRow {
   runs: number;
   succeeded: number;
   failed: number;
+  /** Returned normally but reported failures inside the run (`jobs.error` on a completed row). */
+  completedWithErrors: number;
   avgDurationSeconds: number;
   lastRun: Date | null;
 }
@@ -295,6 +297,7 @@ export async function getSyncHealthSection(windowStart: Date, windowEnd: Date): 
       runs: unknown;
       succeeded: unknown;
       failed: unknown;
+      completed_with_errors: unknown;
       avg_duration_seconds: unknown;
       last_run: unknown;
     }>(sql`
@@ -303,6 +306,7 @@ export async function getSyncHealthSection(windowStart: Date, windowEnd: Date): 
         count(*)::int as runs,
         count(*) filter (where status = 'completed')::int as succeeded,
         count(*) filter (where status = 'failed')::int as failed,
+        count(*) filter (where status = 'completed' and error is not null)::int as completed_with_errors,
         coalesce(avg(extract(epoch from (ended_at - started_at))), 0)::float as avg_duration_seconds,
         max(coalesce(started_at, created_at)) as last_run
       from jobs
@@ -317,6 +321,7 @@ export async function getSyncHealthSection(windowStart: Date, windowEnd: Date): 
         runs: toNumber(row.runs),
         succeeded: toNumber(row.succeeded),
         failed: toNumber(row.failed),
+        completedWithErrors: toNumber(row.completed_with_errors),
         avgDurationSeconds: toNumber(row.avg_duration_seconds),
         lastRun: toDate(row.last_run),
       })),
@@ -720,11 +725,14 @@ export async function getFailuresDetailSection(windowStart: Date, windowEnd: Dat
         from vendor_api_logs
         where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()} and success = false
         union all
-        select created_at as failure_timestamp, 'Cron' as category, job_type as vendor_or_job, order_id::text as order_reference,
+        select created_at as failure_timestamp,
+          case when status = 'failed' then 'Cron' else 'Cron (completed with errors)' end as category,
+          job_type as vendor_or_job, order_id::text as order_reference,
           left(coalesce(error, 'Job failed'), 100) as error_summary,
           'manual intervention needed' as remediation_status
         from jobs
-        where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()} and status = 'failed'
+        where created_at >= ${windowStart.toISOString()} and created_at < ${windowEnd.toISOString()}
+          and (status = 'failed' or (status = 'completed' and error is not null))
         union all
         select created_at as failure_timestamp, 'Notification' as category, coalesce(provider, event_type) as vendor_or_job, order_id::text as order_reference,
           left(coalesce(error_message, status), 100) as error_summary,

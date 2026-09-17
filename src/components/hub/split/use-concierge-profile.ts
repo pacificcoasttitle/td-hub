@@ -36,8 +36,11 @@ export interface UseConciergeProfile {
 }
 
 export interface GenerateArgs {
-  /** Required: the route refuses a generation with no order to dedupe against. */
-  orderId: number;
+  /**
+   * Optional metadata. The Reports entry point has no order; the double-charge
+   * guard is keyed on the property (lib/domain/concierge/claim.ts), never this.
+   */
+  orderId?: number | null;
   street: string; city: string; state: string; zip: string;
   preparedForName: string;
   preparedForCompany: string | null;

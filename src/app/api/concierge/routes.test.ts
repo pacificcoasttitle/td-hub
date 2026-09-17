@@ -40,26 +40,20 @@ describe('exactly one route can spend a credit', () => {
     }
   });
 
-  it('generating twice for one order is refused, not charged', () => {
-    expect(generate).toContain('getProfileForOrder');
-    expect(generate).toContain('409');
-  });
-
-  it('requires an orderId, because the double-charge guard needs one', () => {
-    // While orderId was optional, a generation without one skipped the
-    // one-profile-per-order check entirely and had nothing stopping a second
-    // click spending a second credit.
-    expect(generate).toMatch(/orderId:\s*z\.number\(\)\.int\(\)\.positive\(\),/);
-    expect(generate).not.toMatch(/orderId:.*(nullable|optional)/);
-  });
-
-  it('runs the duplicate check on every request, not only when an order is given', () => {
-    // The guard must not sit inside `if (parsed.data.orderId)`.
-    expect(generate).not.toMatch(/if\s*\(\s*parsed\.data\.orderId\s*\)/);
-    const guard = generate.indexOf('getProfileForOrder');
-    const generator = generate.indexOf('generateConciergeProfile(');
+  it('the double-charge guard is keyed on the property, not the order', () => {
+    // The entry point moved to the Reports page, where a request carries no
+    // order — an order-keyed guard would protect nothing there.
+    expect(generate).not.toContain('getProfileForOrder');
+    const claim = read('../../../lib/domain/concierge/generate.ts');
+    expect(claim).toContain('claimProperty(requestKey)');
+    const guard = claim.indexOf('claimProperty(');
+    const vendor = claim.indexOf('fetchConciergeProfile(');
     expect(guard).toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(generator);
+    expect(guard).toBeLessThan(vendor);
+  });
+
+  it('accepts a generation with no order at all', () => {
+    expect(generate).toMatch(/orderId:\s*z\.number\(\)\.int\(\)\.positive\(\)\.nullable\(\)\.optional\(\)/);
   });
 
   it('the PDF route never accepts a storage key from the browser', () => {

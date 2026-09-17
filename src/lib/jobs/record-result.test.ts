@@ -10,6 +10,7 @@ import {
   completionUpdate,
   recordJobCompletion,
   serializeResult,
+  summarizeResultErrors,
 } from './record-result';
 
 // Fourteen of 22 job handlers left no record of what a run did: the runner put
@@ -115,5 +116,52 @@ describe('the runner uses it', () => {
       .replace(/\/\/.*$/gm, '');
     expect(source).toMatch(/const result = await handler\(handlerPayload\);\s*await recordJobCompletion\(jobId, result\);/);
     expect(source).not.toMatch(/set\(\{\s*status:\s*'completed'/);
+  });
+});
+
+describe('summarizeResultErrors — "completed with errors"', () => {
+  it('names the count and the first failure from an errors array', () => {
+    expect(summarizeResultErrors({ total: 25, errors: [
+      { fileNumber: '20022227-OCT', error: 'GetOrderContacts returned no data' },
+      { fileNumber: '20021999-OCT', error: 'timeout' },
+    ] })).toBe('Completed with errors: 2 errors, first: 20022227-OCT: GetOrderContacts returned no data');
+  });
+
+  it('reads a failed count (outbox, drain, alerts)', () => {
+    expect(summarizeResultErrors({ processed: 12, succeeded: 9, failed: 3 })).toBe('Completed with errors: 3 failed');
+  });
+
+  it('reads a work item that returned failure instead of throwing (titlepoint.poll)', () => {
+    expect(summarizeResultErrors({ status: 'failed', error: 'Poll returned Failed' }))
+      .toBe('Completed with errors: returned failed: Poll returned Failed');
+  });
+
+  it('reads a vendor call that failed outright but returned normally (import-orders)', () => {
+    expect(summarizeResultErrors({ total: 0, imported: 0, updated: 0, errors: [{ fileNumber: '*', error: 'GetOrderDetails timed out' }] }))
+      .toContain('1 error, first: *: GetOrderDetails timed out');
+  });
+
+  it('reads the all-contacts sweep total', () => {
+    expect(summarizeResultErrors({ results: [], totalErrors: 40 })).toBe('Completed with errors: 40 total errors');
+  });
+
+  it('is null for a clean run, so a clean run records no error', () => {
+    expect(summarizeResultErrors({ total: 25, attempted: 25, failed: 0, errors: [] })).toBeNull();
+    expect(summarizeResultErrors(undefined)).toBeNull();
+    expect(summarizeResultErrors([1, 2])).toBeNull();
+  });
+});
+
+describe('completionUpdate records the error on a completed run', () => {
+  const text = (q: ReturnType<typeof completionUpdate>) => new PgDialect().sqlToQuery(q.getSQL()).sql;
+
+  it('writes the summary without overwriting an error the handler wrote itself', () => {
+    const q = completionUpdate(1, { failed: 2 });
+    expect(text(q)).toContain('"error" = coalesce("jobs"."error", $');
+    expect(() => bindLikeTheDriver(q.getSQL())).not.toThrow();
+  });
+
+  it('leaves error alone for a clean run', () => {
+    expect(text(completionUpdate(1, { failed: 0, errors: [] }))).not.toContain('"error"');
   });
 });

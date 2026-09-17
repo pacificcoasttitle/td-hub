@@ -177,6 +177,36 @@ describe('regressions found against real data', () => {
   });
 });
 
+describe('background jobs: failures and runs that finished with errors', () => {
+  it('does not reassure that failures clear on their own', () => {
+    // On 2026-09-16 the outstanding-documents alert failed 538 runs in a row on
+    // a bug of ours, not a vendor blip.
+    const out = composeAttention({
+      ...CLEAN,
+      syncHealth: ok({ rows: [{ jobType: 'notifications.outstanding_documents_alert', failed: 538 }] }),
+    });
+    expect(out[0]).toContain('(538)');
+    expect(out.join(' ')).not.toMatch(/clears on its own|briefly unreachable/);
+  });
+
+  it('reports runs that completed but reported errors inside them, separately', () => {
+    const out = composeAttention({
+      ...CLEAN,
+      syncHealth: ok({ rows: [{ jobType: 'softpro.sync_contacts.lender', failed: 0, completedWithErrors: 3 }] }),
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('finished but reported errors');
+    expect(out[0]).toContain('contact sync (3)');
+  });
+
+  it('says nothing when every run was clean', () => {
+    expect(composeAttention({
+      ...CLEAN,
+      syncHealth: ok({ rows: [{ jobType: 'softpro.enrich_orders', failed: 0, completedWithErrors: 0 }] }),
+    })).toEqual([]);
+  });
+});
+
 describe('number lines never read nonsensically', () => {
   it('does not say "0 sent, all delivered" on a quiet day', () => {
     const s = summary([]);

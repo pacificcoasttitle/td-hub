@@ -8,7 +8,7 @@ interface CronJob {
   lastRun: string | null;
   lastStatus: string | null;
   lastError: string | null;
-  monthly: { runs: number; completed: number; failed: number };
+  monthly: { runs: number; completed: number; failed: number; completedWithErrors: number };
   avgDurationMs: number;
 }
 
@@ -138,6 +138,7 @@ export function CronStatus({ month, year }: { month: number; year: number }) {
                 <th className="text-left px-4 py-2.5 font-medium text-gray-500">Status</th>
                 <th className="text-right px-4 py-2.5 font-medium text-gray-500">Runs</th>
                 <th className="text-right px-4 py-2.5 font-medium text-gray-500">Failures</th>
+                <th className="text-right px-4 py-2.5 font-medium text-gray-500" title="Runs that finished but reported failures inside them">With errors</th>
                 <th className="text-right px-4 py-2.5 font-medium text-gray-500">Avg Time</th>
               </tr>
             </thead>
@@ -145,15 +146,15 @@ export function CronStatus({ month, year }: { month: number; year: number }) {
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
-                    {Array.from({ length: 7 }).map((__, j) => (
+                    {Array.from({ length: 8 }).map((__, j) => (
                       <td key={j} className="px-4 py-3"><div className="h-4 bg-gray-200 rounded w-3/4" /></td>
                     ))}
                   </tr>
                 ))
               ) : crons.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No cron data for this month.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No cron data for this month.</td></tr>
               ) : crons.map(c => (
-                <tr key={c.jobType} className={c.monthly.failed > 0 ? 'bg-red-50' : ''}>
+                <tr key={c.jobType} className={c.monthly.failed > 0 ? 'bg-red-50' : c.monthly.completedWithErrors > 0 ? 'bg-amber-50' : ''} title={c.lastError ?? undefined}>
                   <td className="px-4 py-3 font-medium text-gray-900">{JOB_LABELS[c.jobType] ?? c.jobType}</td>
                   <td className="px-4 py-3 text-gray-500 text-xs">{c.schedule}</td>
                   <td className="px-4 py-3 text-gray-500" title={c.lastRun ?? undefined}>{relTime(c.lastRun)}</td>
@@ -167,6 +168,9 @@ export function CronStatus({ month, year }: { month: number; year: number }) {
                   <td className="px-4 py-3 text-right tabular-nums text-gray-700">{c.monthly.runs}</td>
                   <td className={`px-4 py-3 text-right tabular-nums ${c.monthly.failed > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}`}>
                     {c.monthly.failed}
+                  </td>
+                  <td className={`px-4 py-3 text-right tabular-nums ${c.monthly.completedWithErrors > 0 ? 'text-amber-700 font-medium' : 'text-gray-700'}`}>
+                    {c.monthly.completedWithErrors ?? 0}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-500">{fmtMs(c.avgDurationMs)}</td>
                 </tr>

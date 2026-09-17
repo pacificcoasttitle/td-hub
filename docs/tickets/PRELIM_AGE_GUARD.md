@@ -27,6 +27,20 @@ row; measuring that clock is how a 20-day catch-up would look like news.
 `needs_manual_delivery` is false on the age skip. Older prelims are hub
 visibility only.
 
+### Property of the `opened_at` fallback
+
+Fetch does not store a SoftPro document date. On the 274 held prelims
+counted 2026-09-17, every upload audit has `occurredAt: null`. The live
+guard then uses `orders.opened_at`.
+
+A prelim cannot exist before its order opened. So the age we compute is
+always the same as the prelim's real age, or older. The guard can hold a
+prelim that is actually fresh. It cannot send one that is actually stale.
+
+That is a property of the design, not a caveat. The three-day rule is
+honoured conservatively. The next person to read this should not take
+the fallback as a guess.
+
 ## What this PR does
 
 - Re-arms live `fetch_prelims` (`deliver: true`). That is the only path that

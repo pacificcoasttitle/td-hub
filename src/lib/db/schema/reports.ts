@@ -68,6 +68,19 @@ const dataset = {
   rejectedTypes: jsonb('rejected_types'),
 };
 
+/**
+ * Subject and Settings as the list prints them, stored at creation and rewritten
+ * whenever the document is regenerated (migration 0058). Stored rather than
+ * derived so the union is the same columns from every table — and so the row
+ * says what the document says, the way template_version ties a PDF to its
+ * template. Nullable: a row exists before its document does.
+ */
+const listing = {
+  listSubject: varchar('list_subject', { length: 300 }),
+  listSubjectDetail: varchar('list_subject_detail', { length: 300 }),
+  listSettings: varchar('list_settings', { length: 300 }),
+};
+
 const artifact = {
   templateVersion: varchar('template_version', { length: 20 }).notNull(),
   pdfStorageKey: varchar('pdf_storage_key', { length: 500 }),
@@ -90,6 +103,7 @@ export const salesActivityReports = pgTable('sales_activity_reports', {
   windowEnd: date('window_end').notNull(),
   ...brandedTo,
   ...dataset,
+  ...listing,
   metrics: jsonb('metrics'),
   months: jsonb('months'),
   ...artifact,
@@ -105,6 +119,7 @@ export const carrierRouteReports = pgTable('carrier_route_reports', {
   ...brandedTo,
   ...dataset,
   /** Each standout computed from its OWN field; legacy's non-owner tile was not. */
+  ...listing,
   standouts: jsonb('standouts'),
   routes: jsonb('routes'),
   ...artifact,
@@ -120,6 +135,7 @@ export const countySalesReports = pgTable('county_sales_reports', {
   month: date('month').notNull(),
   ...brandedTo,
   ...dataset,
+  ...listing,
   cities: jsonb('cities'),
   /** From the per-sale rows: a median of city medians is not a median. */
   totals: jsonb('totals'),

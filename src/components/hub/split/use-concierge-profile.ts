@@ -36,7 +36,8 @@ export interface UseConciergeProfile {
 }
 
 export interface GenerateArgs {
-  orderId: number | null;
+  /** Required: the route refuses a generation with no order to dedupe against. */
+  orderId: number;
   street: string; city: string; state: string; zip: string;
   preparedForName: string;
   preparedForCompany: string | null;

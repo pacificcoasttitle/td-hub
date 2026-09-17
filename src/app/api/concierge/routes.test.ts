@@ -45,6 +45,23 @@ describe('exactly one route can spend a credit', () => {
     expect(generate).toContain('409');
   });
 
+  it('requires an orderId, because the double-charge guard needs one', () => {
+    // While orderId was optional, a generation without one skipped the
+    // one-profile-per-order check entirely and had nothing stopping a second
+    // click spending a second credit.
+    expect(generate).toMatch(/orderId:\s*z\.number\(\)\.int\(\)\.positive\(\),/);
+    expect(generate).not.toMatch(/orderId:.*(nullable|optional)/);
+  });
+
+  it('runs the duplicate check on every request, not only when an order is given', () => {
+    // The guard must not sit inside `if (parsed.data.orderId)`.
+    expect(generate).not.toMatch(/if\s*\(\s*parsed\.data\.orderId\s*\)/);
+    const guard = generate.indexOf('getProfileForOrder');
+    const generator = generate.indexOf('generateConciergeProfile(');
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(generator);
+  });
+
   it('the PDF route never accepts a storage key from the browser', () => {
     const pdf = read('profiles/[id]/pdf/route.ts');
     expect(pdf).toContain('getProfilePdfKey(id)');

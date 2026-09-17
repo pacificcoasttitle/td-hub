@@ -1,4 +1,5 @@
-import { pgTable, serial, varchar, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, serial, varchar, text, integer, timestamp, date, jsonb, index } from 'drizzle-orm/pg-core';
+import { contacts } from './contacts';
 
 // ─── Report deliveries ───────────────────────────────────────────────────────
 //
@@ -36,4 +37,94 @@ export const reportDeliveries = pgTable('report_deliveries', {
 }, (t) => ({
   reportIdx: index('report_deliveries_report_idx').on(t.reportType, t.reportId, t.attemptedAt),
   attemptedIdx: index('report_deliveries_attempted_idx').on(t.attemptedAt),
+}));
+
+// ─── The three farming reports (migration 0057) ─────────────────────────────
+//
+// Three tables, not one: the list page prints Subject and Settings per row and
+// those differ per type. The dataset is stored as the uploaded file; the report
+// is stored as the COMPUTED FIGURES, so a re-render costs nothing and cannot
+// drift from the database. Rejected rows are counted against the value that
+// caused them — legacy dropped `Condo` and `SFR` in silence.
+
+/** Columns every farming report carries. Repeated per table, deliberately. */
+const brandedTo = {
+  brandedToContactId: integer('branded_to_contact_id').references(() => contacts.id, { onDelete: 'set null' }),
+  brandedToName: varchar('branded_to_name', { length: 200 }).notNull(),
+  brandedToTitle: varchar('branded_to_title', { length: 120 }),
+  brandedToEmail: varchar('branded_to_email', { length: 200 }),
+  brandedToPhone: varchar('branded_to_phone', { length: 50 }),
+  brandedToPhotoKey: varchar('branded_to_photo_key', { length: 500 }),
+};
+
+const dataset = {
+  datasetSource: varchar('dataset_source', { length: 20 }).notNull().default('csv_upload'),
+  datasetStorageKey: varchar('dataset_storage_key', { length: 500 }),
+  datasetSha256: varchar('dataset_sha256', { length: 64 }),
+  datasetRows: integer('dataset_rows').notNull().default(0),
+  datasetUsed: integer('dataset_used').notNull().default(0),
+  datasetRejected: integer('dataset_rejected').notNull().default(0),
+  /** {"Mineral Rights": 4, "(blank type)": 2} — reported, never discarded. */
+  rejectedTypes: jsonb('rejected_types'),
+};
+
+const artifact = {
+  templateVersion: varchar('template_version', { length: 20 }).notNull(),
+  pdfStorageKey: varchar('pdf_storage_key', { length: 500 }),
+  pdfSha256: varchar('pdf_sha256', { length: 64 }),
+  pdfBytes: integer('pdf_bytes'),
+  pdfPageCount: integer('pdf_page_count'),
+  status: varchar('status', { length: 20 }).notNull().default('pending'),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  createdBy: varchar('created_by', { length: 100 }),
+};
+
+export const salesActivityReports = pgTable('sales_activity_reports', {
+  id: serial('id').primaryKey(),
+  areaName: varchar('area_name', { length: 200 }).notNull(),
+  propertyType: varchar('property_type', { length: 40 }),
+  windowMonths: integer('window_months').notNull(),
+  /** A real date range. Legacy matched the month NUMBER and mixed three Augusts. */
+  windowStart: date('window_start').notNull(),
+  windowEnd: date('window_end').notNull(),
+  ...brandedTo,
+  ...dataset,
+  metrics: jsonb('metrics'),
+  months: jsonb('months'),
+  ...artifact,
+}, (t) => ({
+  createdIdx: index('sales_activity_created_idx').on(t.createdAt),
+  brandedIdx: index('sales_activity_branded_idx').on(t.brandedToContactId),
+}));
+
+export const carrierRouteReports = pgTable('carrier_route_reports', {
+  id: serial('id').primaryKey(),
+  areaName: varchar('area_name', { length: 200 }).notNull(),
+  rankBy: varchar('rank_by', { length: 30 }).notNull(),
+  ...brandedTo,
+  ...dataset,
+  /** Each standout computed from its OWN field; legacy's non-owner tile was not. */
+  standouts: jsonb('standouts'),
+  routes: jsonb('routes'),
+  ...artifact,
+}, (t) => ({
+  createdIdx: index('carrier_route_created_idx').on(t.createdAt),
+  brandedIdx: index('carrier_route_branded_idx').on(t.brandedToContactId),
+}));
+
+export const countySalesReports = pgTable('county_sales_reports', {
+  id: serial('id').primaryKey(),
+  county: varchar('county', { length: 60 }).notNull(),
+  /** The first of the month, as a date. Not a month number. */
+  month: date('month').notNull(),
+  ...brandedTo,
+  ...dataset,
+  cities: jsonb('cities'),
+  /** From the per-sale rows: a median of city medians is not a median. */
+  totals: jsonb('totals'),
+  ...artifact,
+}, (t) => ({
+  createdIdx: index('county_sales_created_idx').on(t.createdAt),
+  brandedIdx: index('county_sales_branded_idx').on(t.brandedToContactId),
 }));

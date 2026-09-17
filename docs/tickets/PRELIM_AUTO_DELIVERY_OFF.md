@@ -1,8 +1,21 @@
 # Prelim auto-delivery is OFF — temporary, and must not stay that way
 
-**Status: OFF since 2026-09-17 17:34 UTC** (production deploy of #154).
-**Must be followed by:** the age rule below. Until it ships, no prelim is
-emailed to anyone automatically — not the backlog, and not today's orders.
+**RESOLVED.** Prelim auto-delivery was fully off for 18 minutes and is now
+age-guarded.
+
+| When (UTC, 2026-09-17) | State |
+|---|---|
+| 17:34 | #154 deployed: the fetch path ingests with `deliver: false`. Nothing auto-delivers. |
+| 17:52 | #156 deployed: the age guard. A prelim issued within `PRELIM_AUTO_DELIVERY_MAX_AGE_DAYS` (3) delivers; older ones are stored and skipped as `skipped_older_than_window`. |
+| 18:51 | #157 deployed: the held-prelim retry goes through the same guard. |
+
+Age is taken from `resolvePrelimIssuedAt` — SoftPro's document date, falling back
+to the order's open date — NOT `documents.created_at`, which is the date the hub
+fetched it.
+
+Confirmed in production: at 18:01 an order opened 2026-07-14 was stored and
+skipped as `skipped_older_than_window`, and between 18:14 and 18:16 nine prelims
+for orders opened 2026-09-14 delivered normally.
 
 ## What happened
 
@@ -15,7 +28,7 @@ Gerard: no emails for the backlog.
 #154 (Cursor) is the emergency stop: `softpro.fetch_prelims` now ingests with
 `deliver: false`.
 
-## Why this is not a resting state
+## Why a permanent stop would not have been a resting state
 
 That job was the ONLY path that has ever auto-delivered a prelim:
 
@@ -30,19 +43,12 @@ sales reps get nothing unless someone presses Deliver Prelim by hand. That is th
 failure this incident started from — prelims not reaching people, and nobody
 noticing for weeks.
 
-## The follow-up: the age rule
+## The follow-up that shipped: the age rule
 
-In the same fetch path, deliver a prelim only when it is recent; store old ones
-without sending. Gerard's instruction: nothing older than three days goes out.
-
-- Recent (SoftPro issued / uploaded within 3 days): ingest and auto-deliver as before.
-- Older: ingest, visible in the hub, no email.
-- Decide what "age" is measured from. NOT `documents.created_at` — a prelim
-  fetched today has today's `created_at` whatever SoftPro's date is.
-  `GetAttachedDocumentsPrelim` returns `ModifiedAt`; the order's open date is a
-  fallback.
-
-Owner: Cursor (delivery side).
+#156 and #157 (Cursor). A prelim issued within 3 days delivers as before; an
+older one is stored, shown in the hub, and recorded as
+`skipped_older_than_window`. Age comes from SoftPro's document date, with the
+order's open date as the fallback.
 
 ## How to know it is back on
 

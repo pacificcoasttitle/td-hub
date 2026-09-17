@@ -31,7 +31,7 @@ export interface IngestPrelimFromSoftProInput {
   occurredAt?: Date | null;
   source: SoftProPrelimIngestSource;
   createdBy: string;
-  /** When true (webhook update path), call maybeAutoDeliverPrelim after ingest. Cron always delivers. */
+  /** When true, call maybeAutoDeliverPrelim after ingest. Fetch/backfill hardcode false. Webhook is the only live send. */
   deliver: boolean;
   triggeredBy: 'fetch_prelims' | 'softpro_webhook';
 }

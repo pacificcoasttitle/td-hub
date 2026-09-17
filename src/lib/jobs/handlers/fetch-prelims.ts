@@ -277,7 +277,10 @@ export async function fetchPrelimsForOrder(
         documentUrl: url,
         source: 'softpro_fetch',
         createdBy: 'job:fetch_prelims',
-        deliver: true,
+        // Fetch is a recovery/safety-net. It stores. It does not mail.
+        // A 20-day backfill lands with today's hub timestamp; delivery
+        // here would treat every catch-up as news. Webhook stays armed.
+        deliver: false,
         triggeredBy: 'fetch_prelims',
       });
 

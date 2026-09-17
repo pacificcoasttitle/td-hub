@@ -29,6 +29,25 @@ export const jobs = pgTable('jobs', {
   retryIdx: index('jobs_retry_idx').on(table.nextRetryAt),
 }));
 
+/**
+ * The jobs watchdog's memory of what it has told a person (migration 0054).
+ * One open row per (job type, condition); see src/lib/domain/ops/job-health.ts.
+ */
+export const jobHealthAlerts = pgTable('job_health_alerts', {
+  id: serial('id').primaryKey(),
+  jobType: varchar('job_type', { length: 100 }).notNull(),
+  condition: varchar('condition', { length: 40 }).notNull(),
+  summary: text('summary').notNull(),
+  detail: jsonb('detail'),
+  openedAt: timestamp('opened_at').notNull().defaultNow(),
+  lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+  lastAlertedAt: timestamp('last_alerted_at'),
+  alertCount: integer('alert_count').notNull().default(0),
+  resolvedAt: timestamp('resolved_at'),
+}, (table) => ({
+  openedIdx: index('job_health_alerts_opened_idx').on(table.openedAt),
+}));
+
 export const contactSyncState = pgTable('contact_sync_state', {
   entityType: varchar('entity_type', { length: 100 }).primaryKey(),
   jobType: varchar('job_type', { length: 100 }).notNull(),

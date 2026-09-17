@@ -11,7 +11,14 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 const bodySchema = z.object({
-  orderId: z.number().int().positive().nullable().optional(),
+  // REQUIRED. The one-profile-per-order check below is the only thing standing
+  // between a second click and a second credit, and it can only run when the
+  // generation is tied to an order. While this was optional, a request without
+  // an orderId had no double-charge protection at all. The table still allows a
+  // null order_id (docs/migration-concierge-profile.sql), so an address-only
+  // profile remains possible — but not from the route that spends money, and
+  // not until it carries its own idempotency.
+  orderId: z.number().int().positive(),
   street: z.string().min(1),
   city: z.string().min(1),
   state: z.string().min(1).default('CA'),
@@ -46,20 +53,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }, { status: 400 });
   }
 
-  // One profile per order. A second Generate on an order that already has one
-  // is refused rather than silently charged again — the tile should never offer
-  // it, and this is the server saying so too.
-  if (parsed.data.orderId) {
-    const existing = await getProfileForOrder(parsed.data.orderId);
-    if (existing && existing.status !== 'failed') {
-      return NextResponse.json({
-        error: 'This order already has a property profile. Adjust its criteria or re-render it — neither costs a credit.',
-        profileId: existing.id,
-      }, { status: 409 });
-    }
+  // One profile per order, checked on EVERY request. A second Generate on an
+  // order that already has one is refused rather than silently charged again —
+  // the tile should never offer it, and this is the server saying so too.
+  const existing = await getProfileForOrder(parsed.data.orderId);
+  if (existing && existing.status !== 'failed') {
+    return NextResponse.json({
+      error: 'This order already has a property profile. Adjust its criteria or re-render it — neither costs a credit.',
+      profileId: existing.id,
+    }, { status: 409 });
   }
 
-  const rep = await resolvePresentingRep(parsed.data.orderId ?? null, parsed.data.presentingRepContactId);
+  const rep = await resolvePresentingRep(parsed.data.orderId, parsed.data.presentingRepContactId);
   if (!rep.ok) {
     return NextResponse.json({ error: rep.message, reason: rep.reason }, { status: 400 });
   }

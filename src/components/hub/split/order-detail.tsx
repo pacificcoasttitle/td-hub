@@ -9,6 +9,7 @@ import { DocumentsPanel, type GenerateKind, type OrderDocuments } from './docume
 import { PartiesPanel } from './parties-panel';
 import { NotesStrip } from './notes-strip';
 import { DeliverableEmailsPanel } from './deliverable-emails-panel';
+import { ConciergeProfilePanel } from './concierge-profile-panel';
 import { useOrderExtras } from './use-order-extras';
 import { ReconcileBanner } from './reconcile-banner';
 
@@ -174,6 +175,11 @@ export function OrderDetail({
         </div>
 
         <DocumentsPanel documents={d.documents} onGenerate={d.onGenerateDocument} />
+
+        {/* On the pane, NOT in Documents: everything there is free to fetch,
+            and this one spends a credit. It draws nothing unless the server
+            says the feature is on and the role may generate. */}
+        <ConciergeProfilePanel order={order} />
 
         {/* Editable for the life of the order — the common case is adding
             somebody after the order is already open. */}

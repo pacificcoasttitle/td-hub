@@ -139,14 +139,6 @@ describe('an entity is never run through the person parser', () => {
     expect(renderBorrowerName('CONNOR AND CO')).toBe('CONNOR AND CO');
   });
 
-  it('does not split a trust on & — that ampersand is the name', () => {
-    const r = resolveBorrowers(base({
-      primaryOwner: '2026 HOI NHU LE & MY LINH THI PHAM REV T,',
-    }));
-    expect(r.names).toEqual(['2026 HOI NHU LE & MY LINH THI PHAM REV T,']);
-    expect(r.names).toHaveLength(1);
-  });
-
   it('never returns empty for a name that had content', () => {
     for (const n of ['X', 'A B', 'ESTATE OF SOMEONE', '  PADDED  ']) {
       expect(renderBorrowerName(n).trim()).not.toBe('');

@@ -11,6 +11,7 @@ import {
 } from './normalize';
 import { convertPlatMap } from './platmap';
 import { DEFAULT_CRITERIA } from './comp-filter';
+import { claimProperty, propertyRequestKey, recordClaimOutcome, releaseClaim } from './claim';
 import { TEMPLATE_VERSION } from './document/profile-document';
 import { renderProfile } from './render';
 
@@ -49,10 +50,32 @@ export interface GenerateInput {
 
 export type GenerateOutcome =
   | { ok: true; profileId: number; creditsCharged: number; compsShown: number }
-  | { ok: false; profileId: number | null; creditsCharged: number; message: string };
+  | { ok: false; profileId: number | null; creditsCharged: number; message: string }
+  /**
+   * A request within the claim window already generated (or is generating) this
+   * property. Nothing was spent; the caller shows that profile instead.
+   */
+  | { ok: false; duplicate: true; profileId: number | null; creditsCharged: 0; message: string };
 
 export async function generateConciergeProfile(input: GenerateInput): Promise<GenerateOutcome> {
   const feedId = getConciergeFeedId();
+
+  // 0. THE GUARD, BEFORE ANYTHING. Keyed on the property, not the order: the
+  //    Reports entry point has no order, and a read-then-write check loses the
+  //    race a double-click creates. Exactly one caller comes away holding this.
+  const requestKey = propertyRequestKey(input);
+  const claim = await claimProperty(requestKey);
+  if (!claim.held) {
+    return {
+      ok: false,
+      duplicate: true,
+      profileId: claim.profileId,
+      creditsCharged: 0,
+      message: claim.profileId
+        ? 'A profile for this property was generated moments ago. Opening that one — nothing was charged.'
+        : 'A profile for this property is being generated right now. Nothing was charged.',
+    };
+  }
 
   // 1. The row exists before the call does. A profile that fails halfway is a
   //    row with a reason on it, never a missing record and a spent credit.
@@ -111,8 +134,18 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
     await db.update(conciergeProfiles)
       .set({ ...guardCols, status: 'failed', errorMessage: message })
       .where(eq(conciergeProfiles.id, profileId));
+    // Nothing spent — give the property back, so a corrected retry is not
+    // locked out for the window. If it DID charge, the claim stands: the credit
+    // is gone and a second click must not spend another.
+    if (result.creditsCharged === 0) await releaseClaim(requestKey);
+    else await recordClaimOutcome(requestKey, profileId, null);
     return { ok: false, profileId, creditsCharged: result.creditsCharged, message };
   }
+
+  // The call charged, so the claim is now permanent for its window whatever
+  // happens next. Recorded here rather than at the end, because every path
+  // below this point has already spent the credit.
+  await recordClaimOutcome(requestKey, profileId, null);
 
   // 4. RAW TO STORAGE BEFORE ANYTHING PARSES IT. We are not paying twice for a
   //    payload lost to a parse error.
@@ -203,6 +236,10 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
     taxStatus: tax.status,
     compsReturned: comps.length,
   }).where(eq(conciergeProfiles.id, profileId));
+
+  // The property this address turned out to be. Evidence on the claim, not the
+  // pre-spend key — the APN does not exist until the call has been paid for.
+  await recordClaimOutcome(requestKey, profileId, subject.apn ?? null);
 
   // 6. Render. Separate module, no vendor access — see render.ts.
   const rendered = await renderProfile(profileId, DEFAULT_CRITERIA);

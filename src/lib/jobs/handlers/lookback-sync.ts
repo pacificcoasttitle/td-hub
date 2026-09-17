@@ -87,6 +87,15 @@ export function isOffPeakHour(utcHour: number): boolean {
 
 export interface LookbackSyncResult extends LookbackCounts {
   dryRun: boolean;
+  /**
+   * Write runs only: orders whose update threw. They count as checked but NOT
+   * as corrected — `corrected`, `correctedTo` and `fieldsChanged` describe what
+   * landed. Until 2026-09-17 a failed write was counted as corrected, because
+   * the counts were folded in before the write ran.
+   */
+  writeFailed: number;
+  /** One entry per failed write, so the run records as completed with errors. */
+  errors: Array<{ fileNumber: string; error: string }>;
   /** Set when the run declined to take work. Counts are all zero. */
   skipped: 'shut_off' | 'business_hours' | null;
   correctionPct: number | null;
@@ -107,6 +116,8 @@ function skippedResult(reason: 'shut_off' | 'business_hours', dryRun: boolean): 
   return {
     ...emptyCounts(),
     dryRun,
+    writeFailed: 0,
+    errors: [],
     skipped: reason,
     correctionPct: null,
     nextCursorId: null,
@@ -242,6 +253,8 @@ export async function handleLookbackSync(
   const deadline = createDeadline('softpro.lookback_sync');
 
   const counts = emptyCounts();
+  let writeFailed = 0;
+  const errors: Array<{ fileNumber: string; error: string }> = [];
   let stoppedEarly = false;
   let attempted = 0;
   /** Highest id fully processed — only advanced past finished units. */
@@ -274,7 +287,6 @@ export async function handleLookbackSync(
         : null;
 
       const diff = diffOrder(order, detail);
-      accumulate(counts, order.band, diff);
 
       // Only write when the diff is usable. An unreadable order is left exactly
       // as it was — we did not learn that it is correct, only that we could not
@@ -287,12 +299,22 @@ export async function handleLookbackSync(
             preserveExistingOnEmpty: true,
             statusHistorySource: LOOKBACK_STATUS_SOURCE,
           });
+          // Counted AFTER the write lands. A correction that did not land is
+          // not a correction.
+          accumulate(counts, order.band, diff);
         } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
           console.error('[lookback-sync] write failed', {
-            orderId: order.id, fileNumber: order.fileNumber,
-            message: err instanceof Error ? err.message : err,
+            orderId: order.id, fileNumber: order.fileNumber, message,
           });
+          // Checked — SoftPro was read and compared — but nothing changed here.
+          accumulate(counts, order.band, { ...diff, statusChanged: false, becameTerminal: false, fieldChanges: [] });
+          writeFailed++;
+          errors.push({ fileNumber: order.fileNumber, error: message });
         }
+      } else {
+        // A dry run counts what it WOULD correct; an unusable diff counts as unchecked.
+        accumulate(counts, order.band, diff);
       }
 
       // Advance only after the unit is finished, so a budget stop never leaves
@@ -313,6 +335,8 @@ export async function handleLookbackSync(
   const result: LookbackSyncResult = {
     ...counts,
     dryRun,
+    writeFailed,
+    errors,
     skipped: null,
     correctionPct: correctionPct(counts),
     nextCursorId: windowComplete ? null : highWater,

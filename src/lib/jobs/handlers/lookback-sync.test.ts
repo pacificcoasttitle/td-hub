@@ -109,6 +109,33 @@ describe('dry run writes nothing', () => {
 
 // ─── Timeouts ───────────────────────────────────────────────────────────────
 
+describe('a correction counts only once it has landed', () => {
+  it('does not count a failed write as corrected, and records it as an error', async () => {
+    // Until 2026-09-17 the counts were folded in before the write ran, so a
+    // write that threw still reported the order as corrected.
+    rows.claimed = claimed(3);
+    processMock.mockImplementation(async (item: unknown) => {
+      if ((item as { OrderNumber: string }).OrderNumber === 'F101') throw new Error('deadlock detected');
+      return undefined;
+    });
+
+    const r = await handleLookbackSync({ dryRun: false });
+
+    expect(r.checked).toBe(3);
+    expect(r.corrected).toBe(2);
+    expect(r.correctedTo).toEqual({ Closed: 2 });
+    expect(r.writeFailed).toBe(1);
+    expect(r.errors).toEqual([{ fileNumber: 'F101', error: 'deadlock detected' }]);
+    expect(r.correctionPct).toBeCloseTo(66.67, 1);
+  });
+
+  it('a dry run still counts what it would correct', async () => {
+    rows.claimed = claimed(3);
+    const r = await handleLookbackSync({ dryRun: true });
+    expect(r).toMatchObject({ corrected: 3, writeFailed: 0, errors: [] });
+  });
+});
+
 describe('timeouts count as unchecked', () => {
   // FAKE TIMERS, not a real wait. This used to sleep PER_CALL_TIMEOUT_MS + 5s of
   // actual wall clock — 35 seconds on every run of the whole suite, holding a

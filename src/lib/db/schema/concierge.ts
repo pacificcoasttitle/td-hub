@@ -117,6 +117,21 @@ export const conciergeProfiles = pgTable('concierge_profiles', {
   searchIdx: index('concierge_profiles_searchid_idx').on(t.sitexSearchId),
 }));
 
+/**
+ * The double-charge guard (migration 0055). One row per normalized requested
+ * address; claimed before the SiteX call, released when nothing was spent.
+ * See src/lib/domain/concierge/claim.ts.
+ */
+export const conciergeProfileClaims = pgTable('concierge_profile_claims', {
+  requestKey: varchar('request_key', { length: 200 }).primaryKey(),
+  profileId: integer('profile_id').references(() => conciergeProfiles.id, { onDelete: 'set null' }),
+  /** Written after the call: the property the address turned out to be. */
+  apn: varchar('apn', { length: 50 }),
+  claimedAt: timestamp('claimed_at').notNull().defaultNow(),
+}, (t) => ({
+  claimedIdx: index('concierge_profile_claims_claimed_idx').on(t.claimedAt),
+}));
+
 export const conciergeProfileComps = pgTable('concierge_profile_comps', {
   id: serial('id').primaryKey(),
   profileId: integer('profile_id').notNull().references(() => conciergeProfiles.id, { onDelete: 'cascade' }),

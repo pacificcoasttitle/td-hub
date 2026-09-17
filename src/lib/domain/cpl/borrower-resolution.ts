@@ -91,13 +91,11 @@ function hasMarker(name: string): boolean {
  *
  * `parseSiteXOwners` is a PERSON parser — it turns "LUCHSHEYE CORP" into
  * "Corp Luchsheye". The entity check runs first so a company is never fed to
- * it. A trust or company that contains `&` is kept whole — that ampersand is
- * part of the name, not a second owner.
+ * it.
  */
 export function renderBorrowerName(raw: string): string {
   const name = raw.trim();
   if (name === '') return '';
-  if (classifyPartyName(name) !== 'person') return name;
   if (hasMarker(name)) return name;
 
   const parsed = parseSiteXOwners(name);
@@ -111,21 +109,6 @@ export function renderBorrowerName(raw: string): string {
 /** Split "A; B" / "A & B" the way the record owner columns store them. */
 function splitOwners(raw: string): string[] {
   return raw.split(/;| & /).map((s) => s.trim()).filter((s) => s !== '');
-}
-
-function recordOwnerNames(primary?: string | null, secondary?: string | null): string[] {
-  const out: string[] = [];
-  for (const raw of [primary, secondary]) {
-    const value = (raw ?? '').trim();
-    if (!value) continue;
-    // A trust or company is one name even when it contains `&`.
-    if (classifyPartyName(value) !== 'person') {
-      out.push(value);
-      continue;
-    }
-    out.push(...splitOwners(value).map(renderBorrowerName).filter((n) => n !== ''));
-  }
-  return out;
 }
 
 export function resolveBorrowers(i: BorrowerInputs): BorrowerResolution {
@@ -156,8 +139,12 @@ export function resolveBorrowers(i: BorrowerInputs): BorrowerResolution {
     };
   }
 
-  const names = recordOwnerNames(i.primaryOwner, i.secondaryOwner);
-  if (names.length > 0) {
+  const owners = [
+    ...splitOwners(i.primaryOwner ?? ''),
+    ...splitOwners(i.secondaryOwner ?? ''),
+  ];
+  if (owners.length > 0) {
+    const names = owners.map(renderBorrowerName).filter((n) => n !== '');
     return {
       names,
       source: 'record_owner',
@@ -210,67 +197,7 @@ export type NameKind = 'person' | 'trust' | 'company';
  * matched TRUSTEE and nothing else, and all 11 were people —
  * "DANNA MICHAEL A (TRUSTEE)". A trustee is a person acting for a trust.
  */
-// TRUSTEE is still absent: "DANNA MICHAEL A (TRUSTEE)" is a person.
-// Bare TR is not — SiteX writes "NGUYEN, GIAHUY H TR G H" / "NGUYEN LIVING TR",
-// and the letter sweep printed those as "Giahuy H Tr G H Nguyen" and
-// "Living Tr Nguyen". \bTR\b does not match TRUSTEE.
-const TRUST_MARKER = /\bTRUST\b|\bLIVING TR\b|\bFAMILY TR\b|\bREV(?:OCABLE)? TR\b|\bREV T\b|\bTR\b/i;
-
-/**
- * Vesting prose that is not a name. Westcor's person path takes the last
- * token as Last, so "husband and wife as joint tenants" printed Tenants as
- * the borrower, and a trust "dated September 01, 2016" printed 2016.
- *
- * These only REMOVE a clause. They never invent a person or pick a surname.
- */
-const VESTING_CLAUSE = [
-  /,?\s*(all\s+)?as\s+joint\s+tenants\b.*$/i,
-  /,?\s*(as\s+)?tenants\s+in\s+common\b.*$/i,
-  /,?\s*husband\s+and\s+wife\b.*$/i,
-  /,?\s*as\s+(his|her)\s+sole\s+and\s+separate\s+property\b.*$/i,
-  /,?\s*as\s+to\s+an\s+undivided\b[^,]*/gi,
-  /,?\s*a(n)?\s+(single|unmarried|married)\s+(man|woman)\b[^,]*/gi,
-  /,?\s*a\s+widow(ed)?\b[^,]*/gi,
-];
-
-const JUNK_FRAGMENT = /^(?:\d{4}|tenants|common|trustee|trustees|dated|and)$/i;
-
-export function looksLikeVesting(raw: string): boolean {
-  const name = (raw ?? '').trim();
-  if (!name) return false;
-  if (classifyPartyName(name) === 'trust') return true;
-  return /joint\s+tenants|tenants\s+in\s+common|trustee\s+of\b|dated\s+\w+|husband\s+and\s+wife|undivided/i.test(name);
-}
-
-export function stripVestingClauses(raw: string): string {
-  let name = (raw ?? '').trim().replace(/[.,;]+$/g, '');
-  let prev = '';
-  while (name !== prev) {
-    prev = name;
-    for (const clause of VESTING_CLAUSE) {
-      name = name.replace(clause, '').trim().replace(/[.,;]+$/g, '');
-    }
-  }
-  return name.replace(/\s+/g, ' ').trim();
-}
-
-export function isJunkNameFragment(raw: string): boolean {
-  const name = stripVestingClauses(raw);
-  if (!name) return true;
-  return JUNK_FRAGMENT.test(name);
-}
-
-/**
- * The modal's seller box uses "; " / ", " as a people separator. A pasted
- * vesting is one name that happens to contain commas — "Trust dated
- * September 01, 2016" is not three people, the last of whom is called 2016.
- */
-export function splitTypedNames(raw?: string | null): string[] {
-  const value = (raw ?? '').trim();
-  if (!value) return [];
-  if (looksLikeVesting(value)) return [value];
-  return value.split(/;|,/).map((n) => n.trim()).filter((n) => n !== '');
-}
+const TRUST_MARKER = /\bTRUST\b|\bLIVING TR\b|\bFAMILY TR\b/i;
 
 /**
  * `trust` is tested before `company` because a trust name almost always also

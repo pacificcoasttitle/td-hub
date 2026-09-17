@@ -195,6 +195,9 @@ describe('ingestPrelimFromSoftPro', () => {
     expect(result.isUpdate).toBe(false);
     expect(result.documentId).toBe(99);
     expect(maybeAutoDeliverMock).toHaveBeenCalledTimes(1);
+    expect(maybeAutoDeliverMock).toHaveBeenCalledWith(expect.objectContaining({
+      softproDocumentAt: new Date('2026-07-10T15:00:00Z'),
+    }));
 
     const inserted = insertValuesMock.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(inserted.isSyncedToSoftpro).toBe(true);

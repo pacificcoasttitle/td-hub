@@ -277,10 +277,11 @@ export async function fetchPrelimsForOrder(
         documentUrl: url,
         source: 'softpro_fetch',
         createdBy: 'job:fetch_prelims',
-        // Fetch is a recovery/safety-net. It stores. It does not mail.
-        // A 20-day backfill lands with today's hub timestamp; delivery
-        // here would treat every catch-up as news. Webhook stays armed.
-        deliver: false,
+        // Fetch is the live send path. The webhook has never fired once.
+        // Age is SoftPro's document date, else the order open date — never
+        // hub created_at. Older than three Pacific days is held; recent
+        // prelims mail. See docs/tickets/PRELIM_AGE_GUARD.md.
+        deliver: true,
         triggeredBy: 'fetch_prelims',
       });
 

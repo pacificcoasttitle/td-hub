@@ -2,9 +2,9 @@
  * One-shot Title & Escrow prelim ingest. Not a cron. Not the live fetch_prelims handler.
  *
  * This recovery is DOCUMENT fetch lag: T&E prelims issued months ago and
- * fetched now are not news. Fetch and this backfill both hardcode
- * `deliver: false`. Only the prelim webhook can mail. See
- * backfill-te-prelims.test.ts.
+ * fetched now are not news. This backfill hardcodes `deliver: false`.
+ * Live fetch is armed again; the three-day age rule holds old prelims.
+ * See backfill-te-prelims.test.ts and docs/tickets/PRELIM_AGE_GUARD.md.
  *
  * SoftPro endpoint is GetAttachedDocumentsPrelim (T&E only). Title-only and
  * the live cron stay on GetAttachedDocuments. TESSA is not called here.

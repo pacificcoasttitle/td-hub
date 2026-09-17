@@ -2,6 +2,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { PreSendRecipientUnresolvedError } from './pre-send-errors';
 import { db } from '@/lib/db/client';
 import { adminActivityLogs, orders } from '@/lib/db/schema';
+import { pacificMidnightUtc, pacificYmd } from '@/lib/domain/ops/calendar-day';
 import { getPrelimDeliveryMode } from './prelim-delivery-mode';
 import { resolvePrelimRecipients } from './prelim-recipient-resolution';
 import { PrelimContentCheckFailedError, sendPrelimDeliveryEmail } from './prelim-delivery-send';
@@ -9,6 +10,7 @@ import { PrelimContentCheckFailedError, sendPrelimDeliveryEmail } from './prelim
 export type PrelimAutoDeliveryOutcome =
   | 'delivered'
   | 'skipped_before_cutoff'
+  | 'skipped_older_than_window'
   | 'skipped_already_delivered'
   | 'blocked_no_recipient'
   | 'not_armed'
@@ -27,7 +29,14 @@ export type PrelimAutoDeliveryOutcome =
 export interface PrelimAutoDeliveryInput {
   orderId: number;
   documentId: number;
+  /** When the hub row was written. Used only for the feature-arm cutoff. */
   documentCreatedAt: Date;
+  /**
+   * SoftPro's document/event time when the payload carries one.
+   * The three-day window is measured against this, not hub created_at —
+   * a recovery fetch stamps today on every row.
+   */
+  softproDocumentAt?: Date | null;
   triggeredBy: 'fetch_prelims' | 'softpro_webhook';
 }
 
@@ -37,6 +46,8 @@ export interface PrelimAutoDeliveryResult {
   needsManualDelivery: boolean;
   reason?: string;
   messageId?: string;
+  issuedAt?: string;
+  issuedAtSource?: 'softpro_document' | 'order_opened_at' | 'none';
   /**
    * The send succeeded but a proof row did not get written. Carried here and
    * onto the attempt log because the previous version dropped it: the writeback
@@ -69,7 +80,8 @@ function parseCutoff(): Date | null {
  * must not mail anyone, whenever its prelim turns up. Only the gap between
  * opened_at and created_at separates them, and it is a property of the ORDER,
  * not of the document — so a late prelim on a long-held file is untouched by
- * this gate.
+ * this gate. The three-day window (`PRELIM_AUTO_DELIVERY_MAX_AGE_DAYS`) is a
+ * different clock on the prelim itself.
  *
  * WHY TEN DAYS. Two independent lines agree. Measured: across 5,262 orders
  * opened since 2026-04 and created before the 2026-08-27 recovery, the lag runs
@@ -83,7 +95,50 @@ function parseCutoff(): Date | null {
  */
 export const BACKFILL_LAG_THRESHOLD_DAYS = 10;
 
+/**
+ * Auto-delivery will not mail a prelim older than this many Pacific calendar
+ * days. Age is SoftPro's document date, or the order's open date if SoftPro
+ * sent none. Hub created_at is not consulted — a fetch today of an August
+ * prelim would otherwise look new. Fail closed when neither date exists.
+ */
+export const PRELIM_AUTO_DELIVERY_MAX_AGE_DAYS = 3;
+
 const DAY_MS = 86_400_000;
+
+function addCalendarDays(
+  ymd: { year: number; month: number; day: number },
+  days: number,
+): { year: number; month: number; day: number } {
+  const utc = new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day + days));
+  return {
+    year: utc.getUTCFullYear(),
+    month: utc.getUTCMonth() + 1,
+    day: utc.getUTCDate(),
+  };
+}
+
+/** Inclusive start of the auto-delivery window: midnight Pacific, today minus 3 days. */
+export function prelimAutoDeliveryWindowStart(now: Date = new Date()): Date {
+  return pacificMidnightUtc(addCalendarDays(pacificYmd(now), -PRELIM_AUTO_DELIVERY_MAX_AGE_DAYS));
+}
+
+async function resolvePrelimIssuedAt(
+  orderId: number,
+  softproDocumentAt: Date | null | undefined,
+): Promise<{ at: Date | null; source: 'softpro_document' | 'order_opened_at' | 'none' }> {
+  if (softproDocumentAt && !Number.isNaN(softproDocumentAt.getTime())) {
+    return { at: softproDocumentAt, source: 'softpro_document' };
+  }
+
+  const [row] = await db
+    .select({ openedAt: orders.openedAt })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (row?.openedAt) return { at: row.openedAt, source: 'order_opened_at' };
+  return { at: null, source: 'none' };
+}
 
 /**
  * Whether this order reached us by backfill rather than by seeing it happen.
@@ -161,6 +216,8 @@ async function logAttempt(input: PrelimAutoDeliveryInput, result: PrelimAutoDeli
       triggered_by: input.triggeredBy,
       message_id: result.messageId,
       writeback_warning: result.writebackWarning ?? null,
+      issued_at: result.issuedAt ?? null,
+      issued_at_source: result.issuedAtSource ?? null,
     } as Record<string, unknown>,
   });
 }
@@ -187,6 +244,22 @@ export async function maybeAutoDeliverPrelim(input: PrelimAutoDeliveryInput): Pr
       sent: false,
       needsManualDelivery: false,
       reason: 'prelim arrived before auto-delivery cutoff',
+    });
+  }
+
+  const issued = await resolvePrelimIssuedAt(input.orderId, input.softproDocumentAt);
+  const windowStart = prelimAutoDeliveryWindowStart();
+  if (!issued.at || issued.at < windowStart) {
+    return finish(input, {
+      outcome: 'skipped_older_than_window',
+      sent: false,
+      needsManualDelivery: false,
+      issuedAt: issued.at?.toISOString(),
+      issuedAtSource: issued.source,
+      reason: issued.at
+        ? `prelim is older than the ${PRELIM_AUTO_DELIVERY_MAX_AGE_DAYS}-day auto-delivery window `
+          + `(issued ${issued.at.toISOString()} via ${issued.source}; window opens ${windowStart.toISOString()})`
+        : 'cannot establish prelim age (no SoftPro document date, no order open date)',
     });
   }
 

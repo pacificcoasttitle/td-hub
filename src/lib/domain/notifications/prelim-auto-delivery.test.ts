@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   deliveryMarkerRows,
@@ -86,14 +86,19 @@ vi.mock('./prelim-delivery-send', () => ({
   },
 }));
 
-import { maybeAutoDeliverPrelim } from './prelim-auto-delivery';
+import { maybeAutoDeliverPrelim, prelimAutoDeliveryWindowStart } from './prelim-auto-delivery';
 
 const CUTOFF = '2026-07-16T00:00:00.000Z';
+/** 17 September 2026, 10:18 PT — the day the three-day window was locked in. */
+const NOW = '2026-09-17T17:18:00.000Z';
+/** Inside the window (16 September Pacific). */
+const IN_WINDOW = '2026-09-16T18:00:00.000Z';
 
 const baseInput = {
   orderId: 5029,
   documentId: 3982,
-  documentCreatedAt: new Date(CUTOFF),
+  documentCreatedAt: new Date(IN_WINDOW),
+  softproDocumentAt: new Date(IN_WINDOW),
   triggeredBy: 'fetch_prelims' as const,
 };
 
@@ -114,8 +119,18 @@ function armLiveDelivery() {
   sendPrelimDeliveryEmailMock.mockResolvedValue({ messageId: 'sg-message-id' });
 }
 
+describe('prelimAutoDeliveryWindowStart', () => {
+  it('opens at midnight Pacific three calendar days before today', () => {
+    // 17 September 10:18 PT → window starts 14 September 00:00 PDT (07:00Z).
+    expect(prelimAutoDeliveryWindowStart(new Date(NOW)).toISOString())
+      .toBe('2026-09-14T07:00:00.000Z');
+  });
+});
+
 describe('maybeAutoDeliverPrelim', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
     deliveryMarkerRows.splice(0, deliveryMarkerRows.length);
     insertRows.splice(0, insertRows.length);
     // Default: an order the sync saw happen — opened and written the same hour,
@@ -128,6 +143,10 @@ describe('maybeAutoDeliverPrelim', () => {
     getPrelimDeliveryModeMock.mockReset();
     sendPrelimDeliveryEmailMock.mockReset();
     delete process.env.PRELIM_AUTO_DELIVERY_CUTOFF;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('skips when the prelim document arrived before the cutoff', async () => {
@@ -151,10 +170,12 @@ describe('maybeAutoDeliverPrelim', () => {
     process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
     armLiveDelivery();
 
-    // Arrival-gate proof: order age is irrelevant; only the prelim document's created_at matters.
+    // Feature-arm proof: order age is irrelevant to the cutoff; only hub
+    // created_at vs PRELIM_AUTO_DELIVERY_CUTOFF matters there. The three-day
+    // window is a different clock (SoftPro date / open date).
     const result = await maybeAutoDeliverPrelim({
       ...baseInput,
-      documentCreatedAt: new Date('2026-07-16T00:00:00.000Z'),
+      documentCreatedAt: new Date(IN_WINDOW),
     });
 
     expect(result).toMatchObject({ outcome: 'delivered', sent: true, messageId: 'sg-message-id' });
@@ -214,6 +235,122 @@ describe('maybeAutoDeliverPrelim', () => {
     });
   });
 
+  it('holds a prelim older than three Pacific calendar days — no send, not a manual-delivery flag', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+
+    // 13 September 23:59:59 PDT — the last instant before the 14 September window.
+    const result = await maybeAutoDeliverPrelim({
+      ...baseInput,
+      documentCreatedAt: new Date(NOW),
+      softproDocumentAt: new Date('2026-09-14T06:59:59.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      outcome: 'skipped_older_than_window',
+      sent: false,
+      needsManualDelivery: false,
+      issuedAtSource: 'softpro_document',
+    });
+    expect(result.reason).toContain('3-day auto-delivery window');
+    expect(sendPrelimDeliveryEmailMock).not.toHaveBeenCalled();
+    expect(resolvePrelimRecipientsMock).not.toHaveBeenCalled();
+    expect(latestOutcome()).toMatchObject({
+      outcome: 'skipped_older_than_window',
+      needs_manual_delivery: false,
+    });
+  });
+
+  it('does not treat a recovery fetch today of an old SoftPro prelim as news', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+
+    const result = await maybeAutoDeliverPrelim({
+      ...baseInput,
+      documentCreatedAt: new Date(NOW),
+      softproDocumentAt: new Date('2026-08-28T16:00:00.000Z'),
+    });
+
+    expect(result.outcome).toBe('skipped_older_than_window');
+    expect(result.issuedAtSource).toBe('softpro_document');
+    expect(sendPrelimDeliveryEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the order open date when SoftPro sent no document date', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+    orderRows.splice(0, orderRows.length, {
+      openedAt: new Date('2026-08-28T16:00:00.000Z'),
+      createdAt: new Date(NOW),
+    });
+
+    const result = await maybeAutoDeliverPrelim({
+      ...baseInput,
+      documentCreatedAt: new Date(NOW),
+      softproDocumentAt: null,
+    });
+
+    expect(result.outcome).toBe('skipped_older_than_window');
+    expect(result.issuedAtSource).toBe('order_opened_at');
+    expect(sendPrelimDeliveryEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('delivers a fetch of a recent order when SoftPro sent no document date', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+    orderRows.splice(0, orderRows.length, {
+      openedAt: new Date(IN_WINDOW),
+      createdAt: new Date(IN_WINDOW),
+    });
+
+    const result = await maybeAutoDeliverPrelim({
+      ...baseInput,
+      documentCreatedAt: new Date(NOW),
+      softproDocumentAt: null,
+    });
+
+    expect(result.outcome).toBe('delivered');
+    expect(result.sent).toBe(true);
+    expect(sendPrelimDeliveryEmailMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when neither SoftPro date nor order open date exists', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+    orderRows.splice(0, orderRows.length, {
+      openedAt: null,
+      createdAt: new Date(NOW),
+    });
+
+    const result = await maybeAutoDeliverPrelim({
+      ...baseInput,
+      documentCreatedAt: new Date(NOW),
+      softproDocumentAt: null,
+    });
+
+    expect(result).toMatchObject({
+      outcome: 'skipped_older_than_window',
+      sent: false,
+      issuedAtSource: 'none',
+    });
+    expect(result.reason).toContain('cannot establish prelim age');
+    expect(sendPrelimDeliveryEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('delivers a prelim that arrived at midnight Pacific on the first day of the window', async () => {
+    process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
+    armLiveDelivery();
+
+    const result = await maybeAutoDeliverPrelim({
+      ...baseInput,
+      documentCreatedAt: new Date(NOW),
+      softproDocumentAt: new Date('2026-09-14T07:00:00.000Z'),
+    });
+
+    expect(result.outcome).toBe('delivered');
+    expect(sendPrelimDeliveryEmailMock).toHaveBeenCalledTimes(1);
+  });
+
   it('blocks a second send for the same prelim document via idempotency', async () => {
     process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
     armLiveDelivery();
@@ -254,7 +391,7 @@ describe('maybeAutoDeliverPrelim', () => {
     const result = await maybeAutoDeliverPrelim({
       ...baseInput,
       documentId: 3983,
-      documentCreatedAt: new Date('2026-07-20T00:00:00.000Z'),
+      documentCreatedAt: new Date(IN_WINDOW),
     });
 
     expect(result).toMatchObject({ outcome: 'delivered', sent: true, messageId: 'sg-updated-version' });
@@ -385,9 +522,9 @@ describe('maybeAutoDeliverPrelim', () => {
   it('delivers a late prelim on a long-held order, however old the order is', async () => {
     process.env.PRELIM_AUTO_DELIVERY_CUTOFF = CUTOFF;
     armLiveDelivery();
-    // Opened in March 2025 and written the same day — held all along. The prelim
-    // arriving 16 months later is a real delivery. Age must not suppress it;
-    // only the lag may, and here there is none.
+    // Opened in March 2025 and written the same day — held all along. SoftPro
+    // dated the prelim inside the window, so it is a real delivery. Order age
+    // must not suppress it; only the prelim's own age (or the ingest lag) may.
     orderRows.splice(0, orderRows.length, {
       openedAt: new Date('2025-03-05T00:00:00.000Z'),
       createdAt: new Date('2025-03-05T00:30:00.000Z'),
@@ -395,7 +532,7 @@ describe('maybeAutoDeliverPrelim', () => {
 
     const result = await maybeAutoDeliverPrelim({
       ...baseInput,
-      documentCreatedAt: new Date('2026-07-20T00:00:00.000Z'),
+      documentCreatedAt: new Date(IN_WINDOW),
     });
 
     expect(result.outcome).toBe('delivered');

@@ -1,12 +1,21 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/db/client', () => ({ db: {} }));
-vi.mock('@/lib/db/schema', () => ({ adminActivityLogs: {}, eventOutbox: {}, orderContactDrift: {} }));
+vi.mock('@/lib/db/schema', () => ({
+  adminActivityLogs: {},
+  contacts: {},
+  eventOutbox: {},
+  orderContactDrift: {},
+  orderParties: {},
+}));
 
 import type { MappedOrderContacts, MappedResolvedParty } from '@/lib/integrations/softpro';
 import {
   buildContactDriftAlertEmail,
   decideRecipient,
+  planSoftProPartyPatch,
   PRE_SEND_TIMEOUT_MS,
   refreshBeforeSend,
   type PreSendDecision,
@@ -133,8 +142,56 @@ describe('refreshBeforeSend', () => {
   });
 });
 
+describe('planSoftProPartyPatch — write this order, not the book', () => {
+  it('writes SoftPro\'s email and detaches a book contact whose email differs', () => {
+    const plan = planSoftProPartyPatch({
+      partyConfirmedAt: null,
+      externalEmail: 'diana@nexumescrow.com',
+      externalName: 'Diana Lopez',
+      contactId: 22882,
+      bookEmail: 'diana@nexumescrow.com',
+    }, 'jessica@nexumescrow.com', 'Jessica');
+    expect(plan).toEqual({
+      apply: true,
+      patch: { externalEmail: 'jessica@nexumescrow.com', externalName: 'Jessica' },
+      detachContact: true,
+    });
+  });
+
+  it('does not detach when the book already holds SoftPro\'s email', () => {
+    const plan = planSoftProPartyPatch({
+      partyConfirmedAt: null,
+      externalEmail: 'old@escrow.com',
+      externalName: 'Kim',
+      contactId: 9,
+      bookEmail: 'kim@inlandempireescrow.com',
+    }, 'kim@inlandempireescrow.com', 'Kim Hoh');
+    expect(plan.apply).toBe(true);
+    expect(plan.detachContact).toBe(false);
+  });
+
+  it('will not overwrite a confirmed populated email', () => {
+    const plan = planSoftProPartyPatch({
+      partyConfirmedAt: new Date('2026-09-01T00:00:00Z'),
+      externalEmail: 'typed@escrow.com',
+      externalName: 'Typed',
+      contactId: 1,
+      bookEmail: 'typed@escrow.com',
+    }, 'jessica@nexumescrow.com', 'Jessica');
+    expect(plan.apply).toBe(false);
+  });
+
+  it('the writer updates this order\'s party and never the shared contacts book', () => {
+    const src = readFileSync(resolve(__dirname, 'pre-send-refresh.ts'), 'utf8');
+    const apply = src.slice(src.indexOf('export async function applySoftProRecipientToOrderParty'));
+    expect(apply).toContain('db.update(orderParties)');
+    expect(apply).not.toMatch(/db\.update\(\s*contacts\s*\)/);
+    expect(apply).not.toMatch(/db\.insert\(\s*contacts\s*\)/);
+  });
+});
+
 describe('the drift alert', () => {
-  it('says the document went to SoftPro\'s contact, and that the hub was not changed', () => {
+  it('says the document went to SoftPro\'s contact, and that the hub order was updated', () => {
     const decisions: PreSendDecision[] = [{
       role: 'escrow', status: 'differs', email: 'kim@inlandempireescrow.com', name: 'Kim', ours: 'm@premierpropertiesescrow.com',
     }];
@@ -142,7 +199,8 @@ describe('the drift alert', () => {
     expect(subject).toBe("Preliminary report sent to SoftPro's contact, not ours — 20018662-GLT");
     expect(html).toContain('m@premierpropertiesescrow.com');
     expect(html).toContain('kim@inlandempireescrow.com');
-    expect(html).toContain('Nothing in the hub was changed');
+    expect(html).toContain('hub contact on this order was updated');
+    expect(html).not.toContain('Nothing in the hub was changed');
   });
 
   it('says NOT SENT when SoftPro has no recipient', () => {

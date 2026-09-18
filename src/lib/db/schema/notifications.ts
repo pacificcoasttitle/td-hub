@@ -50,8 +50,9 @@ export const notificationLogs = pgTable('notification_logs', {
  * Written by the pre-send refresh today (source 'pre_send') and by the weekly
  * sweep when it ships (source 'sweep'). One OPEN row per (order, role, field):
  * a difference seen again updates last_seen_at and times_seen; a later read that
- * agrees closes it as 'converged'. Recorded, never used to overwrite our data —
- * see docs/tickets/ORDER_CONTACT_REFRESH.md.
+ * agrees closes it as 'converged'. A differs send writes SoftPro onto this
+ * order's party and closes as 'applied_softpro'. History stays; the open row
+ * does not. See pre-send-refresh.
  */
 export const orderContactDrift = pgTable('order_contact_drift', {
   id: serial('id').primaryKey(),

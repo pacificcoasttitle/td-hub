@@ -29,7 +29,15 @@ const ORDER_ITEMS: NavItem[] = [
   { label: 'My Clients', href: '/sales/clients', icon: <Contact className={ICON_CLS} /> },
 ];
 
-function buildNav(role: Role): { top: NavItem[]; orders: NavItem[] } {
+/**
+ * Every item this sidebar declares, whether or not a role currently gets it.
+ * The navigation test asserts each one reaches at least one role — an item
+ * declared and never built into anybody's nav is invisible, which is how
+ * /reports shipped to nobody on 2026-09-17.
+ */
+export const SALES_NAV_ITEMS: NavItem[] = [...BASE_ITEMS, RANKING, ...ORDER_ITEMS];
+
+export function buildNav(role: Role): { top: NavItem[]; orders: NavItem[] } {
   if (role === 'sales_manager') {
     const top = [...BASE_ITEMS];
     const summaryIdx = top.findIndex(i => i.label === 'Summary');

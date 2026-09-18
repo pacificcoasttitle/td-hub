@@ -1,8 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { NAV, canSee } from './sidebar-nav';
-import { NAV_BY_ROLE } from '@/lib/security/nav-access';
+
 
 const SOURCE = readFileSync(join(process.cwd(), 'src/components/admin/sidebar-nav.tsx'), 'utf8');
 const APP_DIR = join(process.cwd(), 'src/app');
@@ -72,88 +71,7 @@ describe('sidebar nav', () => {
     expect(childrenContainerJsx()).toContain('grid-rows-[0fr]');
   });
 
-  // ── Every route reachable, every entry routed ──────────────────────────────
-
-  function pageRoutes(dir: string, prefix = ''): string[] {
-    const out: string[] = [];
-    for (const name of readdirSync(dir)) {
-      const full = join(dir, name);
-      if (statSync(full).isDirectory()) {
-        if (name === 'api' || name.startsWith('[')) continue;
-        // (admin), (hub) and friends are route groups: they organise files
-        // without appearing in the URL.
-        const segment = name.startsWith('(') && name.endsWith(')') ? '' : `/${name}`;
-        out.push(...pageRoutes(full, prefix + segment));
-      } else if (name === 'page.tsx') {
-        out.push(prefix || '/');
-      }
-    }
-    return out;
-  }
-
-  const routes = pageRoutes(APP_DIR);
-  const hrefs = new Set<string>();
-  for (const entry of NAV) {
-    if (entry.kind === 'link') hrefs.add(entry.href);
-    else for (const child of entry.children) hrefs.add(child.href);
-  }
-
-  it('points every nav entry at a page that exists', () => {
-    const dangling = [...hrefs].filter((href) => !routes.includes(href));
-    expect(dangling, 'nav entries with no page').toEqual([]);
-  });
-
-  /**
-   * Pages deliberately not in the sidebar. Anything else that turns up here is
-   * a working feature nobody can reach without typing the URL — the same
-   * family as the edit button that only appeared on hover, and the unit number
-   * that was in every SiteX response and never read.
-   *
-   * /admin/ops is listed because it is TRUE today, not because it is right.
-   * See docs/tickets/REACHABILITY_SWEEP.md.
-   */
-  const INTENTIONALLY_UNLINKED = new Set([
-    '/',                    // marketing root
-    '/login',
-    '/contacts',            // index landing page; the sidebar links its children
-    '/admin/ops',           // FIXME: real page, no nav entry — see the ticket
-  ]);
-
-  it('has a nav entry for every page, or an explicit reason not to', () => {
-    const unreachable = routes
-      .filter((route) => !hrefs.has(route))
-      .filter((route) => !INTENTIONALLY_UNLINKED.has(route))
-      // Client, sales and hub surfaces have their own navigation, roots
-      // included — /client is the portal's own landing page, not an orphan.
-      .filter((route) => !['/client', '/sales', '/hub'].some(
-        (root) => route === root || route.startsWith(root + '/')));
-    expect(unreachable, 'pages with no way to reach them — add a nav entry, or '
-      + 'add the route to INTENTIONALLY_UNLINKED with a reason').toEqual([]);
-  });
-
-  // ── Reachable by somebody ─────────────────────────────────────────────────
-  //
-  // REGRESSION 2026-09-17. /reports shipped with a nav entry and no path in
-  // NAV_BY_ROLE, so the link rendered for nobody and the page could only be
-  // reached by typing the URL. The entry existed, sat in the right place, and
-  // pointed at a real page — every assertion above passed.
-  //
-  // Presence is not visibility. This asks the question the sidebar asks, with
-  // the same canSee(), for every role.
-
-  it('shows every nav entry to at least one role', () => {
-    const roles = Object.entries(NAV_BY_ROLE);
-    const invisible = [...hrefs].filter(
-      (href) => !roles.some(([, allowed]) => canSee(href, allowed)),
-    );
-    expect(invisible, 'nav entries no role can see — add the path to NAV_BY_ROLE '
-      + 'for whoever the page is for').toEqual([]);
-  });
-
-  it('gives the roles that can generate a profile a way to reach /reports', () => {
-    // The nine open_order_team operators are the people the feature is for.
-    for (const role of ['super_admin', 'admin', 'open_order_team']) {
-      expect(canSee('/reports', NAV_BY_ROLE[role] ?? []), `${role} cannot see /reports`).toBe(true);
-    }
-  });
+  // Reachability moved to src/components/navigation.test.ts, which asks the
+  // same questions of all FOUR navigations — this file had checked only the
+  // admin sidebar, and Reports turned out to be missing from the hub's.
 });

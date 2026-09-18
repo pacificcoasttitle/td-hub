@@ -4,15 +4,34 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { handleSignOut } from '@/lib/security/sign-out';
+import { canSee } from '@/components/admin/sidebar-nav';
+import { NAV_BY_ROLE } from '@/lib/security/nav-access';
 
-const NAV = [
+/**
+ * The hub's whole navigation. There is no sidebar here — this bar is it.
+ *
+ * REPORTS IS HERE BECAUSE THE OPERATORS ARE HERE. It shipped into the admin
+ * sidebar on 2026-09-17 and the people who use it work in the hub, so reaching
+ * it meant the avatar menu, the admin dashboard, then the sidebar: three clicks
+ * and a change of shell. Gerard went looking for it at /hub/reports, which is a
+ * 404. The page still lives in the admin shell; this is a second door to it,
+ * not a second copy.
+ *
+ * Visibility comes from NAV_BY_ROLE through the same canSee() the sidebar uses,
+ * so the two doors cannot disagree about who is allowed through. A third
+ * hardcoded list is how they would.
+ */
+export const HUB_NAV = [
   { label: 'Orders', href: '/hub' },
   { label: 'New Order', href: '/hub/new-order' },
+  { label: 'Reports', href: '/reports' },
 ];
 
-export function HubHeader({ displayName }: {
+export function HubHeader({ displayName, role }: {
   displayName: string;
+  role: string;
 }) {
+  const allowed = NAV_BY_ROLE[role] ?? [];
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -24,7 +43,7 @@ export function HubHeader({ displayName }: {
       </Link>
 
       <nav className="flex items-center gap-1">
-        {NAV.map((n) => (
+        {HUB_NAV.filter((n) => canSee(n.href, allowed)).map((n) => (
           <Link
             key={n.href}
             href={n.href}

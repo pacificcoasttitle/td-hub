@@ -13,7 +13,7 @@ export default async function HubLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="h-screen flex flex-col bg-[#F8F9FA]">
-      <HubHeader displayName={session.displayName ?? session.email} />
+      <HubHeader displayName={session.displayName ?? session.email} role={session.role} />
       <main className="flex-1 overflow-y-auto">{children}</main>
     </div>
   );

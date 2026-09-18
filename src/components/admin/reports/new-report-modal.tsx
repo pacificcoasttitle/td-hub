@@ -5,7 +5,7 @@ import { ModalShell } from '@/components/shared/action-modals/modal-shell';
 import { ConciergeCostGate } from '@/components/hub/split/concierge-cost-gate';
 import { criteriaSummary } from '@/lib/domain/concierge/list-line';
 import { DEFAULT_CRITERIA } from '@/lib/domain/concierge/comp-filter';
-import type { ReportType } from '@/lib/domain/reports/list';
+import type { ReportType } from '@/lib/domain/reports/list-types';
 
 // ─── New Report ─────────────────────────────────────────────────────────────
 //

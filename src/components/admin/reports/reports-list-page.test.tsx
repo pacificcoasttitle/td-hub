@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { ReportListRow } from '@/lib/domain/reports/list';
+import type { ReportListRow } from '@/lib/domain/reports/list-types';
 import { DeliveryCell, ReportRow, shortWhen } from './reports-list-page';
 
 // Rendered and read as text, like documents-panel.test.tsx: grepping source for

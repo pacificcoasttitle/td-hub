@@ -5,7 +5,7 @@ import {
   REPORTS_PAGE_SIZE,
   type ReportListRow,
   type ReportFilter,
-} from '@/lib/domain/reports/list';
+} from '@/lib/domain/reports/list-types';
 
 // ─── Reports ────────────────────────────────────────────────────────────────
 //

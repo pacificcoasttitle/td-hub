@@ -2,26 +2,32 @@
 
 import { useState } from 'react';
 import { ReportsListPage } from '@/components/admin/reports/reports-list-page';
+import { NewReportModal } from '@/components/admin/reports/new-report-modal';
 
 /**
  * Reports — farming reports and property profiles, in one list.
  *
- * The New Report modal is the next piece; until it lands the button says so
- * rather than opening something empty. Permission is the shell's: this page is
- * reached through SidebarNav's allowedPaths, and /api/reports re-checks the
- * session on every request — hiding a link is not a permission model.
+ * Permission is the shell's: this page is reached through SidebarNav's
+ * allowedPaths, and /api/reports re-checks the session on every request —
+ * hiding a link is not a permission model. The one action here that can spend
+ * lives behind the cost gate inside NewReportModal, and the server re-checks
+ * both the flag and the role before it reaches the vendor.
  */
 export default function ReportsPage() {
-  const [notice, setNotice] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
 
   return (
     <>
-      {notice ? (
-        <div className="px-6 pt-6">
-          <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-[#6B7280]">{notice}</div>
-        </div>
+      <ReportsListPage onNewReport={() => setModalOpen(true)} reloadToken={reloadToken} />
+      {/* Mounted only while open, so every open starts from an empty form. */}
+      {modalOpen ? (
+        <NewReportModal
+          onClose={() => setModalOpen(false)}
+          // Created, not sent. The row appears; delivery is a separate act.
+          onCreated={() => setReloadToken((t) => t + 1)}
+        />
       ) : null}
-      <ReportsListPage onNewReport={() => setNotice('The New Report picker is being built. A property profile is the first type it will offer.')} />
     </>
   );
 }

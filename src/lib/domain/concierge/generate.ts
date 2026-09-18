@@ -11,6 +11,7 @@ import {
 } from './normalize';
 import { convertPlatMap } from './platmap';
 import { DEFAULT_CRITERIA } from './comp-filter';
+import { criteriaSummary, profileListSubject } from './list-line';
 import { claimProperty, propertyRequestKey, recordClaimOutcome, releaseClaim } from './claim';
 import { TEMPLATE_VERSION } from './document/profile-document';
 import { renderProfile } from './render';
@@ -102,6 +103,10 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
     presentingRepTitle: input.presentingRep.title ?? null,
     templateVersion: TEMPLATE_VERSION,
     status: 'pending',
+    // What the Reports list prints. Written now, with the row, so a generation
+    // that fails at the vendor is still a legible line rather than a blank one.
+    ...profileListSubject(input),
+    listSettings: criteriaSummary(DEFAULT_CRITERIA),
     createdBy: input.createdBy ?? null,
   }).returning({ id: conciergeProfiles.id });
 

@@ -4,6 +4,7 @@ import { db } from '@/lib/db/client';
 import { conciergeProfiles, conciergeProfileComps } from '@/lib/db/schema';
 import { uploadFile, downloadFile } from '@/lib/integrations/s3/client';
 import { DEFAULT_CRITERIA, selectComps, type CompCriteria, type CompCandidate } from './comp-filter';
+import { criteriaSummary } from './list-line';
 import { computeMetrics } from './metrics';
 import { toDataUri } from './platmap';
 import { ProfileDocument, TEMPLATE_VERSION } from './document/profile-document';
@@ -174,6 +175,9 @@ export async function renderProfile(
     criteriaRadiusMiles: applied.radiusMiles === null ? null : String(applied.radiusMiles),
     criteriaMonths: applied.months,
     criteriaMaxComps: applied.maxComps,
+    // Rewritten on every render: a profile re-filtered to half a mile must not
+    // go on advertising the mile it was created with.
+    listSettings: criteriaSummary(applied),
     compsQualified: filter.counts.qualified,
     compsShown: filter.counts.shown,
     metrics: metrics as unknown as Record<string, unknown>,

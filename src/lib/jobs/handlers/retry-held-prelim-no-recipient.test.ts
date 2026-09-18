@@ -43,9 +43,12 @@ describe('the no-recipient retry re-examines hub-resolve holds through maybeAuto
     expect(src).toMatch(/prelimAutoDeliveryWindowStart\(/);
     expect(src).toMatch(/opened_at at time zone 'UTC'/);
     expect(src).toMatch(/occurred_at::timestamptz/);
+    expect(src).toMatch(/windowStartIso}::timestamptz/);
+    expect(src).toMatch(/\[:space:\]/);
     expect(src).toMatch(/escrow_officer_id is not null/);
     expect(src).toMatch(/role = 'escrow_company'/);
     expect(src).toMatch(/loadDeliverableHeld\(limit, windowStart\)/);
+    expect(src).toMatch(/pickerError/);
   });
 
   it('logs the no-escrow-party gap once and does not treat it as a retry', () => {

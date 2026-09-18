@@ -195,10 +195,14 @@ export async function renderProfile(
   const byPosition = new Map(filter.decisions.map((d) => [d.candidate.sourcePosition, d]));
   for (const c of candidates) {
     const d = byPosition.get(c.sourcePosition);
+    // No decision means leave the row exactly as it was. Writing
+    // `selected = false, exclusion_reason = NULL` would be an undecided row,
+    // which the constraint refuses — and rightly: it explains nothing.
+    if (!d) continue;
     await db.update(conciergeProfileComps).set({
-      selected: d?.selected ?? false,
-      exclusionReason: d?.exclusionReason ?? null,
-      displayPosition: d?.displayPosition ?? null,
+      selected: d.selected,
+      exclusionReason: d.selected ? null : d.exclusionReason,
+      displayPosition: d.selected ? d.displayPosition : null,
     }).where(and(
       eq(conciergeProfileComps.id, c.rowId),
       eq(conciergeProfileComps.profileId, profileId),

@@ -53,7 +53,8 @@ export const NAV: NavEntry[] = [
 
 /* ── Permission helpers ────────────────────────────────────────────────────── */
 
-function canSee(href: string, allowed: string[]): boolean {
+/** Exported so the nav test can ask visibility the way the sidebar asks it. */
+export function canSee(href: string, allowed: string[]): boolean {
   return allowed.some(p => href === p || href.startsWith(p + '/'));
 }
 

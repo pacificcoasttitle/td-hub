@@ -108,6 +108,13 @@ export const conciergeProfiles = pgTable('concierge_profiles', {
   status: varchar('status', { length: 20 }).notNull().default('pending'),
   errorMessage: text('error_message'),
 
+  /**
+   * The property this profile is OF, as propertyRequestKey() normalizes it
+   * (migration 0059). The same key the claim uses — this one does not expire,
+   * so an operator can be told we already have this property before spending.
+   */
+  propertyKey: varchar('property_key', { length: 200 }),
+
   /** As the Reports list prints them (migration 0058); rewritten on re-render. */
   listSubject: varchar('list_subject', { length: 300 }),
   listSubjectDetail: varchar('list_subject_detail', { length: 300 }),
@@ -120,6 +127,7 @@ export const conciergeProfiles = pgTable('concierge_profiles', {
   createdIdx: index('concierge_profiles_created_idx').on(t.createdAt),
   apnIdx: index('concierge_profiles_apn_idx').on(t.subjectApn),
   searchIdx: index('concierge_profiles_searchid_idx').on(t.sitexSearchId),
+  propertyKeyIdx: index('concierge_profiles_property_key_idx').on(t.propertyKey, t.createdAt),
 }));
 
 /**

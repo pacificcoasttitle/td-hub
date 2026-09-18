@@ -13,6 +13,7 @@ import { convertPlatMap } from './platmap';
 import { DEFAULT_CRITERIA, selectComps } from './comp-filter';
 import { criteriaSummary, profileListSubject } from './list-line';
 import { claimProperty, propertyRequestKey, recordClaimOutcome, releaseClaim } from './claim';
+import { alreadyHaveMessage, findProfileForProperty, type ExistingProfile } from './already-have';
 import { TEMPLATE_VERSION } from './document/profile-document';
 import { renderProfile } from './render';
 
@@ -47,6 +48,12 @@ export interface GenerateInput {
     title?: string | null;
   };
   createdBy?: string | null;
+  /**
+   * The operator was shown the profile we already hold for this property and
+   * asked for a fresh one anyway. Absent, an existing profile stops the spend
+   * and is returned instead.
+   */
+  allowDuplicate?: boolean;
 }
 
 export type GenerateOutcome =
@@ -56,7 +63,12 @@ export type GenerateOutcome =
    * A request within the claim window already generated (or is generating) this
    * property. Nothing was spent; the caller shows that profile instead.
    */
-  | { ok: false; duplicate: true; profileId: number | null; creditsCharged: 0; message: string };
+  | { ok: false; duplicate: true; profileId: number | null; creditsCharged: 0; message: string }
+  /**
+   * We already hold a profile for this property, generated outside the claim
+   * window. Nothing was spent; the caller offers the choice.
+   */
+  | { ok: false; alreadyHave: ExistingProfile; profileId: number; creditsCharged: 0; message: string };
 
 export async function generateConciergeProfile(input: GenerateInput): Promise<GenerateOutcome> {
   const feedId = getConciergeFeedId();
@@ -65,6 +77,23 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
   //    Reports entry point has no order, and a read-then-write check loses the
   //    race a double-click creates. Exactly one caller comes away holding this.
   const requestKey = propertyRequestKey(input);
+
+  // 0a. DO WE ALREADY OWN THIS? Asked before the claim and before the call, and
+  //     answered from the profile rows rather than the claim, which expires.
+  //     Informs rather than refuses — a six-month-old profile may legitimately
+  //     need refreshing — but the operator has to have said so.
+  if (!input.allowDuplicate) {
+    const existing = await findProfileForProperty(requestKey);
+    if (existing) {
+      return {
+        ok: false, alreadyHave: existing, profileId: existing.id,
+        creditsCharged: 0, message: alreadyHaveMessage(existing),
+      };
+    }
+  }
+
+  // 0b. THE RACE GUARD. Two clicks a second apart both read nothing above; this
+  //     is the statement that lets exactly one of them through.
   const claim = await claimProperty(requestKey);
   if (!claim.held) {
     return {
@@ -103,6 +132,8 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
     presentingRepTitle: input.presentingRep.title ?? null,
     templateVersion: TEMPLATE_VERSION,
     status: 'pending',
+    // The property, as the guard keys it (migration 0059).
+    propertyKey: requestKey,
     // What the Reports list prints. Written now, with the row, so a generation
     // that fails at the vendor is still a legible line rather than a blank one.
     ...profileListSubject(input),

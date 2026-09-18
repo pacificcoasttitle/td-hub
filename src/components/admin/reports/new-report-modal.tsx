@@ -117,6 +117,40 @@ export function fullAddress(d: ConciergeDraft): string {
 
 export const DEFAULT_CRITERIA_SUMMARY = criteriaSummary(DEFAULT_CRITERIA);
 
+/**
+ * The body of the one request that spends.
+ *
+ * A function rather than an inline object because of what `allowDuplicate` is:
+ * the single flag that lets a second credit be spent on a property we already
+ * hold. It must be absent unless the operator was shown what we have and chose
+ * to buy another — so it is built here, from a boolean, and asserted in a test.
+ *
+ * It was briefly wired as `confirm(allowDuplicate = freshRequested)` passed
+ * straight to the gate's onClick, which hands its handler a MouseEvent: truthy,
+ * every time. That would have sent allowDuplicate: true on every generation and
+ * quietly disabled the guard this exists to enforce.
+ */
+export function generationBody(input: {
+  draft: ConciergeDraft;
+  preparedForName: string;
+  preparedForCompany: string;
+  allowDuplicate: boolean;
+}): Record<string, unknown> {
+  const { draft: d } = input;
+  return {
+    // No order here. The double-charge guard is keyed on the property.
+    street: d.street.trim(),
+    city: d.city.trim(),
+    state: d.state.trim().toUpperCase(),
+    zip: d.zip.trim(),
+    preparedForName: input.preparedForName.trim(),
+    preparedForCompany: input.preparedForCompany.trim() || null,
+    // Which contact, never their name, email or phone.
+    presentingRepContactId: d.repContactId,
+    ...(input.allowDuplicate ? { allowDuplicate: true } : {}),
+  };
+}
+
 // ─── The type cards ─────────────────────────────────────────────────────────
 
 export function TypeCard({ option, selected, onSelect }: {
@@ -274,6 +308,54 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+export interface ExistingProfileNotice {
+  id: number;
+  createdAt: string;
+  ageDays: number;
+  preparedForName: string | null;
+}
+
+/**
+ * What the operator sees when we already hold this property.
+ *
+ * NOT A REFUSAL. A six-month-old profile may legitimately need refreshing; a
+ * same-week one almost never does. Both buttons are real, and the one that
+ * spends says so.
+ */
+export function AlreadyHavePanel({ message, existing, onOpen, onFresh }: {
+  message: string;
+  existing: ExistingProfileNotice;
+  onOpen: () => void;
+  onFresh: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-[#E7D9C0] bg-[#FDF8EF] px-4 py-3">
+      <p className="text-[12px] text-[#6B4E16]">{message}</p>
+      {existing.preparedForName ? (
+        <p className="mt-[3px] text-[10.5px] text-[#9A8455]">
+          Prepared for {existing.preparedForName}.
+        </p>
+      ) : null}
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="h-8 px-[13px] rounded-md text-[11.5px] font-semibold bg-[#1B2A4A] text-white hover:bg-[#243658]"
+        >
+          Open the existing profile
+        </button>
+        <button
+          type="button"
+          onClick={onFresh}
+          className="h-8 px-[13px] rounded-md text-[11.5px] font-semibold border border-[#E5E5E5] bg-white text-[#3C4557] hover:bg-[#FAFAFB]"
+        >
+          Generate a fresh one — 1 credit
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── The modal ──────────────────────────────────────────────────────────────
 
 const EMPTY: ConciergeDraft = { street: '', city: '', state: 'CA', zip: '', repContactId: null, repName: '' };
@@ -300,6 +382,9 @@ export function NewReportModal({ onClose, onCreated }: {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showProblem, setShowProblem] = useState(false);
+  const [existing, setExisting] = useState<{ existing: ExistingProfileNotice; message: string } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [freshRequested, setFreshRequested] = useState(false);
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<RepResult[]>([]);
@@ -337,8 +422,33 @@ export function NewReportModal({ onClose, onCreated }: {
 
   const problem = draftProblem(draft);
 
-  function openGate() {
+  /**
+   * Continue. Asks whether we already hold this property BEFORE the gate opens,
+   * so the question is answered while deciding rather than after clicking a
+   * button that spends. The server asks again; this is for the operator.
+   */
+  async function onContinue() {
     if (problem) { setShowProblem(true); return; }
+    setError(null);
+    setChecking(true);
+    try {
+      const p = new URLSearchParams({
+        street: draft.street.trim(), city: draft.city.trim(),
+        state: draft.state.trim().toUpperCase(), zip: draft.zip.trim(),
+      });
+      const res = await fetch(`/api/concierge/for-property?${p}`);
+      const body = await res.json().catch(() => null);
+      if (body?.existing) { setExisting({ existing: body.existing, message: body.message }); return; }
+    } catch {
+      // A lookup that fails must not block the flow: the server checks again
+      // and is what actually stops a second charge.
+    } finally {
+      setChecking(false);
+    }
+    openGate();
+  }
+
+  function openGate() {
     setError(null);
     setGateOpen(true);
     // Read when the gate opens, so the number is current rather than whatever
@@ -349,21 +459,21 @@ export function NewReportModal({ onClose, onCreated }: {
       .catch(() => {});
   }
 
-  /** THE ONLY CALL IN THIS FILE THAT SPENDS. */
+  /**
+   * THE ONLY CALL IN THIS FILE THAT SPENDS.
+   *
+   * Takes no arguments on purpose: the gate calls it from an onClick, which
+   * would hand a MouseEvent to any parameter it had.
+   */
   async function confirm() {
     setSubmitting(true); setError(null);
     try {
       const res = await fetch('/api/concierge/profiles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          // No order here. The double-charge guard is keyed on the property.
-          street: draft.street.trim(), city: draft.city.trim(),
-          state: draft.state.trim().toUpperCase(), zip: draft.zip.trim(),
-          preparedForName: preparedForName.trim(),
-          preparedForCompany: preparedForCompany.trim() || null,
-          presentingRepContactId: draft.repContactId,
-        }),
+        body: JSON.stringify(generationBody({
+          draft, preparedForName, preparedForCompany, allowDuplicate: freshRequested,
+        })),
       });
       const body = await res.json().catch(() => null);
       if (body?.spend) setSpend(body.spend);
@@ -406,6 +516,16 @@ export function NewReportModal({ onClose, onCreated }: {
                 />
               ))}
             </div>
+          ) : existing ? (
+            <AlreadyHavePanel
+              message={existing.message}
+              existing={existing.existing}
+              onOpen={() => {
+                window.open(`/api/concierge/profiles/${existing.existing.id}/pdf`, '_blank');
+                onClose();
+              }}
+              onFresh={() => { setFreshRequested(true); setExisting(null); openGate(); }}
+            />
           ) : (
             <ConciergeStep
               draft={draft}
@@ -437,19 +557,21 @@ export function NewReportModal({ onClose, onCreated }: {
         <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-end gap-2">
           <button
             type="button"
-            onClick={step === 'type' ? onClose : () => setStep('type')}
+            onClick={step === 'type' ? onClose : () => { setExisting(null); setStep('type'); }}
             className="h-8 px-[13px] rounded-md text-[11.5px] font-semibold border border-[#E5E5E5] bg-white text-[#3C4557] hover:bg-[#FAFAFB]"
           >
             {step === 'type' ? 'Cancel' : 'Back'}
           </button>
-          <button
-            type="button"
-            disabled={step === 'type' && selected === null}
-            onClick={step === 'type' ? () => setStep('details') : openGate}
-            className="h-8 px-[13px] rounded-md text-[11.5px] font-semibold bg-[#1B2A4A] text-white hover:bg-[#243658] disabled:opacity-40"
-          >
-            Continue
-          </button>
+          {existing ? null : (
+            <button
+              type="button"
+              disabled={(step === 'type' && selected === null) || checking}
+              onClick={step === 'type' ? () => setStep('details') : onContinue}
+              className="h-8 px-[13px] rounded-md text-[11.5px] font-semibold bg-[#1B2A4A] text-white hover:bg-[#243658] disabled:opacity-40"
+            >
+              {checking ? 'Checking…' : 'Continue'}
+            </button>
+          )}
         </div>
       </ModalShell>
 

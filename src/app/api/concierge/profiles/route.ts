@@ -26,6 +26,12 @@ const bodySchema = z.object({
   // phone printed on a client-facing document are resolved server-side from
   // the order, never accepted from the browser.
   presentingRepContactId: z.number().int().positive().optional().nullable(),
+  /**
+   * Set only after the operator has been shown the profile we already hold for
+   * this property and asked for a fresh one. The browser cannot set it by
+   * accident — the modal sends it only from that choice.
+   */
+  allowDuplicate: z.boolean().optional(),
 });
 
 /**
@@ -57,6 +63,16 @@ export async function POST(req: NextRequest) {
   const result = await generateConciergeProfile({
     ...parsed.data, presentingRep: rep.rep, createdBy: session.email,
   });
+
+  // We already hold this property and nobody said to buy it again. Nothing was
+  // spent; 409 rather than 502, because this is a choice to make, not a failure.
+  if (!result.ok && 'alreadyHave' in result) {
+    return NextResponse.json({
+      error: result.message, reason: 'already_have',
+      existing: result.alreadyHave, profileId: result.profileId, creditsCharged: 0,
+    }, { status: 409 });
+  }
+
   const spend = await getSpendSnapshot();
 
   if (!result.ok) {

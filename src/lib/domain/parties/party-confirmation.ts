@@ -25,6 +25,7 @@
 // must call protectConfirmedPartyFields. Today that is:
 //   - enrich-orders upsertResolvedParty   (SoftPro GetOrderContacts / enrich)
 //   - verify-order-sync reconcileParties  (SoftPro read-back)
+//   - pre-send-refresh applySoftProRecipientToOrderParty  (live GetOrderContacts at send)
 // SiteX create-order writes parties only on INSERT of a new order (no row to
 // clobber). lookback-sync / process-detail do not write order_parties identity
 // fields. If either starts to, they come through this function first.

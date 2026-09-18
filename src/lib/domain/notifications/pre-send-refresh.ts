@@ -7,10 +7,12 @@
  * document goes to, SoftPro's address is the right answer, not the risky one:
  *
  *   - AGREES            send to that address.
- *   - DIFFERS           send to SoftPro's address. Record the disagreement and
- *                       alert, so the send is correct AND the drift is visible.
- *                       No hold queue: a queue that depends on somebody noticing
- *                       gets noticed for about a week.
+ *   - DIFFERS           send to SoftPro's address AND write that address onto
+ *                       this order's party row. Record the disagreement once
+ *                       (history, not an open queue). Alert once. Leaving our
+ *                       row stale is how the same alert fired on every later
+ *                       send — Diana stayed on the order, Jessica got the
+ *                       document, Gerard heard about it again.
  *   - SOFTPRO HAS NONE  do not substitute ours. That recipient is unresolved:
  *                       the caller's existing fail-closed path runs — no send,
  *                       internal alert.
@@ -20,9 +22,10 @@
  *
  * ─── WHAT IT DOES NOT DO ────────────────────────────────────────────────────
  *
- * It changes who THIS send goes to. It does not write SoftPro's address over our
- * party rows: a disagreement is recorded, not silently resolved, so the drift
- * rate stays measurable (docs/tickets/ORDER_CONTACT_REFRESH.md).
+ * It changes who THIS send goes to, and it updates this order's party snapshot
+ * so the hub matches SoftPro. It does not write the shared contacts book —
+ * Diana's row is on more than one order. The party list prefers the book
+ * email, so a differing book link is detached and the SoftPro snapshot shows.
  *
  * ─── MEASURED BEFORE BUILDING ───────────────────────────────────────────────
  *
@@ -32,7 +35,8 @@
  */
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { adminActivityLogs, eventOutbox, orderContactDrift } from '@/lib/db/schema';
+import { adminActivityLogs, contacts, eventOutbox, orderContactDrift, orderParties } from '@/lib/db/schema';
+import { protectConfirmedPartyFields } from '@/lib/domain/parties/party-confirmation';
 import {
   getOrderContacts,
   mapOrderContacts,
@@ -50,6 +54,12 @@ export const PRE_SEND_TIMEOUT_MS = 15_000;
 export const CONTACT_DRIFT_ALERT_EVENT_TYPE = 'order.contacts.drift';
 
 export type PreSendRole = 'escrow' | 'lender' | 'owner';
+
+export const PRE_SEND_PARTY_ROLE = {
+  escrow: 'escrow_company',
+  lender: 'lender',
+  owner: 'buyer',
+} as const;
 
 export type PreSendKind = 'prelim' | 'lender_policy' | 'owner_policy' | 'supplement';
 
@@ -109,6 +119,89 @@ export function decideRecipient(candidate: PreSendCandidate, mapped: MappedOrder
   };
 }
 
+export type SoftProPartyExisting = {
+  partyConfirmedAt: Date | string | null;
+  externalEmail: string | null;
+  externalName: string | null;
+  contactId: number | null;
+  bookEmail: string | null;
+};
+
+/**
+ * What we write onto THIS order's party when SoftPro disagrees.
+ *
+ * The shared contacts book is not touched: Diana's contact sits on two orders.
+ * The party list prefers the book email, so a book link whose email is not
+ * SoftPro's is detached and the snapshot becomes what the screen shows.
+ *
+ * A human-confirmed party still goes through protectConfirmedPartyFields.
+ */
+export function planSoftProPartyPatch(
+  existing: SoftProPartyExisting | null,
+  softproEmail: string,
+  softproName: string | null,
+): { apply: boolean; patch: { externalEmail?: string; externalName?: string }; detachContact: boolean } {
+  const proposed = {
+    externalEmail: softproEmail,
+    ...(softproName?.trim() ? { externalName: softproName.trim() } : {}),
+  };
+  const patch = protectConfirmedPartyFields(existing, proposed);
+  if (!patch.externalEmail) {
+    return { apply: false, patch: {}, detachContact: false };
+  }
+  const detachContact = !!existing?.contactId && norm(existing.bookEmail) !== norm(softproEmail);
+  return { apply: true, patch, detachContact };
+}
+
+export async function applySoftProRecipientToOrderParty(input: {
+  orderId: number;
+  role: PreSendRole;
+  email: string;
+  name: string | null;
+}): Promise<boolean> {
+  const role = PRE_SEND_PARTY_ROLE[input.role];
+  const [row] = await db
+    .select({
+      id: orderParties.id,
+      partyConfirmedAt: orderParties.partyConfirmedAt,
+      externalEmail: orderParties.externalEmail,
+      externalName: orderParties.externalName,
+      contactId: orderParties.contactId,
+      bookEmail: contacts.email,
+    })
+    .from(orderParties)
+    .leftJoin(contacts, eq(contacts.id, orderParties.contactId))
+    .where(and(
+      eq(orderParties.orderId, input.orderId),
+      eq(orderParties.role, role),
+      eq(orderParties.isPrimary, true),
+    ))
+    .limit(1);
+
+  const plan = planSoftProPartyPatch(row ?? null, input.email, input.name);
+  if (!plan.apply) return false;
+
+  if (row) {
+    await db.update(orderParties)
+      .set({
+        ...(plan.patch.externalEmail ? { externalEmail: plan.patch.externalEmail } : {}),
+        ...(plan.patch.externalName ? { externalName: plan.patch.externalName } : {}),
+        ...(plan.detachContact ? { contactId: null } : {}),
+      })
+      .where(eq(orderParties.id, row.id));
+    return true;
+  }
+
+  await db.insert(orderParties).values({
+    orderId: input.orderId,
+    role,
+    isPrimary: true,
+    externalEmail: plan.patch.externalEmail ?? input.email,
+    externalName: plan.patch.externalName ?? input.name,
+  });
+  return true;
+}
+
 export interface PreSendDeps {
   fetchContacts?: typeof getOrderContacts;
   record?: typeof recordPreSendOutcome;
@@ -160,15 +253,18 @@ export async function refreshBeforeSend(input: PreSendInput, deps: PreSendDeps =
 }
 
 /**
- * Persist what the refresh found, and alert when a send is going somewhere our
- * records did not say, or cannot go anywhere.
+ * Persist what the refresh found, write SoftPro's address onto this order
+ * when it differs, and alert the first time only.
  *
  * - agrees            closes any open drift row for that role as converged
- * - differs / none    opens or updates the one open row per (order, role, field)
+ * - differs           writes the order party, records history, resolves as
+ *                     applied_softpro, alerts if this disagreement is new
+ * - softpro_has_none  records history, alerts if new — no write (nothing to write)
  * - unreachable       an activity row — the refresh did not happen for this send
  */
 export async function recordPreSendOutcome(input: PreSendInput, decisions: PreSendDecision[]): Promise<void> {
   const now = new Date();
+  const notable: PreSendDecision[] = [];
 
   for (const d of decisions) {
     if (d.status === 'agrees') {
@@ -194,8 +290,48 @@ export async function recordPreSendOutcome(input: PreSendInput, decisions: PreSe
       continue;
     }
 
-    await db.insert(orderContactDrift)
-      .values({
+    let applied = false;
+    if (d.status === 'differs') {
+      try {
+        applied = await applySoftProRecipientToOrderParty({
+          orderId: input.orderId,
+          role: d.role,
+          email: d.email,
+          name: d.name,
+        });
+      } catch {
+        applied = false;
+      }
+    }
+
+    const [open] = await db
+      .select({ id: orderContactDrift.id })
+      .from(orderContactDrift)
+      .where(and(
+        eq(orderContactDrift.orderId, input.orderId),
+        eq(orderContactDrift.role, d.role),
+        eq(orderContactDrift.field, 'email'),
+        isNull(orderContactDrift.resolvedAt),
+      ))
+      .limit(1);
+
+    const firstSeen = !open;
+    const resolution = d.status === 'differs' && applied ? 'applied_softpro' : null;
+
+    if (open) {
+      await db.update(orderContactDrift)
+        .set({
+          kind: d.status,
+          sendKind: input.sendKind,
+          ours: d.ours,
+          softpro: d.status === 'differs' ? d.email : null,
+          lastSeenAt: now,
+          timesSeen: sql`${orderContactDrift.timesSeen} + 1`,
+          ...(resolution ? { resolvedAt: now, resolution } : {}),
+        })
+        .where(eq(orderContactDrift.id, open.id));
+    } else {
+      await db.insert(orderContactDrift).values({
         orderId: input.orderId,
         role: d.role,
         field: 'email',
@@ -204,22 +340,13 @@ export async function recordPreSendOutcome(input: PreSendInput, decisions: PreSe
         sendKind: input.sendKind,
         ours: d.ours,
         softpro: d.status === 'differs' ? d.email : null,
-      })
-      .onConflictDoUpdate({
-        target: [orderContactDrift.orderId, orderContactDrift.role, orderContactDrift.field],
-        targetWhere: isNull(orderContactDrift.resolvedAt),
-        set: {
-          kind: d.status,
-          sendKind: input.sendKind,
-          ours: d.ours,
-          softpro: d.status === 'differs' ? d.email : null,
-          lastSeenAt: now,
-          timesSeen: sql`${orderContactDrift.timesSeen} + 1`,
-        },
+        ...(resolution ? { resolvedAt: now, resolution } : {}),
       });
+    }
+
+    if (firstSeen) notable.push(d);
   }
 
-  const notable = decisions.filter((d) => d.status === 'differs' || d.status === 'softpro_has_none');
   if (notable.length === 0) return;
 
   const { subject, html } = buildContactDriftAlertEmail({
@@ -278,9 +405,8 @@ export function buildContactDriftAlertEmail(input: {
     ? '<strong>SoftPro holds no email for this recipient, so the document was not sent.</strong> '
       + 'Our address was not used in its place: SoftPro is the system of record. '
       + 'Add the contact in SoftPro and the next delivery attempt will use it.'
-    : '<strong>The document went to the address SoftPro holds.</strong> '
-      + 'Our records had a different contact for this order. Nothing in the hub was changed — '
-      + 'check whether the order\'s contact in the hub is out of date.';
+      : '<strong>The document went to the address SoftPro holds, and the hub contact on this order was updated to match.</strong> '
+      + 'SoftPro is the system of record. The previous hub address is kept on the drift row.';
 
   return {
     subject,

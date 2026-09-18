@@ -21,6 +21,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/jobs/run?name=prelim.retry_held_no_recipient",
+      "schedule": "20 * * * *"
+    },
+    {
       "path": "/api/jobs/run?name=softpro.retry_document_attach",
       "schedule": "*/10 * * * *"
     },

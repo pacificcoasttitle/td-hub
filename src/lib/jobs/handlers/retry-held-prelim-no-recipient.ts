@@ -11,31 +11,35 @@
  * SoftPro has none (the rule change that would have released the three
  * Green Forest files).
  *
- * Only hub-resolve holds are picked (`No valid primary prelim recipient
- * resolved`). SoftPro-empty holds are a different stop — SoftPro was asked
- * and had nobody — and are left alone.
+ * The picker is the same gates, applied before the walk: only hub-resolve
+ * holds (`No valid primary prelim recipient resolved`) whose issued date is
+ * still inside the three-day window and that now have a hub recipient.
+ * SoftPro-empty holds, aged-out holds, and orders with no escrow party are
+ * not loaded. They fall out as they age; a cron that rediscovered them every
+ * hour would bury the rows that can still deliver.
  *
- * Orders that still have no escrow officer and no escrow_company party are
- * not retried. They are logged once as `prelim_held_no_escrow_party` — a
- * data gap on the order, not a delivery bug.
- *
- * Rate: one maybeAutoDeliver at a time, 5s pause between calls. Each retry
- * may make one GetOrderContacts. Ceiling: 50 orders, youngest first, so a
- * run cannot walk the historical hold pile. `payload.limit` is required —
- * an empty invoke refuses rather than sending the whole in-window set.
- * Not a cron.
+ * Rate: one maybeAutoDeliver at a time, 5s pause. Ceiling 50, youngest first.
+ * Cron GET has no body, so a missing limit defaults to the ceiling. Hourly
+ * at :20, after the :15 enrich that writes the party.
  */
 
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { adminActivityLogs } from '@/lib/db/schema';
-import { maybeAutoDeliverPrelim } from '@/lib/domain/notifications/prelim-auto-delivery';
+import {
+  maybeAutoDeliverPrelim,
+  prelimAutoDeliveryWindowStart,
+} from '@/lib/domain/notifications/prelim-auto-delivery';
 import { resolvePrelimRecipients } from '@/lib/domain/notifications/prelim-recipient-resolution';
 
 export const HUB_RESOLVE_BLOCK_REASON = 'No valid primary prelim recipient resolved';
 export const NO_ESCROW_PARTY_ACTION = 'prelim_held_no_escrow_party';
+export const RETRY_HELD_NO_RECIPIENT_RUN_ACTION = 'prelim_retry_held_no_recipient';
 export const RETRY_HELD_NO_RECIPIENT_CEILING = 50;
 export const RETRY_HELD_NO_RECIPIENT_PAUSE_MS = 5_000;
+
+/** Same shape as resolvePrelimRecipients / isValidEmail. */
+const EMAIL_SQL = '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$';
 
 export interface RetryHeldNoRecipientRow {
   fileNumber: string;
@@ -48,20 +52,27 @@ export interface RetryHeldNoRecipientRow {
   issuedAtSource?: string;
 }
 
+export interface RetryHeldNoRecipientHeld {
+  fileNumber: string;
+  outcome: string;
+  reason: string | null;
+}
+
 export interface RetryHeldNoRecipientResult {
   limit: number;
+  windowStart: string;
   examined: number;
-  retried: number;
-  sent: number;
+  attempted: number;
+  delivered: number;
+  held: RetryHeldNoRecipientHeld[];
+  heldByOutcome: Record<string, number>;
   loggedNoEscrowParty: number;
   rows: RetryHeldNoRecipientRow[];
 }
 
 export function parseRetryHeldNoRecipientLimit(payload: Record<string, unknown>): number {
   if (!Object.prototype.hasOwnProperty.call(payload, 'limit')) {
-    throw new Error(
-      'prelim.retry_held_no_recipient requires payload.limit — refusing to run uncapped',
-    );
+    return RETRY_HELD_NO_RECIPIENT_CEILING;
   }
   const raw = payload.limit;
   if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1 || raw > RETRY_HELD_NO_RECIPIENT_CEILING) {
@@ -94,6 +105,14 @@ function asDate(value: Date | string): Date {
   return value instanceof Date ? value : new Date(value);
 }
 
+function tally(rows: RetryHeldNoRecipientRow[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    counts[row.outcome] = (counts[row.outcome] ?? 0) + 1;
+  }
+  return counts;
+}
+
 async function alreadyLoggedNoEscrowParty(documentId: number): Promise<boolean> {
   const [row] = await db
     .select({ id: adminActivityLogs.id })
@@ -120,8 +139,38 @@ async function logNoEscrowParty(row: HeldRow): Promise<void> {
   });
 }
 
-async function loadHeldHubResolve(retryLimit: number): Promise<HeldRow[]> {
-  const limit = retryLimit + 20;
+async function logRun(input: {
+  jobId: number | null;
+  windowStart: Date;
+  result: RetryHeldNoRecipientResult;
+}): Promise<void> {
+  await db.insert(adminActivityLogs).values({
+    userId: 'system:retry_held_no_recipient',
+    action: RETRY_HELD_NO_RECIPIENT_RUN_ACTION,
+    entityType: 'job',
+    entityId: input.jobId !== null ? String(input.jobId) : 'prelim.retry_held_no_recipient',
+    meta: {
+      job_id: input.jobId,
+      window_start: input.windowStart.toISOString(),
+      limit: input.result.limit,
+      examined: input.result.examined,
+      attempted: input.result.attempted,
+      delivered: input.result.delivered,
+      held: input.result.held,
+      held_by_outcome: input.result.heldByOutcome,
+    },
+  });
+}
+
+/**
+ * Issued date is SoftPro's occurredAt when present, else orders.opened_at —
+ * the same clock maybeAutoDeliverPrelim uses. Compared to the same
+ * prelimAutoDeliveryWindowStart instant, not a second definition of "three days".
+ *
+ * Hub recipient matches resolvePrelimRecipients: officer FK wins and does
+ * not fall back to the company party.
+ */
+async function loadDeliverableHeld(retryLimit: number, windowStart: Date): Promise<HeldRow[]> {
   const rows = await db.execute(sql`
     with latest as (
       select distinct on ((a.meta->>'document_id')::int)
@@ -133,40 +182,78 @@ async function loadHeldHubResolve(retryLimit: number): Promise<HeldRow[]> {
       where a.action = 'prelim_auto_delivery'
         and a.meta ? 'document_id'
       order by (a.meta->>'document_id')::int, a.created_at desc
+    ),
+    candidates as (
+      select
+        l.document_id,
+        l.order_id,
+        o.file_number,
+        o.opened_at,
+        o.escrow_officer_id,
+        d.created_at as document_created_at,
+        (
+          select da.meta->>'occurredAt'
+          from document_audit da
+          where da.document_id = d.id
+            and da.action = 'uploaded'
+          order by da.performed_at desc, da.id desc
+          limit 1
+        ) as occurred_at
+      from latest l
+      join documents d on d.id = l.document_id
+      join orders o on o.id = l.order_id
+      where l.outcome = 'blocked_no_recipient'
+        and l.reason = ${HUB_RESOLVE_BLOCK_REASON}
+        and d.category = 'prelim'
+        and d.status = 'active'
+        and not exists (
+          select 1 from admin_activity_logs del
+          where (
+            del.action = 'prelim_delivered'
+            and (del.meta->>'document_id')::int = l.document_id
+          ) or (
+            del.action = 'prelim_auto_delivery'
+            and (del.meta->>'document_id')::int = l.document_id
+            and del.meta->>'outcome' = 'delivered'
+          )
+        )
     )
     select
-      l.document_id,
-      l.order_id,
-      o.file_number,
-      d.created_at as document_created_at,
-      (
-        select da.meta->>'occurredAt'
-        from document_audit da
-        where da.document_id = d.id
-          and da.action = 'uploaded'
-        order by da.performed_at desc, da.id desc
-        limit 1
-      ) as occurred_at
-    from latest l
-    join documents d on d.id = l.document_id
-    join orders o on o.id = l.order_id
-    where l.outcome = 'blocked_no_recipient'
-      and l.reason = ${HUB_RESOLVE_BLOCK_REASON}
-      and d.category = 'prelim'
-      and d.status = 'active'
-      and not exists (
-        select 1 from admin_activity_logs del
-        where (
-          del.action = 'prelim_delivered'
-          and (del.meta->>'document_id')::int = l.document_id
-        ) or (
-          del.action = 'prelim_auto_delivery'
-          and (del.meta->>'document_id')::int = l.document_id
-          and del.meta->>'outcome' = 'delivered'
+      c.document_id,
+      c.order_id,
+      c.file_number,
+      c.document_created_at,
+      c.occurred_at
+    from candidates c
+    where coalesce(
+        case
+          when c.occurred_at ~ '^[0-9]{4}-'
+          then c.occurred_at::timestamptz
+        end,
+        c.opened_at at time zone 'UTC'
+      ) >= ${windowStart}
+      and (
+        (
+          c.escrow_officer_id is not null
+          and exists (
+            select 1 from contacts oc
+            where oc.id = c.escrow_officer_id
+              and oc.email ~* ${EMAIL_SQL}
+          )
+        )
+        or (
+          c.escrow_officer_id is null
+          and exists (
+            select 1 from order_parties ep
+            left join contacts epc on epc.id = ep.contact_id
+            where ep.order_id = c.order_id
+              and ep.role = 'escrow_company'
+              and coalesce(ep.external_email, epc.email) ~* ${EMAIL_SQL}
+          )
         )
       )
-    order by o.opened_at desc nulls last
-    limit ${limit}
+    order by c.opened_at desc nulls last
+    limit ${retryLimit}
   `) as unknown as HeldRow[];
   return rows;
 }
@@ -175,9 +262,11 @@ export async function handleRetryHeldPrelimNoRecipient(
   payload: Record<string, unknown> = {},
 ): Promise<RetryHeldNoRecipientResult> {
   const limit = parseRetryHeldNoRecipientLimit(payload);
-  const held = await loadHeldHubResolve(limit);
+  const windowStart = prelimAutoDeliveryWindowStart();
+  const jobId = typeof payload.__jobId === 'number' ? payload.__jobId : null;
+  const held = await loadDeliverableHeld(limit, windowStart);
   const rows: RetryHeldNoRecipientRow[] = [];
-  let retried = 0;
+  let attempted = 0;
   let loggedNoEscrowParty = 0;
 
   for (const heldRow of held) {
@@ -199,9 +288,9 @@ export async function handleRetryHeldPrelimNoRecipient(
       continue;
     }
 
-    if (retried >= limit) break;
-    if (retried > 0) await sleep(RETRY_HELD_NO_RECIPIENT_PAUSE_MS);
-    retried++;
+    if (attempted >= limit) break;
+    if (attempted > 0) await sleep(RETRY_HELD_NO_RECIPIENT_PAUSE_MS);
+    attempted++;
 
     const delivery = await maybeAutoDeliverPrelim({
       orderId: heldRow.order_id,
@@ -223,12 +312,29 @@ export async function handleRetryHeldPrelimNoRecipient(
     });
   }
 
-  return {
+  const result: RetryHeldNoRecipientResult = {
     limit,
+    windowStart: windowStart.toISOString(),
     examined: held.length,
-    retried,
-    sent: rows.filter((row) => row.sent).length,
+    attempted,
+    delivered: rows.filter((row) => row.sent).length,
+    held: rows
+      .filter((row) => !row.sent)
+      .map((row) => ({
+        fileNumber: row.fileNumber,
+        outcome: row.outcome,
+        reason: row.reason ?? null,
+      })),
+    heldByOutcome: tally(rows.filter((row) => !row.sent)),
     loggedNoEscrowParty,
     rows,
   };
+
+  try {
+    await logRun({ jobId, windowStart, result });
+  } catch {
+    // The sends already happened. A missing run log must not fail the job.
+  }
+
+  return result;
 }

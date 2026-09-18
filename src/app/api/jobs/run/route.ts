@@ -77,6 +77,7 @@ const NEEDS_JOB_ID = new Set([
   // looks exactly like a run that found nothing to do.
   'party_wizard.invite',
   'prelim.retry_held_watched_ten',
+  'prelim.retry_held_no_recipient',
   // Need their rows to record a PARTIAL failure. These handlers collect
   // per-row errors and return normally, so the runner marks them `completed`
   // and writes no error — which is how the escrow-officer feed reported clean

@@ -1,7 +1,8 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { NAV } from './sidebar-nav';
+import { NAV, canSee } from './sidebar-nav';
+import { NAV_BY_ROLE } from '@/lib/security/nav-access';
 
 const SOURCE = readFileSync(join(process.cwd(), 'src/components/admin/sidebar-nav.tsx'), 'utf8');
 const APP_DIR = join(process.cwd(), 'src/app');
@@ -128,5 +129,31 @@ describe('sidebar nav', () => {
         (root) => route === root || route.startsWith(root + '/')));
     expect(unreachable, 'pages with no way to reach them — add a nav entry, or '
       + 'add the route to INTENTIONALLY_UNLINKED with a reason').toEqual([]);
+  });
+
+  // ── Reachable by somebody ─────────────────────────────────────────────────
+  //
+  // REGRESSION 2026-09-17. /reports shipped with a nav entry and no path in
+  // NAV_BY_ROLE, so the link rendered for nobody and the page could only be
+  // reached by typing the URL. The entry existed, sat in the right place, and
+  // pointed at a real page — every assertion above passed.
+  //
+  // Presence is not visibility. This asks the question the sidebar asks, with
+  // the same canSee(), for every role.
+
+  it('shows every nav entry to at least one role', () => {
+    const roles = Object.entries(NAV_BY_ROLE);
+    const invisible = [...hrefs].filter(
+      (href) => !roles.some(([, allowed]) => canSee(href, allowed)),
+    );
+    expect(invisible, 'nav entries no role can see — add the path to NAV_BY_ROLE '
+      + 'for whoever the page is for').toEqual([]);
+  });
+
+  it('gives the roles that can generate a profile a way to reach /reports', () => {
+    // The nine open_order_team operators are the people the feature is for.
+    for (const role of ['super_admin', 'admin', 'open_order_team']) {
+      expect(canSee('/reports', NAV_BY_ROLE[role] ?? []), `${role} cannot see /reports`).toBe(true);
+    }
   });
 });

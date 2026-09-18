@@ -1,28 +1,18 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/security/auth';
 import { SidebarNav } from '@/components/admin/sidebar-nav';
+// Shared so the nav test can assert every entry is visible to some role.
+import { ADMIN_SHELL_ROLES, NAV_BY_ROLE } from '@/lib/security/nav-access';
 
 export const dynamic = 'force-dynamic';
 
-const NAV_BY_ROLE: Record<string, string[]> = {
-  super_admin: ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs', '/settings', '/notifications', '/users'],
-  admin:       ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs', '/settings', '/notifications', '/users'],
-  cs_admin:    ['/dashboard', '/hub', '/orders', '/contacts', '/documents', '/jobs'],
-  title_officer:   ['/dashboard', '/orders', '/documents'],
-  escrow_officer:  ['/dashboard', '/orders', '/documents'],
-  open_order_team: ['/hub', '/orders', '/contacts'],
-  escrow_assistant: ['/hub', '/orders', '/contacts'],
-  title_production: ['/title-production'],
-};
-
-const ALLOWED_ROLES = Object.keys(NAV_BY_ROLE);
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session) redirect('/login');
   if (session.role === 'client') redirect('/client/orders');
   if (session.role === 'sales_rep' || session.role === 'sales_manager') redirect('/sales/dashboard');
-  if (!ALLOWED_ROLES.includes(session.role)) redirect('/login');
+  if (!ADMIN_SHELL_ROLES.includes(session.role)) redirect('/login');
 
   const allowedPaths = NAV_BY_ROLE[session.role] ?? [];
 

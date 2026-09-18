@@ -4,11 +4,14 @@ import { describe, expect, it } from 'vitest';
 
 const read = (p: string) => readFileSync(join(__dirname, p), 'utf8');
 
-// One route may spend. Three may not. That split is the whole safety model, so
+// One route may spend. Four may not. That split is the whole safety model, so
 // it is asserted against the source rather than trusted to review.
 describe('exactly one route can spend a credit', () => {
   const generate = read('profiles/route.ts');
-  const free = ['profiles/[id]/criteria/route.ts', 'profiles/[id]/render/route.ts', 'profiles/[id]/pdf/route.ts'];
+  const free = [
+    'profiles/[id]/criteria/route.ts', 'profiles/[id]/render/route.ts',
+    'profiles/[id]/pdf/route.ts', 'profiles/[id]/resume/route.ts',
+  ];
 
   it('only the generate route imports the generator', () => {
     expect(generate).toContain('generateConciergeProfile');
@@ -27,7 +30,7 @@ describe('exactly one route can spend a credit', () => {
 
   it('the free routes are NOT gated on the feature flag', () => {
     // Turning generation off must not strand a profile that already exists.
-    for (const f of ['profiles/[id]/criteria/route.ts', 'profiles/[id]/render/route.ts']) {
+    for (const f of ['profiles/[id]/criteria/route.ts', 'profiles/[id]/render/route.ts', 'profiles/[id]/resume/route.ts']) {
       expect(read(f), f).not.toContain('denyConciergeGeneration');
       expect(read(f), f).toContain('canGenerateConcierge');
     }
@@ -38,6 +41,17 @@ describe('exactly one route can spend a credit', () => {
       expect(read(f), f).toContain('creditsCharged: 0');
       expect(read(f), f).toContain('freeRender: true');
     }
+  });
+
+  it('resume finishes a paid-for profile but refuses to buy one again', () => {
+    // The ingest of profile 3 failed after the credit was spent. Resume exists
+    // to finish it from the stored payload — and a profile with no stored
+    // payload must be refused, because finishing that one means paying twice.
+    const resume = read('profiles/[id]/resume/route.ts');
+    expect(resume).toContain('ingestPayload');
+    expect(resume).toContain('creditsCharged: 0');
+    expect(resume).toContain('rawStorageKey');
+    expect(resume).toMatch(/cannot be finished without buying it again/);
   });
 
   it('the double-charge guard is keyed on the property, not the order', () => {

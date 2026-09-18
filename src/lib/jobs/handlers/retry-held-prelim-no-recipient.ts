@@ -40,8 +40,8 @@ export const RETRY_HELD_NO_RECIPIENT_RUN_ACTION = 'prelim_retry_held_no_recipien
 export const RETRY_HELD_NO_RECIPIENT_CEILING = 50;
 export const RETRY_HELD_NO_RECIPIENT_PAUSE_MS = 5_000;
 
-/** Same shape as resolvePrelimRecipients / isValidEmail. */
-const EMAIL_SQL = '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$';
+/** Same shape as resolvePrelimRecipients / isValidEmail, in POSIX (Postgres ~*). */
+const EMAIL_SQL = '^[^[:space:]@]+@[^[:space:]@]+\\.[^[:space:]@]+$';
 
 export interface RetryHeldNoRecipientRow {
   fileNumber: string;
@@ -70,6 +70,7 @@ export interface RetryHeldNoRecipientResult {
   heldByOutcome: Record<string, number>;
   loggedNoEscrowParty: number;
   rows: RetryHeldNoRecipientRow[];
+  pickerError?: string;
 }
 
 export function parseRetryHeldNoRecipientLimit(payload: Record<string, unknown>): number {
@@ -163,6 +164,7 @@ async function logRun(input: {
       delivered: input.result.delivered,
       held: input.result.held,
       held_by_outcome: input.result.heldByOutcome,
+      picker_error: input.result.pickerError ?? null,
     },
   });
 }
@@ -176,6 +178,9 @@ async function logRun(input: {
  * not fall back to the company party.
  */
 async function loadDeliverableHeld(retryLimit: number, windowStart: Date): Promise<HeldRow[]> {
+  // ISO string, not a Date: drizzle's Date bind became `Tue Sep 15 2026…`
+  // and Postgres rejected it. The :20 cron failed on that, with no run log.
+  const windowStartIso = windowStart.toISOString();
   const rows = await db.execute(sql`
     with latest as (
       select distinct on ((a.meta->>'document_id')::int)
@@ -236,7 +241,7 @@ async function loadDeliverableHeld(retryLimit: number, windowStart: Date): Promi
           then c.occurred_at::timestamptz
         end,
         c.opened_at at time zone 'UTC'
-      ) >= ${windowStart}
+      ) >= ${windowStartIso}::timestamptz
       and (
         (
           c.escrow_officer_id is not null
@@ -269,7 +274,31 @@ export async function handleRetryHeldPrelimNoRecipient(
   const limit = parseRetryHeldNoRecipientLimit(payload);
   const windowStart = prelimAutoDeliveryWindowStart();
   const jobId = typeof payload.__jobId === 'number' ? payload.__jobId : null;
-  const held = await loadDeliverableHeld(limit, windowStart);
+
+  let held: HeldRow[];
+  try {
+    held = await loadDeliverableHeld(limit, windowStart);
+  } catch (err) {
+    const pickerError = err instanceof Error ? err.message : String(err);
+    const result: RetryHeldNoRecipientResult = {
+      limit,
+      windowStart: windowStart.toISOString(),
+      examined: 0,
+      attempted: 0,
+      delivered: 0,
+      held: [],
+      heldByOutcome: {},
+      loggedNoEscrowParty: 0,
+      rows: [],
+      pickerError,
+    };
+    try {
+      await logRun({ jobId, windowStart, result });
+    } catch {
+      /* the throw below is the record that matters */
+    }
+    throw err;
+  }
   const rows: RetryHeldNoRecipientRow[] = [];
   let attempted = 0;
   let loggedNoEscrowParty = 0;

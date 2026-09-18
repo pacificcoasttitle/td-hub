@@ -155,3 +155,42 @@ Until that exists, manual coercion at boundaries is the rule.
 
 - `/docs/claude-skills/agents/builder.md`
 - `/docs/claude-skills/agents/reviewer.md`
+
+## The other direction: a STRING bound where Postgres expects a timestamp (2026-09-17)
+
+Reading a timestamp gives a string. Writing one is worse: a **JS string bound as a
+parameter into a timestamp position is shifted by the workstation's UTC offset**,
+silently, and the comparison quietly returns the wrong rows.
+
+Measured against production (session `TimeZone` = UTC, machine at UTC-7), for the
+value `'2026-09-17 17:30'`:
+
+| Form | What the server actually got |
+|---|---|
+| `sql\`... ${s}::timestamp\`` | `2026-09-18 00:30` — **7 hours out** |
+| `sql\`... where col > ${s}\`` | same shift; `19:03 > 17:30` came back **false** |
+| `sql\`... ${s}::text::timestamp\`` | `2026-09-17 17:30` ✅ |
+| `sql\`... ${new Date(...)}\`` (a Date, in **drizzle's** `sql`) | correct, but drizzle's postgres-js driver rejects a Date in a raw template — see `src/lib/db/driver-bind.ts` |
+| A literal written in the template | correct ✅ |
+
+The driver sees the parameter typed as `timestamp` (1114) and treats the string as
+LOCAL time, converting it to UTC. On Vercel (UTC) the shift is zero, which is why
+this only bites scripts run from a workstation — the place where one-off audits and
+backfills are written, and where a wrong answer is most likely to be believed.
+
+**What it cost here.** A backfill classified orders by
+`opened_at >= ${SINCE}`, so orders near the boundary landed in the wrong group, and
+a follow-up check bucketed a letter as "before the fix" when it was generated after.
+Both looked plausible.
+
+**Rules:**
+
+- **In a script, write the bound as a literal in the template,** or bind it as
+  `${s}::text::timestamp`. Both reach the server unchanged.
+- **Prefer relative SQL** — `now() - interval '24 hours'` — which has no parameter
+  at all and cannot be shifted.
+- **In application code, use the query builder** (`gt(table.col, date)`), which maps
+  a Date through the column and is unaffected.
+- **Sanity-check a boundary before trusting a bucket count:** select the raw value
+  alongside the comparison (`select col::text, (col < $1) ...`) and read both. That
+  is how this was caught: a row dated 19:03 was reported as earlier than 17:30.

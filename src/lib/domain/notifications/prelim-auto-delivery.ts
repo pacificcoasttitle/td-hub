@@ -37,7 +37,7 @@ export interface PrelimAutoDeliveryInput {
    * a recovery fetch stamps today on every row.
    */
   softproDocumentAt?: Date | null;
-  triggeredBy: 'fetch_prelims' | 'softpro_webhook';
+  triggeredBy: 'fetch_prelims' | 'softpro_webhook' | 'retry_held_no_recipient';
 }
 
 export interface PrelimAutoDeliveryResult {

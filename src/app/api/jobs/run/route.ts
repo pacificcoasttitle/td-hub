@@ -34,6 +34,7 @@ import { handleOpsDailyReport } from '@/lib/jobs/handlers/ops-daily-report';
 import { handleRetrySoftProDocumentAttach } from '@/lib/jobs/handlers/retry-softpro-document-attach';
 import { handleOutstandingDocumentsAlert } from '@/lib/jobs/handlers/outstanding-documents-alert';
 import { handleRetryHeldPrelimWatchedTen } from '@/lib/jobs/handlers/retry-held-prelim-watched-ten';
+import { handleRetryHeldPrelimNoRecipient } from '@/lib/jobs/handlers/retry-held-prelim-no-recipient';
 import { handlePartyWizardInvite } from '@/lib/jobs/handlers/party-wizard-invite';
 import { processOutboxEvents } from '@/lib/domain/notifications/service';
 import { recordJobCompletion } from '@/lib/jobs/record-result';
@@ -149,6 +150,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleOutstandingDocumentsAlert(),
   'prelim.retry_held_watched_ten': () =>
     handleRetryHeldPrelimWatchedTen(),
+  'prelim.retry_held_no_recipient': (payload) =>
+    handleRetryHeldPrelimNoRecipient(payload),
 };
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ import {
   normalizeComps, normalizePlatMap, normalizeSubject, normalizeTax, normalizeTransfers,
 } from './normalize';
 import { convertPlatMap } from './platmap';
-import { DEFAULT_CRITERIA } from './comp-filter';
+import { DEFAULT_CRITERIA, selectComps } from './comp-filter';
 import { criteriaSummary, profileListSubject } from './list-line';
 import { claimProperty, propertyRequestKey, recordClaimOutcome, releaseClaim } from './claim';
 import { TEMPLATE_VERSION } from './document/profile-document';
@@ -28,7 +28,7 @@ import { renderProfile } from './render';
 //   2. the call
 //   3. guard — a failure stores the evidence and produces NO document
 //   4. raw payload to storage BEFORE parsing
-//   5. comps, transfers, maps
+//   5. comps, transfers, maps — EACH COMP ROW WRITTEN ALREADY DECIDED
 //   6. render, which is a separate module that cannot call the vendor
 
 export interface GenerateInput {
@@ -174,33 +174,99 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
     return { ok: false, profileId, creditsCharged: result.creditsCharged, message };
   }
 
-  const feed = (result.payload.Feed ?? {}) as Record<string, unknown>;
+  const { apn } = await ingestPayload(profileId, result.payload);
+
+  // The property this address turned out to be. Evidence on the claim, not the
+  // pre-spend key — the APN does not exist until the call has been paid for.
+  await recordClaimOutcome(requestKey, profileId, apn);
+
+  // 6. Render. Separate module, no vendor access — see render.ts.
+  const rendered = await renderProfile(profileId, DEFAULT_CRITERIA);
+  if (!rendered.ok) {
+    return {
+      ok: false, profileId, creditsCharged: result.creditsCharged,
+      message: `${rendered.message ?? 'The document could not be produced.'} The property data is stored, so retrying the render costs nothing.`,
+    };
+  }
+
+  return { ok: true, profileId, creditsCharged: result.creditsCharged, compsShown: rendered.compsShown ?? 0 };
+}
+
+
+/**
+ * Everything that happens to a payload we have already paid for.
+ *
+ * SEPARATE FROM THE CALL ON PURPOSE. The raw response is in storage before this
+ * runs, so a profile whose ingest failed can be completed from what is stored —
+ * without going back to the vendor and without spending a second credit. That
+ * is what raw_storage_key was always for; nothing exercised it until profile 3.
+ *
+ * ─── THE FILTER RUNS BEFORE THE WRITE ───────────────────────────────────────
+ *
+ * Every comp row is inserted ALREADY DECIDED: selected with a display position,
+ * or excluded with the rule that rejected it. The check constraint
+ * `concierge_comps_exclusion_shape` requires exactly that, and it is the reason
+ * the stored set can explain itself months later — every comparable either
+ * appears at a position or carries why it does not.
+ *
+ * Writing candidates undecided and filtering afterwards is what failed on the
+ * first real generation: `selected = false, exclusion_reason = NULL` is a third
+ * state the schema does not allow, and it should not — it is a row that means
+ * nothing. selectComps is pure and takes no I/O, so there is no reason to write
+ * first and decide second.
+ */
+export async function ingestPayload(
+  profileId: number,
+  /** The parsed SiteX response — from the call, or from stored raw on a resume. */
+  payload: { Feed?: Record<string, unknown> },
+  now: Date = new Date(),
+): Promise<{ apn: string | null; compsReturned: number }> {
+  const feed = (payload.Feed ?? {}) as Record<string, unknown>;
   const subject = normalizeSubject(feed);
   const tax = normalizeTax(feed);
   const comps = normalizeComps(feed);
   const transfers = normalizeTransfers(feed);
   const platmapRaw = normalizePlatMap(feed);
 
-  // 5a. Every comparable SiteX returned, selected or not. selectComps runs in
-  //     the render step; these rows are the raw candidate set it filters.
+  // 5a. Decide, then write. The render step re-runs this whenever the criteria
+  //     move; these are the decisions the FIRST document was built from.
+  const decisions = selectComps(comps, {
+    buildingArea: subject.buildingArea,
+    bedrooms: subject.beds,
+    baths: subject.baths,
+    useCodeDescription: subject.useDescription,
+  }, DEFAULT_CRITERIA, now);
+  const byPosition = new Map(decisions.decisions.map((d) => [d.candidate.sourcePosition, d]));
+
   if (comps.length > 0) {
-    await db.insert(conciergeProfileComps).values(comps.map((c) => ({
-      profileId,
-      sourcePosition: c.sourcePosition,
-      address: c.address, city: c.city, state: c.state, zip: c.zip, apn: c.apn,
-      salePrice: c.salePrice === null ? null : String(c.salePrice),
-      pricePerSqft: c.pricePerSqft === null ? null : String(c.pricePerSqft),
-      recordingDate: c.recordingDate,
-      documentNumber: c.documentNumber, documentType: c.documentType,
-      buildingArea: c.buildingArea, bedrooms: c.bedrooms,
-      baths: c.baths === null ? null : String(c.baths),
-      yearBuilt: c.yearBuilt, lotSize: c.lotSize,
-      useDescription: c.useCodeDescription,
-      proximityMiles: c.proximityMiles === null ? null : String(c.proximityMiles),
-      latitude: c.latitude === null ? null : String(c.latitude),
-      longitude: c.longitude === null ? null : String(c.longitude),
-      raw: c.raw,
-    })));
+    await db.insert(conciergeProfileComps).values(comps.map((c) => {
+      // One decision per candidate, so this cannot miss. If it ever does, stop:
+      // the row would have to be written undecided, and an undecided row is the
+      // thing the constraint exists to refuse. The payload is already stored,
+      // so the profile is resumable rather than lost.
+      const d = byPosition.get(c.sourcePosition);
+      if (!d) throw new Error(`Comparable ${c.sourcePosition} came back without a decision.`);
+      return {
+        profileId,
+        sourcePosition: c.sourcePosition,
+        selected: d.selected,
+        exclusionReason: d.selected ? null : d.exclusionReason,
+        displayPosition: d.selected ? d.displayPosition : null,
+        address: c.address, city: c.city, state: c.state, zip: c.zip, apn: c.apn,
+        salePrice: c.salePrice === null ? null : String(c.salePrice),
+        pricePerSqft: c.pricePerSqft === null ? null : String(c.pricePerSqft),
+        recordingDate: c.recordingDate,
+        documentNumber: c.documentNumber, documentType: c.documentType,
+        buildingArea: c.buildingArea, bedrooms: c.bedrooms,
+        baths: c.baths === null ? null : String(c.baths),
+        yearBuilt: c.yearBuilt, lotSize: c.lotSize,
+        useDescription: c.useCodeDescription,
+        proximityMiles: c.proximityMiles === null ? null : String(c.proximityMiles),
+        latitude: c.latitude === null ? null : String(c.latitude),
+        longitude: c.longitude === null ? null : String(c.longitude),
+        raw: c.raw,
+      };
+    }));
   }
 
   if (transfers.length > 0) {
@@ -242,20 +308,7 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
     compsReturned: comps.length,
   }).where(eq(conciergeProfiles.id, profileId));
 
-  // The property this address turned out to be. Evidence on the claim, not the
-  // pre-spend key — the APN does not exist until the call has been paid for.
-  await recordClaimOutcome(requestKey, profileId, subject.apn ?? null);
-
-  // 6. Render. Separate module, no vendor access — see render.ts.
-  const rendered = await renderProfile(profileId, DEFAULT_CRITERIA);
-  if (!rendered.ok) {
-    return {
-      ok: false, profileId, creditsCharged: result.creditsCharged,
-      message: `${rendered.message ?? 'The document could not be produced.'} The property data is stored, so retrying the render costs nothing.`,
-    };
-  }
-
-  return { ok: true, profileId, creditsCharged: result.creditsCharged, compsShown: rendered.compsShown ?? 0 };
+  return { apn: subject.apn ?? null, compsReturned: comps.length };
 }
 
 async function storePlatMap(profileId: number, raw: ReturnType<typeof normalizePlatMap>) {

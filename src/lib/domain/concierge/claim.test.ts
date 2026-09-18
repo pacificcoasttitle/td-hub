@@ -63,6 +63,8 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
+const { owned } = vi.hoisted(() => ({ owned: { value: null as ExistingProfile | null } }));
+
 vi.mock('@/lib/db/schema', () => ({ conciergeProfiles: { id: 'id' }, conciergeProfileComps: {}, conciergeProfileTransfers: {} }));
 vi.mock('drizzle-orm', async () => {
   const actual = await vi.importActual<typeof import('drizzle-orm')>('drizzle-orm');
@@ -95,9 +97,14 @@ vi.mock('./normalize', () => ({
   normalizePlatMap: () => null,
 }));
 vi.mock('./platmap', () => ({ convertPlatMap: async () => null }));
+vi.mock('./already-have', async () => {
+  const actual = await vi.importActual<typeof import('./already-have')>('./already-have');
+  return { ...actual, findProfileForProperty: vi.fn(async () => owned.value) };
+});
 vi.mock('./render', () => ({ renderProfile: async () => ({ ok: true, compsShown: 6 }) }));
 
 import { claimProperty, propertyRequestKey, releaseClaim } from './claim';
+import type { ExistingProfile } from './already-have';
 import { generateConciergeProfile } from './generate';
 
 const ADDRESS = { street: '1358 5th St', city: 'La Verne', state: 'CA', zip: '91750' };
@@ -115,6 +122,60 @@ beforeEach(() => {
   state.nextProfileId = 100;
   vendor.calls = 0;
   uploads.calls = 0;
+  owned.value = null;
+});
+
+// ─── The other half of the guard ────────────────────────────────────────────
+//
+// The claim expires after fifteen minutes, by design. Without this check, the
+// same property bought at 3:00pm buys again at 3:16pm at full price, silently.
+
+describe('a property we already hold', () => {
+  const HELD: ExistingProfile = {
+    id: 3, createdAt: '2026-09-12T10:00:00Z', ageDays: 6,
+    preparedForName: 'Internal test', presentingRepName: 'Mark Neveu', hasPdf: true,
+  };
+
+  it('does not reach the vendor at all', async () => {
+    owned.value = HELD;
+    const result = await generateConciergeProfile(input());
+    expect(vendor.calls).toBe(0);
+    expect(result.ok).toBe(false);
+    expect((result as { creditsCharged: number }).creditsCharged).toBe(0);
+  });
+
+  it('returns the profile we already have, so the caller can offer it', async () => {
+    owned.value = HELD;
+    const result = await generateConciergeProfile(input()) as { alreadyHave?: ExistingProfile; message: string };
+    expect(result.alreadyHave?.id).toBe(3);
+    expect(result.message).toContain('12 September');
+  });
+
+  it('does not take the claim, so the property is not locked for fifteen minutes', async () => {
+    // Refusing AND claiming would block the deliberate re-run that follows.
+    owned.value = HELD;
+    await generateConciergeProfile(input());
+    expect(state.claims.size).toBe(0);
+  });
+
+  it('writes no row — a refusal is not an attempt', async () => {
+    owned.value = HELD;
+    await generateConciergeProfile(input());
+    expect(state.inserted.length).toBe(0);
+  });
+
+  it('spends when the operator asked for a fresh one, having been shown it', async () => {
+    owned.value = HELD;
+    const result = await generateConciergeProfile({ ...input(), allowDuplicate: true });
+    expect(result.ok).toBe(true);
+    expect(vendor.calls).toBe(1);
+  });
+
+  it('stamps the property key on the row, or the next lookup finds nothing', async () => {
+    owned.value = null;
+    await generateConciergeProfile(input());
+    expect(state.inserted[0]).toMatchObject({ propertyKey: propertyRequestKey(ADDRESS) });
+  });
 });
 
 describe('the key a claim is taken on', () => {

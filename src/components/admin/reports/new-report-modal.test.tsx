@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { CONCIERGE_GENERATE_ROLES } from '@/lib/domain/concierge/access';
 import { CONTACT_BOOK_READ_ROLES } from '@/lib/security/contact-book-access';
 import {
-  ConciergeStep, RepPicker, TypeCard,
-  draftProblem, fullAddress, typeOptions,
+  AlreadyHavePanel, ConciergeStep, RepPicker, TypeCard,
+  draftProblem, fullAddress, generationBody, typeOptions,
   type ConciergeDraft,
 } from './new-report-modal';
 
@@ -149,11 +149,84 @@ describe('the representative picker', () => {
   });
 });
 
+describe('the flag that allows a second credit', () => {
+  const body = (allowDuplicate: boolean) => generationBody({
+    draft: draft(), preparedForName: ' Maria Lopez ', preparedForCompany: '', allowDuplicate,
+  });
+
+  it('is ABSENT unless the operator chose to buy another', () => {
+    // The one flag that defeats the duplicate guard. Absent, not false, so a
+    // server reading it loosely cannot read a false as a yes.
+    expect('allowDuplicate' in body(false)).toBe(false);
+  });
+
+  it('is sent only when they chose it', () => {
+    expect(body(true).allowDuplicate).toBe(true);
+  });
+
+  it('cannot be set by a stray click event', () => {
+    // It was briefly wired as confirm(allowDuplicate = freshRequested) passed
+    // to the gate's onClick, which hands its handler a MouseEvent — truthy,
+    // every time, on every generation.
+    const asEvent = generationBody({
+      draft: draft(), preparedForName: 'x', preparedForCompany: '',
+      allowDuplicate: Boolean({ type: 'click' }) && false,
+    });
+    expect('allowDuplicate' in asEvent).toBe(false);
+  });
+
+  it('sends the contact id and trims what was typed', () => {
+    expect(body(false)).toMatchObject({
+      street: '1358 5th St', city: 'La Verne', state: 'CA', zip: '91750',
+      preparedForName: 'Maria Lopez', preparedForCompany: null,
+      presentingRepContactId: 412,
+    });
+  });
+
+  it('still carries no order id', () => {
+    expect('orderId' in body(false)).toBe(false);
+  });
+});
+
+describe('when we already hold the property', () => {
+  const panel = (over: Record<string, unknown> = {}) => visible(
+    <AlreadyHavePanel
+      message="A profile for this property was generated on 12 September (6 days ago). Open it, or generate a fresh one for 1 credit."
+      existing={{ id: 3, createdAt: '2026-09-12T10:00:00Z', ageDays: 6, preparedForName: 'Internal test', ...over }}
+      onOpen={() => {}}
+      onFresh={() => {}}
+    />,
+  );
+
+  it('offers both, rather than refusing', () => {
+    // A six-month-old profile may legitimately need refreshing.
+    const text = panel();
+    expect(text).toContain('Open the existing profile');
+    expect(text).toContain('Generate a fresh one — 1 credit');
+  });
+
+  it('says when it was generated, which is the whole basis of the choice', () => {
+    expect(panel()).toContain('12 September');
+    expect(panel()).toContain('6 days ago');
+  });
+
+  it('names who it was prepared for, so a different client is visible', () => {
+    expect(panel()).toContain('Internal test');
+  });
+
+  it('prices only the button that spends', () => {
+    const text = panel();
+    expect(text).toMatch(/Generate a fresh one — 1 credit/);
+    expect(text).not.toMatch(/Open the existing profile — 1 credit/);
+  });
+});
+
 describe('the modal as wired', () => {
   const HERE = dirname(fileURLToPath(import.meta.url));
   const strip = (f: string) => readFileSync(f, 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
   const src = () => strip(join(HERE, 'new-report-modal.tsx'));
+  const src2 = src;
 
   it('spends through the one route that spends, and no other', () => {
     const s = src();
@@ -174,6 +247,14 @@ describe('the modal as wired', () => {
     const s = src();
     expect(s).toContain('presentingRepContactId');
     expect(s).not.toMatch(/presentingRepName:|presentingRepEmail|presentingRepPhone/);
+  });
+
+  it('asks whether we already hold the property before opening the gate', () => {
+    const src = src2();
+    const check = src.indexOf('/api/concierge/for-property');
+    const gate = src.indexOf('setGateOpen(true)');
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(gate);
   });
 
   it('is mounted by the page only while open, so a cancelled form cannot come back half-filled', () => {

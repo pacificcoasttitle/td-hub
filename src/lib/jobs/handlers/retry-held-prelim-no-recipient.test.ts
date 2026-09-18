@@ -55,14 +55,17 @@ describe('the no-recipient retry re-examines hub-resolve holds through maybeAuto
     expect(src).toMatch(/kind: 'no_escrow_party'/);
   });
 
-  it('defaults a missing limit to the ceiling and rejects an invalid one', () => {
-    expect(parseRetryHeldNoRecipientLimit({})).toBe(RETRY_HELD_NO_RECIPIENT_CEILING);
+  it('defaults a missing limit only on a cron GET; a manual body still refuses', () => {
+    expect(parseRetryHeldNoRecipientLimit({ __invokedBy: 'cron' })).toBe(RETRY_HELD_NO_RECIPIENT_CEILING);
+    expect(() => parseRetryHeldNoRecipientLimit({})).toThrow(/requires payload.limit/);
+    expect(() => parseRetryHeldNoRecipientLimit({ __invokedBy: 'manual' })).toThrow(/requires payload.limit/);
     expect(() => parseRetryHeldNoRecipientLimit({ limit: 0 })).toThrow(/integer from 1/);
     expect(() => parseRetryHeldNoRecipientLimit({ limit: 51 })).toThrow(/integer from 1/);
     expect(() => parseRetryHeldNoRecipientLimit({ limit: '5' })).toThrow(/integer from 1/);
     expect(parseRetryHeldNoRecipientLimit({ limit: 5 })).toBe(5);
     expect(src).toMatch(/parseRetryHeldNoRecipientLimit\(payload\)/);
     expect(src).toMatch(/attempted >= limit/);
+    expect(jobsRun).toMatch(/__invokedBy = req.method === 'GET' \? 'cron' : 'manual'/);
   });
 
   it('logs attempted, delivered, and held-and-why on every run', () => {

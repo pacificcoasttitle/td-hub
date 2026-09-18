@@ -19,8 +19,10 @@
  * hour would bury the rows that can still deliver.
  *
  * Rate: one maybeAutoDeliver at a time, 5s pause. Ceiling 50, youngest first.
- * Cron GET has no body, so a missing limit defaults to the ceiling. Hourly
- * at :20, after the :15 enrich that writes the party.
+ * A GET (the cron) has no body and defaults to the ceiling. A POST with a
+ * body but a missing or malformed limit still refuses — that is the wrapper
+ * check that caught the empty invoke on the first drain. Hourly at :20,
+ * after the :15 enrich that writes the party.
  */
 
 import { and, eq, sql } from 'drizzle-orm';
@@ -72,7 +74,10 @@ export interface RetryHeldNoRecipientResult {
 
 export function parseRetryHeldNoRecipientLimit(payload: Record<string, unknown>): number {
   if (!Object.prototype.hasOwnProperty.call(payload, 'limit')) {
-    return RETRY_HELD_NO_RECIPIENT_CEILING;
+    if (payload.__invokedBy === 'cron') return RETRY_HELD_NO_RECIPIENT_CEILING;
+    throw new Error(
+      'prelim.retry_held_no_recipient requires payload.limit — refusing to run uncapped',
+    );
   }
   const raw = payload.limit;
   if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1 || raw > RETRY_HELD_NO_RECIPIENT_CEILING) {

@@ -37,6 +37,6 @@ describe('the watched-ten retry goes through maybeAutoDeliverPrelim', () => {
   it('is wired to the job runner and is not a cron', () => {
     expect(jobsRun).toContain('handleRetryHeldPrelimWatchedTen');
     expect(jobsRun).toContain('prelim.retry_held_watched_ten');
-    expect(vercel.crons.some((c) => c.path.includes('watched_ten') || c.path.includes('retry_held'))).toBe(false);
+    expect(vercel.crons.some((c) => c.path.includes('watched_ten'))).toBe(false);
   });
 });

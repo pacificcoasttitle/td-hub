@@ -245,6 +245,9 @@ async function executeJob(req: NextRequest, payload: Record<string, unknown>) {
     const handlerPayload = ENRICH_ORDER_JOB_NAMES.has(jobName) || TITLEPOINT_DRAIN_JOB_NAMES.has(jobName) || NEEDS_JOB_ID.has(jobName)
       ? { ...payload, __jobId: jobId }
       : payload;
+    if (jobName === 'prelim.retry_held_no_recipient') {
+      handlerPayload.__invokedBy = req.method === 'GET' ? 'cron' : 'manual';
+    }
     const result = await handler(handlerPayload);
     // Saves the handler's result on the row as well as the status. The result
     // used to reach only this HTTP response, which nobody reads for a cron run.

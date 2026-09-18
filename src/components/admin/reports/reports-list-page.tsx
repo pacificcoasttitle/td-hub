@@ -35,9 +35,11 @@ const COLUMN_WIDTHS = ['18%', '22%', '20%', '13%', '10%', '9%', '8%'];
 interface Props {
   /** Concierge is the only type that can be created today. */
   onNewReport: () => void;
+  /** Bumped when a report is created, so the new row appears without a reload. */
+  reloadToken?: number;
 }
 
-export function ReportsListPage({ onNewReport }: Props) {
+export function ReportsListPage({ onNewReport, reloadToken = 0 }: Props) {
   const [rows, setRows] = useState<ReportListRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -62,7 +64,7 @@ export function ReportsListPage({ onNewReport }: Props) {
       .finally(() => { if (id === fetchCount.current) setLoading(false); });
   }, [page, search, filter]);
 
-  useEffect(() => { fetchReports(); }, [fetchReports]);
+  useEffect(() => { fetchReports(); }, [fetchReports, reloadToken]);
 
   function handleSearch(v: string) {
     setSearchInput(v);

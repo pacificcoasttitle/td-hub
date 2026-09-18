@@ -6,7 +6,8 @@ import { useEffect, useRef, useState } from 'react';
 import { handleSignOut } from '@/lib/security/sign-out';
 
 /* ─── Desktop Nav Items ────────────────────────────────────────────────────── */
-const NAV_ITEMS = [
+/** Exported for the navigation test: the portal's whole desktop nav. */
+export const NAV_ITEMS = [
   { label: 'My Files', href: '/client/dashboard' },
   { label: 'Open New Order', href: '/client/orders/new' },
 ];

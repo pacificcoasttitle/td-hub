@@ -25,7 +25,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   REPORTS_PAGE_SIZE, REPORT_TYPE_LABELS, sourceLineFor,
-  type ReportFilter, type ReportListResult, type ReportListRow, type ReportType,
+  type ReportFilter, type ReportListResult, type ReportType,
 } from './list-types';
 
 // Re-exported so server callers keep one import. The browser must import

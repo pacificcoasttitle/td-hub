@@ -34,12 +34,14 @@ export const TEMPLATE_VERSION = 'v1';
  */
 Font.registerHyphenationCallback((word) => [word]);
 
-const NAVY = '#1B2A4A';
-const ORANGE = '#F26B2B';
-const MUTED = '#526174';
-const BORDER = '#D7DDE5';
-const TINT = '#F8F9FA';
-const GAP = '—';
+// Exported as the family's tokens: the three farming documents take these
+// values rather than the design mock's, so all four artefacts are one family.
+export const NAVY = '#1B2A4A';
+export const ORANGE = '#F26B2B';
+export const MUTED = '#526174';
+export const BORDER = '#D7DDE5';
+export const TINT = '#F8F9FA';
+export const GAP = '—';
 
 const s = StyleSheet.create({
   page: { paddingTop: 34, paddingBottom: 46, paddingHorizontal: 40, fontSize: 8.5, color: NAVY, fontFamily: 'Helvetica' },

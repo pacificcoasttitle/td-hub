@@ -117,20 +117,21 @@ const AWAITING_THEIR_ENDPOINT = new Set([
   // part of the farming PDFs, next on the build list.
   '/api/reports/${row.type}/${row.id}/pdf',
 
-  // ── FIXME: calls to endpoints nobody wrote, found 2026-09-21 ──────────────
-  // True today, not right. Each fails SILENTLY — that is how they survived.
+  // ── Deliberately kept: shelved, not dead ─────────────────────────────────
 
-  // Job Log → documents tab. Live for admins; the 404 is swallowed by
-  // `if (!d) return`, so the tab simply stays empty.
-  '/api/logs/documents',
-  // Title officer dashboard. The 404 becomes `{ tasks: [] }` and renders as
-  // "No pending tasks." No title_officer account exists yet, so nobody sees
-  // it today — the first one will be told they have nothing to do.
-  '/api/dashboard/title-officer/pending',
-  // Tessa chat and prelim analysis. Dead code end to end: components/tessa and
-  // hooks/usePrelimAnalysis are imported by nothing.
+  // Tessa chat and prelim analysis. Imported by nothing today, and the
+  // endpoints were never written — but Gerard is SHELVING Tessa until he
+  // decides what it should do, not abandoning it (2026-09-21). Recorded here
+  // so this check does not flag it, and so nobody deletes it later on the
+  // assumption that unused means dead.
   '/api/tessa/chat',
   '/api/tessa/analyze',
+
+  // Removed 2026-09-21 rather than listed: the Job Log "Document Activity" tab
+  // (/api/logs/documents) and the title officer "Pending Tasks" panel
+  // (/api/dashboard/title-officer/pending). Both turned a 404 into an empty
+  // state that read as "nothing here" — the second one in green, as "All
+  // caught up!".
 ]);
 
 describe('every API call in the application resolves to a route', () => {

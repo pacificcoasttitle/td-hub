@@ -52,22 +52,3 @@ export function ApiFilterBar({
     </div>
   );
 }
-
-export function DocFilterBar({ actionFilter, onActionChange }: {
-  actionFilter: string; onActionChange: (v: string) => void;
-}) {
-  return (
-    <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
-      <select value={actionFilter} onChange={(e) => onActionChange(e.target.value)}
-        className="h-9 px-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:border-[#C5A55A]">
-        <option value="">All Actions</option>
-        <option value="upload">Upload</option>
-        <option value="download">Download</option>
-        <option value="attach">Attach to SoftPro</option>
-        <option value="generate">Generate</option>
-        <option value="delete">Delete</option>
-      </select>
-      <span className="ml-auto text-xs text-[#9CA3AF]">Auto-refreshes every 60s</span>
-    </div>
-  );
-}

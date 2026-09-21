@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderToBuffer } from '@react-pdf/renderer';
-import pdf from 'pdf-parse/lib/pdf-parse';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
 import { computeCarrierRoute, computeCountySales, computeSalesActivity } from '../compute';
 import { monthWindow, type AreaSaleRow, type CountySaleRow, type RouteRow } from '../datasets';
@@ -14,19 +14,36 @@ import { CUSTOMER_SERVICE, OPEN_ORDERS, type RepBlock } from './family';
 
 // ─── The documents, read the way an agent reads them ────────────────────────
 //
-// Each test renders the REAL PDF and reads its text back. The first render of
+// Each test renders the REAL PDF and reads its text back with pdf.js. The first render of
 // Sales Activity printed three monthly declines as "3.2%", "3.9%", "4.8%" —
 // the typographic minus is not in Helvetica's encoding and react-pdf dropped it
 // without a word. Nothing short of reading the output would have caught that.
 
 type Parsed = { text: string; numpages: number };
 const has = (text: string, needle: string) => text.includes(flat(needle));
-const read = async (el: React.ReactElement): Promise<Parsed> =>
-  (pdf as unknown as (b: Buffer) => Promise<Parsed>)(await renderToBuffer(el as never));
+
 /**
- * Whitespace removed. Letter-spaced labels come back from pdf-parse one glyph
- * at a time — "S A L E S" — so comparisons are made with spacing squashed out
- * on both sides. What is being checked is the characters and their order.
+ * Text as a reader gets it, page by page, from the modern pdf.js.
+ *
+ * NOT pdf-parse: it bundles pdf.js 1.10 (2017), which reads these files on
+ * Windows and rejects the same output on Linux with "bad XRef entry". The
+ * parser was the fault, not the PDF — the current pdf.js reads them on both.
+ */
+const read = async (el: React.ReactElement): Promise<Parsed> => {
+  const buf = await renderToBuffer(el as never);
+  const doc = await getDocument({ data: new Uint8Array(buf), verbosity: 0 }).promise;
+  const pages: string[] = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const content = await (await doc.getPage(p)).getTextContent();
+    pages.push(content.items.map((i) => ('str' in i ? i.str : '')).join(' '));
+  }
+  return { text: pages.join('\n'), numpages: doc.numPages };
+};
+
+/**
+ * Whitespace removed. Letter-spaced labels can come back one glyph at a time —
+ * "S A L E S" — so comparisons are made with spacing squashed out on both
+ * sides. What is being checked is the characters and their order.
  */
 const flat = (s: string) => s.replace(/\s+/g, '');
 

@@ -86,8 +86,7 @@ export function StatsRow({ stats, loading, onRefresh }: { stats: LogStats | null
   );
 }
 
-export function VendorCards({ stats, subTab }: { stats: LogStats | null; subTab: 'api' | 'documents' }) {
-  if (subTab !== 'api') return null;
+export function VendorCards({ stats }: { stats: LogStats | null }) {
   const byVendor = vendorMap(stats);
   return (
     <div className="flex gap-2 overflow-x-auto pb-1">

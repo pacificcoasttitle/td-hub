@@ -1,0 +1,360 @@
+/**
+ * The farming report generator: a file in, a stored report out.
+ *
+ * ─── ORDER OF OPERATIONS ────────────────────────────────────────────────────
+ *
+ *   1. parse      refuse — with NO row — a file missing the columns the report
+ *                 needs, or one with nothing readable in it at all
+ *   2. row        status 'pending', so a crash leaves a record, not a gap
+ *   3. dataset    the uploaded file to storage BEFORE anything is computed from
+ *                 it; a report we cannot reproduce is not produced
+ *   4. figures    computed once and STORED, with Subject and Settings, so the
+ *                 list and any later render read the same numbers back
+ *   5. render     the document, from those figures
+ *   6. pdf        to storage, keyed per render; the row is 'generated' only
+ *                 once the file is there
+ *
+ * Any failure after step 2 marks the row 'failed' with the reason and returns
+ * it — never a throw, never a row that says 'pending' forever.
+ *
+ * ─── THE REP IS RESOLVED HERE, NOT ACCEPTED ─────────────────────────────────
+ *
+ * The caller names a CONTACT. The name, title, phone and email printed on the
+ * leave-behind are read from that contact server-side and snapshotted onto the
+ * row, the same rule as the concierge presenting rep: a client-facing document
+ * does not print details a browser supplied.
+ *
+ * ─── DRIVEN FROM A TEST, BEFORE ANY SCREEN ──────────────────────────────────
+ *
+ * No UI reaches this yet. generate.test.ts pushes real CSV text through it and
+ * reads the rendered PDF back, so the numbers are proven against the document
+ * before the modal exists.
+ */
+import crypto from 'node:crypto';
+import { eq } from 'drizzle-orm';
+import { renderToBuffer } from '@react-pdf/renderer';
+import { db } from '@/lib/db/client';
+import { carrierRouteReports, countySalesReports, salesActivityReports } from '@/lib/db/schema';
+import { uploadFile } from '@/lib/integrations/s3/client';
+import { resolvePresentingRep } from '@/lib/domain/concierge/presenting-rep';
+import {
+  CITIES_PER_PAGE, RANK_BY, RANK_LABEL, computeCarrierRoute, computeCountySales, computeSalesActivity, monthLabel,
+  type DataQuality, type RankBy,
+} from './compute';
+import {
+  monthWindow, parseAreaSaleRows, parseCountySaleRows, parseRouteRows, type ParseReport,
+} from './datasets';
+import {
+  SalesActivityDocument, TEMPLATE_VERSION as SA_TEMPLATE,
+} from './document/sales-activity-document';
+import {
+  CarrierRouteDocument, TEMPLATE_VERSION as CR_TEMPLATE,
+} from './document/carrier-route-document';
+import {
+  CountySalesDocument, TEMPLATE_VERSION as CS_TEMPLATE,
+} from './document/county-sales-document';
+import type { RepBlock } from './document/family';
+
+// ─── Inputs and outcomes ────────────────────────────────────────────────────
+
+export const FARMING_WINDOWS = [3, 6, 12] as const;
+export type FarmingWindow = typeof FARMING_WINDOWS[number];
+
+/** The six counties the County Sales report has always covered. */
+export const FARMING_COUNTIES = ['Los Angeles', 'Orange', 'Riverside', 'San Bernardino', 'San Diego', 'Ventura'] as const;
+export type FarmingCounty = typeof FARMING_COUNTIES[number];
+
+interface Common {
+  /** The uploaded file, as text. */
+  csv: string;
+  /** Which contact the report is branded to. Resolved here, never trusted. */
+  brandedToContactId: number;
+  createdBy: string;
+  now?: Date;
+}
+
+export interface SalesActivityRequest extends Common {
+  areaName: string;
+  propertyType: string | null;
+  windowMonths: FarmingWindow;
+  /** `YYYY-MM`, the last month in the window. */
+  windowEnd: string;
+}
+
+export interface CarrierRouteRequest extends Common {
+  areaName: string;
+  rankBy: RankBy;
+}
+
+export interface CountySalesRequest extends Common {
+  county: FarmingCounty;
+  /** `YYYY-MM`, the month the file covers. */
+  month: string;
+}
+
+export type GenerateOutcome =
+  | { ok: true; reportId: number; pdfStorageKey: string; pageCount: number; quality: DataQuality }
+  /** Refused before anything was written. The message says what to fix. */
+  | { ok: false; reportId: null; stage: 'input' | 'parse'; message: string }
+  /** A row exists and says failed, with this reason on it. */
+  | { ok: false; reportId: number; stage: 'dataset' | 'render' | 'store'; message: string };
+
+// ─── Shared steps ───────────────────────────────────────────────────────────
+
+const MONTH_KEY = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function quality(p: ParseReport<unknown>): DataQuality {
+  return { rowsRead: p.total, used: p.used, rejected: p.rejected, rejectedTypes: p.rejectedTypes };
+}
+
+/**
+ * Refuse a file that cannot make this report, before a row exists.
+ *
+ * Missing columns name the fields in the words the report uses. A file with
+ * columns but nothing readable says what was wrong with the rows — counted,
+ * the way the page would have counted them.
+ */
+function parseProblem(p: ParseReport<unknown>, fieldWords: Record<string, string>): string | null {
+  if (p.missingFields.length > 0) {
+    const names = p.missingFields.map((f) => fieldWords[f] ?? f).join(', ');
+    return `The file has no column for: ${names}.`
+      + (p.unmappedHeaders.length ? ` Columns it does have that were not recognised: ${p.unmappedHeaders.join(', ')}.` : '');
+  }
+  if (p.total === 0) return 'The file has a header row and no data.';
+  if (p.used === 0) {
+    const why = Object.entries(p.rejectedTypes).map(([k, n]) => `${k} (${n})`).join(', ');
+    return `None of the ${p.total} rows could be used: ${why}.`;
+  }
+  return null;
+}
+
+async function loadRep(contactId: number): Promise<{ ok: true; rep: RepBlock } | { ok: false; message: string }> {
+  const r = await resolvePresentingRep(null, contactId);
+  if (!r.ok) return { ok: false, message: r.message };
+  // No photo source exists yet. The block renders without one — never a
+  // placeholder — until reps have photos stored somewhere we own.
+  return { ok: true, rep: { name: r.rep.name, title: r.rep.title, phone: r.rep.phone, email: r.rep.email, photo: null } };
+}
+
+const repColumns = (contactId: number, rep: RepBlock) => ({
+  brandedToContactId: contactId,
+  brandedToName: rep.name,
+  brandedToTitle: rep.title,
+  brandedToEmail: rep.email,
+  brandedToPhone: rep.phone,
+  brandedToPhotoKey: null,
+});
+
+const datasetKey = (type: string, id: number) => `reports/${type}/${id}/dataset.csv`;
+const pdfKey = (type: string, id: number, at: Date) =>
+  `reports/${type}/${id}/report-${at.toISOString().replace(/[:.]/g, '-')}.pdf`;
+
+/** The same count the concierge render uses. */
+const countPages = (buf: Buffer) => (buf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+
+type Table = typeof salesActivityReports | typeof carrierRouteReports | typeof countySalesReports;
+
+/**
+ * Steps 3, 5 and 6 — shared by all three. The caller has already inserted the
+ * row and written its figures; this stores the file, renders and stores the PDF.
+ */
+async function storeAndRender(args: {
+  type: string;
+  table: Table;
+  id: number;
+  csv: string;
+  now: Date;
+  render: () => Promise<Buffer>;
+  quality: DataQuality;
+}): Promise<GenerateOutcome> {
+  const { type, table, id, now } = args;
+  const fail = async (stage: 'dataset' | 'render' | 'store', message: string): Promise<GenerateOutcome> => {
+    await db.update(table).set({ status: 'failed', errorMessage: message }).where(eq(table.id, id));
+    return { ok: false, reportId: id, stage, message };
+  };
+
+  // 3. The file first. A report whose source cannot be kept is not produced.
+  const csvBuf = Buffer.from(args.csv, 'utf8');
+  const dKey = datasetKey(type, id);
+  const dUp = await uploadFile({ key: dKey, buffer: csvBuf, contentType: 'text/csv' });
+  if (!dUp.success) {
+    return fail('dataset', 'The uploaded file could not be stored, so the report cannot be reproduced. Not generating a document from data we cannot keep.');
+  }
+  await db.update(table).set({
+    datasetStorageKey: dKey,
+    datasetSha256: crypto.createHash('sha256').update(csvBuf).digest('hex'),
+  }).where(eq(table.id, id));
+
+  // 5. Render.
+  let pdf: Buffer;
+  try {
+    pdf = await args.render();
+  } catch (e) {
+    return fail('render', `The document could not be rendered: ${(e as Error).message}`);
+  }
+
+  // 6. The PDF, keyed per render. Only now is the row 'generated'.
+  const key = pdfKey(type, id, now);
+  const up = await uploadFile({ key, buffer: pdf, contentType: 'application/pdf' });
+  if (!up.success) return fail('store', 'The document rendered but could not be stored.');
+
+  const pageCount = countPages(pdf);
+  await db.update(table).set({
+    pdfStorageKey: key,
+    pdfSha256: crypto.createHash('sha256').update(pdf).digest('hex'),
+    pdfBytes: pdf.length,
+    pdfPageCount: pageCount,
+    status: 'generated',
+    errorMessage: null,
+  }).where(eq(table.id, id));
+
+  return { ok: true, reportId: id, pdfStorageKey: key, pageCount, quality: args.quality };
+}
+
+// ─── 01 · Sales Activity ────────────────────────────────────────────────────
+
+export async function generateSalesActivity(req: SalesActivityRequest): Promise<GenerateOutcome> {
+  const now = req.now ?? new Date();
+  if (!req.areaName.trim()) return { ok: false, reportId: null, stage: 'input', message: 'Enter the area name.' };
+  if (!FARMING_WINDOWS.includes(req.windowMonths)) {
+    return { ok: false, reportId: null, stage: 'input', message: 'The window must be 3, 6 or 12 months.' };
+  }
+  if (!MONTH_KEY.test(req.windowEnd)) return { ok: false, reportId: null, stage: 'input', message: 'The window must end on a month.' };
+
+  const parsed = parseAreaSaleRows(req.csv);
+  const problem = parseProblem(parsed, { price: 'purchase price', saleDate: 'purchase date' });
+  if (problem) return { ok: false, reportId: null, stage: 'parse', message: problem };
+
+  const rep = await loadRep(req.brandedToContactId);
+  if (!rep.ok) return { ok: false, reportId: null, stage: 'input', message: rep.message };
+
+  const [y, m] = req.windowEnd.split('-').map(Number) as [number, number];
+  const window = monthWindow(new Date(Date.UTC(y, m - 1, 1)), req.windowMonths);
+  const figures = computeSalesActivity(parsed.rows, window);
+  const q = quality(parsed);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+  const [row] = await db.insert(salesActivityReports).values({
+    areaName: req.areaName.trim(),
+    propertyType: req.propertyType?.trim() || null,
+    windowMonths: req.windowMonths,
+    windowStart: iso(window.start),
+    windowEnd: iso(window.end),
+    ...repColumns(req.brandedToContactId, rep.rep),
+    datasetSource: 'csv_upload',
+    datasetRows: q.rowsRead,
+    datasetUsed: q.used,
+    datasetRejected: q.rejected,
+    rejectedTypes: q.rejectedTypes,
+    listSubject: req.areaName.trim(),
+    listSubjectDetail: req.propertyType?.trim() || 'All property types',
+    listSettings: `${req.windowMonths} months to ${monthLabel(req.windowEnd)}`,
+    metrics: figures.metrics as unknown as Record<string, unknown>,
+    months: figures.months as unknown as Record<string, unknown>,
+    templateVersion: SA_TEMPLATE,
+    status: 'pending',
+    createdBy: req.createdBy,
+  }).returning({ id: salesActivityReports.id });
+
+  return storeAndRender({
+    type: 'sales_activity', table: salesActivityReports, id: row!.id, csv: req.csv, now, quality: q,
+    render: () => renderToBuffer(SalesActivityDocument({
+      areaName: req.areaName.trim(), propertyType: req.propertyType?.trim() || null,
+      windowMonths: req.windowMonths, windowEndKey: req.windowEnd,
+      figures, quality: q, rep: rep.rep, generatedAt: now,
+    }) as never),
+  });
+}
+
+// ─── 02 · Carrier Route Analysis ────────────────────────────────────────────
+
+export async function generateCarrierRoute(req: CarrierRouteRequest): Promise<GenerateOutcome> {
+  const now = req.now ?? new Date();
+  if (!req.areaName.trim()) return { ok: false, reportId: null, stage: 'input', message: 'Enter the area name.' };
+  if (!RANK_BY.includes(req.rankBy)) return { ok: false, reportId: null, stage: 'input', message: 'Choose what to rank the routes by.' };
+
+  const parsed = parseRouteRows(req.csv);
+  const problem = parseProblem(parsed, { routeId: 'carrier route' });
+  if (problem) return { ok: false, reportId: null, stage: 'parse', message: problem };
+
+  const rep = await loadRep(req.brandedToContactId);
+  if (!rep.ok) return { ok: false, reportId: null, stage: 'input', message: rep.message };
+
+  const figures = computeCarrierRoute(parsed.rows, req.rankBy);
+  const q = quality(parsed);
+
+  const [row] = await db.insert(carrierRouteReports).values({
+    areaName: req.areaName.trim(),
+    rankBy: req.rankBy,
+    ...repColumns(req.brandedToContactId, rep.rep),
+    datasetSource: 'csv_upload',
+    datasetRows: q.rowsRead,
+    datasetUsed: q.used,
+    datasetRejected: q.rejected,
+    rejectedTypes: q.rejectedTypes,
+    listSubject: req.areaName.trim(),
+    listSubjectDetail: `${figures.totalRoutes} ${figures.totalRoutes === 1 ? 'route' : 'routes'}`,
+    listSettings: `Top ${figures.routes.length} by ${RANK_LABEL[req.rankBy]}`,
+    standouts: figures.standouts as unknown as Record<string, unknown>,
+    routes: figures.routes as unknown as Record<string, unknown>,
+    templateVersion: CR_TEMPLATE,
+    status: 'pending',
+    createdBy: req.createdBy,
+  }).returning({ id: carrierRouteReports.id });
+
+  return storeAndRender({
+    type: 'carrier_route', table: carrierRouteReports, id: row!.id, csv: req.csv, now, quality: q,
+    render: () => renderToBuffer(CarrierRouteDocument({
+      areaName: req.areaName.trim(), rankBy: req.rankBy, figures, quality: q, rep: rep.rep, generatedAt: now,
+    }) as never),
+  });
+}
+
+// ─── 03 · County Sales ──────────────────────────────────────────────────────
+
+export async function generateCountySales(req: CountySalesRequest): Promise<GenerateOutcome> {
+  const now = req.now ?? new Date();
+  if (!FARMING_COUNTIES.includes(req.county)) {
+    return { ok: false, reportId: null, stage: 'input', message: `The county must be one of ${FARMING_COUNTIES.join(', ')}.` };
+  }
+  if (!MONTH_KEY.test(req.month)) return { ok: false, reportId: null, stage: 'input', message: 'Choose the month the file covers.' };
+
+  const parsed = parseCountySaleRows(req.csv);
+  const problem = parseProblem(parsed, { city: 'site city', price: 'purchase price', propertyType: 'property type' });
+  if (problem) return { ok: false, reportId: null, stage: 'parse', message: problem };
+
+  const rep = await loadRep(req.brandedToContactId);
+  if (!rep.ok) return { ok: false, reportId: null, stage: 'input', message: rep.message };
+
+  const figures = computeCountySales(parsed.rows);
+  const q = quality(parsed);
+
+  const [row] = await db.insert(countySalesReports).values({
+    county: req.county,
+    month: `${req.month}-01`,
+    ...repColumns(req.brandedToContactId, rep.rep),
+    datasetSource: 'csv_upload',
+    datasetRows: q.rowsRead,
+    datasetUsed: q.used,
+    datasetRejected: q.rejected,
+    rejectedTypes: q.rejectedTypes,
+    listSubject: `${req.county} County`,
+    listSubjectDetail: `${figures.cities.length} ${figures.cities.length === 1 ? 'city' : 'cities'}`,
+    listSettings: monthLabel(req.month),
+    cities: figures.cities as unknown as Record<string, unknown>,
+    totals: { ...figures.totals, otherKinds: figures.otherKinds } as unknown as Record<string, unknown>,
+    templateVersion: CS_TEMPLATE,
+    status: 'pending',
+    createdBy: req.createdBy,
+  }).returning({ id: countySalesReports.id });
+
+  return storeAndRender({
+    type: 'county_sales', table: countySalesReports, id: row!.id, csv: req.csv, now, quality: q,
+    render: () => renderToBuffer(CountySalesDocument({
+      county: req.county, monthKey: req.month, figures, quality: q, rep: rep.rep, generatedAt: now,
+    }) as never),
+  });
+}
+
+/** Exported for the test that checks the page count against the city count. */
+export const COUNTY_PAGES = (cities: number) => Math.max(1, Math.ceil(cities / CITIES_PER_PAGE));

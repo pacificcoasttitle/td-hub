@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, BarChart3, TrendingUp, Users,
-  Briefcase, Trophy, Contact, LogOut, Menu, X,
+  Briefcase, Trophy, Contact, LogOut, Menu, X, CalendarDays,
 } from 'lucide-react';
 import { handleSignOut } from '@/lib/security/sign-out';
 
@@ -24,6 +24,12 @@ const BASE_ITEMS: NavItem[] = [
 
 const RANKING: NavItem = { label: 'Ranking', href: '/sales/ranking', icon: <Trophy className={ICON_CLS} /> };
 
+/**
+ * Managers only — the page and /api/sales/daily both refuse anyone else. Built
+ * 2026-04-06 and working since, with no link to it until 2026-09-21.
+ */
+const DAILY: NavItem = { label: 'Daily', href: '/sales/daily', icon: <CalendarDays className={ICON_CLS} /> };
+
 const ORDER_ITEMS: NavItem[] = [
   { label: 'Orders', href: '/sales/orders', icon: <Briefcase className={ICON_CLS} /> },
   { label: 'My Clients', href: '/sales/clients', icon: <Contact className={ICON_CLS} /> },
@@ -35,13 +41,13 @@ const ORDER_ITEMS: NavItem[] = [
  * declared and never built into anybody's nav is invisible, which is how
  * /reports shipped to nobody on 2026-09-17.
  */
-export const SALES_NAV_ITEMS: NavItem[] = [...BASE_ITEMS, RANKING, ...ORDER_ITEMS];
+export const SALES_NAV_ITEMS: NavItem[] = [...BASE_ITEMS, RANKING, DAILY, ...ORDER_ITEMS];
 
 export function buildNav(role: Role): { top: NavItem[]; orders: NavItem[] } {
   if (role === 'sales_manager') {
     const top = [...BASE_ITEMS];
     const summaryIdx = top.findIndex(i => i.label === 'Summary');
-    top.splice(summaryIdx + 1, 0, RANKING);
+    top.splice(summaryIdx + 1, 0, RANKING, DAILY);
     return { top, orders: ORDER_ITEMS };
   }
   return { top: BASE_ITEMS, orders: ORDER_ITEMS };

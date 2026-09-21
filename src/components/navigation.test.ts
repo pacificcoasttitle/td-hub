@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { NAV, canSee } from './admin/sidebar-nav';
@@ -103,8 +103,40 @@ describe('every nav entry is visible to somebody', () => {
   });
 });
 
+/**
+ * Every literal internal destination in the source: href="/x", redirect('/x'),
+ * router.push('/x'), router.replace('/x').
+ *
+ * A NAV ENTRY IS NOT THE ONLY DOOR. On 2026-09-21 this test called /client/orders
+ * unreachable, and it was nearly deleted on that word. It is reached by two
+ * layout redirects that send a client who lands in the admin shell there, and by
+ * a button on the client dashboard. A reachability test that only reads nav
+ * components will recommend deleting live pages — so this reads the doors the
+ * code actually opens, too.
+ */
+function inCodeDestinations(): Set<string> {
+  const out = new Set<string>();
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) files.push(full);
+    }
+  };
+  walk(join(process.cwd(), 'src'));
+  const re = /(?:href\s*=\s*\{?\s*|redirect\(\s*|\.push\(\s*|\.replace\(\s*)['"`](\/[^'"`?#$\s]*)/g;
+  for (const f of files) {
+    for (const m of readFileSync(f, 'utf8').matchAll(re)) out.add(m[1]!.replace(/\/$/, '') || '/');
+  }
+  return out;
+}
+
 describe('every page can be reached', () => {
-  const linked = new Set([...adminHrefs, ...hubHrefs, ...salesHrefs, ...clientHrefs]);
+  const linked = new Set([
+    ...adminHrefs, ...hubHrefs, ...salesHrefs, ...clientHrefs,
+    ...inCodeDestinations(),
+  ]);
 
   /**
    * Pages deliberately not in any navigation. Anything else that turns up here
@@ -121,14 +153,13 @@ describe('every page can be reached', () => {
     '/contacts',               // index landing page; the sidebar links its children
     '/client',                 // redirects to /client/dashboard
 
-    // FIXME — real pages with no way in, found by widening this test to the
-    // other three shells on 2026-09-18. Listed because they are TRUE today,
-    // not because they are right. See docs/tickets/REACHABILITY_SWEEP.md.
+    // Waiting on its own feature: the destination for the sales rep's view of
+    // the Reports page. Its API does not exist yet, and neither does the link;
+    // both arrive with that work. Decided 2026-09-21.
+    '/sales/reports',
+
+    // FIXME — true today, not right. See docs/tickets/REACHABILITY_SWEEP.md.
     '/admin/ops',              // ops console, admin sidebar has no entry
-    '/sales/commission',       // monthly commission with PDF downloads
-    '/sales/daily',            // sales_manager daily table
-    '/sales/reports',          // reads /api/sales/reports, which 404s
-    '/client/orders',          // "My Orders"; the portal links the dashboard
   ]);
 
   it('has a nav entry for every page, or an explicit reason not to', () => {

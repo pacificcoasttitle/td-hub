@@ -7,6 +7,7 @@ import {
   type ReportFilter,
 } from '@/lib/domain/reports/list-types';
 import { NotifyRepControl } from './notify-rep-control';
+import { ComparablesControl, RetryControl } from './row-actions';
 
 // ─── Reports ────────────────────────────────────────────────────────────────
 //
@@ -201,7 +202,7 @@ export function ReportRow({ row, onChanged }: { row: ReportListRow; onChanged?: 
         {building ? (
           <span className="text-xs text-[#6B7280]">Building…</span>
         ) : failed ? (
-          <button className="text-xs font-medium text-[#1B2A4A] hover:underline">Try again</button>
+          <RetryControl row={row} onChanged={onChanged} />
         ) : (
           <div className="inline-flex items-center gap-3">
             <a
@@ -213,7 +214,7 @@ export function ReportRow({ row, onChanged }: { row: ReportListRow; onChanged?: 
               Download
             </a>
             {row.type === 'concierge_profile' ? (
-              <button className="text-xs font-medium text-[#1B2A4A] hover:underline">Comparables</button>
+              <ComparablesControl row={row} onChanged={onChanged} />
             ) : (
               <NotifyRepControl row={row} onChanged={onChanged} />
             )}

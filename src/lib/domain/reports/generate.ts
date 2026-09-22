@@ -183,6 +183,28 @@ async function storeAndRender(args: {
     datasetSha256: crypto.createHash('sha256').update(csvBuf).digest('hex'),
   }).where(eq(table.id, id));
 
+  return renderAndStore({ type, table, id, now, render: args.render, quality: args.quality });
+}
+
+/**
+ * Steps 5 and 6 — render, then store the PDF and mark the row generated. The
+ * ONE place a farming PDF is made: the generator and "Try again" both come
+ * through here.
+ */
+async function renderAndStore(args: {
+  type: string;
+  table: Table;
+  id: number;
+  now: Date;
+  render: () => Promise<Buffer>;
+  quality: DataQuality;
+}): Promise<GenerateOutcome> {
+  const { type, table, id, now } = args;
+  const fail = async (stage: 'render' | 'store', message: string): Promise<GenerateOutcome> => {
+    await db.update(table).set({ status: 'failed', errorMessage: message }).where(eq(table.id, id));
+    return { ok: false, reportId: id, stage, message };
+  };
+
   // 5. Render.
   let pdf: Buffer;
   try {
@@ -356,3 +378,84 @@ export async function generateCountySales(req: CountySalesRequest): Promise<Gene
 
 /** Exported for the test that checks the page count against the city count. */
 export const COUNTY_PAGES = (cities: number) => Math.max(1, Math.ceil(cities / CITIES_PER_PAGE));
+
+// ─── Try again ──────────────────────────────────────────────────────────────
+
+const TABLE_FOR = {
+  sales_activity: salesActivityReports,
+  carrier_route: carrierRouteReports,
+  county_sales: countySalesReports,
+} as const;
+
+export type RerenderOutcome =
+  | { ok: true; reportId: number; pdfStorageKey: string; pageCount: number }
+  | { ok: false; reason: 'not_found' | 'not_failed' | 'no_dataset' | 'render' | 'store'; message: string };
+
+/**
+ * "Try again" on a failed farming report: render it again from the figures the
+ * row already stores, and store the PDF. Free, and it cannot change a number:
+ * the figures were computed once, from the stored file, and are only read here.
+ *
+ * A report whose uploaded file was never stored is REFUSED. The generator will
+ * not produce a report it cannot reproduce, and retrying one would do exactly
+ * that — so it says to create the report again from the file.
+ */
+export async function rerenderFarming(
+  type: 'sales_activity' | 'carrier_route' | 'county_sales',
+  id: number,
+  now: Date = new Date(),
+): Promise<RerenderOutcome> {
+  const table = TABLE_FOR[type];
+  const [row] = await db.select().from(table).where(eq(table.id, id)).limit(1);
+  if (!row) return { ok: false, reason: 'not_found', message: 'No such report.' };
+  if (row.status !== 'failed') return { ok: false, reason: 'not_failed', message: 'Only a failed report can be tried again.' };
+  if (!row.datasetStorageKey) {
+    return {
+      ok: false, reason: 'no_dataset',
+      message: 'The uploaded file was never stored, so this report cannot be rebuilt from it. Create it again from the file.',
+    };
+  }
+
+  const q: DataQuality = {
+    rowsRead: row.datasetRows, used: row.datasetUsed, rejected: row.datasetRejected,
+    rejectedTypes: (row.rejectedTypes ?? {}) as Record<string, number>,
+  };
+  const rep: RepBlock = {
+    name: row.brandedToName, title: row.brandedToTitle, phone: row.brandedToPhone, email: row.brandedToEmail, photo: null,
+  };
+
+  let render: () => Promise<Buffer>;
+  if (type === 'sales_activity') {
+    const r = row as typeof salesActivityReports.$inferSelect;
+    render = () => renderToBuffer(SalesActivityDocument({
+      areaName: r.areaName, propertyType: r.propertyType, windowMonths: r.windowMonths,
+      windowEndKey: String(r.windowEnd).slice(0, 7),
+      figures: { metrics: r.metrics as never, months: r.months as never },
+      quality: q, rep, generatedAt: now,
+    }) as never);
+  } else if (type === 'carrier_route') {
+    const r = row as typeof carrierRouteReports.$inferSelect;
+    render = () => renderToBuffer(CarrierRouteDocument({
+      areaName: r.areaName, rankBy: r.rankBy as RankBy,
+      // Every route that could be read was in the file; the total is what was used.
+      figures: { routes: r.routes as never, standouts: r.standouts as never, totalRoutes: r.datasetUsed },
+      quality: q, rep, generatedAt: now,
+    }) as never);
+  } else {
+    const r = row as typeof countySalesReports.$inferSelect;
+    const stored = (r.totals ?? {}) as { houses?: unknown; condos?: unknown; otherKinds?: unknown };
+    render = () => renderToBuffer(CountySalesDocument({
+      county: r.county, monthKey: String(r.month).slice(0, 7),
+      figures: {
+        cities: r.cities as never,
+        totals: { houses: stored.houses as never, condos: stored.condos as never },
+        otherKinds: (stored.otherKinds ?? {}) as never,
+      },
+      quality: q, rep, generatedAt: now,
+    }) as never);
+  }
+
+  const out = await renderAndStore({ type, table, id, now, render, quality: q });
+  if (out.ok) return { ok: true, reportId: id, pdfStorageKey: out.pdfStorageKey, pageCount: out.pageCount };
+  return { ok: false, reason: out.stage === 'render' ? 'render' : 'store', message: out.message };
+}

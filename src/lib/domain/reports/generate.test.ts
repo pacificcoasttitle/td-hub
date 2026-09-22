@@ -18,6 +18,8 @@ const state = vi.hoisted(() => ({
   uploads: [] as Array<{ key: string; buffer: Buffer; contentType: string }>,
   failUploadsMatching: null as RegExp | null,
   nextId: 50,
+  /** What db.select returns — the stored row "Try again" reads back. */
+  selectRows: [] as Record<string, unknown>[],
 }));
 
 vi.mock('@/lib/db/client', () => ({
@@ -30,6 +32,7 @@ vi.mock('@/lib/db/client', () => ({
     update: (table: unknown) => ({
       set: (set: Record<string, unknown>) => ({ where: async () => { state.updates.push({ table, set }); } }),
     }),
+    select: () => ({ from: () => ({ where: () => ({ limit: async () => state.selectRows }) }) }),
   },
 }));
 
@@ -47,7 +50,7 @@ vi.mock('@/lib/domain/concierge/presenting-rep', () => ({
     : { ok: false, reason: 'contact_missing', message: 'That representative could not be found.' })),
 }));
 
-const { generateSalesActivity, generateCarrierRoute, generateCountySales } = await import('./generate');
+const { generateSalesActivity, generateCarrierRoute, generateCountySales, rerenderFarming } = await import('./generate');
 const { salesActivityReports, carrierRouteReports, countySalesReports } = await import('@/lib/db/schema');
 
 const NOW = new Date('2026-09-21T17:00:00Z');
@@ -58,6 +61,7 @@ beforeEach(() => {
   state.updates.length = 0;
   state.uploads.length = 0;
   state.failUploadsMatching = null;
+  state.selectRows = [];
 });
 
 /** Text of the PDF the generator STORED, squashed of whitespace. */
@@ -334,5 +338,59 @@ describe('County Sales, file to page', () => {
     const r = await generateCountySales({ ...base, csv: COUNTY_CSV, county: 'Kern' as never, month: '2026-08' });
     expect(r).toMatchObject({ ok: false, stage: 'input' });
     expect(state.inserts).toHaveLength(0);
+  });
+});
+
+// ─── Try again ──────────────────────────────────────────────────────────────
+
+describe('Try again on a failed farming report', () => {
+  /**
+   * Generate for real, then hand back what was STORED as a failed row. Proves
+   * the retry rebuilds the page from the stored figures — the same numbers,
+   * computed once, never recomputed.
+   */
+  async function storedAsFailed(over: Record<string, unknown> = {}) {
+    await generateCountySales({ ...base, csv: COUNTY_CSV, county: 'Orange', month: '2026-08' });
+    const stored = state.inserts[0]!.values;
+    state.inserts.length = 0; state.updates.length = 0; state.uploads.length = 0;
+    state.selectRows = [{
+      ...stored, id: 50, status: 'failed', errorMessage: 'The document rendered but could not be stored.',
+      datasetStorageKey: 'reports/county_sales/50/dataset.csv', ...over,
+    }];
+  }
+
+  it('re-renders from the stored figures, and the page says what it said before', async () => {
+    await storedAsFailed();
+    const r = await rerenderFarming('county_sales', 50, NOW);
+    expect(r).toMatchObject({ ok: true, reportId: 50, pageCount: 1 });
+    const { text } = await storedPdfText();
+    expect(text).toContain(sq('Irvine 3 $1,250,000 2 $750,000'));
+    expect(text).toContain(sq('Orange County total 5 $1,250,000 2 $750,000'));
+    expect(text).toContain(sq('9 rows read · 7 used · 2 could not be used'));
+  });
+
+  it('marks the row generated once the new PDF is stored', async () => {
+    await storedAsFailed();
+    await rerenderFarming('county_sales', 50, NOW);
+    expect(state.updates.at(-1)!.set).toMatchObject({ status: 'generated', errorMessage: null });
+  });
+
+  it('does not upload the source file again — it was already kept', async () => {
+    await storedAsFailed();
+    await rerenderFarming('county_sales', 50, NOW);
+    expect(state.uploads.map((u) => u.contentType)).toEqual(['application/pdf']);
+  });
+
+  it('refuses a report whose file was never stored, and says to create it again', async () => {
+    await storedAsFailed({ datasetStorageKey: null });
+    const r = await rerenderFarming('county_sales', 50, NOW);
+    expect(r).toMatchObject({ ok: false, reason: 'no_dataset' });
+    expect((r as { message: string }).message).toContain('Create it again from the file');
+    expect(state.uploads).toHaveLength(0);
+  });
+
+  it('refuses a report that has not failed', async () => {
+    await storedAsFailed({ status: 'generated' });
+    expect(await rerenderFarming('county_sales', 50, NOW)).toMatchObject({ ok: false, reason: 'not_failed' });
   });
 });

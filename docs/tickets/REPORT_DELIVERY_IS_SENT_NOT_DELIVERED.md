@@ -55,3 +55,49 @@ Those send to clients and agents, so the gap matters more there, not less.
 Not changed here — they have their own readers (the ops daily report counts
 `'delivered'`) and a rename needs those found first. The webhook above fixes
 all three at once, which is the better reason to build it.
+
+## Measured 2026-09-22 — it is not theoretical
+
+`scripts/audit/sendgrid-bounces.ts` (read-only) pulls SendGrid's suppression
+lists and joins them to our own send log, which records every recipient and
+subject. Since 2026-04-01 we made **5,524 deliveries to 869 addresses**:
+2,448 prelim, 2,784 confirmation, the rest internal alerts and samples.
+
+**17 of those sends went to addresses SendGrid had already suppressed** — 6
+prelims and 11 confirmations, to 12 distinct addresses, the most recent on
+2026-09-22. SendGrid answered every one with a 202. We logged success. Nobody
+was told, and nobody could have been: a suppressed address is dropped
+silently, which is what `bounce_drops` counts.
+
+That is the gap this ticket describes, with a number on it. Not a large
+number — but each one is a confirmation or a prelim that an escrow officer is
+still waiting for, and the sender believes it arrived.
+
+Loss by path, over the whole period:
+
+| | addresses | bounced | blocked | spam |
+| --- | --- | --- | --- | --- |
+| prelim | 429 | 5 (1.2%) | 1 (0.2%) | 0 |
+| confirmation | 664 | 3 (0.5%) | 6 (0.9%) | 0 |
+
+Both paths are healthy. **The delivery rate is not the problem; the silence
+is.** One address, `rosa@lincolnescrow.com`, bounced on the prelim path and
+was then blocked on the confirmation path a week later — two different orders,
+two different officers, neither told.
+
+### Two things that fall out of the same measurement
+
+**1. The dashboard is not ours to read.** The SendGrid account shows 99,943
+requests for the period against our 5,524 — something else sends on this
+account, so account-level bounce and deferral counts (1,395 `bounce_drops`,
+4,071 `deferred`) are overwhelmingly not ours. Any future alerting has to
+filter to our own sends, as this script does, or it will measure a stranger.
+
+**2. Two addresses in our contact data are malformed** and will never deliver,
+whatever we build:
+
+- `nathalie@villalendinginc.comc.com` — `.comc.com`, a typo
+- `julie.martincz@primclending.com` — very likely `primelending.com`
+
+Both are live contact records that we mailed a confirmation to this month.
+Worth a validation pass on the contacts table separately from the webhook.

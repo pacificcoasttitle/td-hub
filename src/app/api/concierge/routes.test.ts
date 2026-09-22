@@ -47,11 +47,16 @@ describe('exactly one route can spend a credit', () => {
     // The ingest of profile 3 failed after the credit was spent. Resume exists
     // to finish it from the stored payload — and a profile with no stored
     // payload must be refused, because finishing that one means paying twice.
+    // The work moved to lib/domain/concierge/retry.ts, shared with the Reports
+    // list's "Try again"; the route answers with what it did and what it cost.
     const resume = read('profiles/[id]/resume/route.ts');
-    expect(resume).toContain('ingestPayload');
+    expect(resume).toContain('resumeFromStored');
     expect(resume).toContain('creditsCharged: 0');
-    expect(resume).toContain('rawStorageKey');
-    expect(resume).toMatch(/cannot be finished without buying it again/);
+    const domain = read('../../../lib/domain/concierge/retry.ts');
+    expect(domain).toContain('ingestPayload');
+    expect(domain).toContain('rawStorageKey');
+    expect(domain).toMatch(/cannot be finished without buying it again/);
+    expect(domain).not.toMatch(/integrations\/sitex|generateConciergeProfile/);
   });
 
   it('the double-charge guard is keyed on the property, not the order', () => {

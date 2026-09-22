@@ -31,16 +31,17 @@ export function pdfFilename(subject: string | null, settings: string | null, typ
 }
 
 export async function getFarmingPdf(type: FarmingType, id: number): Promise<
-  | { ok: true; key: string; filename: string }
-  | { ok: false; reason: 'not_found' | 'no_document'; status: string | null }
+  | { ok: true; key: string; filename: string; brandedToContactId: number | null }
+  | { ok: false; reason: 'not_found' | 'no_document'; status: string | null; brandedToContactId: number | null }
 > {
   const t = TABLES[type];
   const [row] = await db.select({
     key: t.pdfStorageKey, status: t.status, subject: t.listSubject, settings: t.listSettings,
+    brandedToContactId: t.brandedToContactId,
   }).from(t).where(eq(t.id, id)).limit(1);
-  if (!row) return { ok: false, reason: 'not_found', status: null };
-  if (!row.key) return { ok: false, reason: 'no_document', status: row.status };
-  return { ok: true, key: row.key, filename: pdfFilename(row.subject, row.settings, type) };
+  if (!row) return { ok: false, reason: 'not_found', status: null, brandedToContactId: null };
+  if (!row.key) return { ok: false, reason: 'no_document', status: row.status, brandedToContactId: row.brandedToContactId };
+  return { ok: true, key: row.key, filename: pdfFilename(row.subject, row.settings, type), brandedToContactId: row.brandedToContactId };
 }
 
 /** What Notify rep needs, read from the report row — never from the browser. */

@@ -107,12 +107,6 @@ function apiCalls(): Call[] {
  * to stay. Anything else unresolved fails the build.
  */
 const AWAITING_THEIR_ENDPOINT = new Set([
-  // ── Planned: the route arrives with work already on the list ──────────────
-
-  // The sales rep's view of the Reports page. Kept by decision on 2026-09-21
-  // as the destination for that work.
-  '/api/sales/reports',
-
   // ── Deliberately kept: shelved, not dead ─────────────────────────────────
 
   // Tessa chat and prelim analysis. Imported by nothing today, and the
@@ -171,9 +165,11 @@ describe('the matcher', () => {
     expect(resolves(['sales', '*'])).toBe(routes.some((r) => r.length === 2 && r[0] === 'sales' && r[1]!.startsWith('[')));
   });
 
-  it('fails the two endpoints that were never written', () => {
+  it('fails an endpoint that was never written', () => {
+    // /api/sales/commission never existed; its page was deleted on 2026-09-21.
+    // /api/sales/reports, its twin, was built on 2026-09-22.
     expect(resolves(toSegments('/api/sales/commission'))).toBe(false);
-    expect(resolves(toSegments('/api/sales/reports'))).toBe(false);
+    expect(resolves(toSegments('/api/sales/reports'))).toBe(true);
   });
 
   it('knows the route tree exists where it thinks it does', () => {

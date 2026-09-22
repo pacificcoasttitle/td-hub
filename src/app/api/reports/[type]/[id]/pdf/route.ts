@@ -16,7 +16,9 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest, { params }: { params: Promise<{ type: string; id: string }> }) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canGenerateFarming(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const operator = canGenerateFarming(session.role);
+  const rep = session.role === 'sales_rep' || session.role === 'sales_manager';
+  if (!operator && !rep) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { type, id: rawId } = await params;
   if (!isFarmingType(type)) return NextResponse.json({ error: 'Unknown report type.' }, { status: 404 });
@@ -24,6 +26,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
   if (!Number.isInteger(id) || id <= 0) return NextResponse.json({ error: 'Bad id' }, { status: 400 });
 
   const found = await getFarmingPdf(type, id);
+
+  // A rep may open the reports branded to THEM, and nothing else. Someone
+  // else's report answers exactly as a missing one does, so a rep cannot learn
+  // which ids exist by trying them.
+  if (!operator && (session.contactId === null || found.brandedToContactId !== session.contactId)) {
+    return NextResponse.json({ error: 'No such report.' }, { status: 404 });
+  }
+
   if (!found.ok) {
     return NextResponse.json({
       error: found.reason === 'not_found' ? 'No such report.'

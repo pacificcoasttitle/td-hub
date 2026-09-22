@@ -48,6 +48,7 @@ interface RawRow {
   delivery_attempted_at: string | null;
   delivery_recipient_name: string | null;
   delivery_recipient_email: string | null;
+  made_by: string | null;
 }
 
 /**
@@ -55,13 +56,17 @@ interface RawRow {
  * differ — who the report is branded to, and whether a credit was spent — are
  * mapped here rather than left to the reader.
  */
-function unionSql(filter: ReportFilter, search: string | null) {
+function unionSql(filter: ReportFilter, search: string | null, forRep: number | null = null) {
   const like = search ? `%${search.toLowerCase()}%` : null;
   const matches = (subject: string, settings: string, branded: string) => (like === null
     ? sql`true`
     : sql`(lower(coalesce(${sql.raw(subject)}, '')) like ${like}
         or lower(coalesce(${sql.raw(settings)}, '')) like ${like}
         or lower(coalesce(${sql.raw(branded)}, '')) like ${like})`);
+
+  // A rep's own list: reports branded to their contact. The same id the rep
+  // picker writes, so a report is in exactly one rep's list.
+  const repFilter = forRep === null ? sql`true` : sql`r.branded_to_contact_id = ${forRep}`;
 
   const parts = [];
   if (filter !== 'concierge') {
@@ -73,7 +78,8 @@ function unionSql(filter: ReportFilter, search: string | null) {
              r.created_at, r.created_by
         from sales_activity_reports r
         left join contacts c on c.id = r.branded_to_contact_id
-       where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}`);
+       where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}
+         and ${repFilter}`);
     parts.push(sql`
       select 'carrier_route' as type, r.id, r.status, null::int as credits_charged,
              r.list_subject, r.list_subject_detail, r.list_settings,
@@ -82,7 +88,8 @@ function unionSql(filter: ReportFilter, search: string | null) {
              r.created_at, r.created_by
         from carrier_route_reports r
         left join contacts c on c.id = r.branded_to_contact_id
-       where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}`);
+       where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}
+         and ${repFilter}`);
     parts.push(sql`
       select 'county_sales' as type, r.id, r.status, null::int as credits_charged,
              r.list_subject, r.list_subject_detail, r.list_settings,
@@ -91,9 +98,12 @@ function unionSql(filter: ReportFilter, search: string | null) {
              r.created_at, r.created_by
         from county_sales_reports r
         left join contacts c on c.id = r.branded_to_contact_id
-       where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}`);
+       where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}
+         and ${repFilter}`);
   }
-  if (filter !== 'farming') {
+  // Concierge profiles record their rep by name and email, not contact, and
+  // legacy's rep list held only the farming three — so a rep's list is farming.
+  if (filter !== 'farming' && forRep === null) {
     parts.push(sql`
       select 'concierge_profile' as type, r.id, r.status, r.sitex_credits_charged as credits_charged,
              r.list_subject, r.list_subject_detail, r.list_settings,
@@ -111,12 +121,17 @@ export async function listReports(input: {
   pageSize?: number;
   filter?: ReportFilter;
   search?: string | null;
+  /**
+   * Only reports branded to this contact — the rep's own list at
+   * /sales/reports. Farming reports only; see unionSql.
+   */
+  forRepContactId?: number | null;
 } = {}): Promise<ReportListResult> {
   const page = Math.max(1, Math.floor(input.page ?? 1));
   const pageSize = Math.min(100, Math.max(1, Math.floor(input.pageSize ?? REPORTS_PAGE_SIZE)));
   const filter = input.filter ?? 'all';
   const search = (input.search ?? '').trim().toLowerCase() || null;
-  const union = unionSql(filter, search);
+  const union = unionSql(filter, search, input.forRepContactId ?? null);
 
   const [countRow] = await db.execute(sql`select count(*)::int as n from (${union}) all_reports`) as unknown as Array<{ n: number }>;
 
@@ -125,8 +140,16 @@ export async function listReports(input: {
            d.outcome        as delivery_outcome,
            d.attempted_at::text as delivery_attempted_at,
            d.recipient_name as delivery_recipient_name,
-           d.recipient_email as delivery_recipient_email
+           d.recipient_email as delivery_recipient_email,
+           coalesce(mb.display_name, r.created_by) as made_by
       from (${union}) r
+      -- Who made it, as a name. Lateral and limited, so a profile email that
+      -- appears twice cannot double a report.
+      left join lateral (
+        select pr.display_name from profiles pr
+         where lower(pr.email) = lower(r.created_by) and pr.display_name is not null
+         limit 1
+      ) mb on true
       left join lateral (
         select outcome, attempted_at, recipient_name, recipient_email
           from report_deliveries dl
@@ -152,6 +175,7 @@ export async function listReports(input: {
       status: r.status,
       createdAt: String(r.created_at),
       createdBy: r.created_by,
+      madeBy: r.made_by,
       delivery: r.delivery_outcome
         ? {
           outcome: r.delivery_outcome === 'sent' ? 'sent' : 'failed',

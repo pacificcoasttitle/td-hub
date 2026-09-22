@@ -102,15 +102,29 @@ describe('the union', () => {
   });
 });
 
+describe('the address Notify rep will use', () => {
+  it('comes from the report row SNAPSHOT, not the contact current email', async () => {
+    // The send reads branded_to_email off the report row. The confirmation must
+    // show that same address, or the operator confirms one thing and another
+    // happens.
+    captured.length = 0;
+    await listReports();
+    const sql = text(lastQuery());
+    expect(sql.match(/r\.branded_to_email/g)!.length).toBe(3);
+    expect(sql).not.toMatch(/c\.email/);
+    expect(sql).toContain('r.presenting_rep_email as branded_to_email');
+  });
+});
+
 describe('the rows it returns', () => {
-  it('maps a delivered attempt onto the row', async () => {
+  it('maps a sent attempt onto the row', async () => {
     captured.length = 0;
     rows.value = [{
       type: 'concierge_profile', id: 7, status: 'generated', credits_charged: 1,
       list_subject: '1358 5th St', list_subject_detail: 'La Verne, CA 91750',
       list_settings: '0.5 mi · 12 mo · ±20% size', branded_to_name: 'Justin Nouri',
       created_at: '2026-09-17 20:14:00', created_by: 'ops@pct.com',
-      delivery_outcome: 'delivered', delivery_attempted_at: '2026-09-17 20:20:00',
+      delivery_outcome: 'sent', delivery_attempted_at: '2026-09-17 20:20:00',
       delivery_recipient_name: 'Justin Nouri', delivery_recipient_email: 'jnouri@pct.com',
     }];
     const r = await listReports();
@@ -119,7 +133,7 @@ describe('the rows it returns', () => {
       sourceLine: '1 credit spent',
       subject: '1358 5th St',
       settings: '0.5 mi · 12 mo · ±20% size',
-      delivery: { outcome: 'delivered', recipientEmail: 'jnouri@pct.com' },
+      delivery: { outcome: 'sent', recipientEmail: 'jnouri@pct.com' },
     });
   });
 

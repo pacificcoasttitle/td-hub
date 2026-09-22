@@ -20,7 +20,7 @@ function visible(el: React.ReactElement): string {
 const row = (over: Partial<ReportListRow> = {}): ReportListRow => ({
   type: 'county_sales', id: 3, typeLabel: 'County Sales', sourceLine: 'Dataset',
   subject: 'Orange County', subjectDetail: '44 cities', settings: 'August 2026',
-  brandedToName: 'Maria Lopez', status: 'generated',
+  brandedToName: 'Maria Lopez', brandedToEmail: 'mlopez@pct.com', status: 'generated',
   createdAt: '2026-09-16 21:14:00', createdBy: 'ops@pct.com', delivery: null,
   ...over,
 });
@@ -74,22 +74,32 @@ describe('the delivery cell', () => {
     expect(visible(<tr><DeliveryCell row={row()} /></tr>)).toContain('Never sent');
   });
 
-  it('reads differently for delivered and failed', () => {
-    const delivered = row({ delivery: { outcome: 'delivered', attemptedAt: '2026-09-16 22:00:00', recipientName: 'Maria Lopez', recipientEmail: 'mlopez@pct.com' } });
+  it('reads differently for sent and failed', () => {
+    const delivered = row({ delivery: { outcome: 'sent', attemptedAt: '2026-09-16 22:00:00', recipientName: 'Maria Lopez', recipientEmail: 'mlopez@pct.com' } });
     const failed = row({ delivery: { outcome: 'failed', attemptedAt: '2026-09-16 22:00:00', recipientName: null, recipientEmail: 'mlopez@pct.com' } });
-    expect(visible(<tr><DeliveryCell row={delivered} /></tr>)).toContain('Delivered');
+    expect(visible(<tr><DeliveryCell row={delivered} /></tr>)).toContain('Sent');
     expect(visible(<tr><DeliveryCell row={failed} /></tr>)).toContain('Failed');
   });
 
   it('colours the three states apart, so the dot alone is readable', () => {
     const html = (r: ReportListRow) => renderToStaticMarkup(<DeliveryCell row={r} />);
     expect(html(row())).toContain('bg-gray-300');
-    expect(html(row({ delivery: { outcome: 'delivered', attemptedAt: '2026-09-16 22:00:00', recipientName: null, recipientEmail: 'a@b.com' } }))).toContain('bg-green-500');
+    expect(html(row({ delivery: { outcome: 'sent', attemptedAt: '2026-09-16 22:00:00', recipientName: null, recipientEmail: 'a@b.com' } }))).toContain('bg-[#1B2A4A]');
     expect(html(row({ delivery: { outcome: 'failed', attemptedAt: '2026-09-16 22:00:00', recipientName: null, recipientEmail: 'a@b.com' } }))).toContain('bg-red-500');
   });
 
+  it('never claims Delivered, and never shows the green of a confirmed delivery', () => {
+    // SendGrid accepting a message is not delivery. The word and the colour both
+    // stop at what we know.
+    const sent = row({ delivery: { outcome: 'sent', attemptedAt: '2026-09-16 22:00:00', recipientName: 'Maria Lopez', recipientEmail: 'mlopez@pct.com' } });
+    const html = renderToStaticMarkup(<DeliveryCell row={sent} />);
+    expect(html).not.toMatch(/Delivered/);
+    expect(html).not.toContain('bg-green-500');
+    expect(html).toContain('delivery not confirmed');
+  });
+
   it('carries who and when in the title, so the log is one hover away', () => {
-    const html = renderToStaticMarkup(<DeliveryCell row={row({ delivery: { outcome: 'delivered', attemptedAt: '2026-09-16 22:00:00', recipientName: 'Maria Lopez', recipientEmail: 'mlopez@pct.com' } })} />);
+    const html = renderToStaticMarkup(<DeliveryCell row={row({ delivery: { outcome: 'sent', attemptedAt: '2026-09-16 22:00:00', recipientName: 'Maria Lopez', recipientEmail: 'mlopez@pct.com' } })} />);
     expect(html).toContain('Maria Lopez');
   });
 });

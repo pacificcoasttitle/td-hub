@@ -1,0 +1,118 @@
+name: production-serves-main
+
+# ─── Is production actually running what was merged? ────────────────────────
+#
+# Twice now a merge to main has failed its PRODUCTION build and nothing said so:
+#
+#   2026-09-17  a client component pulled the postgres driver into the browser
+#               bundle. Production served the old commit for SIXTEEN HOURS.
+#   2026-09-22  the build could not download a Google font. Found by chance,
+#               ten minutes later, because /api/health still showed the old sha.
+#
+# The required Vercel check does not cover this: it gates the PREVIEW build of
+# a pull request. The production build runs after the merge, and when it fails
+# Vercel simply keeps serving the previous deployment — correctly, and silently.
+#
+# So this asks the only question that matters, whatever the cause: a few
+# minutes after a push to main, does https://hub.pctdesk.com/api/health report
+# THAT commit? If not, the run fails and an issue is opened, which notifies the
+# repository's watchers and stays open until production catches up.
+
+on:
+  push:
+    branches: [main]
+  # Manual runs exist to prove the alarm: aimed at a branch production will
+  # never serve, with a short window, it must fail and open the issue.
+  workflow_dispatch:
+    inputs:
+      window_seconds:
+        description: How long to wait for production to report the commit
+        default: '900'
+
+# A newer push supersedes this check — it is the newer commit production
+# should be serving now.
+concurrency:
+  group: production-serves-main
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  HEALTH_URL: https://hub.pctdesk.com/api/health
+  # Production deploys take about a minute. Fifteen is generous without being
+  # slow to raise the alarm.
+  WINDOW_SECONDS: ${{ inputs.window_seconds || '900' }}
+  ISSUE_TITLE: Production is not serving main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history, so a production commit NEWER than this one (a later push
+      # that deployed first) counts as serving it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Wait for production to report this commit
+        id: wait
+        run: |
+          set -u
+          want="$GITHUB_SHA"
+          deadline=$(( $(date +%s) + WINDOW_SECONDS ))
+          seen="(no response)"
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            body=$(curl -fsS --max-time 20 "$HEALTH_URL" || true)
+            seen=$(printf '%s' "$body" | sed -n 's/.*"commit":"\([0-9a-f]\{7,40\}\)".*/\1/p')
+            seen=${seen:-"(no commit in response)"}
+            if [ "$seen" = "$want" ]; then
+              echo "Production is serving $want."
+              echo "result=ok" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if git cat-file -e "$seen^{commit}" 2>/dev/null && git merge-base --is-ancestor "$want" "$seen"; then
+              echo "Production is serving $seen, which already contains $want."
+              echo "result=ok" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "seen=$seen" >> "$GITHUB_OUTPUT"
+          echo "result=stale" >> "$GITHUB_OUTPUT"
+          echo "::error::Production is still serving $seen, ${WINDOW_SECONDS}s after $want was pushed to main. The production build most likely failed — check Vercel."
+          exit 1
+
+      - name: Raise it
+        if: failure() && steps.wait.outputs.result == 'stale'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SEEN: ${{ steps.wait.outputs.seen }}
+        run: |
+          short=${GITHUB_SHA:0:7}
+          body=$(printf '%s\n' \
+            "Production is serving \`${SEEN}\`, ${WINDOW_SECONDS}s after \`${short}\` (\`${GITHUB_REF_NAME}\`) was expected." \
+            "" \
+            "The production build most likely failed. Vercel keeps serving the previous deployment when that happens, so nothing else will say so." \
+            "" \
+            "- Check the latest Production deployment in Vercel and read its build log." \
+            "- A transient failure (a network fetch during the build) is fixed by redeploying the same commit." \
+            "- This issue closes itself when production reports the latest \`main\` commit." \
+            "" \
+            "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
+          existing=$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$ISSUE_TITLE" --body "$body"
+          fi
+
+      - name: Close the alarm once production has caught up
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in $(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Production now reports \`${GITHUB_SHA:0:7}\` — caught up."
+          done

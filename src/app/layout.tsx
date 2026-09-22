@@ -1,15 +1,27 @@
 import type { Metadata } from "next";
-import { Fraunces, Inter } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
+// Fonts are served from the repo, not fetched from Google at build time. On
+// 2026-09-22 the production build could not reach fonts.gstatic.com, failed,
+// and production silently kept serving the previous commit. A build should
+// not depend on a network call it does not need. Files from Fontsource
+// (@fontsource-variable/inter, @fontsource/fraunces 5.3.0), SIL OFL 1.1 —
+// licences alongside in ./fonts.
+const inter = localFont({
+  src: "./fonts/inter-latin-wght-normal.woff2",
+  weight: "100 900",
+  style: "normal",
+  display: "swap",
   variable: "--font-inter",
 });
 
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  weight: ["600", "700"],
+const fraunces = localFont({
+  src: [
+    { path: "./fonts/fraunces-latin-600-normal.woff2", weight: "600", style: "normal" },
+    { path: "./fonts/fraunces-latin-700-normal.woff2", weight: "700", style: "normal" },
+  ],
+  display: "swap",
   variable: "--font-fraunces",
 });
 

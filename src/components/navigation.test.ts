@@ -153,11 +153,6 @@ describe('every page can be reached', () => {
     '/contacts',               // index landing page; the sidebar links its children
     '/client',                 // redirects to /client/dashboard
 
-    // Waiting on its own feature: the destination for the sales rep's view of
-    // the Reports page. Its API does not exist yet, and neither does the link;
-    // both arrive with that work. Decided 2026-09-21.
-    '/sales/reports',
-
     // FIXME — true today, not right. See docs/tickets/REACHABILITY_SWEEP.md.
     '/admin/ops',              // ops console, admin sidebar has no entry
   ]);

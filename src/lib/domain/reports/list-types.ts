@@ -57,6 +57,8 @@ export interface ReportListRow {
   status: string;
   createdAt: string;
   createdBy: string | null;
+  /** Who made it, by name where we know one — the sales view's column. */
+  madeBy: string | null;
   /** The latest ATTEMPT. Null means never sent, and must not read as success. */
   delivery: ReportDeliverySummary | null;
 }

@@ -116,6 +116,32 @@ describe('the address Notify rep will use', () => {
   });
 });
 
+describe('a rep own list', () => {
+  it('filters every farming table to the rep contact, and leaves concierge out', async () => {
+    captured.length = 0;
+    await listReports({ filter: 'farming', forRepContactId: 22140 });
+    const q = lastQuery();
+    const sql = text(q);
+    expect(sql.match(/r\.branded_to_contact_id = \$/g)!.length).toBe(3);
+    expect(sql).not.toContain('concierge_profiles');
+    expect(new PgDialect().sqlToQuery(q).params).toContain(22140);
+  });
+
+  it('applies no rep filter on the operators list', async () => {
+    captured.length = 0;
+    await listReports();
+    expect(text(lastQuery())).not.toMatch(/branded_to_contact_id = \$/);
+  });
+
+  it('names who made each report, without letting a repeated email double a row', async () => {
+    captured.length = 0;
+    await listReports();
+    const sql = text(lastQuery());
+    expect(sql).toContain('as made_by');
+    expect(sql).toMatch(/left join lateral \(\s*select pr\.display_name from profiles pr[\s\S]*limit 1/);
+  });
+});
+
 describe('the rows it returns', () => {
   it('maps a sent attempt onto the row', async () => {
     captured.length = 0;

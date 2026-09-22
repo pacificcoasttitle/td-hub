@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, BarChart3, TrendingUp, Users,
-  Briefcase, Trophy, Contact, LogOut, Menu, X, CalendarDays,
+  Briefcase, Trophy, Contact, LogOut, Menu, X, CalendarDays, FileText,
 } from 'lucide-react';
 import { handleSignOut } from '@/lib/security/sign-out';
 
@@ -33,6 +33,8 @@ const DAILY: NavItem = { label: 'Daily', href: '/sales/daily', icon: <CalendarDa
 const ORDER_ITEMS: NavItem[] = [
   { label: 'Orders', href: '/sales/orders', icon: <Briefcase className={ICON_CLS} /> },
   { label: 'My Clients', href: '/sales/clients', icon: <Contact className={ICON_CLS} /> },
+  // The farming reports branded to this rep — the list reps had in legacy.
+  { label: 'Reports', href: '/sales/reports', icon: <FileText className={ICON_CLS} /> },
 ];
 
 /**

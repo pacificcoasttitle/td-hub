@@ -53,9 +53,31 @@ describe('the farming PDF route', () => {
     expect(getFarmingPdf).not.toHaveBeenCalled();
   });
 
-  it('turns away a role that may not open farming reports', async () => {
-    getSessionMock.mockResolvedValue({ role: 'sales_rep', email: 'r@pct.com' });
+  it('turns away a role that has no business with farming reports', async () => {
+    getSessionMock.mockResolvedValue({ role: 'escrow_assistant', email: 'e@pct.com', contactId: 9 });
     expect((await get('county_sales', '3')).status).toBe(403);
+  });
+
+  it('lets a rep open a report branded to them', async () => {
+    getFarmingPdf.mockResolvedValue({ ok: true, key: 'k', filename: 'f.pdf', brandedToContactId: 22140 });
+    getSessionMock.mockResolvedValue({ role: 'sales_rep', email: 'mneveu@pct.com', contactId: 22140 });
+    expect((await get('county_sales', '3')).status).toBe(200);
+  });
+
+  it('answers a rep asking for SOMEONE ELSE\'s report exactly as a missing one', async () => {
+    // Not 403: a different answer would let a rep learn which ids exist.
+    getFarmingPdf.mockResolvedValue({ ok: true, key: 'k', filename: 'f.pdf', brandedToContactId: 999 });
+    getSessionMock.mockResolvedValue({ role: 'sales_rep', email: 'mneveu@pct.com', contactId: 22140 });
+    const res = await get('county_sales', '3');
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe('No such report.');
+    expect(downloadFile).not.toHaveBeenCalled();
+  });
+
+  it('gives a rep account with no linked contact nothing', async () => {
+    getFarmingPdf.mockResolvedValue({ ok: true, key: 'k', filename: 'f.pdf', brandedToContactId: null });
+    getSessionMock.mockResolvedValue({ role: 'sales_rep', email: 'x@pct.com', contactId: null });
+    expect((await get('county_sales', '3')).status).toBe(404);
   });
 
   it('says a failed report has no document, rather than a bare 404', async () => {

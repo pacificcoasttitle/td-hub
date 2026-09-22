@@ -21,12 +21,13 @@ describe('refreshPolicyLine — the pre-send rule on a policy', () => {
       { role: 'lender', status: 'agrees', email: 'loans@oldlender.com', name: 'Old Lender' },
     ]);
 
-    const result = await refreshPolicyLine(7, '20018881-OCT', 'lender_policy', line);
+    const result = await refreshPolicyLine(7, '20018881-OCT', 'lender_policy', line, 'Title only');
 
     expect(refreshBeforeSend).toHaveBeenCalledWith({
       orderId: 7,
       fileNumber: '20018881-OCT',
       sendKind: 'lender_policy',
+      orderType: 'Title only',
       candidates: [
         { role: 'escrow', email: 'eo@oldescrow.com', name: 'Old Escrow' },
         { role: 'lender', email: 'loans@oldlender.com', name: 'Old Lender' },

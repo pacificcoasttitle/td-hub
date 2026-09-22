@@ -129,6 +129,7 @@ describe('sendPrelimDeliveryEmail', () => {
     delete process.env.PRELIM_DELIVERY_LIVE;
     getOrderReadModelMock.mockResolvedValue({
       fileNumber: '12345-PCT',
+      orderType: 'Title only',
       property: {
         addressFormatted: '123 Main St, Downey, CA 90241',
         apn: '999-111-222',
@@ -351,6 +352,7 @@ describe('sendPrelimDeliveryEmail', () => {
         orderId: 123,
         fileNumber: '12345-PCT',
         sendKind: 'prelim',
+        orderType: 'Title only',
         candidates: [{ role: 'escrow', email: 'm@premierpropertiesescrow.com', name: 'Old Officer' }],
       });
     });
@@ -432,6 +434,7 @@ describe('sendPrelimDeliveryEmail', () => {
   it('falls back to open orders as Reply-To when no title officer email resolves', async () => {
     getOrderReadModelMock.mockResolvedValue({
       fileNumber: '12345-PCT',
+      orderType: 'Title only',
       property: {
         addressFormatted: '123 Main St, Downey, CA 90241',
         apn: '999-111-222',

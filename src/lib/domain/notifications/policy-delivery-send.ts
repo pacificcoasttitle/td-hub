@@ -228,7 +228,7 @@ export async function deliverPolicyDocument(input: {
   // PRE-SEND REFRESH — the same rule as the prelim (pre-send-refresh.ts): send to
   // SoftPro's recipient when it differs, record and alert; if SoftPro holds none
   // for a recipient this policy needs, fail closed rather than use ours.
-  const refreshed = await refreshPolicyLine(input.orderId, order.fileNumber, input.kind, resolvedLine);
+  const refreshed = await refreshPolicyLine(input.orderId, order.fileNumber, input.kind, resolvedLine, order.orderType);
   if (!refreshed.ok) {
     return failClosed(input.orderId, order.fileNumber, propertyAddress, {
       ...resolved,
@@ -479,12 +479,14 @@ export async function refreshPolicyLine(
   fileNumber: string,
   kind: PolicyKind,
   line: { to: PolicyParty; cc: PolicyParty[] },
+  orderType?: string | null,
 ): Promise<{ ok: true; line: { to: PolicyParty; cc: PolicyParty[] } } | { ok: false; missing: string[] }> {
   const parties = [line.to, ...line.cc];
   const decisions = await refreshBeforeSend({
     orderId,
     fileNumber,
     sendKind: kind,
+    orderType,
     candidates: parties.map((p) => ({ role: PRE_SEND_ROLE[p.role] ?? 'escrow', email: p.email, name: p.name })),
   });
 

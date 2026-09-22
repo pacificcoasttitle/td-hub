@@ -651,6 +651,7 @@ export async function getOrderDetails(params: {
   dateTo?: string;
   orderNumber?: string;
   orderId?: number;
+  timeoutMs?: number;
 }): Promise<VendorResult<SoftProOrderDetailItem[]>> {
   return makeRequest<SoftProOrderDetailItem[]>('GET', SOFTPRO_ENDPOINTS.getOrderDetails, {
     queryParams: {
@@ -660,7 +661,7 @@ export async function getOrderDetails(params: {
     },
     operation: 'get_order_details',
     orderId: params.orderId,
-    timeoutMs: 120_000,
+    timeoutMs: params.timeoutMs ?? 120_000,
   });
 }
 

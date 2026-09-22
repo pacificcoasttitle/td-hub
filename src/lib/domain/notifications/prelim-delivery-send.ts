@@ -83,6 +83,7 @@ export interface PrelimDeliverySampleData {
 
 interface OrderEmailContext {
   fileNumber: string;
+  orderType: string | null;
   propertyAddress: string | null;
   apn: string | null;
   titleOfficerName: string | null;
@@ -228,6 +229,7 @@ export function prelimDeliverySampleTemplate(data: PrelimDeliverySampleData): { 
   return buildEmailContent({
     context: {
       fileNumber: data.fileNumber,
+      orderType: null,
       propertyAddress: data.propertyAddress,
       apn: data.apn,
       titleOfficerName: data.titleOfficerName,
@@ -261,6 +263,7 @@ async function loadOrderEmailContext(orderId: number): Promise<OrderEmailContext
 
   return {
     fileNumber: order.fileNumber,
+    orderType: order.orderType ?? null,
     propertyAddress,
     apn: order.property.apn,
     titleOfficerEmail: order.assignments.titleOfficer?.email ?? null,
@@ -412,6 +415,7 @@ export async function sendPrelimDeliveryEmail(
     orderId,
     fileNumber: context.fileNumber,
     sendKind: 'prelim',
+    orderType: context.orderType,
     candidates: [{ role: 'escrow', email: reviewedRecipients.to.email, name: reviewedRecipients.to.name }],
   });
   if (preSendRefresh!.status === 'softpro_has_none') {

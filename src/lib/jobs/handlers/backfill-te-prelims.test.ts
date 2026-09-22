@@ -72,7 +72,8 @@ describe('the T&E prelim backfill cannot reach maybeAutoDeliverPrelim', () => {
     expect(liveSrc).not.toMatch(/deliver:\s*input/);
     expect(liveSrc).toContain('handleFetchPrelims');
     expect(liveSrc).toMatch(/getAttachedDocuments\(/);
-    expect(liveSrc).not.toContain('getAttachedDocumentsPrelim');
+    expect(liveSrc).toMatch(/getAttachedDocumentsPrelim\(/);
+    expect(liveSrc).toContain("expectsPctEscrowOfficer(orderType) ? 'prelim' : 'general'");
   });
 
   it('the age rule is three Pacific days on SoftPro date else opened_at, never hub created_at', () => {

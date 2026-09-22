@@ -1,7 +1,8 @@
 import { db } from '@/lib/db/client';
 import { orders, documents, prelimAnalyses } from '@/lib/db/schema';
 import { sql, and, eq, or, isNull } from 'drizzle-orm';
-import { getAttachedDocuments } from '@/lib/integrations/softpro';
+import { expectsPctEscrowOfficer } from '@/lib/domain/orders/escrow-officer-expectation';
+import { getAttachedDocuments, getAttachedDocumentsPrelim } from '@/lib/integrations/softpro';
 import { describeAttachedDocuments } from '@/lib/integrations/softpro/client';
 import { analyzePrelim } from '@/lib/tessa';
 import { budgetMsFor } from '@/lib/jobs/time-budget';
@@ -41,7 +42,8 @@ const MAX_TESSA_ATTEMPTS = 5;
 
 /**
  * Finds orders without prelim documents and attempts to fetch them
- * from SoftPro's GetAttachedDocuments endpoint. Downloaded PDFs
+ * from SoftPro. Title-only uses GetAttachedDocuments; Title & Escrow
+ * and Escrow-only use GetAttachedDocumentsPrelim. Downloaded PDFs
  * are stored in S3 and recorded in the documents table.
  */
 export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
@@ -79,7 +81,7 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
   // provenance recorded at write time rather than inferred from timestamps —
   // the same conclusion orders.opened_at reached.
   const ordersWithoutPrelims = await db
-    .select({ id: orders.id, fileNumber: orders.fileNumber })
+    .select({ id: orders.id, fileNumber: orders.fileNumber, orderType: orders.orderType })
     .from(orders)
     .where(and(
       sql`${orders.operationalStatus} in ('open', 'in_process', 'completed')`,
@@ -109,7 +111,7 @@ export async function handleFetchPrelims(): Promise<FetchPrelimsResult> {
 
     attempted++;
     try {
-      const stored = await fetchPrelimsForOrder(order.id, order.fileNumber);
+      const stored = await fetchPrelimsForOrder(order.id, order.fileNumber, order.orderType);
       if (stored > 0) {
         fetched++;
         documentsStored += stored;
@@ -221,10 +223,19 @@ async function markTessaRetryCapReached(analysisId: number, error: string) {
 /**
  * Fetch and store prelim documents for a single order.
  * Returns the number of documents successfully stored.
+ *
+ * Title & Escrow / Escrow-only prelims live on GetAttachedDocumentsPrelim.
+ * GetAttachedDocuments is blind to them — that is why 546 T&E PDFs had to be
+ * backfilled. Title-only stays on the general endpoint.
  */
+export function attachedDocumentsCallFor(orderType: string | null | undefined): 'prelim' | 'general' {
+  return expectsPctEscrowOfficer(orderType) ? 'prelim' : 'general';
+}
+
 export async function fetchPrelimsForOrder(
   orderId: number,
   fileNumber: string,
+  orderType?: string | null,
 ): Promise<number> {
   const [existing] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -240,7 +251,9 @@ export async function fetchPrelimsForOrder(
     return 0;
   }
 
-  const result = await getAttachedDocuments(fileNumber);
+  const result = attachedDocumentsCallFor(orderType) === 'prelim'
+    ? await getAttachedDocumentsPrelim(fileNumber)
+    : await getAttachedDocuments(fileNumber);
 
   // Stamp the attempt regardless of outcome so the cron's 6-hour
   // re-check window applies to both empty and successful responses.

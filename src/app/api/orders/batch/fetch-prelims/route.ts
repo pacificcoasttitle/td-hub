@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
       }
 
       const [order] = await db
-        .select({ fileNumber: orders.fileNumber })
+        .select({ fileNumber: orders.fileNumber, orderType: orders.orderType })
         .from(orders)
         .where(eq(orders.id, orderId))
         .limit(1);
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const stored = await fetchPrelimsForOrder(orderId, order.fileNumber);
+      const stored = await fetchPrelimsForOrder(orderId, order.fileNumber, order.orderType);
       results.push({ orderId, success: true, documentsFound: stored });
     } catch (err) {
       results.push({

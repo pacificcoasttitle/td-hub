@@ -14,7 +14,10 @@ vi.mock('@/lib/db/schema', () => ({
 import type { MappedOrderContacts, MappedResolvedParty } from '@/lib/integrations/softpro';
 import {
   buildContactDriftAlertEmail,
+  decideOfficerRecipient,
   decideRecipient,
+  detailForFile,
+  escrowPreSendSource,
   planSoftProPartyPatch,
   PRE_SEND_TIMEOUT_MS,
   refreshBeforeSend,
@@ -86,6 +89,59 @@ describe('decideRecipient — the rule', () => {
   });
 });
 
+describe('the field the rule asks depends on order type', () => {
+  it('Title-only still asks EscrowCompanies', () => {
+    expect(escrowPreSendSource('Title only')).toBe('escrow_company');
+    expect(escrowPreSendSource(null)).toBe('escrow_company');
+  });
+
+  it('Title & Escrow and Escrow-only ask EscrowOfficerContact', () => {
+    expect(escrowPreSendSource('Title & Escrow')).toBe('escrow_officer');
+    expect(escrowPreSendSource('Escrow only')).toBe('escrow_officer');
+  });
+});
+
+describe('decideOfficerRecipient — T&E / Escrow-only', () => {
+  const officer = { Name: 'Christine', Email: 'christine@pct.com', LookupCode: 'Chris123' };
+
+  it('agrees when our address is SoftPro\'s officer (case and spaces ignored)', () => {
+    const d = decideOfficerRecipient(
+      { role: 'escrow', email: ' Christine@PCT.com ', name: 'Christine' },
+      officer,
+    );
+    expect(d).toEqual({ role: 'escrow', status: 'agrees', email: 'christine@pct.com', name: 'Christine' });
+  });
+
+  it('DIFFERS: sends to SoftPro\'s officer, and keeps ours for the record', () => {
+    const d = decideOfficerRecipient(
+      { role: 'escrow', email: 'lupe@pct.com', name: 'Lupe' },
+      officer,
+    );
+    expect(d).toEqual({
+      role: 'escrow', status: 'differs', email: 'christine@pct.com', name: 'Christine',
+      ours: 'lupe@pct.com',
+    });
+  });
+
+  it('SOFTPRO HAS NONE: empty officer is a genuine absence and holds the send', () => {
+    expect(decideOfficerRecipient(
+      { role: 'escrow', email: 'christine@pct.com', name: 'Christine' },
+      null,
+    )).toEqual({ role: 'escrow', status: 'softpro_has_none', ours: 'christine@pct.com' });
+    expect(decideOfficerRecipient(
+      { role: 'escrow', email: 'christine@pct.com', name: 'Christine' },
+      { Name: 'Christine', Email: '' },
+    ).status).toBe('softpro_has_none');
+  });
+
+  it('does not fall back to a company inbox — there is not one on these files', () => {
+    const src = readFileSync(resolve(__dirname, 'pre-send-refresh.ts'), 'utf8');
+    const fn = src.slice(src.indexOf('export function decideOfficerRecipient'), src.indexOf('export function detailForFile'));
+    expect(fn).not.toContain('companyEmail');
+    expect(fn).not.toContain('EscrowCompanies');
+  });
+});
+
 describe('refreshBeforeSend', () => {
   const input = {
     orderId: 8542, fileNumber: '20018662-GLT', sendKind: 'prelim' as const,
@@ -139,6 +195,134 @@ describe('refreshBeforeSend', () => {
     const record = vi.fn(async () => { throw new Error('db down'); });
 
     await expect(refreshBeforeSend(input, { fetchContacts: fetchContacts as never, record })).resolves.toHaveLength(1);
+  });
+});
+
+describe('refreshBeforeSend — Title & Escrow asks EscrowOfficerContact', () => {
+  const teInput = {
+    orderId: 9101,
+    fileNumber: '20022514-OCT',
+    sendKind: 'prelim' as const,
+    orderType: 'Title & Escrow',
+    candidates: [{ role: 'escrow' as const, email: 'christine@pct.com', name: 'Christine' }],
+  };
+  const details = [{
+    OrderNumber: '20022514-OCT',
+    EscrowOfficerContact: { Name: 'Christine', Email: 'christine@pct.com', LookupCode: 'Chris123' },
+  }];
+
+  it('calls GetOrderDetails once and never GetOrderContacts', async () => {
+    const fetchDetails = vi.fn(async () => ({ success: true, data: details }));
+    const fetchContacts = vi.fn(async () => {
+      throw new Error('GetOrderContacts must not run on a T&E prelim');
+    });
+    const record = vi.fn(async () => undefined);
+
+    const decisions = await refreshBeforeSend(teInput, {
+      fetchContacts: fetchContacts as never,
+      fetchDetails: fetchDetails as never,
+      record,
+    });
+
+    expect(fetchContacts).not.toHaveBeenCalled();
+    expect(fetchDetails).toHaveBeenCalledTimes(1);
+    expect(fetchDetails).toHaveBeenCalledWith({
+      dateFrom: '',
+      orderNumber: '20022514-OCT',
+      orderId: 9101,
+      timeoutMs: PRE_SEND_TIMEOUT_MS,
+    });
+    expect(decisions[0]).toEqual({
+      role: 'escrow', status: 'agrees', email: 'christine@pct.com', name: 'Christine',
+    });
+    expect(record).toHaveBeenCalledWith(teInput, decisions);
+  });
+
+  it('holds the send when EscrowOfficerContact is empty — a genuine absence', async () => {
+    const fetchDetails = vi.fn(async () => ({
+      success: true,
+      data: [{ OrderNumber: '20022514-OCT', EscrowOfficerContact: null }],
+    }));
+
+    const decisions = await refreshBeforeSend(teInput, {
+      fetchDetails: fetchDetails as never,
+      record: vi.fn(),
+    });
+
+    expect(decisions[0]).toEqual({
+      role: 'escrow', status: 'softpro_has_none', ours: 'christine@pct.com',
+    });
+  });
+
+  it('Escrow-only uses the same officer field', async () => {
+    const fetchDetails = vi.fn(async () => ({ success: true, data: details }));
+    const fetchContacts = vi.fn();
+
+    const decisions = await refreshBeforeSend(
+      { ...teInput, orderType: 'Escrow only' },
+      { fetchContacts: fetchContacts as never, fetchDetails: fetchDetails as never, record: vi.fn() },
+    );
+
+    expect(fetchContacts).not.toHaveBeenCalled();
+    expect(fetchDetails).toHaveBeenCalledTimes(1);
+    expect(decisions[0]!.status).toBe('agrees');
+  });
+
+  it('Title-only still calls GetOrderContacts and never GetOrderDetails', async () => {
+    const fetchContacts = vi.fn(async () => ({
+      success: true,
+      data: {
+        EscrowCompanies: {
+          Person: { Name: 'Kim Hoh', Email: 'kim@inlandempireescrow.com' },
+        },
+      },
+    }));
+    const fetchDetails = vi.fn(async () => {
+      throw new Error('GetOrderDetails must not run on a Title-only prelim');
+    });
+
+    const decisions = await refreshBeforeSend({
+      orderId: 8542,
+      fileNumber: '20018662-GLT',
+      sendKind: 'prelim',
+      orderType: 'Title only',
+      candidates: [{ role: 'escrow', email: 'm@premierpropertiesescrow.com', name: 'M' }],
+    }, { fetchContacts: fetchContacts as never, fetchDetails: fetchDetails as never, record: vi.fn() });
+
+    expect(fetchDetails).not.toHaveBeenCalled();
+    expect(fetchContacts).toHaveBeenCalledTimes(1);
+    expect(decisions[0]!.status).toBe('differs');
+  });
+
+  it('a mixed T&E policy line asks both fields — officer for escrow, contacts for lender', async () => {
+    const fetchDetails = vi.fn(async () => ({ success: true, data: details }));
+    const fetchContacts = vi.fn(async () => ({
+      success: true,
+      data: { Lenders: { Company: { Name: 'New Lender', Email: 'closing@newlender.com' } } },
+    }));
+
+    const decisions = await refreshBeforeSend({
+      orderId: 7,
+      fileNumber: '20022514-OCT',
+      sendKind: 'lender_policy',
+      orderType: 'Title & Escrow',
+      candidates: [
+        { role: 'escrow', email: 'christine@pct.com', name: 'Christine' },
+        { role: 'lender', email: 'loans@oldlender.com', name: 'Old Lender' },
+      ],
+    }, { fetchContacts: fetchContacts as never, fetchDetails: fetchDetails as never, record: vi.fn() });
+
+    expect(fetchDetails).toHaveBeenCalledTimes(1);
+    expect(fetchContacts).toHaveBeenCalledTimes(1);
+    expect(decisions[0]).toMatchObject({ role: 'escrow', status: 'agrees' });
+    expect(decisions[1]).toMatchObject({ role: 'lender', status: 'differs', email: 'closing@newlender.com' });
+  });
+
+  it('picks the matching file out of a GetOrderDetails page', () => {
+    expect(detailForFile([
+      { OrderNumber: '20000000-OCT', EscrowOfficerContact: { Email: 'other@pct.com' } },
+      { OrderNumber: '20022514-OCT', EscrowOfficerContact: { Email: 'christine@pct.com' } },
+    ] as never, '20022514-OCT')?.EscrowOfficerContact?.Email).toBe('christine@pct.com');
   });
 });
 
@@ -210,5 +394,15 @@ describe('the drift alert', () => {
     });
     expect(subject).toContain('not sent');
     expect(html).toContain('Our address was not used in its place');
+  });
+});
+
+describe('T&E differs does not write an escrow_company party', () => {
+  it('recordPreSendOutcome skips the party write when escrow comes from the officer field', () => {
+    const src = readFileSync(resolve(__dirname, 'pre-send-refresh.ts'), 'utf8');
+    const record = src.slice(src.indexOf('export async function recordPreSendOutcome'));
+    expect(record).toContain("d.role === 'escrow' && escrowPreSendSource(input.orderType) === 'escrow_officer'");
+    expect(record).toMatch(/const writeParty = d\.status === 'differs'/);
+    expect(record).toContain('if (writeParty && d.status === \'differs\')');
   });
 });

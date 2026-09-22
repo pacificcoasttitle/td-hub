@@ -35,7 +35,7 @@ export async function POST(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    const documentsStored = await fetchPrelimsForOrder(orderId, order.fileNumber);
+    const documentsStored = await fetchPrelimsForOrder(orderId, order.fileNumber, order.orderType);
 
     return NextResponse.json({
       success: true,

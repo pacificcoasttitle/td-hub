@@ -33,11 +33,13 @@ export const SAFETY_MARGIN_MS = 30_000;
  */
 export const UNIT_P99_MS = {
   /**
-   * One order: get_attached_documents (p99 4.5s) plus, per document, an S3
-   * ingest and an INLINE TESSA analysis — tessa_extract p99 62.6s and
-   * tessa_summarize p99 12.1s. TESSA dominates; this is by far the heaviest
-   * unit and the reason the previous flat 240s budget could overrun
-   * (240 + 90 = 330 > 300).
+   * One order: get_attached_documents (p99 4.5s) or, on Title & Escrow,
+   * get_attached_documents_prelim (p99 8.6s over 1,412 calls / 30 days) plus,
+   * per document, an S3 ingest and an INLINE TESSA analysis — tessa_extract
+   * p99 62.6s and tessa_summarize p99 12.1s. TESSA still dominates; the
+   * slower prelim endpoint does not change the 90s unit. The run already
+   * stops before the next order when the 180s budget is gone, so a 50-order
+   * cap is a ceiling, not a promise to finish 50.
    */
   'softpro.fetch_prelims': 90_000,
   /** One order: get_order_contacts, p99 31.9s, observed max 60s (client timeout). */

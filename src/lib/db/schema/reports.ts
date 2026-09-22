@@ -14,11 +14,17 @@ import { contacts } from './contacts';
 /** notify_rep is telling the branded rep a report exists. It is not a send to an outside agent. */
 export const REPORT_DELIVERY_KINDS = ['notify_rep', 'send_to_agent'] as const;
 /**
- * SENT, not delivered (migration 0060): sent is what SendGrid's acceptance
- * proves. 'delivered' returns only with the event webhook that could prove it —
- * docs/tickets/REPORT_DELIVERY_IS_SENT_NOT_DELIVERED.md.
+ * 0060 narrowed this to sent|failed because acceptance was all we could prove.
+ * 0061 widens it, on evidence: the event webhook reports what the receiving
+ * server did, so 'delivered' is earned rather than assumed.
+ *
+ * 'deferred' is deliberately absent. It means SendGrid is still retrying —
+ * a step, not an outcome — and showing it would alarm somebody about the
+ * normal case.
  */
-export const REPORT_DELIVERY_OUTCOMES = ['sent', 'failed'] as const;
+export const REPORT_DELIVERY_OUTCOMES = [
+  'sent', 'failed', 'delivered', 'bounced', 'dropped', 'spam',
+] as const;
 /** No permanent public link: an attachment, or a link that expires. */
 export const REPORT_DELIVERY_PAYLOAD_MODES = ['attachment', 'signed_link'] as const;
 
@@ -33,9 +39,23 @@ export const reportDeliveries = pgTable('report_deliveries', {
   sentBy: varchar('sent_by', { length: 100 }),
   /** Of the attempt, not of the success. */
   attemptedAt: timestamp('attempted_at').notNull().defaultNow(),
+  /**
+   * sent | failed | delivered | bounced | dropped | spam (migration 0061).
+   *
+   * 'sent' is the honest state between SendGrid accepting the message and the
+   * first event about it — usually seconds. The four beyond it are written by
+   * the event webhook and by nothing else: they are what the receiving server
+   * did, not what we hoped.
+   */
   outcome: varchar('outcome', { length: 20 }).notNull(),
   /** The provider's reason, verbatim. Required when the outcome is failed. */
   outcomeDetail: text('outcome_detail'),
+  /**
+   * SendGrid's message id, in its own column so an event can find this row
+   * (migration 0061). It was written into outcomeDetail as prose first, which
+   * could neither be indexed nor joined.
+   */
+  providerMessageId: varchar('provider_message_id', { length: 200 }),
   payloadMode: varchar('payload_mode', { length: 20 }).notNull(),
   /** signed_link only, so a link in an old email can be shown to have died. */
   linkExpiresAt: timestamp('link_expires_at'),

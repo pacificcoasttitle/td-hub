@@ -101,3 +101,72 @@ whatever we build:
 
 Both are live contact records that we mailed a confirmation to this month.
 Worth a validation pass on the contacts table separately from the webhook.
+
+## BUILT 2026-09-22 — the webhook
+
+**Status: the evidence exists.** `POST /api/webhooks/sendgrid/events`,
+signature-verified, filtered to our own mail.
+
+### The scoping mistake worth recording
+
+The plan above said to match events to "our send by message id — Notify rep
+already stores the id in `outcome_detail`". Built exactly that way, this
+webhook would have caught **none of the seventeen silent drops**, and would
+have looked like it was working.
+
+`report_deliveries` has **zero rows in production**. Notify rep has never been
+used. All 2,874 client emails — every prelim, every confirmation, all
+seventeen drops — are in **`notification_logs`**, which already carries the
+SendGrid message id in `provider_id` on every single row.
+
+The lesson is the familiar one: the plan named the table we had just built
+rather than the table the mail actually goes through. Found by querying
+production before committing, not by reasoning about it.
+
+### Matched on message **and** recipient
+
+One message id covers up to eight recipients — a confirmation goes to the
+escrow officer, both agents and the cc list under one id, and production has
+many such rows. SendGrid reports per recipient. Matching on the id alone would
+have stamped one person's bounce onto all eight rows: seven lies for every
+truth.
+
+### What it does
+
+- **Verifies** every batch (ECDSA P-256 over `timestamp + raw body`), with a
+  ten-minute skew window against replay. No public key configured means
+  *refuse*, never wave through. `SENDGRID_WEBHOOK_PUBLIC_KEY` must be set.
+- **Filters to our own sends.** The account shows ~99,900 requests against our
+  ~5,500. An event whose (message, recipient) we have no record of is counted
+  and dropped, never stored.
+- **Stores what SendGrid said, verbatim and append-only**, in `email_events`.
+  Unique on (message, event, instant), so a retried batch cannot double-count
+  a bounce.
+- **Recomputes** the shown outcome from the full event history rather than
+  applying each event in place, so late and out-of-order arrivals cannot
+  produce a wrong answer.
+- **Answers 500 on a storage failure**, so SendGrid retries. A 200 there would
+  lose the batch — the exact silent failure this ends.
+
+### The words
+
+`delivered` is now earned. Green is reserved for it, as 0060 intended.
+`bounced`, `dropped` and `spam` are kept separate because they need different
+actions: a bounce means the address is wrong, a drop means we are still
+sending to an address SendGrid gave up on weeks ago, and spam means we got
+through and a person rejected us. `deferred` is deliberately **not** an
+outcome — it is a retry in progress, and showing it would put an alarming word
+against the ordinary case.
+
+### Still to do
+
+- **Turn it on.** SendGrid dashboard → Settings → Mail Settings → Event
+  Webhook: post to `https://hub.pctdesk.com/api/webhooks/sendgrid/events`,
+  enable signature verification, copy the public key into
+  `SENDGRID_WEBHOOK_PUBLIC_KEY`. Until that is done this endpoint is correct
+  and idle.
+- **The two other `'delivered'` writers** (`prelim-auto-delivery.ts`,
+  `policy-delivery-send.ts`) still record `delivered` on acceptance in
+  `admin_activity_logs`. The webhook now corrects `notification_logs`
+  underneath them, so the two disagree until those are changed to `sent`. Not
+  done here: the ops daily report counts `'delivered'` and needs finding first.

@@ -78,3 +78,32 @@ export const orderContactDrift = pgTable('order_contact_drift', {
     .where(sql`resolved_at IS NULL`),
   lastSeenIdx: index('order_contact_drift_last_seen_idx').on(table.lastSeenAt),
 }));
+
+// ─── What SendGrid actually did with a message (migration 0061) ─────────────
+//
+// Append-only, and verbatim. Every row is something the provider told us, kept
+// whole so that a mapping we get wrong today can be recomputed tomorrow from
+// events we still hold. What a human is SHOWN is derived from this, and lives
+// in report_deliveries.outcome.
+//
+// FILTERED TO OUR OWN SENDS. The SendGrid account carries roughly 99,900
+// requests against our 5,500 — something else at PCT sends on it. Only events
+// whose message id matches one of our sends are stored; the rest are counted
+// and dropped. Otherwise every number built on this table would be measuring
+// a stranger's traffic.
+export const emailEvents = pgTable('email_events', {
+  id: serial('id').primaryKey(),
+  /** SendGrid's per-message id — the join to the send we made. */
+  sgMessageId: varchar('sg_message_id', { length: 200 }).notNull(),
+  /** delivered | bounce | dropped | deferred | spamreport | blocked | … */
+  event: varchar('event', { length: 40 }).notNull(),
+  email: varchar('email', { length: 320 }).notNull(),
+  /** When SendGrid says it happened — NOT when we heard. Events arrive late and out of order. */
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  /** "550 5.1.1 User unknown" — the whole value of this row to whoever chases the client. */
+  reason: text('reason'),
+  raw: jsonb('raw').notNull(),
+}, (t) => ({
+  messageIdx: index('email_events_message_idx').on(t.sgMessageId),
+}));

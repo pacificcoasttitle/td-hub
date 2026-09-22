@@ -237,10 +237,15 @@ function pdfHref(row: ReportListRow): string {
  * The cell reads the latest ATTEMPT from the log. Grey with "Never sent" is a
  * statement; an empty cell would be the silence this column exists to end.
  *
- * SENT, NOT DELIVERED. SendGrid accepting a message proves it left, not that it
- * arrived — it can still bounce. So the word is Sent, and the dot is navy, not
- * green: green is kept for a Delivered that SendGrid's event webhook can prove
- * (docs/tickets/REPORT_DELIVERY_IS_SENT_NOT_DELIVERED.md).
+ * SENT IS NOT DELIVERED. SendGrid accepting a message proves it left, not that
+ * it arrived. So a freshly sent report says Sent with a navy dot, and green is
+ * reserved for a Delivered the event webhook has actually proved (migration
+ * 0061). Most rows pass through Sent in seconds.
+ *
+ * The words that matter are the other three. Before the webhook, a message
+ * SendGrid accepted and then failed to deliver looked identical to one that
+ * arrived — seventeen of them went out between April and September 2026, six
+ * of them prelims, and this column said Sent for every one.
  */
 export function DeliveryCell({ row }: { row: ReportListRow }) {
   if (!row.delivery) {
@@ -251,14 +256,33 @@ export function DeliveryCell({ row }: { row: ReportListRow }) {
       </span>
     );
   }
-  const failed = row.delivery.outcome === 'failed';
+  const look = DELIVERY_LOOK[row.delivery.outcome] ?? DELIVERY_LOOK.sent;
   return (
     <span
-      className={`inline-flex items-center gap-1.5 text-xs ${failed ? 'text-[#B03A2C]' : 'text-[#1A1A2E]'}`}
-      title={`${row.delivery.recipientName ?? row.delivery.recipientEmail} · ${shortWhen(row.delivery.attemptedAt)}${failed ? '' : ' · accepted by SendGrid, delivery not confirmed'}`}
+      className={`inline-flex items-center gap-1.5 text-xs ${look.text}`}
+      title={`${row.delivery.recipientName ?? row.delivery.recipientEmail} · ${shortWhen(row.delivery.attemptedAt)} · ${look.title}`}
     >
-      <span className={`h-2 w-2 rounded-full ${failed ? 'bg-red-500' : 'bg-[#1B2A4A]'}`} />
-      {failed ? 'Failed' : 'Sent'}
+      <span className={`h-2 w-2 rounded-full ${look.dot}`} />
+      {look.label}
     </span>
   );
 }
+
+/**
+ * GREEN MEANS SOMEBODY HAS IT. Nothing else gets green — that was the whole
+ * point of 0060, and it stays true now that green can be earned.
+ *
+ * The three failures are deliberately not one word. A bounce, a drop and a
+ * spam report need different actions from whoever reads this: a bounce means
+ * the address is wrong, a drop means we are still sending to an address
+ * SendGrid gave up on weeks ago, and spam means we got through and were
+ * rejected by a person.
+ */
+const DELIVERY_LOOK: Record<string, { label: string; dot: string; text: string; title: string }> = {
+  sent: { label: 'Sent', dot: 'bg-[#1B2A4A]', text: 'text-[#1A1A2E]', title: 'accepted by SendGrid, delivery not confirmed yet' },
+  delivered: { label: 'Delivered', dot: 'bg-emerald-500', text: 'text-[#1A1A2E]', title: 'the receiving server accepted it' },
+  bounced: { label: 'Bounced', dot: 'bg-red-500', text: 'text-[#B03A2C]', title: 'rejected by the receiving server — they do NOT have it' },
+  dropped: { label: 'Dropped', dot: 'bg-red-500', text: 'text-[#B03A2C]', title: 'SendGrid did not attempt it — they do NOT have it' },
+  spam: { label: 'Spam', dot: 'bg-amber-500', text: 'text-[#B45309]', title: 'the recipient marked it as spam' },
+  failed: { label: 'Failed', dot: 'bg-red-500', text: 'text-[#B03A2C]', title: 'we never handed it to SendGrid' },
+};

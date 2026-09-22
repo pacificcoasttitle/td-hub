@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import type { ReportDeliverySummary } from '@/lib/domain/reports/list-types';
 import type { ReportListRow } from '@/lib/domain/reports/list-types';
 import { DeliveryCell, ReportRow, shortWhen } from './reports-list-page';
 
@@ -142,5 +143,48 @@ describe('the page itself', () => {
     const reportsAt = nav.indexOf("label: 'Reports'");
     expect(reportsAt).toBeGreaterThan(documentsAt);
     expect(nav).toContain("href: '/reports'");
+  });
+});
+
+// ─── The outcomes the event webhook can now prove (migration 0061) ──────────
+describe('the Delivery column, once SendGrid has told us what happened', () => {
+  // `outcome` is typed as a string, not the union: this asserts what happens
+  // when SendGrid sends an event type the union does not know about, which is
+  // precisely the case the type system cannot rule out at runtime.
+  const withOutcome = (outcome: string) => renderToStaticMarkup(
+    <DeliveryCell row={row({
+      delivery: {
+        outcome: outcome as ReportDeliverySummary['outcome'],
+        attemptedAt: '2026-09-22 10:00:00', recipientName: null, recipientEmail: 'a@b.com',
+      },
+    }) as never} />,
+  );
+
+  it('gives green ONLY to a delivery that was proved', () => {
+    expect(withOutcome('delivered')).toContain('bg-emerald-500');
+    // Everything else must not be green — the rule 0060 established.
+    for (const o of ['sent', 'failed', 'bounced', 'dropped', 'spam']) {
+      expect(withOutcome(o), o).not.toContain('emerald');
+    }
+  });
+
+  it('says Delivered, not Sent, once it is proved', () => {
+    expect(withOutcome('delivered')).toContain('Delivered');
+  });
+
+  it('names the three failures separately, because they need different actions', () => {
+    expect(withOutcome('bounced')).toContain('Bounced');
+    expect(withOutcome('dropped')).toContain('Dropped');
+    expect(withOutcome('spam')).toContain('Spam');
+  });
+
+  it('tells the reader plainly that a bounce or a drop did not arrive', () => {
+    expect(withOutcome('bounced')).toContain('do NOT have it');
+    expect(withOutcome('dropped')).toContain('do NOT have it');
+  });
+
+  it('falls back to Sent for an outcome it does not recognise, rather than rendering nothing', () => {
+    // A new SendGrid event type must not blank the column.
+    expect(withOutcome('something_new')).toContain('Sent');
   });
 });

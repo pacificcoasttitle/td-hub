@@ -13,7 +13,12 @@ import { contacts } from './contacts';
 
 /** notify_rep is telling the branded rep a report exists. It is not a send to an outside agent. */
 export const REPORT_DELIVERY_KINDS = ['notify_rep', 'send_to_agent'] as const;
-export const REPORT_DELIVERY_OUTCOMES = ['delivered', 'failed'] as const;
+/**
+ * SENT, not delivered (migration 0060): sent is what SendGrid's acceptance
+ * proves. 'delivered' returns only with the event webhook that could prove it —
+ * docs/tickets/REPORT_DELIVERY_IS_SENT_NOT_DELIVERED.md.
+ */
+export const REPORT_DELIVERY_OUTCOMES = ['sent', 'failed'] as const;
 /** No permanent public link: an attachment, or a link that expires. */
 export const REPORT_DELIVERY_PAYLOAD_MODES = ['attachment', 'signed_link'] as const;
 

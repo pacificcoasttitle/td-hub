@@ -29,7 +29,11 @@ export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
 };
 
 export interface ReportDeliverySummary {
-  outcome: 'delivered' | 'failed';
+  /**
+   * SENT, not delivered: SendGrid accepted it. Nothing yet proves it arrived
+   * (migration 0060; docs/tickets/REPORT_DELIVERY_IS_SENT_NOT_DELIVERED.md).
+   */
+  outcome: 'sent' | 'failed';
   attemptedAt: string;
   recipientName: string | null;
   recipientEmail: string;
@@ -45,6 +49,11 @@ export interface ReportListRow {
   subjectDetail: string | null;
   settings: string | null;
   brandedToName: string | null;
+  /**
+   * The address Notify rep will use: the SNAPSHOT on the report row, not the
+   * contact's current email, because that snapshot is what the send reads.
+   */
+  brandedToEmail: string | null;
   status: string;
   createdAt: string;
   createdBy: string | null;

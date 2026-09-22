@@ -41,6 +41,7 @@ interface RawRow {
   list_subject_detail: string | null;
   list_settings: string | null;
   branded_to_name: string | null;
+  branded_to_email: string | null;
   created_at: string;
   created_by: string | null;
   delivery_outcome: string | null;
@@ -68,6 +69,7 @@ function unionSql(filter: ReportFilter, search: string | null) {
       select 'sales_activity' as type, r.id, r.status, null::int as credits_charged,
              r.list_subject, r.list_subject_detail, r.list_settings,
              coalesce(c.full_name, r.branded_to_name) as branded_to_name,
+             r.branded_to_email,
              r.created_at, r.created_by
         from sales_activity_reports r
         left join contacts c on c.id = r.branded_to_contact_id
@@ -76,6 +78,7 @@ function unionSql(filter: ReportFilter, search: string | null) {
       select 'carrier_route' as type, r.id, r.status, null::int as credits_charged,
              r.list_subject, r.list_subject_detail, r.list_settings,
              coalesce(c.full_name, r.branded_to_name) as branded_to_name,
+             r.branded_to_email,
              r.created_at, r.created_by
         from carrier_route_reports r
         left join contacts c on c.id = r.branded_to_contact_id
@@ -84,6 +87,7 @@ function unionSql(filter: ReportFilter, search: string | null) {
       select 'county_sales' as type, r.id, r.status, null::int as credits_charged,
              r.list_subject, r.list_subject_detail, r.list_settings,
              coalesce(c.full_name, r.branded_to_name) as branded_to_name,
+             r.branded_to_email,
              r.created_at, r.created_by
         from county_sales_reports r
         left join contacts c on c.id = r.branded_to_contact_id
@@ -94,6 +98,7 @@ function unionSql(filter: ReportFilter, search: string | null) {
       select 'concierge_profile' as type, r.id, r.status, r.sitex_credits_charged as credits_charged,
              r.list_subject, r.list_subject_detail, r.list_settings,
              r.presenting_rep_name as branded_to_name,
+             r.presenting_rep_email as branded_to_email,
              r.created_at, r.created_by
         from concierge_profiles r
        where ${matches('r.list_subject', 'r.list_settings', 'r.presenting_rep_name')}`);
@@ -143,12 +148,13 @@ export async function listReports(input: {
       subjectDetail: r.list_subject_detail,
       settings: r.list_settings,
       brandedToName: r.branded_to_name,
+      brandedToEmail: r.branded_to_email,
       status: r.status,
       createdAt: String(r.created_at),
       createdBy: r.created_by,
       delivery: r.delivery_outcome
         ? {
-          outcome: r.delivery_outcome === 'delivered' ? 'delivered' : 'failed',
+          outcome: r.delivery_outcome === 'sent' ? 'sent' : 'failed',
           attemptedAt: String(r.delivery_attempted_at),
           recipientName: r.delivery_recipient_name,
           recipientEmail: String(r.delivery_recipient_email),

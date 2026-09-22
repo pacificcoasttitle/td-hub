@@ -42,3 +42,26 @@ export async function getFarmingPdf(type: FarmingType, id: number): Promise<
   if (!row.key) return { ok: false, reason: 'no_document', status: row.status };
   return { ok: true, key: row.key, filename: pdfFilename(row.subject, row.settings, type) };
 }
+
+/** What Notify rep needs, read from the report row — never from the browser. */
+export interface NotifyTarget {
+  status: string;
+  pdfKey: string | null;
+  repName: string;
+  repEmail: string | null;
+  subject: string | null;
+  subjectDetail: string | null;
+  settings: string | null;
+  filename: string;
+}
+
+export async function getNotifyTarget(type: FarmingType, id: number): Promise<NotifyTarget | null> {
+  const t = TABLES[type];
+  const [row] = await db.select({
+    status: t.status, pdfKey: t.pdfStorageKey,
+    repName: t.brandedToName, repEmail: t.brandedToEmail,
+    subject: t.listSubject, subjectDetail: t.listSubjectDetail, settings: t.listSettings,
+  }).from(t).where(eq(t.id, id)).limit(1);
+  if (!row) return null;
+  return { ...row, filename: pdfFilename(row.subject, row.settings, type) };
+}

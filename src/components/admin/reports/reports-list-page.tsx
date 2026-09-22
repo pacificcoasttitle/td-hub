@@ -6,6 +6,7 @@ import {
   type ReportListRow,
   type ReportFilter,
 } from '@/lib/domain/reports/list-types';
+import { NotifyRepControl } from './notify-rep-control';
 
 // ─── Reports ────────────────────────────────────────────────────────────────
 //
@@ -135,7 +136,7 @@ export function ReportsListPage({ onNewReport, reloadToken = 0 }: Props) {
                   <tr key={i}>{Array.from({ length: 7 }).map((__, j) => (
                     <td key={j} className="px-4 py-3"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" /></td>
                   ))}</tr>
-                )) : rows.map((r) => <ReportRow key={`${r.type}-${r.id}`} row={r} />)}
+                )) : rows.map((r) => <ReportRow key={`${r.type}-${r.id}`} row={r} onChanged={fetchReports} />)}
               </tbody>
             </table>
             {!loading && rows.length === 0 && (
@@ -178,7 +179,7 @@ export function shortWhen(iso: string): string {
   return `${day}, ${time}`;
 }
 
-export function ReportRow({ row }: { row: ReportListRow }) {
+export function ReportRow({ row, onChanged }: { row: ReportListRow; onChanged?: () => void }) {
   const building = row.status === 'pending' || row.status === 'retrieved';
   const failed = row.status === 'failed';
 
@@ -211,9 +212,11 @@ export function ReportRow({ row }: { row: ReportListRow }) {
             >
               Download
             </a>
-            <button className="text-xs font-medium text-[#1B2A4A] hover:underline">
-              {row.type === 'concierge_profile' ? 'Comparables' : 'Notify rep'}
-            </button>
+            {row.type === 'concierge_profile' ? (
+              <button className="text-xs font-medium text-[#1B2A4A] hover:underline">Comparables</button>
+            ) : (
+              <NotifyRepControl row={row} onChanged={onChanged} />
+            )}
           </div>
         )}
       </td>
@@ -228,10 +231,15 @@ function pdfHref(row: ReportListRow): string {
 }
 
 /**
- * Never sent is not a quiet version of delivered.
+ * Never sent is not a quiet version of sent.
  *
  * The cell reads the latest ATTEMPT from the log. Grey with "Never sent" is a
  * statement; an empty cell would be the silence this column exists to end.
+ *
+ * SENT, NOT DELIVERED. SendGrid accepting a message proves it left, not that it
+ * arrived — it can still bounce. So the word is Sent, and the dot is navy, not
+ * green: green is kept for a Delivered that SendGrid's event webhook can prove
+ * (docs/tickets/REPORT_DELIVERY_IS_SENT_NOT_DELIVERED.md).
  */
 export function DeliveryCell({ row }: { row: ReportListRow }) {
   if (!row.delivery) {
@@ -246,10 +254,10 @@ export function DeliveryCell({ row }: { row: ReportListRow }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 text-xs ${failed ? 'text-[#B03A2C]' : 'text-[#1A1A2E]'}`}
-      title={`${row.delivery.recipientName ?? row.delivery.recipientEmail} · ${shortWhen(row.delivery.attemptedAt)}`}
+      title={`${row.delivery.recipientName ?? row.delivery.recipientEmail} · ${shortWhen(row.delivery.attemptedAt)}${failed ? '' : ' · accepted by SendGrid, delivery not confirmed'}`}
     >
-      <span className={`h-2 w-2 rounded-full ${failed ? 'bg-red-500' : 'bg-green-500'}`} />
-      {failed ? 'Failed' : 'Delivered'}
+      <span className={`h-2 w-2 rounded-full ${failed ? 'bg-red-500' : 'bg-[#1B2A4A]'}`} />
+      {failed ? 'Failed' : 'Sent'}
     </span>
   );
 }

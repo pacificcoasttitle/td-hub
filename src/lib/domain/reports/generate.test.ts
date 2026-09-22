@@ -319,6 +319,17 @@ describe('County Sales, file to page', () => {
     });
   });
 
+  it('reads a CSV as Excel saves it: byte-order mark first, Windows line endings', async () => {
+    // "Save As CSV (UTF-8)" writes U+FEFF before the first header. A parser that
+    // kept it would see "<BOM>Site City", find no city column, and refuse the
+    // first real file anyone uploaded.
+    const excel = '﻿' + COUNTY_CSV.replace(/\n/g, '\r\n');
+    const r = await generateCountySales({ ...base, csv: excel, county: 'Orange', month: '2026-08' });
+    expect(r).toMatchObject({ ok: true });
+    const { text } = await storedPdfText();
+    expect(text).toContain(sq('Orange County total 5 $1,250,000 2 $750,000'));
+  });
+
   it('refuses a county outside the six', async () => {
     const r = await generateCountySales({ ...base, csv: COUNTY_CSV, county: 'Kern' as never, month: '2026-08' });
     expect(r).toMatchObject({ ok: false, stage: 'input' });

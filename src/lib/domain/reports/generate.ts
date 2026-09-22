@@ -57,12 +57,10 @@ import type { RepBlock } from './document/family';
 
 // ─── Inputs and outcomes ────────────────────────────────────────────────────
 
-export const FARMING_WINDOWS = [3, 6, 12] as const;
-export type FarmingWindow = typeof FARMING_WINDOWS[number];
-
-/** The six counties the County Sales report has always covered. */
-export const FARMING_COUNTIES = ['Los Angeles', 'Orange', 'Riverside', 'San Bernardino', 'San Diego', 'Ventura'] as const;
-export type FarmingCounty = typeof FARMING_COUNTIES[number];
+// The option lists live in options.ts so the browser can import them without
+// reaching this module, which reaches the database.
+import { FARMING_COUNTIES, FARMING_WINDOWS, type FarmingCounty, type FarmingWindow } from './options';
+export { FARMING_COUNTIES, FARMING_WINDOWS, type FarmingCounty, type FarmingWindow };
 
 interface Common {
   /** The uploaded file, as text. */

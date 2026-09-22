@@ -36,17 +36,41 @@ describe('the type picker', () => {
     expect(visible(<TypeCard option={concierge} selected={false} onSelect={() => {}} />)).toContain('1 credit');
   });
 
-  it('shows the three farming types but does not let them be clicked', () => {
-    // A stub that accepts a click and produces no report is worse than a card
-    // that says when.
-    const farming = typeOptions(ON).filter((o) => o.type !== 'concierge_profile');
+  const farmingOf = (farming: boolean | null) => typeOptions(ON, farming).filter((o) => o.type !== 'concierge_profile');
+
+  it('offers the three farming types to a role the server says may create them', () => {
+    const farming = farmingOf(true);
     expect(farming.map((o) => o.label)).toEqual(['Sales Activity', 'Carrier Route Analysis', 'County Sales']);
     for (const o of farming) {
-      expect(o.available).toBe(false);
-      const html = renderToStaticMarkup(<TypeCard option={o} selected={false} onSelect={() => {}} />);
-      expect(html).toContain('disabled');
-      expect(visible(<TypeCard option={o} selected={false} onSelect={() => {}} />)).toContain('Not yet available');
+      expect(o.available).toBe(true);
+      expect(renderToStaticMarkup(<TypeCard option={o} selected={false} onSelect={() => {}} />)).not.toContain('disabled');
     }
+  });
+
+  it('says a farming report needs a file, and never prices one — they cost nothing', () => {
+    for (const o of farmingOf(true)) {
+      const text = visible(<TypeCard option={o} selected={false} onSelect={() => {}} />);
+      expect(text).toContain('Needs a CSV');
+      expect(text).not.toContain('credit');
+    }
+  });
+
+  it('greys the farming types, and says why, for a role that may not create them', () => {
+    for (const o of farmingOf(false)) {
+      expect(o.available).toBe(false);
+      expect(visible(<TypeCard option={o} selected={false} onSelect={() => {}} />)).toContain('permission');
+    }
+  });
+
+  it('offers no farming type before the server has answered', () => {
+    expect(farmingOf(null).every((o) => !o.available)).toBe(true);
+  });
+
+  it('does not let the concierge flag switch the farming reports off', () => {
+    // The flag exists to stop SPENDING. Farming reports spend nothing.
+    const flagOff = typeOptions({ canGenerate: true, featureOn: false }, true);
+    expect(flagOff.find((o) => o.type === 'concierge_profile')!.available).toBe(false);
+    expect(flagOff.filter((o) => o.type !== 'concierge_profile').every((o) => o.available)).toBe(true);
   });
 
   it('never puts a credit pill on a type that cannot be generated', () => {
@@ -229,9 +253,19 @@ describe('the modal as wired', () => {
   const src2 = src;
 
   it('spends through the one route that spends, and no other', () => {
+    // Two POSTs now: the concierge profile, which spends, and a farming report,
+    // which does not. Exactly one may go to the spending route.
     const s = src();
-    expect(s.match(/method: 'POST'/g)!.length).toBe(1);
-    expect(s).toContain("'/api/concierge/profiles'");
+    const posts = [...s.matchAll(/fetch\((['`])([^'`]+)\1,\s*\{[^}]*method: 'POST'/g)].map((m) => m[2]);
+    expect(posts.sort()).toEqual(['/api/concierge/profiles', '/api/reports/farming']);
+  });
+
+  it('sends a farming report through the farming route, never the concierge one', () => {
+    const s = src();
+    const at = s.indexOf('async function submitFarming');
+    const body = s.slice(at, s.indexOf('\n  }\n', at));
+    expect(body).toContain("'/api/reports/farming'");
+    expect(body).not.toContain('/api/concierge');
   });
 
   it('mounts the cost gate only while it is open, so an acknowledgement cannot survive a cancel', () => {

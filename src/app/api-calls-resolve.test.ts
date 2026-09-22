@@ -112,10 +112,6 @@ const AWAITING_THEIR_ENDPOINT = new Set([
   // The sales rep's view of the Reports page. Kept by decision on 2026-09-21
   // as the destination for that work.
   '/api/sales/reports',
-  // The Download action on a FARMING report row. No farming report can exist
-  // until its generator does, so this link cannot render today; the route is
-  // part of the farming PDFs, next on the build list.
-  '/api/reports/${row.type}/${row.id}/pdf',
 
   // ── Deliberately kept: shelved, not dead ─────────────────────────────────
 

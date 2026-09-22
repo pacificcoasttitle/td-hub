@@ -6,13 +6,16 @@ import { ConciergeCostGate } from '@/components/hub/split/concierge-cost-gate';
 import { criteriaSummary } from '@/lib/domain/concierge/list-line';
 import { DEFAULT_CRITERIA } from '@/lib/domain/concierge/comp-filter';
 import type { ReportType } from '@/lib/domain/reports/list-types';
+import {
+  FarmingStep, emptyFarmingDraft, farmingFormData, farmingProblem, isFarming, type FarmingDraft,
+} from './farming-step';
 
 // ─── New Report ─────────────────────────────────────────────────────────────
 //
-// ONE TYPE WORKS TODAY: Concierge Profile. The three farming types are shown
-// because a picker that hid them would say the product is smaller than it is —
-// but they are NOT selectable and they open nothing. A stub that accepts a
-// click and produces no report is worse than a greyed card that says when.
+// FOUR TYPES. Concierge Profile spends a credit and goes through the cost
+// gate. The three farming types spend nothing: a file, a few choices and a rep,
+// then POST /api/reports/farming, which calls the generator and passes its
+// refusals back word for word ("The file has no column for: purchase price").
 //
 // Concierge is also the only type that spends money, and the money is spent by
 // exactly one route: POST /api/concierge/profiles. This file does not decide
@@ -42,14 +45,20 @@ export interface ConciergeAccess {
   featureOn: boolean;
 }
 
-const COMING = 'Not yet available';
-
 /**
  * The cards, and which of them can be clicked. Access is the SERVER's answer,
  * so a flag that is off produces a card that says so rather than a button that
  * fails at the vendor.
+ *
+ * `farming` is the server's answer for the three farming reports: null while it
+ * is being asked, then whether this role may create them. They cost nothing, so
+ * no flag governs them — only the role.
  */
-export function typeOptions(access: ConciergeAccess | null): TypeOption[] {
+export function typeOptions(access: ConciergeAccess | null, farming: boolean | null = null): TypeOption[] {
+  const farmingNote = farming === null
+    ? 'Checking…'
+    : farming ? null : 'You do not have permission to create farming reports.';
+
   const conciergeNote = access === null
     ? 'Checking…'
     : !access.featureOn
@@ -70,20 +79,20 @@ export function typeOptions(access: ConciergeAccess | null): TypeOption[] {
     {
       type: 'sales_activity',
       label: 'Sales Activity',
-      blurb: 'Sales in an area over a period, by city and price band.',
-      available: false, unavailableNote: COMING, costNote: null,
+      blurb: 'One area over 3, 6 or 12 months: median prices, month by month. Needs a CSV.',
+      available: farmingNote === null, unavailableNote: farmingNote, costNote: null,
     },
     {
       type: 'carrier_route',
       label: 'Carrier Route Analysis',
-      blurb: 'Turnover and owner tenure by postal carrier route.',
-      available: false, unavailableNote: COMING, costNote: null,
+      blurb: 'The top ten postal carrier routes in an area, ranked by the measure you choose. Needs a CSV.',
+      available: farmingNote === null, unavailableNote: farmingNote, costNote: null,
     },
     {
       type: 'county_sales',
       label: 'County Sales',
-      blurb: 'A county month: volume, median price, share by type.',
-      available: false, unavailableNote: COMING, costNote: null,
+      blurb: 'A county month, city by city: houses and condominiums. Needs a CSV.',
+      available: farmingNote === null, unavailableNote: farmingNote, costNote: null,
     },
   ];
 }
@@ -385,6 +394,8 @@ export function NewReportModal({ onClose, onCreated }: {
   const [existing, setExisting] = useState<{ existing: ExistingProfileNotice; message: string } | null>(null);
   const [checking, setChecking] = useState(false);
   const [freshRequested, setFreshRequested] = useState(false);
+  const [farming, setFarming] = useState<boolean | null>(null);
+  const [farmingDraft, setFarmingDraft] = useState<FarmingDraft>(() => emptyFarmingDraft());
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<RepResult[]>([]);
@@ -402,6 +413,10 @@ export function NewReportModal({ onClose, onCreated }: {
         if (!cancelled) setAccess(d ?? { canGenerate: false, featureOn: false });
       })
       .catch(() => { if (!cancelled) setAccess({ canGenerate: false, featureOn: false }); });
+    fetch('/api/reports/access')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { farming?: boolean } | null) => { if (!cancelled) setFarming(!!d?.farming); })
+      .catch(() => { if (!cancelled) setFarming(false); });
     return () => { cancelled = true; };
   }, []);
 
@@ -421,6 +436,35 @@ export function NewReportModal({ onClose, onCreated }: {
   }, []);
 
   const problem = draftProblem(draft);
+  const farmingType = isFarming(selected) ? selected : null;
+  const fProblem = farmingType ? farmingProblem(farmingType, farmingDraft) : null;
+
+  /**
+   * Create a farming report. No gate: it spends nothing. A refusal comes back
+   * as the generator wrote it and stays on the form, so the operator can fix
+   * the file and try again without re-entering anything.
+   */
+  async function submitFarming() {
+    if (!farmingType) return;
+    if (fProblem) { setShowProblem(true); return; }
+    setSubmitting(true); setError(null);
+    try {
+      const res = await fetch('/api/reports/farming', { method: 'POST', body: farmingFormData(farmingType, farmingDraft) });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(body?.error ?? `The report could not be created (${res.status}).`);
+        // A failed row exists and is on the list with "Try again".
+        if (body?.reportId) onCreated(body.reportId as number);
+        return;
+      }
+      onCreated(body.reportId as number);
+      onClose();
+    } catch {
+      setError('Network error — the report may or may not have been created. Check the list before trying again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   /**
    * Continue. Asks whether we already hold this property BEFORE the gate opens,
@@ -428,6 +472,7 @@ export function NewReportModal({ onClose, onCreated }: {
    * button that spends. The server asks again; this is for the operator.
    */
   async function onContinue() {
+    if (farmingType) { await submitFarming(); return; }
     if (problem) { setShowProblem(true); return; }
     setError(null);
     setChecking(true);
@@ -494,7 +539,7 @@ export function NewReportModal({ onClose, onCreated }: {
     }
   }
 
-  const options = typeOptions(access);
+  const options = typeOptions(access, farming);
 
   return (
     <>
@@ -502,7 +547,7 @@ export function NewReportModal({ onClose, onCreated }: {
         open
         onClose={onClose}
         title="New Report"
-        subtitle={step === 'type' ? 'Choose a type' : 'Concierge Profile'}
+        subtitle={step === 'type' ? 'Choose a type' : (options.find((o) => o.type === selected)?.label ?? '')}
       >
         <div className="px-5 py-4">
           {step === 'type' ? (
@@ -516,6 +561,27 @@ export function NewReportModal({ onClose, onCreated }: {
                 />
               ))}
             </div>
+          ) : farmingType ? (
+            <FarmingStep
+              type={farmingType}
+              draft={farmingDraft}
+              problem={showProblem ? fProblem : null}
+              onField={(k, v) => setFarmingDraft((d) => ({ ...d, [k]: v }))}
+              onFile={(f) => setFarmingDraft((d) => ({ ...d, file: f }))}
+              repPicker={(
+                <RepPicker
+                  chosenName={farmingDraft.repName}
+                  results={results}
+                  query={query}
+                  searching={searching}
+                  onQuery={search}
+                  onChoose={(r) => setFarmingDraft((d) => ({
+                    ...d, repContactId: r.id, repName: r.fullName ?? r.email ?? `Contact ${r.id}`,
+                  }))}
+                  onClear={() => { setFarmingDraft((d) => ({ ...d, repContactId: null, repName: '' })); setQuery(''); setResults([]); }}
+                />
+              )}
+            />
           ) : existing ? (
             <AlreadyHavePanel
               message={existing.message}
@@ -565,11 +631,13 @@ export function NewReportModal({ onClose, onCreated }: {
           {existing ? null : (
             <button
               type="button"
-              disabled={(step === 'type' && selected === null) || checking}
-              onClick={step === 'type' ? () => setStep('details') : onContinue}
+              disabled={(step === 'type' && selected === null) || checking || (farmingType !== null && submitting)}
+              onClick={step === 'type' ? () => { setShowProblem(false); setError(null); setStep('details'); } : onContinue}
               className="h-8 px-[13px] rounded-md text-[11.5px] font-semibold bg-[#1B2A4A] text-white hover:bg-[#243658] disabled:opacity-40"
             >
-              {checking ? 'Checking…' : 'Continue'}
+              {checking ? 'Checking…'
+                : step === 'details' && farmingType ? (submitting ? 'Creating…' : 'Create report')
+                  : 'Continue'}
             </button>
           )}
         </div>

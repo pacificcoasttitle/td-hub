@@ -38,7 +38,17 @@ function isClientFile(file: string): boolean {
 }
 
 /** Import specifiers that survive compilation. Type-only ones do not. */
+const importsMemo = new Map<string, string[]>();
+
 function valueImports(file: string): string[] {
+  const cached = importsMemo.get(file);
+  if (cached) return cached;
+  const found = readValueImports(file);
+  importsMemo.set(file, found);
+  return found;
+}
+
+function readValueImports(file: string): string[] {
   const src = readFileSync(file, 'utf8');
   const out: string[] = [];
   const re = /(?:^|\n)\s*(?:import|export)\s+([\s\S]*?)\s*from\s*['"]([^'"]+)['"]/g;
@@ -68,21 +78,44 @@ function resolveSpec(spec: string, from: string): string | null {
 }
 
 /** The chain from a client file to the driver, or null if it never gets there. */
-function pathToDriver(entry: string): string[] | null {
-  const seen = new Set<string>();
-  const stack: Array<{ file: string; chain: string[] }> = [{ file: entry, chain: [entry] }];
-  while (stack.length > 0) {
-    const { file, chain } = stack.pop()!;
-    if (seen.has(file)) continue;
-    seen.add(file);
-    for (const spec of valueImports(file)) {
-      const next = resolveSpec(spec, file);
-      if (next === null) continue;
-      if (next === DB_CLIENT) return [...chain, next];
-      stack.push({ file: next, chain: [...chain, next] });
-    }
+/**
+ * Every file's answer is worked out ONCE and shared across entry points.
+ *
+ * The first version re-walked the whole graph from scratch for every client
+ * component — cost growing with the square of the codebase — and on
+ * 2026-09-21 it passed the 5-second timeout without having found anything. A
+ * guard that times out is a guard that gets its timeout raised until it
+ * means nothing, so the walk is memoised instead.
+ *
+ * CYCLES. A file already on the current path is not re-entered; that branch is
+ * cut. A "does not reach the driver" answer computed with a branch cut is
+ * INCOMPLETE — the cut branch might have reached it — so only complete answers
+ * are cached. A chain that does reach the driver is true however it was found.
+ */
+const reachMemo = new Map<string, string[] | null>();
+
+function reach(file: string, onPath: Set<string>): { chain: string[] | null; complete: boolean } {
+  if (reachMemo.has(file)) return { chain: reachMemo.get(file)!, complete: true };
+  if (onPath.has(file)) return { chain: null, complete: false };
+  onPath.add(file);
+  let complete = true;
+  let chain: string[] | null = null;
+  for (const spec of valueImports(file)) {
+    const next = resolveSpec(spec, file);
+    if (next === null) continue;
+    if (next === DB_CLIENT) { chain = [file, next]; break; }
+    const sub = reach(next, onPath);
+    if (sub.chain) { chain = [file, ...sub.chain]; break; }
+    if (!sub.complete) complete = false;
   }
-  return null;
+  onPath.delete(file);
+  if (chain || complete) reachMemo.set(file, chain);
+  return { chain, complete: complete || chain !== null };
+}
+
+/** The chain from a client file to the driver, or null if it never gets there. */
+function pathToDriver(entry: string): string[] | null {
+  return reach(entry, new Set()).chain;
 }
 
 describe('the client bundle', () => {

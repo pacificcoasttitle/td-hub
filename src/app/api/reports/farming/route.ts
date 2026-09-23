@@ -88,7 +88,13 @@ export async function POST(req: NextRequest) {
       : await generateCountySales({ ...base, county: b.county, month: b.month });
 
   if (outcome.ok) {
-    return NextResponse.json({ reportId: outcome.reportId, type: b.type, pageCount: outcome.pageCount, quality: outcome.quality }, { status: 201 });
+    return NextResponse.json({
+      reportId: outcome.reportId, type: b.type, pageCount: outcome.pageCount, quality: outcome.quality,
+      // Set when the report cannot reach the rep it is branded to. Not an
+      // error — the PDF is good — but the operator must be told, because
+      // nothing else will.
+      repWarning: outcome.repWarning ?? null,
+    }, { status: 201 });
   }
   // Refused before anything was written: the file or the details need fixing.
   if (outcome.reportId === null) return NextResponse.json({ error: outcome.message, stage: outcome.stage }, { status: 422 });

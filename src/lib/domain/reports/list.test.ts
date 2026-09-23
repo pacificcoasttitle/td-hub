@@ -24,11 +24,23 @@ describe('the Report column sub-line', () => {
     expect(sourceLineFor('county_sales', 'generated', null)).toBe('Dataset');
   });
 
-  it('says what the money did for Concierge, including when it did nothing', () => {
-    expect(sourceLineFor('concierge_profile', 'generated', 1)).toBe('1 credit spent');
-    // The first question anyone asks of a failed row.
-    expect(sourceLineFor('concierge_profile', 'failed', 0)).toBe('Failed · no credit charged');
-    expect(sourceLineFor('concierge_profile', 'failed', 1)).toBe('Failed · 1 credit spent');
+  it('says whether the lookup happened, without mentioning money', () => {
+    // Credit language is gone from everything an operator sees (Gerard,
+    // 2026-09-23). The DISTINCTION survives, because it is not about money:
+    // a failure after the lookup has data to resume from, and one before it
+    // does not. That is the first question anyone asks of a failed row.
+    expect(sourceLineFor('concierge_profile', 'generated', 1)).toBe('Property lookup');
+    expect(sourceLineFor('concierge_profile', 'failed', 0)).toBe('Failed before the lookup');
+    expect(sourceLineFor('concierge_profile', 'failed', 1)).toBe('Failed after the lookup');
+  });
+
+  it('says nothing about credits in any state', () => {
+    for (const status of ['generated', 'failed', 'pending', 'retrieved']) {
+      for (const charged of [0, 1, null]) {
+        expect(sourceLineFor('concierge_profile', status, charged), `${status}/${charged}`)
+          .not.toMatch(/credit/i);
+      }
+    }
   });
 
   it('says Generating while a profile is still being fetched', () => {
@@ -156,7 +168,7 @@ describe('the rows it returns', () => {
     const r = await listReports();
     expect(r.rows[0]).toMatchObject({
       typeLabel: 'Concierge Profile',
-      sourceLine: '1 credit spent',
+      sourceLine: 'Property lookup',
       subject: '1358 5th St',
       settings: '0.5 mi · 12 mo · ±20% size',
       delivery: { outcome: 'sent', recipientEmail: 'jnouri@pct.com' },

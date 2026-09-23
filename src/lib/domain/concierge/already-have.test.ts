@@ -58,9 +58,13 @@ describe('what the operator is told', () => {
     expect(msg()).toContain('6 days ago');
   });
 
-  it('offers both options and prices the one that costs', () => {
+  it('offers both options and says what a fresh one really means', () => {
+    // No longer priced (Gerard, 2026-09-23). "A second property lookup" is
+    // the consequence an operator can actually act on; the number of credits
+    // was never theirs to weigh.
     expect(msg()).toContain('Open it');
-    expect(msg()).toContain('fresh one for 1 credit');
+    expect(msg()).toContain('second property lookup');
+    expect(msg()).not.toMatch(/credit/i);
   });
 
   it('reads naturally for today and yesterday', () => {

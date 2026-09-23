@@ -143,7 +143,7 @@ export function ReportsListPage({ onNewReport, reloadToken = 0 }: Props) {
             {!loading && rows.length === 0 && (
               <div className="p-12 text-center">
                 <p className="text-[#1A1A2E] font-medium">No reports yet</p>
-                <p className="text-sm text-[#6B7280] mt-1">New Report starts one. A property profile costs a credit; the farming reports read a dataset.</p>
+                <p className="text-sm text-[#6B7280] mt-1">New Report starts one. A property profile looks up a single address; the farming reports read a dataset you upload.</p>
               </div>
             )}
           </div>

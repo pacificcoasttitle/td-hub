@@ -74,7 +74,9 @@ export function typeOptions(access: ConciergeAccess | null, farming: boolean | n
       blurb: 'One property: owner, tax, sales history and comparables.',
       available: conciergeNote === null,
       unavailableNote: conciergeNote,
-      costNote: '1 credit',
+      // No cost pill (Gerard, 2026-09-23). The type card says what the report
+      // IS; what it costs is the company's concern, not the operator's.
+      costNote: null,
     },
     {
       type: 'sales_activity',
@@ -203,6 +205,16 @@ export interface RepResult {
   fullName: string | null;
   email: string | null;
   companyName: string | null;
+  /**
+   * Set by /api/contacts/search for sales reps only, and only when the book
+   * holds another row with the SAME name and email. Kevin Cameron is two such
+   * rows; without these the operator is choosing between identical lines and
+   * the wrong choice makes a report he never sees.
+   */
+  ambiguous?: boolean;
+  hasLogin?: boolean;
+  orders?: number;
+  twinLabel?: string | null;
 }
 
 export function RepPicker({ chosenName, results, query, searching, onQuery, onChoose, onClear }: {
@@ -247,6 +259,13 @@ export function RepPicker({ chosenName, results, query, searching, onQuery, onCh
             >
               {r.fullName ?? r.email ?? `Contact ${r.id}`}
               {r.companyName ? <span className="text-[#9AA0AA]"> · {r.companyName}</span> : null}
+              {/* Two rows a human cannot tell apart get the facts that separate them. */}
+              {r.twinLabel ? (
+                <span className={`block text-[10.5px] ${r.hasLogin ? 'text-[#9AA0AA]' : 'text-[#B45309]'}`}>
+                  {r.twinLabel}
+                  {!r.hasLogin ? ' — they will not see this report in their own list' : ''}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -267,16 +286,19 @@ export function ConciergeStep({ draft, problem, onField, repPicker }: {
   return (
     <div className="space-y-3">
       <Field label="Street address">
+        {/* No placeholder address. A real one (1358 5th St, La Verne) read as
+            prefilled rather than as an example, and an operator who does not
+            notice it is empty is one keystroke from generating the wrong
+            property — which spends a lookup and cannot be undone. */}
         <input
           value={draft.street}
           onChange={(e) => onField('street', e.target.value)}
-          placeholder="1358 5th St"
           className={input}
         />
       </Field>
       <div className="grid grid-cols-[1fr_70px_110px] gap-2">
         <Field label="City">
-          <input value={draft.city} onChange={(e) => onField('city', e.target.value)} placeholder="La Verne" className={input} />
+          <input value={draft.city} onChange={(e) => onField('city', e.target.value)} className={input} />
         </Field>
         <Field label="State">
           <input
@@ -286,7 +308,7 @@ export function ConciergeStep({ draft, problem, onField, repPicker }: {
           />
         </Field>
         <Field label="ZIP">
-          <input value={draft.zip} onChange={(e) => onField('zip', e.target.value)} placeholder="91750" className={input} />
+          <input value={draft.zip} onChange={(e) => onField('zip', e.target.value)} className={input} />
         </Field>
       </div>
 
@@ -358,7 +380,7 @@ export function AlreadyHavePanel({ message, existing, onOpen, onFresh }: {
           onClick={onFresh}
           className="h-8 px-[13px] rounded-md text-[11.5px] font-semibold border border-[#E5E5E5] bg-white text-[#3C4557] hover:bg-[#FAFAFB]"
         >
-          Generate a fresh one — 1 credit
+          Generate a fresh one
         </button>
       </div>
     </div>
@@ -390,6 +412,8 @@ export function NewReportModal({ onClose, onCreated }: {
   const [spend, setSpend] = useState<{ thisMonth: number; allTime: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The report was made and its rep will never see it. Held, not flashed. */
+  const [repWarning, setRepWarning] = useState<string | null>(null);
   const [showProblem, setShowProblem] = useState(false);
   const [existing, setExisting] = useState<{ existing: ExistingProfileNotice; message: string } | null>(null);
   const [checking, setChecking] = useState(false);
@@ -458,6 +482,11 @@ export function NewReportModal({ onClose, onCreated }: {
         return;
       }
       onCreated(body.reportId as number);
+      // A report that cannot reach its rep is still a report. The modal stays
+      // open so the sentence is READ rather than flashing past on a list the
+      // operator may not look at — closing here is how the silent failure
+      // stays silent.
+      if (body?.repWarning) { setRepWarning(body.repWarning as string); return; }
       onClose();
     } catch {
       setError('Network error — the report may or may not have been created. Check the list before trying again.');
@@ -617,6 +646,25 @@ export function NewReportModal({ onClose, onCreated }: {
             <p className="mt-3 text-[11.5px] text-[#8E2A1E] bg-[#FDECEA] border border-[#F2C4BD] rounded-md px-3 py-2">
               {error}
             </p>
+          ) : null}
+
+          {/*
+            The report EXISTS. This is amber, not red, and says so — an
+            operator who reads "will NOT appear in their own Reports list" and
+            thinks the generation failed will make a second one.
+          */}
+          {repWarning ? (
+            <div className="mt-3 text-[11.5px] text-[#7C4A03] bg-[#FEF6E7] border border-[#F3D9A4] rounded-md px-3 py-2">
+              <p className="font-medium">The report was created.</p>
+              <p className="mt-1">{repWarning}</p>
+              <button
+                type="button"
+                onClick={() => { setRepWarning(null); onClose(); }}
+                className="mt-2 text-[11px] font-medium text-[#1B2A4A] hover:underline"
+              >
+                Understood — close
+              </button>
+            </div>
           ) : null}
         </div>
 

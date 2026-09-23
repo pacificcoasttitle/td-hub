@@ -37,6 +37,7 @@ import { db } from '@/lib/db/client';
 import { carrierRouteReports, countySalesReports, salesActivityReports } from '@/lib/db/schema';
 import { uploadFile } from '@/lib/integrations/s3/client';
 import { resolvePresentingRep } from '@/lib/domain/concierge/presenting-rep';
+import { repVisibility } from './rep-visibility';
 import {
   CITIES_PER_PAGE, RANK_BY, RANK_LABEL, computeCarrierRoute, computeCountySales, computeSalesActivity, monthLabel,
   type DataQuality, type RankBy,
@@ -91,7 +92,13 @@ export interface CountySalesRequest extends Common {
 }
 
 export type GenerateOutcome =
-  | { ok: true; reportId: number; pdfStorageKey: string; pageCount: number; quality: DataQuality }
+  /**
+   * `repWarning` is set when the report cannot reach the rep it is branded to
+   * — they have no login, or their login points at a different contact row of
+   * the same name. The report is still generated: it warns, it does not block
+   * (src/lib/domain/reports/rep-visibility.ts).
+   */
+  | { ok: true; reportId: number; pdfStorageKey: string; pageCount: number; quality: DataQuality; repWarning?: string | null }
   /** Refused before anything was written. The message says what to fix. */
   | { ok: false; reportId: null; stage: 'input' | 'parse'; message: string }
   /** A row exists and says failed, with this reason on it. */
@@ -126,12 +133,15 @@ function parseProblem(p: ParseReport<unknown>, fieldWords: Record<string, string
   return null;
 }
 
-async function loadRep(contactId: number): Promise<{ ok: true; rep: RepBlock } | { ok: false; message: string }> {
+async function loadRep(contactId: number): Promise<{ ok: true; rep: RepBlock; warning: string | null } | { ok: false; message: string }> {
   const r = await resolvePresentingRep(null, contactId);
   if (!r.ok) return { ok: false, message: r.message };
+  // Checked BEFORE the row is written: a report branded to a contact no login
+  // points at is one its rep can never see in their own list.
+  const seen = await repVisibility(contactId);
   // No photo source exists yet. The block renders without one — never a
   // placeholder — until reps have photos stored somewhere we own.
-  return { ok: true, rep: { name: r.rep.name, title: r.rep.title, phone: r.rep.phone, email: r.rep.email, photo: null } };
+  return { ok: true, rep: { name: r.rep.name, title: r.rep.title, phone: r.rep.phone, email: r.rep.email, photo: null }, warning: seen.warning };
 }
 
 const repColumns = (contactId: number, rep: RepBlock) => ({
@@ -164,6 +174,8 @@ async function storeAndRender(args: {
   now: Date;
   render: () => Promise<Buffer>;
   quality: DataQuality;
+  /** Carried from loadRep, so a success can still say who will never see it. */
+  repWarning?: string | null;
 }): Promise<GenerateOutcome> {
   const { type, table, id, now } = args;
   const fail = async (stage: 'dataset' | 'render' | 'store', message: string): Promise<GenerateOutcome> => {
@@ -183,7 +195,8 @@ async function storeAndRender(args: {
     datasetSha256: crypto.createHash('sha256').update(csvBuf).digest('hex'),
   }).where(eq(table.id, id));
 
-  return renderAndStore({ type, table, id, now, render: args.render, quality: args.quality });
+  const out = await renderAndStore({ type, table, id, now, render: args.render, quality: args.quality });
+  return out.ok ? { ...out, repWarning: args.repWarning ?? null } : out;
 }
 
 /**
@@ -277,6 +290,7 @@ export async function generateSalesActivity(req: SalesActivityRequest): Promise<
   }).returning({ id: salesActivityReports.id });
 
   return storeAndRender({
+    repWarning: rep.warning,
     type: 'sales_activity', table: salesActivityReports, id: row!.id, csv: req.csv, now, quality: q,
     render: () => renderToBuffer(SalesActivityDocument({
       areaName: req.areaName.trim(), propertyType: req.propertyType?.trim() || null,
@@ -323,6 +337,7 @@ export async function generateCarrierRoute(req: CarrierRouteRequest): Promise<Ge
   }).returning({ id: carrierRouteReports.id });
 
   return storeAndRender({
+    repWarning: rep.warning,
     type: 'carrier_route', table: carrierRouteReports, id: row!.id, csv: req.csv, now, quality: q,
     render: () => renderToBuffer(CarrierRouteDocument({
       areaName: req.areaName.trim(), rankBy: req.rankBy, figures, quality: q, rep: rep.rep, generatedAt: now,
@@ -369,6 +384,7 @@ export async function generateCountySales(req: CountySalesRequest): Promise<Gene
   }).returning({ id: countySalesReports.id });
 
   return storeAndRender({
+    repWarning: rep.warning,
     type: 'county_sales', table: countySalesReports, id: row!.id, csv: req.csv, now, quality: q,
     render: () => renderToBuffer(CountySalesDocument({
       county: req.county, monthKey: req.month, figures, quality: q, rep: rep.rep, generatedAt: now,

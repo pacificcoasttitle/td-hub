@@ -84,8 +84,18 @@ export async function renderProfile(
     .where(eq(conciergeProfileComps.profileId, profileId))
     .orderBy(conciergeProfileComps.sourcePosition);
 
-  const candidates: Array<CompCandidate & { rowId: number }> = storedComps.map((c) => ({
+  // THE ADDRESS IS CARRIED THROUGH. It is stored on every comp row and was
+  // being dropped here, so a re-rendered profile printed "Comparable 1" where
+  // the first render printed "1481 BONITA AVE". v1's document never showed
+  // comp addresses, so the omission was invisible until the v2 layout put them
+  // on pages 5, 6 and 7 — the generate path builds candidates from
+  // normalizeComps, which has them, and only this path went without.
+  const candidates: Array<CompCandidate & { rowId: number; address: string | null; city: string | null; state: string | null; zip: string | null }> = storedComps.map((c) => ({
     rowId: c.id,
+    address: c.address,
+    city: c.city,
+    state: c.state,
+    zip: c.zip,
     sourcePosition: c.sourcePosition,
     salePrice: num(c.salePrice),
     pricePerSqft: num(c.pricePerSqft),

@@ -34,3 +34,36 @@ describe('rendering cannot reach the vendor', () => {
     expect(src).not.toContain('compMapUrl');
   });
 });
+
+// ─── A re-render must print what the first render printed ───────────────────
+//
+// The comp address is stored on every row of concierge_profile_comps, and the
+// candidate mapping in this file silently left it out. The generate path
+// builds its candidates from normalizeComps, which carries the address, so the
+// first render of a profile showed "1481 BONITA AVE" and a re-render of the
+// SAME profile showed "Comparable 1".
+//
+// It was invisible for as long as it existed, because the v1 document never
+// printed comp addresses at all. The v2 layout puts them on pages 5, 6 and 7,
+// which is what surfaced it — on a profile re-rendered in production.
+describe('a re-render carries the fields the document prints', () => {
+  const src = readFileSync(join(__dirname, 'render.ts'), 'utf8').replace(/\r\n/g, '\n');
+  const mapping = (() => {
+    const at = src.indexOf('storedComps.map(');
+    expect(at, 'the candidate mapping moved — this test reads it by name').toBeGreaterThan(-1);
+    return src.slice(at, src.indexOf('}));', at));
+  })();
+
+  it('maps the comp address through, so pages 5 to 7 are not "Comparable 1"', () => {
+    expect(mapping).toMatch(/address:\s*c\.address/);
+  });
+
+  it('carries the rest of the locality with it', () => {
+    // A bare street line with no city is worse than none on a report that
+    // states the comparables are near the subject.
+    for (const f of ['city', 'state', 'zip'] as const) {
+      expect(mapping, `${f} is stored on the row and belongs on the candidate`)
+        .toContain(`${f}: c.${f}`);
+    }
+  });
+});

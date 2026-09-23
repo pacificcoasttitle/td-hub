@@ -77,8 +77,10 @@ export async function notifyRep(input: { type: FarmingType; id: number; sentBy: 
   }).returning({ id: reportDeliveries.id });
   const deliveryId = row!.id;
 
-  const settle = async (outcome: 'sent' | 'failed', detail: string) => {
-    await db.update(reportDeliveries).set({ outcome, outcomeDetail: detail }).where(eq(reportDeliveries.id, deliveryId));
+  const settle = async (outcome: 'sent' | 'failed', detail: string, providerMessageId?: string | null) => {
+    await db.update(reportDeliveries)
+      .set({ outcome, outcomeDetail: detail, ...(providerMessageId ? { providerMessageId } : {}) })
+      .where(eq(reportDeliveries.id, deliveryId));
   };
 
   // The attachment is part of the attempt: a stored file we cannot read is a
@@ -111,8 +113,18 @@ export async function notifyRep(input: { type: FarmingType; id: number; sentBy: 
     await settle('failed', why);
     return { ok: false, deliveryId, reason: 'provider', message: `The email was not sent: ${why}` };
   }
-  // SENT, not delivered: acceptance is all SendGrid's reply proves. A bounce
-  // after this point is invisible until the event webhook exists.
-  await settle('sent', `Accepted by SendGrid, message ${sent.data?.messageId ?? 'id not returned'}. Delivery not confirmed.`);
+  // SENT, not delivered: acceptance is all SendGrid's reply proves. The row
+  // stays at 'sent' — usually for seconds — until the event webhook hears what
+  // the receiving server did and settles it to delivered, bounced or dropped.
+  //
+  // THE MESSAGE ID IS STORED IN ITS OWN COLUMN (migration 0061), because that
+  // is the only handle an incoming event has on this row. Without it the
+  // webhook matches nothing and quietly does nothing.
+  const messageId = sent.data?.messageId ?? null;
+  await settle(
+    'sent',
+    `Accepted by SendGrid, message ${messageId ?? 'id not returned'}. Delivery not confirmed yet.`,
+    messageId,
+  );
   return { ok: true, deliveryId, recipientName: target.repName, recipientEmail: email };
 }

@@ -30,10 +30,15 @@ export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
 
 export interface ReportDeliverySummary {
   /**
-   * SENT, not delivered: SendGrid accepted it. Nothing yet proves it arrived
-   * (migration 0060; docs/tickets/REPORT_DELIVERY_IS_SENT_NOT_DELIVERED.md).
+   * 'sent' means SendGrid accepted it and nothing has come back yet — usually
+   * a matter of seconds (migration 0060).
+   *
+   * The rest are written by the event webhook, from what the receiving server
+   * actually did (migration 0061). 'delivered' is therefore earned; bounced,
+   * dropped and spam each mean THE RECIPIENT DOES NOT HAVE IT, which is the
+   * thing nobody could see before.
    */
-  outcome: 'sent' | 'failed';
+  outcome: 'sent' | 'failed' | 'delivered' | 'bounced' | 'dropped' | 'spam';
   attemptedAt: string;
   recipientName: string | null;
   recipientEmail: string;

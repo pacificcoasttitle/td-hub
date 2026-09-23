@@ -34,3 +34,29 @@ describe('rendering cannot reach the vendor', () => {
     expect(src).not.toContain('compMapUrl');
   });
 });
+
+// ─── A re-render must print what the first render printed ───────────────────
+//
+// The candidate mapping that used to live in render.ts is now comp-row.ts,
+// shared with the generate path and held to a round-trip test
+// (comp-row.test.ts). That test is strictly stronger than what stood here: it
+// asserts EVERY field survives a write and a read back, rather than naming the
+// one field that had gone missing.
+//
+// What remains worth asserting here is that this file still delegates. An
+// inline mapping reintroduced in render.ts would pass comp-row's round trip —
+// which tests the shared functions, not their callers — while quietly dropping
+// fields again, which is exactly how the address was lost.
+describe('the re-render path uses the shared comp mapping', () => {
+  const src = readFileSync(join(__dirname, 'render.ts'), 'utf8').replace(/\r\n/g, '\n');
+
+  it('builds candidates through compFromRow, not by hand', () => {
+    expect(src).toContain('storedComps.map(compFromRow)');
+  });
+
+  it('has no hand-rolled candidate mapping left in it', () => {
+    // The shape that went wrong: an object literal assembling a candidate
+    // field by field from a stored row.
+    expect(src).not.toMatch(/sourcePosition:\s*c\.sourcePosition/);
+  });
+});

@@ -15,6 +15,7 @@ import { criteriaSummary, profileListSubject } from './list-line';
 import { claimProperty, propertyRequestKey, recordClaimOutcome, releaseClaim } from './claim';
 import { alreadyHaveMessage, findProfileForProperty, type ExistingProfile } from './already-have';
 import { TEMPLATE_VERSION } from './document/profile-document';
+import { compRowValues } from './comp-row';
 import { renderProfile } from './render';
 
 // ─── Generation: the ONLY path that spends a credit ─────────────────────────
@@ -277,26 +278,11 @@ export async function ingestPayload(
       // so the profile is resumable rather than lost.
       const d = byPosition.get(c.sourcePosition);
       if (!d) throw new Error(`Comparable ${c.sourcePosition} came back without a decision.`);
-      return {
-        profileId,
-        sourcePosition: c.sourcePosition,
-        selected: d.selected,
-        exclusionReason: d.selected ? null : d.exclusionReason,
-        displayPosition: d.selected ? d.displayPosition : null,
-        address: c.address, city: c.city, state: c.state, zip: c.zip, apn: c.apn,
-        salePrice: c.salePrice === null ? null : String(c.salePrice),
-        pricePerSqft: c.pricePerSqft === null ? null : String(c.pricePerSqft),
-        recordingDate: c.recordingDate,
-        documentNumber: c.documentNumber, documentType: c.documentType,
-        buildingArea: c.buildingArea, bedrooms: c.bedrooms,
-        baths: c.baths === null ? null : String(c.baths),
-        yearBuilt: c.yearBuilt, lotSize: c.lotSize,
-        useDescription: c.useCodeDescription,
-        proximityMiles: c.proximityMiles === null ? null : String(c.proximityMiles),
-        latitude: c.latitude === null ? null : String(c.latitude),
-        longitude: c.longitude === null ? null : String(c.longitude),
-        raw: c.raw,
-      };
+      // ONE MAPPING, BOTH DIRECTIONS (comp-row.ts). The inverse is what the
+      // re-render path reads, and a round-trip test holds them together — a
+      // field written here and not read back there is how a re-rendered
+      // profile printed "Comparable 1" instead of an address.
+      return compRowValues(c, d, profileId);
     }));
   }
 

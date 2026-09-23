@@ -8,6 +8,7 @@ import { criteriaSummary } from './list-line';
 import { computeMetrics } from './metrics';
 import { toDataUri } from './platmap';
 import { ProfileDocument, TEMPLATE_VERSION } from './document/profile-document';
+import { compFromRow } from './comp-row';
 import { normalizeSubject, normalizeTax, normalizeTransfers } from './normalize';
 
 // ─── Rendering: the path that CANNOT spend a credit ─────────────────────────
@@ -84,20 +85,12 @@ export async function renderProfile(
     .where(eq(conciergeProfileComps.profileId, profileId))
     .orderBy(conciergeProfileComps.sourcePosition);
 
-  const candidates: Array<CompCandidate & { rowId: number }> = storedComps.map((c) => ({
-    rowId: c.id,
-    sourcePosition: c.sourcePosition,
-    salePrice: num(c.salePrice),
-    pricePerSqft: num(c.pricePerSqft),
-    buildingArea: c.buildingArea,
-    bedrooms: c.bedrooms,
-    baths: num(c.baths),
-    yearBuilt: c.yearBuilt,
-    lotSize: c.lotSize,
-    proximityMiles: num(c.proximityMiles),
-    recordingDate: c.recordingDate,
-    useCodeDescription: c.useDescription,
-  }));
+  // ONE MAPPING, BOTH DIRECTIONS (comp-row.ts). Rebuilding the candidate
+  // inline here is how the address was lost: this path had thirteen fields
+  // where the generate path had twenty-two, and nothing compared them. The
+  // round-trip is now tested, so a field the layout starts using cannot be
+  // present on first render and missing on re-render.
+  const candidates = storedComps.map(compFromRow);
 
   const subjectFacts = {
     buildingArea: profile.subjectBuildingArea,

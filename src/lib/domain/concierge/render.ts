@@ -9,6 +9,7 @@ import { computeMetrics } from './metrics';
 import { toDataUri } from './platmap';
 import { ProfileDocument, TEMPLATE_VERSION } from './document/profile-document';
 import { compFromRow } from './comp-row';
+import { subjectFactsFromRow } from './subject-facts';
 import { normalizeSubject, normalizeTax, normalizeTransfers } from './normalize';
 
 // ─── Rendering: the path that CANNOT spend a credit ─────────────────────────
@@ -92,12 +93,10 @@ export async function renderProfile(
   // present on first render and missing on re-render.
   const candidates = storedComps.map(compFromRow);
 
-  const subjectFacts = {
-    buildingArea: profile.subjectBuildingArea,
-    bedrooms: profile.subjectBeds,
-    baths: num(profile.subjectBaths),
-    useCodeDescription: profile.subjectUseDescription,
-  };
+  // The second round-trip pair (subject-facts.ts). These four decide which
+  // comparables appear, so generate and re-render must build them the same
+  // way or a re-render silently shows a different set of sales.
+  const subjectFacts = subjectFactsFromRow(profile);
 
   const filter = selectComps(candidates, subjectFacts, applied, now);
   const metrics = computeMetrics(filter.selected, applied);

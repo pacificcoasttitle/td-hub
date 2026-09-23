@@ -154,6 +154,12 @@ export async function renderProfile(
       title: profile.presentingRepTitle,
     },
     generatedAt: now,
+    // When the VENDOR data was captured, which is not when this PDF was made.
+    // A re-render months later still carries the original capture date, and
+    // page 8 prints both so the reader can tell them apart.
+    capturedAt: profile.sitexRequestedAt ?? null,
+    // The only handle tying this report to an invoice line.
+    sitexSearchId: profile.sitexSearchId ?? null,
   }));
 
   const key = pdfKey(profileId, now);

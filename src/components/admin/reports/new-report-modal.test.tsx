@@ -261,7 +261,21 @@ describe('when we already hold the property', () => {
 
 describe('the modal as wired', () => {
   const HERE = dirname(fileURLToPath(import.meta.url));
+  /**
+   * LINE ENDINGS ARE NORMALISED FIRST, and that is load-bearing.
+   *
+   * The slice below looks for '\n  }\n' to find where a function ends. Git on
+   * Windows checks these files out as CRLF (`core.autocrlf`), so that pattern
+   * matches NOTHING on a fresh clone, `indexOf` returns -1, and the slice runs
+   * to the end of the file — swallowing the next function, which legitimately
+   * does call /api/concierge. The test then fails for a reason that has
+   * nothing to do with what it is asserting.
+   *
+   * It has now done that twice. Normalising here makes the assertion about the
+   * code rather than about whose machine checked it out.
+   */
   const strip = (f: string) => readFileSync(f, 'utf8')
+    .replace(/\r\n/g, '\n')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
   const src = () => strip(join(HERE, 'new-report-modal.tsx'));
   const src2 = src;

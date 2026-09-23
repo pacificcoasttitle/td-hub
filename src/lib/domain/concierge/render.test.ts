@@ -1,11 +1,13 @@
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readSource } from '@/test-support/read-source';
 
 // The constraint is that re-filtering and re-rendering can NEVER spend a credit.
 // A comment saying so is not a guarantee; an import that cannot exist is.
 describe('rendering cannot reach the vendor', () => {
-  const src = readFileSync(join(__dirname, 'render.ts'), 'utf8');
+  // The anchor is the thing this whole file is about: if renderProfile is
+  // gone, "this module cannot reach the vendor" is a claim about nothing.
+  const src = readSource(join(__dirname, 'render.ts'), { mustContain: 'export async function renderProfile' });
 
   it('imports nothing from the SiteX integration', () => {
     expect(src).not.toMatch(/from\s+['"].*integrations\/sitex/);
@@ -48,7 +50,11 @@ describe('rendering cannot reach the vendor', () => {
 // which tests the shared functions, not their callers — while quietly dropping
 // fields again, which is exactly how the address was lost.
 describe('the re-render path uses the shared comp mapping', () => {
-  const src = readFileSync(join(__dirname, 'render.ts'), 'utf8').replace(/\r\n/g, '\n');
+  // Anchored: if renderProfile is renamed or moved, this fails saying so
+  // rather than asserting things about a file it no longer understands.
+  const src = readSource(join(__dirname, 'render.ts'), {
+    mustContain: ['export async function renderProfile', 'storedComps'],
+  });
 
   it('builds candidates through compFromRow, not by hand', () => {
     expect(src).toContain('storedComps.map(compFromRow)');

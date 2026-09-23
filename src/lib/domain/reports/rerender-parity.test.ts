@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readSource, sliceFrom } from '@/test-support/read-source';
 import { parseRouteRows } from './datasets';
 import { TEMPLATE_FOR } from './generate';
 import { computeCarrierRoute } from './compute';
@@ -95,24 +95,21 @@ describe('sales activity: the window key the re-render rebuilds', () => {
 // again from its stored dataset, which produces figures that match the current
 // document by construction.
 describe('a farming report is not re-rendered onto a different template', () => {
-  const src = readFileSync(join(__dirname, 'generate.ts'), 'utf8').replace(/\r\n/g, '\n');
-  const fn = src.slice(src.indexOf('export async function rerenderFarming'));
-
-  it('compares the row template against the current one', () => {
-    expect(fn).toContain('row.templateVersion !== currentTemplate');
-  });
-
-  it('refuses rather than rendering anyway', () => {
-    expect(fn).toMatch(/reason:\s*'stale_template'/);
-  });
-
-  it('checks BEFORE the figures are read, so a mismatch cannot render', () => {
-    const check = fn.indexOf('stale_template');
-    const firstFigureRead = fn.indexOf('salesActivityFigures(');
-    expect(check).toBeGreaterThan(-1);
-    expect(firstFigureRead).toBeGreaterThan(-1);
-    expect(check).toBeLessThan(firstFigureRead);
-  });
+  // THE REFUSAL ITSELF IS TESTED BY BEHAVIOUR, in rerender-template.test.ts:
+  // the function is called with a mismatched row and observed to refuse.
+  // Three assertions that grepped this file for the presence of a check were
+  // deleted when that test was written — a grep for "is the check there" is a
+  // proxy, and it breaks on refactors that do not change behaviour.
+  //
+  // What is left here is the part behaviour cannot see: that the CAST is gone.
+  // `as never` on a jsonb read produces `undefined` at render time rather than
+  // an error, so a guard against it has to read the source. Anchored, so it
+  // cannot quietly start reading a file that no longer holds this function.
+  const fn = sliceFrom(
+    readSource(join(__dirname, 'generate.ts'), { mustContain: 'export async function rerenderFarming' }),
+    'export async function rerenderFarming',
+    '\n}\n',
+  );
 
   it('names a template for every type, so no type is silently exempt', () => {
     for (const t of ['sales_activity', 'carrier_route', 'county_sales']) {
@@ -121,9 +118,8 @@ describe('a farming report is not re-rendered onto a different template', () => 
   });
 
   it('reads the stored figures through a check rather than a cast', () => {
-    // `as never` on a jsonb read is the mechanism that hid the concierge comp
-    // mapping dropping five fields: nothing asks, so a missing value prints as
-    // a blank. See stored-figures.ts.
+    // The mechanism that hid the concierge comp mapping dropping five fields:
+    // nothing asks, so a missing value prints as a blank. See stored-figures.ts.
     expect(fn).not.toMatch(/\br\.(metrics|months|routes|standouts|cities)\s+as never/);
   });
 });

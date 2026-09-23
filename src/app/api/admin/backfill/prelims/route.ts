@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
     .select({
       id: orders.id,
       fileNumber: orders.fileNumber,
+      orderType: orders.orderType,
       createdAt: orders.createdAt,
     })
     .from(orders)
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
 
     stats.attempted++;
     try {
-      const stored = await fetchPrelimsForOrder(order.id, order.fileNumber);
+      const stored = await fetchPrelimsForOrder(order.id, order.fileNumber, order.orderType);
       stats.documentsStored += stored;
     } catch (err) {
       stats.errors.push({

@@ -39,6 +39,7 @@ vi.mock('@/lib/db/schema', () => ({
   orders: {
     id: 'orders.id',
     fileNumber: 'orders.fileNumber',
+    orderType: 'orders.orderType',
   },
 }));
 
@@ -69,7 +70,7 @@ describe('POST /api/orders/batch/fetch-prelims ACL', () => {
     canAccessOrderDetailResourceMock
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(false);
-    dbBuilder.limit.mockResolvedValue([{ fileNumber: '20012345-OCT' }]);
+    dbBuilder.limit.mockResolvedValue([{ fileNumber: '20012345-OCT', orderType: 'Title only' }]);
     fetchPrelimsForOrderMock.mockResolvedValue(2);
 
     const response = await POST(request({ orderIds: [11, 99] }));
@@ -87,7 +88,7 @@ describe('POST /api/orders/batch/fetch-prelims ACL', () => {
       99,
     );
     expect(fetchPrelimsForOrderMock).toHaveBeenCalledTimes(1);
-    expect(fetchPrelimsForOrderMock).toHaveBeenCalledWith(11, '20012345-OCT');
+    expect(fetchPrelimsForOrderMock).toHaveBeenCalledWith(11, '20012345-OCT', 'Title only');
     expect(body.results).toEqual([
       { orderId: 11, success: true, documentsFound: 2 },
       { orderId: 99, success: false, documentsFound: 0, error: 'Not found' },
@@ -96,8 +97,8 @@ describe('POST /api/orders/batch/fetch-prelims ACL', () => {
 
   it('processes all ids when caller has access', async () => {
     dbBuilder.limit
-      .mockResolvedValueOnce([{ fileNumber: 'A' }])
-      .mockResolvedValueOnce([{ fileNumber: 'B' }]);
+      .mockResolvedValueOnce([{ fileNumber: 'A', orderType: 'Title & Escrow' }])
+      .mockResolvedValueOnce([{ fileNumber: 'B', orderType: 'Title only' }]);
     fetchPrelimsForOrderMock
       .mockResolvedValueOnce(1)
       .mockResolvedValueOnce(0);

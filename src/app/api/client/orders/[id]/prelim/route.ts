@@ -88,7 +88,7 @@ export async function POST(
     }
 
     const [order] = await db
-      .select({ fileNumber: orders.fileNumber })
+      .select({ fileNumber: orders.fileNumber, orderType: orders.orderType })
       .from(orders)
       .where(eq(orders.id, orderId))
       .limit(1);
@@ -98,7 +98,7 @@ export async function POST(
     }
 
     if (parsed.data.action === 'fetch') {
-      const documentsStored = await fetchPrelimsForOrder(orderId, order.fileNumber);
+      const documentsStored = await fetchPrelimsForOrder(orderId, order.fileNumber, order.orderType);
       return NextResponse.json({
         success: true,
         documentsFound: documentsStored,

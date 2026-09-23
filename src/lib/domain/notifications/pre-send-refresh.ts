@@ -15,7 +15,12 @@
  *                       document, Gerard heard about it again.
  *   - SOFTPRO HAS NONE  do not substitute ours. That recipient is unresolved:
  *                       the caller's existing fail-closed path runs — no send,
- *                       internal alert.
+ *                       internal alert. The field we ask depends on order type:
+ *                       Title-only reads EscrowCompanies (GetOrderContacts).
+ *                       Title & Escrow / Escrow-only read EscrowOfficerContact
+ *                       (GetOrderDetails). Asking EscrowCompanies on an in-house
+ *                       file treats a structural empty as "no recipient" and
+ *                       holds 711 of 883. Absence of the officer field still holds.
  *   - UNREACHABLE       retry once, then send as we would have, and record that
  *                       the refresh did not happen. Vendor availability must not
  *                       block the business, and must be visible when it does not.
@@ -36,12 +41,16 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { adminActivityLogs, contacts, eventOutbox, orderContactDrift, orderParties } from '@/lib/db/schema';
+import { expectsPctEscrowOfficer } from '@/lib/domain/orders/escrow-officer-expectation';
 import { protectConfirmedPartyFields } from '@/lib/domain/parties/party-confirmation';
 import {
   getOrderContacts,
+  getOrderDetails,
   mapOrderContacts,
   type MappedOrderContacts,
   type MappedResolvedParty,
+  type SoftProOrderDetailItem,
+  type SoftProResolvedPerson,
 } from '@/lib/integrations/softpro';
 import {
   calloutBar, emailShell, esc, fieldTable, sectionLabel,
@@ -62,6 +71,11 @@ export const PRE_SEND_PARTY_ROLE = {
 } as const;
 
 export type PreSendKind = 'prelim' | 'lender_policy' | 'owner_policy' | 'supplement';
+
+/** Which SoftPro field answers "who is escrow" for this order type. */
+export function escrowPreSendSource(orderType: string | null | undefined): 'escrow_company' | 'escrow_officer' {
+  return expectsPctEscrowOfficer(orderType) ? 'escrow_officer' : 'escrow_company';
+}
 
 export interface PreSendCandidate {
   role: PreSendRole;
@@ -117,6 +131,42 @@ export function decideRecipient(candidate: PreSendCandidate, mapped: MappedOrder
     name: (softpro === person ? party?.name : party?.companyName) ?? party?.name ?? party?.companyName ?? candidate.name,
     ours: ours || null,
   };
+}
+
+/**
+ * Title & Escrow / Escrow-only: SoftPro's answer is EscrowOfficerContact, a
+ * person. There is no company inbox to fall back to.
+ */
+export function decideOfficerRecipient(
+  candidate: PreSendCandidate,
+  officer: SoftProResolvedPerson | null | undefined,
+): PreSendDecision {
+  const person = norm(officer?.Email);
+  const ours = norm(candidate.email);
+
+  if (ours && ours === person) {
+    return { role: candidate.role, status: 'agrees', email: ours, name: candidate.name };
+  }
+
+  if (!EMAIL.test(person)) {
+    return { role: candidate.role, status: 'softpro_has_none', ours: ours || null };
+  }
+
+  return {
+    role: candidate.role,
+    status: 'differs',
+    email: person,
+    name: officer?.Name?.trim() || candidate.name,
+    ours: ours || null,
+  };
+}
+
+export function detailForFile(
+  items: SoftProOrderDetailItem[] | null | undefined,
+  fileNumber: string,
+): SoftProOrderDetailItem | null {
+  if (!items?.length) return null;
+  return items.find((item) => item.OrderNumber === fileNumber) ?? items[0] ?? null;
 }
 
 export type SoftProPartyExisting = {
@@ -204,6 +254,7 @@ export async function applySoftProRecipientToOrderParty(input: {
 
 export interface PreSendDeps {
   fetchContacts?: typeof getOrderContacts;
+  fetchDetails?: typeof getOrderDetails;
   record?: typeof recordPreSendOutcome;
 }
 
@@ -211,38 +262,84 @@ export interface PreSendInput {
   orderId: number;
   fileNumber: string;
   sendKind: PreSendKind;
+  orderType?: string | null;
   candidates: PreSendCandidate[];
 }
 
-/**
- * Refresh every candidate for one send, with ONE SoftPro call (retried once).
- * Never throws: an unreachable vendor is a decision, not an exception, and
- * recording is best-effort.
- */
-export async function refreshBeforeSend(input: PreSendInput, deps: PreSendDeps = {}): Promise<PreSendDecision[]> {
-  const fetchContacts = deps.fetchContacts ?? getOrderContacts;
-  const record = deps.record ?? recordPreSendOutcome;
-
-  let mapped: MappedOrderContacts | null = null;
-  let lastError = 'GetOrderContacts returned no data';
-  for (let attempt = 0; attempt < 2 && !mapped; attempt++) {
+async function fetchWithRetry<T>(
+  run: () => Promise<{ success: boolean; data?: T | null; error?: { message?: string } }>,
+  emptyMessage: string,
+): Promise<{ value: T | null; error: string }> {
+  let lastError = emptyMessage;
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const result = await fetchContacts(input.fileNumber, { timeoutMs: PRE_SEND_TIMEOUT_MS });
-      if (result.success && result.data) {
-        mapped = mapOrderContacts(result.data);
-      } else {
-        lastError = result.error?.message ?? lastError;
-      }
+      const result = await run();
+      if (result.success && result.data) return { value: result.data, error: lastError };
+      lastError = result.error?.message ?? lastError;
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
     }
   }
+  return { value: null, error: lastError };
+}
 
-  const decisions: PreSendDecision[] = mapped
-    ? input.candidates.map((c) => decideRecipient(c, mapped!))
-    : input.candidates.map((c) => ({
-      role: c.role, status: 'unreachable' as const, email: c.email, name: c.name, error: lastError,
-    }));
+/**
+ * Refresh every candidate for one send. Title-only escrow (and lender/owner)
+ * is one GetOrderContacts call. In-house escrow is one GetOrderDetails call
+ * for EscrowOfficerContact. A mixed policy line may make both. Each is
+ * retried once. Never throws: an unreachable vendor is a decision, not an
+ * exception, and recording is best-effort.
+ */
+export async function refreshBeforeSend(input: PreSendInput, deps: PreSendDeps = {}): Promise<PreSendDecision[]> {
+  const fetchContacts = deps.fetchContacts ?? getOrderContacts;
+  const fetchDetails = deps.fetchDetails ?? getOrderDetails;
+  const record = deps.record ?? recordPreSendOutcome;
+  const source = escrowPreSendSource(input.orderType);
+  const needsOfficer = source === 'escrow_officer' && input.candidates.some((c) => c.role === 'escrow');
+  const needsContacts = input.candidates.some((c) => c.role !== 'escrow' || source === 'escrow_company');
+
+  let mapped: MappedOrderContacts | null = null;
+  let contactsError = 'GetOrderContacts returned no data';
+  if (needsContacts) {
+    const fetched = await fetchWithRetry(
+      () => fetchContacts(input.fileNumber, { timeoutMs: PRE_SEND_TIMEOUT_MS }),
+      contactsError,
+    );
+    mapped = fetched.value ? mapOrderContacts(fetched.value) : null;
+    contactsError = fetched.error;
+  }
+
+  let officer: SoftProResolvedPerson | null | undefined;
+  let detailsError = 'GetOrderDetails returned no data';
+  let detailsReached = !needsOfficer;
+  if (needsOfficer) {
+    const fetched = await fetchWithRetry(
+      () => fetchDetails({
+        dateFrom: '',
+        orderNumber: input.fileNumber,
+        orderId: input.orderId,
+        timeoutMs: PRE_SEND_TIMEOUT_MS,
+      }),
+      detailsError,
+    );
+    const detail = detailForFile(fetched.value ?? undefined, input.fileNumber);
+    detailsReached = !!detail;
+    officer = detail?.EscrowOfficerContact ?? null;
+    detailsError = fetched.error;
+  }
+
+  const decisions: PreSendDecision[] = input.candidates.map((c) => {
+    if (c.role === 'escrow' && source === 'escrow_officer') {
+      if (!detailsReached) {
+        return { role: c.role, status: 'unreachable' as const, email: c.email, name: c.name, error: detailsError };
+      }
+      return decideOfficerRecipient(c, officer);
+    }
+    if (!mapped) {
+      return { role: c.role, status: 'unreachable' as const, email: c.email, name: c.name, error: contactsError };
+    }
+    return decideRecipient(c, mapped);
+  });
 
   try {
     await record(input, decisions);
@@ -291,7 +388,9 @@ export async function recordPreSendOutcome(input: PreSendInput, decisions: PreSe
     }
 
     let applied = false;
-    if (d.status === 'differs') {
+    const writeParty = d.status === 'differs'
+      && !(d.role === 'escrow' && escrowPreSendSource(input.orderType) === 'escrow_officer');
+    if (writeParty && d.status === 'differs') {
       try {
         applied = await applySoftProRecipientToOrderParty({
           orderId: input.orderId,

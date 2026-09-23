@@ -54,6 +54,11 @@ export interface NormalizedSubject {
   siteAddress: string | null;
   siteCityState: string | null;
   legalDescription: string | null;
+  /** From LegalDescriptionInfo, structured — never parsed out of the string above. */
+  tractNumber: string | null;
+  lotNumber: string | null;
+  block: string | null;
+  subdivision: string | null;
   beds: number | null;
   baths: number | null;
   buildingArea: number | null;
@@ -123,6 +128,17 @@ export function normalizeSubject(feed: Raw): NormalizedSubject {
       return line || str(p.SiteAddressCityState);
     })(),
     legalDescription: str(legal.LegalBriefDescription),
+    // STRUCTURED, so the document never has to parse the brief description.
+    // SiteX sends both: "TRACT NO 6654 LOT 44" AND TractNumber "6654",
+    // LotNumber "44". Reading the string was a parser with failure modes —
+    // an early cut captured "NO" as the tract on every one of our own
+    // profiles, because the sample in the design mock says "TRACT # 14627"
+    // and both live payloads say "TRACT NO 6654". These fields have no such
+    // ambiguity; the string stays as the as-recorded line.
+    tractNumber: str(legal.TractNumber),
+    lotNumber: str(legal.LotNumber),
+    block: str(legal.Block),
+    subdivision: str(legal.Subdivision),
     beds: int(ch.Bedrooms),
     baths: num(ch.Baths),
     buildingArea: int(ch.BuildingArea),

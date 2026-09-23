@@ -16,6 +16,7 @@ import { claimProperty, propertyRequestKey, recordClaimOutcome, releaseClaim } f
 import { alreadyHaveMessage, findProfileForProperty, type ExistingProfile } from './already-have';
 import { TEMPLATE_VERSION } from './document/profile-document';
 import { compRowValues } from './comp-row';
+import { subjectFactsFromPayload } from './subject-facts';
 import { renderProfile } from './render';
 
 // ─── Generation: the ONLY path that spends a credit ─────────────────────────
@@ -262,12 +263,7 @@ export async function ingestPayload(
 
   // 5a. Decide, then write. The render step re-runs this whenever the criteria
   //     move; these are the decisions the FIRST document was built from.
-  const decisions = selectComps(comps, {
-    buildingArea: subject.buildingArea,
-    bedrooms: subject.beds,
-    baths: subject.baths,
-    useCodeDescription: subject.useDescription,
-  }, DEFAULT_CRITERIA, now);
+  const decisions = selectComps(comps, subjectFactsFromPayload(subject), DEFAULT_CRITERIA, now);
   const byPosition = new Map(decisions.decisions.map((d) => [d.candidate.sourcePosition, d]));
 
   if (comps.length > 0) {

@@ -10,6 +10,15 @@ function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.includes(pathname)) return true;
   // SoftPro webhooks stay session-public; handlers verify SOFTPRO_WEBHOOK_SECRET.
   if (pathname.startsWith('/api/webhooks/softpro/')) return true;
+  // SendGrid's event webhook. A provider POSTs here with no session and no
+  // cookie, so the middleware must let it through; the handler verifies an
+  // ECDSA signature over the raw body and refuses anything it cannot check.
+  //
+  // THIS LINE IS THE WHOLE WEBHOOK. Without it the middleware answers 401 with
+  // `{"error":"Unauthorized"}` — BYTE-IDENTICAL to the handler's own refusal —
+  // so the endpoint looks correctly locked down from outside while never
+  // running at all. It shipped that way on 2026-09-22 and received nothing.
+  if (pathname.startsWith('/api/webhooks/sendgrid/')) return true;
   // SoftPro AddDocuments downloads FileURL; HMAC verified in the route handler.
   if (pathname.startsWith('/api/softpro/fetch-doc/')) return true;
   // Party wizard links go to external parties with no TD Hub login; the HMAC
@@ -20,6 +29,13 @@ function isPublic(pathname: string): boolean {
   if (pathname.startsWith('/favicon')) return true;
   return false;
 }
+
+/**
+ * Exposed for src/middleware.test.ts, which asserts that every webhook route
+ * in the tree is reachable without a session. Re-implementing these rules in
+ * the test would let the copy agree with itself while the site disagreed.
+ */
+export const isPublicForTest = isPublic;
 
 function isJobRoute(pathname: string): boolean {
   return pathname.startsWith('/api/jobs/');

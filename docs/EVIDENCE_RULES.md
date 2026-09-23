@@ -66,16 +66,43 @@ render with fixtures, so it is the thing to hand exactly when someone asks
 
 ---
 
-## 4 · A test that passes without running proves nothing
+## 4 · A guard is not a guard until it has been shown to fail
 
-The client-bundle guard timed out at five seconds and was reported green. It
-had found nothing because it had not finished. The County Sales fixture had
-symmetric prices, so a mean/median swap passed every assertion. A round-trip
-fixture of nulls would pass every field comparison while comparing nothing.
+This is the most expensive rule on the page, because a broken test does not
+merely fail to catch a bug — **it certifies that there isn't one.** Every other
+rule here describes something going unnoticed; this one describes something
+actively vouching for the thing it was meant to check.
 
-**The rule.** A guard needs a check that it is still measuring: assert it found
-the files, that the fixture is populated, that the values are asymmetric. Then
-mutate the thing it guards and watch it fail.
+Four instances in a single month, each found by accident:
+
+| | what passed, and why it proved nothing |
+| --- | --- |
+| County Sales fixture | Irvine's prices were symmetric, so mean and median were the same number. A mean/median swap passed every assertion. |
+| Client-bundle guard | It timed out at five seconds and reported green. It had found nothing because it had not finished. |
+| Carrier-route parity | The fixture's rejected row was kept with nulls rather than rejected, so `total === used` whatever the code under test returned. |
+| Transfer audit rows | The fixture set `DocumentNumber`; the normaliser reads `RecorderDocumentNumber`. The assertion would have compared `undefined` to `undefined`. |
+
+Note the last two were caught by *the guard's own meta-check* — an assertion
+that the fixture exercises the difference — not by review. That is the only
+mechanism here that scales.
+
+**The rule, in three parts.**
+
+1. **Assert the guard is still measuring.** It found the files. The fixture is
+   populated. The values are asymmetric. The field list is not empty. Without
+   this a guard degrades silently as the code around it changes.
+2. **Mutate the thing it guards and watch it fail.** Break it on purpose,
+   confirm the failure names the right thing, put it back. A guard never seen
+   red is a guess.
+3. **Pick the mutation someone would actually make.** Not `return false` —
+   the tidy-up. An integer cast on a fractional bath. A filter that skips rows
+   with a missing figure. Those are the changes that get made while
+   improving something, which is when nobody is looking for a regression.
+
+**Why it needs writing down.** Every instance above was caught by habit, in the
+moment, by someone who happened to ask. Habits do not survive handoffs, and the
+failure is invisible by construction: a green test that tests nothing looks
+exactly like a green test.
 
 ---
 

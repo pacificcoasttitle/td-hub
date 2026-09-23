@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseRouteRows } from './datasets';
+import { TEMPLATE_FOR } from './generate';
 import { computeCarrierRoute } from './compute';
 
 // ─── The farming re-render, surveyed ────────────────────────────────────────
@@ -76,5 +79,51 @@ describe('sales activity: the window key the re-render rebuilds', () => {
     // than implied.
     const asDate = String(new Date('2026-08-01T00:00:00Z')).slice(0, 7);
     expect(asDate).not.toBe('2026-08');
+  });
+});
+
+// ─── The stale-template refusal ─────────────────────────────────────────────
+//
+// rerenderFarming renders the STORED figures through TODAY'S document. A
+// layout change between the two means a field the new document reads may not
+// be in the stored object — and because these are jsonb, it arrives as
+// undefined and prints as a blank rather than failing.
+//
+// Concierge already relies on the version stamp for exactly this: profile #3
+// stays on v1 with its original PDF while #4 is on v2. Farming stored the same
+// column and never read it. Now it refuses, and the report can be created
+// again from its stored dataset, which produces figures that match the current
+// document by construction.
+describe('a farming report is not re-rendered onto a different template', () => {
+  const src = readFileSync(join(__dirname, 'generate.ts'), 'utf8').replace(/\r\n/g, '\n');
+  const fn = src.slice(src.indexOf('export async function rerenderFarming'));
+
+  it('compares the row template against the current one', () => {
+    expect(fn).toContain('row.templateVersion !== currentTemplate');
+  });
+
+  it('refuses rather than rendering anyway', () => {
+    expect(fn).toMatch(/reason:\s*'stale_template'/);
+  });
+
+  it('checks BEFORE the figures are read, so a mismatch cannot render', () => {
+    const check = fn.indexOf('stale_template');
+    const firstFigureRead = fn.indexOf('salesActivityFigures(');
+    expect(check).toBeGreaterThan(-1);
+    expect(firstFigureRead).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(firstFigureRead);
+  });
+
+  it('names a template for every type, so no type is silently exempt', () => {
+    for (const t of ['sales_activity', 'carrier_route', 'county_sales']) {
+      expect(TEMPLATE_FOR[t as keyof typeof TEMPLATE_FOR], `${t} has no current template`).toBeTruthy();
+    }
+  });
+
+  it('reads the stored figures through a check rather than a cast', () => {
+    // `as never` on a jsonb read is the mechanism that hid the concierge comp
+    // mapping dropping five fields: nothing asks, so a missing value prints as
+    // a blank. See stored-figures.ts.
+    expect(fn).not.toMatch(/\br\.(metrics|months|routes|standouts|cities)\s+as never/);
   });
 });

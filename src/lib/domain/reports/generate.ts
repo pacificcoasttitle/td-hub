@@ -42,6 +42,7 @@ import {
   CITIES_PER_PAGE, RANK_BY, RANK_LABEL, computeCarrierRoute, computeCountySales, computeSalesActivity, monthLabel,
   type DataQuality, type RankBy,
 } from './compute';
+import { carrierRouteFigures, countySalesFigures, salesActivityFigures } from './stored-figures';
 import {
   monthWindow, parseAreaSaleRows, parseCountySaleRows, parseRouteRows, type ParseReport,
 } from './datasets';
@@ -403,9 +404,27 @@ const TABLE_FOR = {
   county_sales: countySalesReports,
 } as const;
 
+/**
+ * The template each type's document is on TODAY, beside the table it is stored
+ * in. Read only by the re-render's staleness check — the generate paths stamp
+ * the same constants directly, which is what makes the comparison meaningful.
+ */
+export const TEMPLATE_FOR = {
+  sales_activity: SA_TEMPLATE,
+  carrier_route: CR_TEMPLATE,
+  county_sales: CS_TEMPLATE,
+} as const;
+
 export type RerenderOutcome =
   | { ok: true; reportId: number; pdfStorageKey: string; pageCount: number }
-  | { ok: false; reason: 'not_found' | 'not_failed' | 'no_dataset' | 'render' | 'store'; message: string };
+  | { ok: false; reason: 'not_found' | 'not_failed' | 'no_dataset' | 'stale_template' | 'bad_figures' | 'render' | 'store'; message: string };
+
+/** A stored figure object that is not the shape the document reads. */
+const badFigures = (missing: string): RerenderOutcome => ({
+  ok: false,
+  reason: 'bad_figures',
+  message: `This report's stored figures are missing ${missing}, so it cannot be rendered again. Create it again from its dataset.`,
+});
 
 /**
  * "Try again" on a failed farming report: render it again from the figures the
@@ -432,6 +451,32 @@ export async function rerenderFarming(
     };
   }
 
+  // ─── THE TEMPLATE MUST MATCH ──────────────────────────────────────────────
+  //
+  // The figures below are rendered through TODAY'S document, and they were
+  // computed for the document that existed when the row was written. A layout
+  // change between the two means a field the new document reads may not be in
+  // the stored object at all — and because these are jsonb, it arrives as
+  // `undefined` and prints as a blank rather than failing.
+  //
+  // The version stamp exists for exactly this, and Concierge already relies on
+  // it: profile #3 stays on v1 with its original PDF while #4 is on v2, so an
+  // old document is always tied to the template that made it. Farming stored
+  // the same column and never read it.
+  //
+  // Refusing is right rather than rendering anyway. The report can be created
+  // again from its stored dataset, which produces figures that match the
+  // current document by construction.
+  const currentTemplate = TEMPLATE_FOR[type];
+  if (row.templateVersion !== currentTemplate) {
+    return {
+      ok: false,
+      reason: 'stale_template',
+      message: `This report was built for document template ${row.templateVersion ?? 'unknown'}, and the current template is ${currentTemplate}. `
+        + 'Re-rendering would print today’s layout from figures computed for the old one. Create it again from its dataset instead.',
+    };
+  }
+
   const q: DataQuality = {
     rowsRead: row.datasetRows, used: row.datasetUsed, rejected: row.datasetRejected,
     rejectedTypes: (row.rejectedTypes ?? {}) as Record<string, number>,
@@ -440,33 +485,40 @@ export async function rerenderFarming(
     name: row.brandedToName, title: row.brandedToTitle, phone: row.brandedToPhone, email: row.brandedToEmail, photo: null,
   };
 
+  // THE STORED FIGURES ARE CHECKED, NOT CAST. `as never` silenced the compiler
+  // on every one of these, which is the same mechanism that let the Concierge
+  // comp mapping drop five fields without anyone finding out: nothing asks, so
+  // a missing value arrives as undefined and prints as a blank. A shape that
+  // is not what we think now refuses by name.
   let render: () => Promise<Buffer>;
   if (type === 'sales_activity') {
     const r = row as typeof salesActivityReports.$inferSelect;
+    const f = salesActivityFigures(r.metrics, r.months);
+    if (!f.ok) return badFigures(f.missing);
     render = () => renderToBuffer(SalesActivityDocument({
       areaName: r.areaName, propertyType: r.propertyType, windowMonths: r.windowMonths,
       windowEndKey: String(r.windowEnd).slice(0, 7),
-      figures: { metrics: r.metrics as never, months: r.months as never },
+      figures: f.figures,
       quality: q, rep, generatedAt: now,
     }) as never);
   } else if (type === 'carrier_route') {
     const r = row as typeof carrierRouteReports.$inferSelect;
+    // Every route that could be read was in the file; the total is what was
+    // used. Pinned in rerender-parity.test.ts.
+    const f = carrierRouteFigures(r.routes, r.standouts, r.datasetUsed);
+    if (!f.ok) return badFigures(f.missing);
     render = () => renderToBuffer(CarrierRouteDocument({
       areaName: r.areaName, rankBy: r.rankBy as RankBy,
-      // Every route that could be read was in the file; the total is what was used.
-      figures: { routes: r.routes as never, standouts: r.standouts as never, totalRoutes: r.datasetUsed },
+      figures: f.figures,
       quality: q, rep, generatedAt: now,
     }) as never);
   } else {
     const r = row as typeof countySalesReports.$inferSelect;
-    const stored = (r.totals ?? {}) as { houses?: unknown; condos?: unknown; otherKinds?: unknown };
+    const f = countySalesFigures(r.cities, r.totals);
+    if (!f.ok) return badFigures(f.missing);
     render = () => renderToBuffer(CountySalesDocument({
       county: r.county, monthKey: String(r.month).slice(0, 7),
-      figures: {
-        cities: r.cities as never,
-        totals: { houses: stored.houses as never, condos: stored.condos as never },
-        otherKinds: (stored.otherKinds ?? {}) as never,
-      },
+      figures: f.figures,
       quality: q, rep, generatedAt: now,
     }) as never);
   }

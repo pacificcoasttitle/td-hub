@@ -138,3 +138,54 @@ describe('the order of operations', () => {
     expect(strip('render.ts')).toContain('if (!d) continue;');
   });
 });
+
+// ─── The audit record has to keep being written ─────────────────────────────
+//
+// concierge_profile_transfers is written on every generation and read by
+// NOTHING — the document re-normalises transfers from the stored payload. It
+// was kept deliberately (docs/tickets/GENERATE_RERENDER_PAIRS.md): payloads
+// are retained indefinitely today, but that is a state and not a policy, and
+// if a lifecycle rule is ever added for storage cost this table is the only
+// surviving record of what SiteX said about transfers on the day we charged.
+//
+// A TABLE NOBODY READS IS A TABLE NOBODY NOTICES LOSING. A refactor drops the
+// insert, no test fails, no document changes, and the record has a hole in it
+// starting from a date nobody can identify — which is worse than not having
+// the table, because it still looks complete.
+//
+// So the write is asserted here, where nothing else would miss it.
+describe('the transfer audit rows are written', () => {
+  const transfer = (position: number, over: Record<string, unknown> = {}) => ({
+    RecordingDate: '20260801', DocumentType: 'Grant Deed', TransactionType: 'Transfer',
+    // RecorderDocumentNumber, not DocumentNumber — the key normalize.ts reads.
+    // The first version of this fixture used the wrong one and the assertion
+    // below caught it, which is the only reason it is worth having.
+    RecorderDocumentNumber: `26-${position}`, ...over,
+  });
+
+  async function ingestWithTransfers(transfers: Record<string, unknown>[]) {
+    inserted.rows = [];
+    const p = payload([comp(1)]) as { Feed: Record<string, unknown> };
+    p.Feed.TransferHistory = transfers;
+    await ingestPayload(1, p as { Feed?: Record<string, unknown> }, new Date('2026-09-18T00:00:00Z'));
+    // Transfer rows carry a recording date and no `selected` — comps carry
+    // `selected`, and the profile row carries neither.
+    return inserted.rows.filter((r) => 'sourcePosition' in r && !('selected' in r));
+  }
+
+  it('writes one row per transfer the payload carried', async () => {
+    const rows = await ingestWithTransfers([transfer(0), transfer(1), transfer(2)]);
+    expect(rows, 'no transfer rows were written — the audit record this table exists to be '
+      + 'has a hole in it, and nothing else in the system would have failed')
+      .toHaveLength(3);
+  });
+
+  it('keeps the document number, which is what makes a row an audit record', async () => {
+    const rows = await ingestWithTransfers([transfer(0, { RecorderDocumentNumber: '26-0551234' })]);
+    expect(rows[0]).toMatchObject({ documentNumber: '26-0551234' });
+  });
+
+  it('writes nothing when the payload carried no transfers, rather than a placeholder', async () => {
+    expect(await ingestWithTransfers([])).toHaveLength(0);
+  });
+});

@@ -2,12 +2,18 @@
 
 import { useState } from 'react';
 
-// ─── The cost gate ──────────────────────────────────────────────────────────
+// ─── The confirmation gate ──────────────────────────────────────────────────
 //
-// Every generation is a billable SiteX call against a balance nobody can read:
-// the production /credits endpoint returns 2147483647, a sentinel. Our own
-// metering is the only spend signal that exists, so it is shown here, before
-// the click, not on an admin page nobody has open.
+// Every generation is a billable SiteX lookup, and it cannot be undone: the
+// wrong property costs the same as the right one. So this dialog exists to
+// make the operator read the property back before the call is made.
+//
+// IT NO LONGER SAYS "CREDIT" (Gerard, 2026-09-23). The cost is real and still
+// metered — sitex_credits_charged on every row, /api/concierge/spend for the
+// admin usage view — but an operator holds no budget and cannot see a balance,
+// so the wording asked them to weigh something that was never theirs to weigh.
+// What made the spend deliberate was never the word: it is this dialog, and
+// the duplicate check keyed on the normalised property over all time.
 //
 // Four properties, all of them enforced rather than described:
 //
@@ -60,10 +66,14 @@ export function ConciergeCostGate(p: CostGateProps) {
       <div className="bg-white rounded-[10px] w-full max-w-[520px] shadow-xl border border-[#E5E5E5]">
         <div className="px-5 py-4 border-b border-[#F0F1F3]">
           <h2 id="concierge-gate-title" className="text-[15px] font-semibold text-[#171717]">
-            This will spend 1 SiteX credit
+            Generate a property profile
           </h2>
+          {/* WHERE, not just "afterwards". The control is the Comparables
+              button on this profile's row in Reports; saying so is the
+              difference between a promise and an instruction. */}
           <p className="text-[11.5px] text-[#6B7280] mt-[3px]">
-            One property lookup is charged per profile. Adjusting the comparables afterwards is free.
+            One property lookup per profile. You can adjust the comparables afterwards from
+            the report&rsquo;s row in Reports, as often as you like — re-rendering looks nothing up.
           </p>
         </div>
 
@@ -96,22 +106,20 @@ export function ConciergeCostGate(p: CostGateProps) {
           />
           <GateRow label="Comparable criteria" value={p.criteriaSummary} />
 
-          {/* The only spend signal that exists. SiteX's production balance
-              endpoint returns a sentinel, so these come from our own metering. */}
-          <div className="rounded-md bg-[#FAFAFB] border border-[#EDEFF3] px-3 py-2">
-            <p className="text-[10px] uppercase tracking-[0.09em] font-semibold text-[#9AA0AA] mb-[2px]">
-              Credits used
-            </p>
-            <p className="text-[12px] text-[#3C4557] tabular-nums">
-              {p.spend
-                ? <>This month <strong>{p.spend.thisMonth}</strong> · all time <strong>{p.spend.allTime}</strong></>
-                : 'Counting…'}
-            </p>
-            <p className="text-[10px] text-[#9AA0AA] mt-[2px]">
-              Counted by us — SiteX does not report a usable balance.
-            </p>
-          </div>
+          {/* ─── The spend panel is GONE from here (Gerard, 2026-09-23) ─────
+              Operators do not hold a budget and cannot read a balance, so a
+              running credit count asked them to weigh something they had no
+              standing to weigh. The metering itself is untouched: every call
+              still writes sitex_credits_charged, and /api/concierge/spend
+              still serves the admin usage view for the people who do own the
+              cost.
 
+              WHAT CARRIES THE DELIBERATENESS NOW. The words were never the
+              real guard. The guard is this dialog existing at all — Cancel
+              focused, Enter swallowed, an explicit tick, disabled in flight —
+              plus the duplicate check keyed on the normalised property over
+              all time, which is the thing that actually stops a second
+              lookup on a property we already hold. */}
           <label className="flex items-start gap-2 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -120,7 +128,7 @@ export function ConciergeCostGate(p: CostGateProps) {
               className="mt-[2px] w-[14px] h-[14px] rounded border-gray-300 text-brand-orange"
             />
             <span className="text-[11.5px] text-[#3C4557]">
-              I understand this charges one credit.
+              I have checked the property above and want to generate this profile.
             </span>
           </label>
 
@@ -148,7 +156,7 @@ export function ConciergeCostGate(p: CostGateProps) {
             disabled={blocked}
             className="h-8 px-[13px] rounded-md text-[11.5px] font-semibold bg-brand-orange text-white hover:bg-brand-orange-hover disabled:opacity-40 outline-none focus-visible:ring-1 focus-visible:ring-brand-orange/30"
           >
-            {p.submitting ? 'Generating…' : 'Generate — 1 credit'}
+            {p.submitting ? 'Generating…' : 'Generate profile'}
           </button>
         </div>
       </div>

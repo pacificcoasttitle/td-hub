@@ -94,6 +94,9 @@ export function alreadyHaveMessage(existing: ExistingProfile): string {
   const age = existing.ageDays === 0 ? 'today'
     : existing.ageDays === 1 ? 'yesterday'
       : `${existing.ageDays} days ago`;
+  // The duplicate guard is the thing that actually prevents a second lookup,
+  // so this sentence carries the weight the credit wording used to: it names
+  // the property, the date and the age, and offers the cheap way out first.
   return `A profile for this property was generated on ${when} (${age}). `
-    + 'Open it, or generate a fresh one for 1 credit.';
+    + 'Open it, or generate a fresh one — that is a second property lookup.';
 }

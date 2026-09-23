@@ -84,9 +84,22 @@ export const REPORTS_PAGE_SIZE = 25;
  * did — including that a failed generation cost nothing, which is the question
  * anyone looking at a failed row asks first.
  */
+/**
+ * NO CREDIT LANGUAGE HERE (Gerard, 2026-09-23). The operators' list says what
+ * the row IS, not what it cost: they hold no budget and the number asked them
+ * to account for something that was never theirs.
+ *
+ * The distinction the old wording carried is still worth keeping, though, and
+ * it is not about money — a failure that looked the property up is a different
+ * thing from one that never reached SiteX, because only the first has data to
+ * resume from. So `creditsCharged` still decides the words; the words just no
+ * longer mention credits. Spend itself is untouched in the database and on the
+ * admin usage view.
+ */
 export function sourceLineFor(type: ReportType, status: string, creditsCharged: number | null): string {
   if (type !== 'concierge_profile') return 'Dataset';
-  if (status === 'failed') return creditsCharged && creditsCharged > 0 ? 'Failed · 1 credit spent' : 'Failed · no credit charged';
+  const lookedUp = Boolean(creditsCharged && creditsCharged > 0);
+  if (status === 'failed') return lookedUp ? 'Failed after the lookup' : 'Failed before the lookup';
   if (status === 'pending' || status === 'retrieved') return 'Generating';
-  return creditsCharged && creditsCharged > 0 ? `${creditsCharged} credit spent` : 'No credit charged';
+  return lookedUp ? 'Property lookup' : 'No lookup';
 }

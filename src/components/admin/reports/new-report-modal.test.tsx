@@ -29,11 +29,17 @@ const draft = (over: Partial<ConciergeDraft> = {}): ConciergeDraft => ({
 });
 
 describe('the type picker', () => {
-  it('offers Concierge Profile and says what it costs', () => {
+  it('offers Concierge Profile, and says nothing about what it costs', () => {
+    // The cost pill is GONE (Gerard, 2026-09-23). An operator holds no budget
+    // and cannot read a balance, so the price asked them to weigh something
+    // that was never theirs. Spend is still metered; it is just not their
+    // business. The deliberateness now rests on the confirmation dialog and
+    // the duplicate guard, which is where it always actually rested.
     const concierge = typeOptions(ON)[0]!;
     expect(concierge.label).toBe('Concierge Profile');
     expect(concierge.available).toBe(true);
-    expect(visible(<TypeCard option={concierge} selected={false} onSelect={() => {}} />)).toContain('1 credit');
+    expect(concierge.costNote).toBeNull();
+    expect(visible(<TypeCard option={concierge} selected={false} onSelect={() => {}} />)).not.toMatch(/credit/i);
   });
 
   const farmingOf = (farming: boolean | null) => typeOptions(ON, farming).filter((o) => o.type !== 'concierge_profile');
@@ -73,9 +79,12 @@ describe('the type picker', () => {
     expect(flagOff.filter((o) => o.type !== 'concierge_profile').every((o) => o.available)).toBe(true);
   });
 
-  it('never puts a credit pill on a type that cannot be generated', () => {
-    for (const o of typeOptions({ canGenerate: true, featureOn: false })) {
-      expect(visible(<TypeCard option={o} selected={false} onSelect={() => {}} />)).not.toContain('1 credit');
+  it('puts no cost language on ANY type card', () => {
+    for (const on of [ON, { canGenerate: true, featureOn: false }]) {
+      for (const o of typeOptions(on)) {
+        expect(visible(<TypeCard option={o} selected={false} onSelect={() => {}} />), o.type)
+          .not.toMatch(/credit/i);
+      }
     }
   });
 
@@ -215,7 +224,7 @@ describe('the flag that allows a second credit', () => {
 describe('when we already hold the property', () => {
   const panel = (over: Record<string, unknown> = {}) => visible(
     <AlreadyHavePanel
-      message="A profile for this property was generated on 12 September (6 days ago). Open it, or generate a fresh one for 1 credit."
+      message="A profile for this property was generated on 12 September (6 days ago). Open it, or generate a fresh one — that is a second property lookup."
       existing={{ id: 3, createdAt: '2026-09-12T10:00:00Z', ageDays: 6, preparedForName: 'Internal test', ...over }}
       onOpen={() => {}}
       onFresh={() => {}}
@@ -226,7 +235,7 @@ describe('when we already hold the property', () => {
     // A six-month-old profile may legitimately need refreshing.
     const text = panel();
     expect(text).toContain('Open the existing profile');
-    expect(text).toContain('Generate a fresh one — 1 credit');
+    expect(text).toContain('Generate a fresh one');
   });
 
   it('says when it was generated, which is the whole basis of the choice', () => {
@@ -238,10 +247,15 @@ describe('when we already hold the property', () => {
     expect(panel()).toContain('Internal test');
   });
 
-  it('prices only the button that spends', () => {
+  it('still makes the cheap way out the obvious one, without pricing it', () => {
+    // The old version priced the fresh-generation button and not the other.
+    // With the price gone, the ordering and the wording carry it: "Open the
+    // existing profile" comes first, and the message above says what a fresh
+    // one really means.
     const text = panel();
-    expect(text).toMatch(/Generate a fresh one — 1 credit/);
-    expect(text).not.toMatch(/Open the existing profile — 1 credit/);
+    expect(text).not.toMatch(/credit/i);
+    expect(text.indexOf('Open the existing profile')).toBeLessThan(text.indexOf('Generate a fresh one'));
+    expect(text).toMatch(/second property lookup/i);
   });
 });
 

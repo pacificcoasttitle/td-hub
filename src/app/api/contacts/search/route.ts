@@ -4,6 +4,7 @@ import { db } from '@/lib/db/client';
 import { sql } from 'drizzle-orm';
 import { getSession } from '@/lib/security/auth';
 import { canReadContactBook } from '@/lib/security/contact-book-access';
+import { repTwinFacts, twinLabel } from '@/lib/domain/reports/rep-visibility';
 
 
 const querySchema = z.object({
@@ -172,6 +173,22 @@ export async function GET(req: NextRequest) {
         companySalesUnderwriter: (r.company_sales_underwriter as string) ?? null,
       };
     });
+
+    // ── Reps a human cannot tell apart ───────────────────────────────────
+    //
+    // Only for the rep picker, and only two extra queries. Kevin Cameron is
+    // two active sales-rep rows with the same name and the same email; an
+    // operator choosing between them is guessing, and the wrong guess makes a
+    // report the rep never sees. Annotated rather than hidden: which row is
+    // right is a judgement, and the facts that settle it are cheap to show.
+    if (type === 'sales_rep' && results.length > 0) {
+      const facts = await repTwinFacts(results.map((r) => ({ id: r.id, fullName: r.fullName, email: r.email })));
+      const annotated = results.map((r) => {
+        const f = facts.get(r.id);
+        return f ? { ...r, hasLogin: f.hasLogin, orders: f.orders, ambiguous: f.ambiguous, twinLabel: twinLabel(f) } : r;
+      });
+      return NextResponse.json({ results: annotated });
+    }
 
     return NextResponse.json({ results });
   } catch (err) {

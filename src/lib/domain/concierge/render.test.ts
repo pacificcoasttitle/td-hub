@@ -37,33 +37,26 @@ describe('rendering cannot reach the vendor', () => {
 
 // ─── A re-render must print what the first render printed ───────────────────
 //
-// The comp address is stored on every row of concierge_profile_comps, and the
-// candidate mapping in this file silently left it out. The generate path
-// builds its candidates from normalizeComps, which carries the address, so the
-// first render of a profile showed "1481 BONITA AVE" and a re-render of the
-// SAME profile showed "Comparable 1".
+// The candidate mapping that used to live in render.ts is now comp-row.ts,
+// shared with the generate path and held to a round-trip test
+// (comp-row.test.ts). That test is strictly stronger than what stood here: it
+// asserts EVERY field survives a write and a read back, rather than naming the
+// one field that had gone missing.
 //
-// It was invisible for as long as it existed, because the v1 document never
-// printed comp addresses at all. The v2 layout puts them on pages 5, 6 and 7,
-// which is what surfaced it — on a profile re-rendered in production.
-describe('a re-render carries the fields the document prints', () => {
+// What remains worth asserting here is that this file still delegates. An
+// inline mapping reintroduced in render.ts would pass comp-row's round trip —
+// which tests the shared functions, not their callers — while quietly dropping
+// fields again, which is exactly how the address was lost.
+describe('the re-render path uses the shared comp mapping', () => {
   const src = readFileSync(join(__dirname, 'render.ts'), 'utf8').replace(/\r\n/g, '\n');
-  const mapping = (() => {
-    const at = src.indexOf('storedComps.map(');
-    expect(at, 'the candidate mapping moved — this test reads it by name').toBeGreaterThan(-1);
-    return src.slice(at, src.indexOf('}));', at));
-  })();
 
-  it('maps the comp address through, so pages 5 to 7 are not "Comparable 1"', () => {
-    expect(mapping).toMatch(/address:\s*c\.address/);
+  it('builds candidates through compFromRow, not by hand', () => {
+    expect(src).toContain('storedComps.map(compFromRow)');
   });
 
-  it('carries the rest of the locality with it', () => {
-    // A bare street line with no city is worse than none on a report that
-    // states the comparables are near the subject.
-    for (const f of ['city', 'state', 'zip'] as const) {
-      expect(mapping, `${f} is stored on the row and belongs on the candidate`)
-        .toContain(`${f}: c.${f}`);
-    }
+  it('has no hand-rolled candidate mapping left in it', () => {
+    // The shape that went wrong: an object literal assembling a candidate
+    // field by field from a stored row.
+    expect(src).not.toMatch(/sourcePosition:\s*c\.sourcePosition/);
   });
 });

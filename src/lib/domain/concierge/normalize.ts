@@ -168,7 +168,28 @@ export function normalizeTax(feed: Raw): NormalizedTax {
 /** The comp array key carries a dot, which is a SiteX quirk, not a nesting. */
 export const COMP_KEY = 'ComparableSalesReport.ComparableSales';
 
-export function normalizeComps(feed: Raw): Array<CompCandidate & { raw: Raw; address: string | null; city: string | null; state: string | null; zip: string | null; apn: string | null; documentNumber: string | null; documentType: string | null; latitude: number | null; longitude: number | null }> {
+/**
+ * A comparable as the payload gives it, before any filtering.
+ *
+ * NAMED, because two paths build the document and both must agree on what a
+ * comparable is: the generate path uses this, and the re-render path rebuilds
+ * it from stored rows (see comp-row.ts). While the shape was inline here, the
+ * two could diverge field by field with nothing to notice — and they did.
+ */
+export type NormalizedComp = CompCandidate & {
+  raw: Raw;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  apn: string | null;
+  documentNumber: string | null;
+  documentType: string | null;
+  latitude: number | null;
+  longitude: number | null;
+};
+
+export function normalizeComps(feed: Raw): NormalizedComp[] {
   return arr(feed[COMP_KEY]).map((c, i) => ({
     sourcePosition: i,
     salePrice: num(c.SalePrice),

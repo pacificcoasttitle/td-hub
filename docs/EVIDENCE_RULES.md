@@ -119,6 +119,37 @@ vendor already sends the value structured.
 
 ---
 
+## 6 · If a number will shape a decision, commit the thing that produced it
+
+Every wrong figure this month came out of an ad-hoc query nobody could rerun:
+
+> "contact book at 6%" · "1,476 missing contacts" · "821 officer-less orders" ·
+> "87 held prelims" · "four source-reading guards" · "forty-seven"
+
+Each was stated with the same confidence as a verified one. Two of them reached
+Gerard. The count of source-reading guards was wrong **twice in a row** — first
+a guess, then a grep loose enough to match fixtures — and both times the method
+died with the shell that ran it, so the only way to find the error was to
+happen to redo it.
+
+**The rule.** A number that will inform a decision gets a committed artifact:
+a script, a test, a query file. Not because the number needs auditing, but
+because *the method* does — an unrepeatable measurement cannot be corrected,
+only replaced by another guess.
+
+**The stronger form, where it is available: make the number and the enforcement
+come from the same file.** `scripts/audit/detect-source-readers.mjs` produces
+the count, and `source-readers.test.ts` seeds its baseline from the same
+detector — so the figure in the document and the rule in the codebase cannot
+drift apart. When that is reachable, a wrong number stops being possible rather
+than becoming correctable.
+
+**The distinction to keep.** "Not known to be broken" and "known not to have
+been checked" are different statements. Collapsing them is how a figure that
+describes what somebody looked at gets reported as a figure describing what is
+there — which is what a sync *rate* reported as a *total* is, and what "four
+guards" was.
+
 ## The shape they share
 
 In every case the reassuring reading was available and cheap, and the

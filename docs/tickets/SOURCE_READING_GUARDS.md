@@ -3,12 +3,24 @@
 **Status:** inventoried 2026-09-23. Helper landed, four guards migrated, the
 rest listed.
 
-## First, a correction
+## First, a correction. Then a correction to the correction.
 
-I said there were four. **There are 47** source-reading guards in `src` — I had
-counted only the ones I touched that day. The inventory below covers the ones
-this session created or changed; the remaining ~43 predate it and are listed as
-a population, not individually assessed.
+I said **four**. I had counted the ones I touched that day and reported it as
+the population.
+
+I then said **47**, from a grep loose enough to match any `readFileSync` whose
+argument ended in something `.ts`-shaped — including fixtures.
+
+The real figure is **25**, from a detector that matches
+`readFileSync(…'*.ts'…)` in a test file, which you can run:
+`node scripts/audit/detect-source-readers.mjs`. It is the number the ratchet
+below is seeded from, so it cannot drift from the claim.
+
+Three numbers for one question, and only the third had a reproducible method
+behind it. The first two were a guess and a bad grep, stated the same way as
+the third. That is the same error as reporting a sync *rate* as a *total*: a
+figure describing what somebody looked at, presented as a figure describing
+what is there.
 
 ## The failure that matters
 
@@ -61,12 +73,36 @@ guard out — as `comp-row.ts` did. Where it is not, keep the guard and let it b
 brittle: brittle-and-loud is an acceptable trade for a real invariant, and
 silent-and-green is not.
 
-**No new source-reading guard without answering the middle column first.**
+## The ratchet, which retires the rule
+
+"No new source-reading guard without a conversation" depended on somebody
+remembering it. `src/test-support/source-readers.test.ts` does not:
+
+- A test reading source with bare `readFileSync` that is **not** on the
+  baseline **fails**. New guards must go through `readSource`.
+- A baseline entry that has **stopped** doing it also fails, so the list
+  shrinks as files migrate and cannot quietly become a lie.
+
+Mutation-checked both ways: a new bypassing file fails it, and a stale entry
+fails it.
+
+Migrating one is two lines — swap `readFileSync(p, 'utf8')` for
+`readSource(p, { mustContain: '<the declaration it is about>' })` and delete
+its entry. Worth doing whenever one is opened for any other reason. A single
+churn commit touching 25 files would be unreviewable, which is the point of
+letting them migrate as they are touched.
+
+## The known-failing shape: zero instances
+
+The pattern that actually failed here was a regex built from a template
+literal, where `\s` collapses to `s`. Searched deliberately rather than
+assumed: **there is no `new RegExp(` in any test in this repo.** The only
+`RegExp` token is a type annotation. The subset is empty, and that is a
+finding rather than an omission.
 
 ## Not done
 
-The ~43 predating guards were not individually assessed. They are not known to
-be broken; they are known not to have been checked. Migrating one to
-`readSource` is a two-line change and is worth doing whenever one is touched
-for another reason — and worth doing deliberately for any that use a regex
-built from a template literal, which is the shape that failed here.
+The 25 baseline guards were not individually assessed. They are **not known to
+be broken; they are known not to have been checked** — a distinction worth
+keeping, since collapsing it is where most of this session's wrong numbers came
+from.

@@ -129,6 +129,143 @@ const when = (d: Date | string | null) => (d ? new Date(d).toISOString().replace
     if (twins.length === 0) console.log('    NO OTHER ORDER ON THAT ADDRESS — the duplicate mark has no twin.');
   }
 
+  // "We handled it on the other file" is only true if the client can SEE the
+  // other file. There is no duplicate_of/canonical_order column anywhere in the
+  // schema (checked), and documents load strictly by documents.order_id —
+  // src/lib/domain/orders/documents.ts:64-118 has no cross-order path. So a
+  // client whose access is to the DUPLICATE sees an empty document list, and
+  // nothing in the code can walk them to the kept file.
+  console.log('\nCAN THE CLIENT ON THE DUPLICATE SEE THE KEPT FILE?\n');
+  const dupeVisibility = await sql`
+    WITH pair AS (
+      SELECT o.id, o.file_number,
+             lower(regexp_replace(coalesce(p.address, ''), '[^a-zA-Z0-9]', '', 'g')) AS addr
+      FROM orders o JOIN order_properties p ON p.order_id = o.id
+      WHERE o.file_number IN ('20022294-OCT', '20022293-OCT'))
+    SELECT pair.file_number, pair.id,
+           op.contact_id, c.full_name, c.email, op.role
+    FROM pair
+    LEFT JOIN order_parties op ON op.order_id = pair.id
+    LEFT JOIN contacts c ON c.id = op.contact_id
+    ORDER BY pair.file_number, c.full_name`;
+  for (const r of dupeVisibility) {
+    console.log(`  ${String(r.file_number).padEnd(16)} ${String(r.role ?? '(no parties)').padEnd(18)} ${String(r.full_name ?? '—').padEnd(26)} contact=${r.contact_id ?? '—'}`);
+  }
+  // Access is created_by OR an order_parties contact (client-scope.ts:29-41).
+  const creators = await sql`
+    SELECT file_number, created_by FROM orders
+    WHERE file_number IN ('20022294-OCT', '20022293-OCT') ORDER BY file_number`;
+  for (const r of creators) {
+    console.log(`  ${String(r.file_number).padEnd(16)} created_by = ${r.created_by ?? '(null)'}`);
+  }
+  const onlyDupe = await sql`
+    SELECT DISTINCT c.full_name, c.email
+    FROM order_parties op
+    JOIN contacts c ON c.id = op.contact_id
+    JOIN orders o ON o.id = op.order_id
+    WHERE o.file_number = '20022294-OCT'
+      AND op.contact_id NOT IN (
+        SELECT op2.contact_id FROM order_parties op2
+        JOIN orders o2 ON o2.id = op2.order_id
+        WHERE o2.file_number = '20022293-OCT' AND op2.contact_id IS NOT NULL)`;
+  console.log(`\n  Parties on the duplicate who are NOT on the kept file: ${onlyDupe.length}`);
+  for (const r of onlyDupe) console.log(`    ${r.full_name} <${r.email ?? 'no email'}>  ← sees an empty file`);
+  if (onlyDupe.length === 0) console.log('    None — everyone on the duplicate can also reach the kept file.');
+
+  // And the general case, since 20021874-GLT is the same shape.
+  const dupeCorpus = await sql`
+    SELECT count(*) AS dupes,
+           count(*) FILTER (WHERE d.prelims = 0) AS without_prelim
+    FROM orders o
+    JOIN LATERAL (
+      SELECT count(*) AS prelims FROM documents dd
+      WHERE dd.order_id = o.id AND dd.status = 'active'
+        AND (dd.category::text ILIKE '%prelim%' OR dd.filename ILIKE '%prelim%')
+        AND dd.filename NOT ILIKE '%dnu%') d ON true
+    WHERE o.operational_status = 'duplicate'
+      AND o.created_at >= now() - interval '90 days'`;
+  console.log(`\n  Duplicate-marked orders in the last 90 days: ${dupeCorpus[0].dupes}`);
+  console.log(`  of which have no usable prelim of their own: ${dupeCorpus[0].without_prelim}`);
+
+  // That 28/28 is expected — the work happens on the kept file. It only harms
+  // a client if THEY are attached to the duplicate and not to the twin, so
+  // that is what to count. 20022294 passed; the class is the question.
+  // MATCH ON APN, NOT ADDRESS. The app's own duplicate detection is APN
+  // equality (src/app/api/orders/check-duplicate/route.ts:32), so matching on
+  // a normalised address answers a different question than the one the
+  // operator was answering when they pressed the button. Address also drops
+  // most of the population: only 9 of the 28 duplicates have a non-empty
+  // address, against 26 with an APN.
+  const stranded = await sql`
+    WITH dupes AS (
+      SELECT o.id, o.file_number, o.created_by, upper(trim(p.apn)) AS apn
+      FROM orders o JOIN order_properties p ON p.order_id = o.id
+      WHERE o.operational_status = 'duplicate' AND o.created_at >= now() - interval '90 days'
+        AND coalesce(trim(p.apn), '') <> ''),
+    twins AS (
+      SELECT d.id AS dupe_id, o2.id AS twin_id
+      FROM dupes d
+      JOIN order_properties p2 ON upper(trim(p2.apn)) = d.apn
+      JOIN orders o2 ON o2.id = p2.order_id AND o2.id <> d.id
+                    AND o2.operational_status <> 'duplicate')
+    SELECT d.file_number, d.id,
+           (SELECT count(*) FROM twins w WHERE w.dupe_id = d.id) AS twin_count,
+           (SELECT count(*) FROM order_parties op
+             WHERE op.order_id = d.id AND op.contact_id IS NOT NULL
+               AND op.contact_id NOT IN (
+                 SELECT op2.contact_id FROM order_parties op2
+                 JOIN twins w2 ON w2.twin_id = op2.order_id AND w2.dupe_id = d.id
+                 WHERE op2.contact_id IS NOT NULL)) AS stranded_parties,
+           (SELECT count(*) FROM twins w3
+             JOIN documents dd ON dd.order_id = w3.twin_id AND dd.status = 'active'
+             WHERE w3.dupe_id = d.id
+               AND (dd.category::text ILIKE '%prelim%' OR dd.filename ILIKE '%prelim%')
+               AND dd.filename NOT ILIKE '%dnu%') AS twin_prelims
+    FROM dupes d ORDER BY 4 DESC, 1`;
+  // A contact_id on an order is not a person who can log in. Access needs a
+  // profiles row with role='client' whose contact_id matches
+  // (client-scope.ts:28-41), so "sees an empty file" is only true for those.
+  const realClients = await sql`
+    WITH dupes AS (
+      SELECT o.id, o.file_number, upper(trim(p.apn)) AS apn
+      FROM orders o JOIN order_properties p ON p.order_id = o.id
+      WHERE o.operational_status = 'duplicate' AND o.created_at >= now() - interval '90 days'
+        AND coalesce(trim(p.apn), '') <> ''),
+    twins AS (
+      SELECT d.id AS dupe_id, o2.id AS twin_id
+      FROM dupes d
+      JOIN order_properties p2 ON upper(trim(p2.apn)) = d.apn
+      JOIN orders o2 ON o2.id = p2.order_id AND o2.id <> d.id
+                    AND o2.operational_status <> 'duplicate')
+    SELECT d.file_number, c.full_name, c.email, pr.role
+    FROM dupes d
+    JOIN order_parties op ON op.order_id = d.id AND op.contact_id IS NOT NULL
+    JOIN contacts c ON c.id = op.contact_id
+    JOIN profiles pr ON pr.contact_id = op.contact_id AND pr.role = 'client'
+    WHERE op.contact_id NOT IN (
+      SELECT op2.contact_id FROM order_parties op2
+      JOIN twins w ON w.twin_id = op2.order_id AND w.dupe_id = d.id
+      WHERE op2.contact_id IS NOT NULL)`;
+  console.log(`\n  ...of which are a LOGIN-CAPABLE client (profiles.role='client'): ${realClients.length}`);
+  for (const r of realClients) {
+    console.log(`    ${String(r.file_number).padEnd(16)} ${r.full_name} <${r.email ?? 'no email'}>`);
+  }
+  if (realClients.length === 0) {
+    console.log('    None. The stranded contacts have no portal login, so nobody is');
+    console.log('    staring at an empty page today — but nothing prevents it either.');
+  }
+
+  const noTwin = stranded.filter((r) => Number(r.twin_count) === 0);
+  const withStranded = stranded.filter((r) => Number(r.stranded_parties) > 0);
+  const twinNoPrelim = stranded.filter((r) => Number(r.twin_count) > 0 && Number(r.twin_prelims) === 0);
+  console.log(`\n  Of ${stranded.length} duplicates carrying an APN (of ${dupeCorpus[0].dupes} total):`);
+  console.log(`    no same-address twin at all:        ${noTwin.length}  ← "duplicate of what?"`);
+  console.log(`    twin exists but has no prelim:      ${twinNoPrelim.length}  ← nobody is covered`);
+  console.log(`    have a party NOT on the twin:       ${withStranded.length}  ← latent only; see login check above`);
+  for (const r of [...withStranded, ...noTwin, ...twinNoPrelim].slice(0, 12)) {
+    console.log(`      ${String(r.file_number).padEnd(16)} twins=${r.twin_count} twin_prelims=${r.twin_prelims} stranded_parties=${r.stranded_parties}`);
+  }
+
   console.log('\nIS "DNU" A CONVENTION OR A ONE-OFF?\n');
   // 20022304-OCT's only prelim is named "Preliminary Title Report - DNU". If
   // DNU means do-not-use, that file has no usable prelim and the count is one

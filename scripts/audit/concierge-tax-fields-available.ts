@@ -173,6 +173,25 @@ function keyPaths(node: unknown, prefix = '', out: Map<string, unknown> = new Ma
   }
   if (hazards.length === 0) console.log('  None in this payload.');
 
+  // ── Page 3's price per sq ft: supplied, or must it be computed? ──────────
+  //
+  // The handoff says compute it (last sale price / living area). But
+  // concierge_comps.price_per_sqft is annotated "SiteX's own figure. Never
+  // recomputed from BuildingArea — that was the legacy bug." Those are only
+  // compatible if SiteX supplies it for COMPS and not for the SUBJECT, so
+  // check rather than assume.
+  line('═');
+  console.log('\nPAGE 3 PRICE PER SQ FT — does SiteX supply one for the subject?\n');
+  const ppsf = [...seenPaths.entries()]
+    .filter(([p]) => /PricePerSq|SqFt|SalePrice|BuildingArea|LivingArea|SaleLoanInfo/i.test(p))
+    .sort();
+  for (const [path, i] of ppsf) {
+    const scope = /ComparableSales/i.test(path) ? 'COMP   ' : 'SUBJECT';
+    console.log(`  ${scope}  ${path.replace('Feed.', '').padEnd(54)} = ${String(i.sample).slice(0, 18)}`);
+  }
+  const subjectPpsf = ppsf.filter(([p]) => !/ComparableSales/i.test(p) && /PricePerSq/i.test(p));
+  console.log(`\n  Subject-level price-per-sqft field: ${subjectPpsf.length > 0 ? 'SUPPLIED — do not compute' : 'NONE — computing it is correct for the subject'}`);
+
   // ── The verdict ──────────────────────────────────────────────────────────
   line('═');
   console.log('\nVERDICT\n');

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  doc-page:not(:defined){visibility:hidden}
+  body{margin:0}
+  a{color:#16324F;text-decoration:none}
+  a:hover{color:#C86A2A}
+</style>
+<script src="./doc-page.js"></script>
+</helmet>
+
+<doc-page size="letter">
+
+<section class="page" style="font-family:'Instrument Sans',system-ui,sans-serif;color:#1C2430;display:flex;flex-direction:column;gap:13px;padding:40px 46px;box-sizing:border-box;height:100%">
+
+  <div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #16324F;padding-bottom:8px">
+    <div style="font-size:19px;font-weight:700;color:#16324F;letter-spacing:-0.01em">Concierge Profile — operator handover</div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6B7684">17 Sep 2026 · td-hub @ main</div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:5px">
+    <div style="font-size:15px;font-weight:700;color:#16324F">1 · What the operator does</div>
+    <ol style="margin:0;padding-left:17px;font-size:12.5px;line-height:1.5;display:flex;flex-direction:column;gap:2px">
+      <li>Opens <strong>Reports</strong> in the hub, clicks <strong>New report</strong>, and picks <strong>Concierge Profile</strong> — the one type found by address rather than fed a dataset.</li>
+      <li>Types the property address. It is resolved to exactly one property before anything is spent; an ambiguous address stops here with no charge.</li>
+      <li>A cost gate opens: the property, who it's prepared for, the presenting rep, the comparable criteria, and credits used to date. It says plainly that this spends one SiteX credit.</li>
+      <li>They type a prepared-for name, tick the acknowledgement, and click <strong>Generate — 1 credit</strong>. Cancel is focused by default and Enter never confirms.</li>
+      <li>SiteX is called once and the eight-page PDF appears in the Reports list, offering <strong>Download</strong> and <strong>Comparables</strong> — re-rendering is free and never calls SiteX again.</li>
+    </ol>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:5px">
+    <div style="font-size:15px;font-weight:700;color:#16324F">2 · The sample output</div>
+    <div style="font-size:12.5px;line-height:1.5">Generated from the stored 25 August payload — no new credit. Eight pages, printed from the same layout the live path renders. Gerard is judging the real artefact.</div>
+    <div style="background:#F4F1EC;padding:8px 11px;font-size:12px;line-height:1.45">
+      <strong>Visible in the sample:</strong> 13 of 36 transfers · 5 of 25 comparables · annual tax only · no maps. Each gap is footnoted on its page. A full pull fills them; the layout does not change.
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:5px">
+    <div style="font-size:15px;font-weight:700;color:#16324F">3 · The wiring</div>
+    <div style="font-size:12.5px;line-height:1.5">All three pieces are <strong>already on main</strong>, in <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">src/components/hub/split/</span> — they are simply never mounted. Today's <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">orders-split-view.tsx</span> still carries the scars: unused <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">preparedForName</span> / <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">preparedForCompany</span> state, a dangling props comment reading "Both conditions resolved server-side", and a trailing comment describing the two mounts that aren't there. This is a four-edit job, not a port.</div>
+
+    <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:1.45">
+      <div style="border-left:2px solid #C86A2A;padding-left:9px">
+        <strong>a · <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">hub/page.tsx</span></strong> — fetch <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">GET /api/concierge/access</span> and pass the result down. It returns <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">{canGenerate, featureOn}</span>, both resolved server-side. Add <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">access</span> to the <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">OrdersSplitView</span> props — that orphan comment is where it went.
+      </div>
+      <div style="border-left:2px solid #C86A2A;padding-left:9px">
+        <strong>b · state</strong> — one hook call: <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">const cp = useConciergeProfile(selected?.id ?? null, access)</span>. It owns profile, presentingRep, loading, busy, error, spend, gateOpen, criteriaOpen and the three calls. The existing <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">preparedFor*</span> state is what the gate's two inputs bind to — keep it.
+      </div>
+      <div style="border-left:2px solid #C86A2A;padding-left:9px">
+        <strong>c · the entry point is the Reports page</strong>, not the order pane — one of four report types in the New Report picker, listed in the same table. No <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">DocumentsPanel</span> change, and the order-pane tile from #159 is removed.
+      </div>
+      <div style="border-left:2px solid #C86A2A;padding-left:9px">
+        <strong>d · the two mounts</strong> — on the Reports page, not the order pane. Both are <strong>mounted only while open</strong>, by their own documented contract, so acknowledgement and slider state cannot survive a cancel:<br>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">{cp.gateOpen &amp;&amp; &lt;ConciergeCostGate … /&gt;}</span> — props: address, preparedForName, preparedForCompany, presentingRepName, presentingRepProblem, criteriaSummary, spend, submitting, error, onPreparedForName, onPreparedForCompany, onCancel, onConfirm.<br>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">{cp.criteriaOpen &amp;&amp; cp.profile &amp;&amp; &lt;ConciergeCriteriaPanel … /&gt;}</span> — props: profile, busy, error, onClose, onApply.
+      </div>
+    </div>
+
+    <div style="background:#FBF3EA;padding:8px 11px;font-size:12px;line-height:1.5;border-top:2px solid #C86A2A">
+      <strong>Settled — and not as this document first had it.</strong> The profile is <em>not</em> order-scoped. It is a courtesy report someone requests, so its entry point is the <strong>Reports page</strong>, alongside the three farming reports. The note in <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">documents-panel.tsx</span> was right: tying it to an order means you can only produce one for a property you already hold a file on, which defeats the purpose. The order-pane mount shipped in #159 comes off, and it is live in production with the flag on — take it down first. Everything else in #159 stays: the migration check and the tests.
+    </div>
+  </div>
+
+</section>
+
+<section class="page" style="font-family:'Instrument Sans',system-ui,sans-serif;color:#1C2430;display:flex;flex-direction:column;gap:13px;padding:40px 46px;box-sizing:border-box;height:100%">
+
+  <div style="display:flex;flex-direction:column;gap:5px">
+    <div style="font-size:15px;font-weight:700;color:#16324F">4 · Live versus missing</div>
+    <div style="font-size:12.5px;line-height:1.5">Confirmed: <strong>it is a wiring job.</strong> Everything below is on main.</div>
+    <div style="font-size:12px;line-height:1.5">
+      <strong>Routes</strong> — all eight: generate, get, criteria, render, pdf, access, spend, admin usage, plus the per-order lookup.<br>
+      <strong>Domain</strong> — 17 modules in <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">lib/domain/concierge/</span> incl. generate, comp-filter, normalize, metrics, platmap, render, and the document itself at <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">document/profile-document.tsx</span>.<br>
+      <strong>Schema</strong> — <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">lib/db/schema/concierge.ts</span>, three tables.<br>
+      <strong>Tests</strong> — access, comp-filter, metrics, normalize, platmap, render, formatters, and <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">api/concierge/routes.test.ts</span>, which asserts the one-spending-route split against the source.<br>
+      <strong>Missing</strong> — the mount, and only the mount.
+    </div>
+    <div style="background:#FBF3EA;padding:8px 11px;font-size:12px;line-height:1.5;border-top:2px solid #C86A2A">
+      <strong>Do first, in this order:</strong> (1) <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">CONCIERGE_PROFILE_ENABLED=false</span> in Production — takes the panel down with no deploy and closes the real exposure, which is the dead guard, not the panel's location. (2) Replace the guard. (3) Remove the order-pane mount, (4) wire the Reports entry point — both per section 3. (5) Flag back on, only once the guard is tested. The rest of #159 stays.
+    </div>
+    <div style="background:#FBF3EA;padding:8px 11px;font-size:12px;line-height:1.5">
+      <strong>Three things to verify</strong> — facts I can't read from source: (1) the migration lives at <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">docs/migration-concierge-profile.sql</span>, not a migrations folder — confirm it was applied in production; (2) <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">OPEN_SECURITY_ITEMS.md</span> records <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">schema/index.ts</span> once failing to re-export <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">concierge.ts</span> — reads as fixed, worth one grep; (3) the same doc lists <strong>no RLS</strong> on all three concierge tables.
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:5px">
+    <div style="font-size:15px;font-weight:700;color:#16324F">5 · The money</div>
+    <div style="font-size:12px;line-height:1.55">
+      <strong>The one charging route:</strong> <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">POST /api/concierge/profiles</span>. It is the only file that imports <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">generateConciergeProfile</span>, and a test asserts the criteria, render and pdf routes import neither it nor anything under <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">integrations/sitex</span>. A 200 costs one credit; any non-2xx costs nothing.
+      <br><br>
+      <strong>What stops a retry charging twice — and why it no longer does:</strong> the guard is one profile per order. The route calls <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">getProfileForOrder</span> before generating and returns <strong>409</strong> if a profile exists whose status is not <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">failed</span>. <strong>With the entry point on the Reports page there is no order, so this guard protects nothing.</strong> It has to be replaced before the flag goes back on — the gate being disabled in flight is a UI courtesy, not a guarantee.
+      <br><br>
+      <strong>The replacement:</strong> key on the <strong>resolved property identifier</strong> — the APN or SiteX location id the lookup returns, available before the spend — plus a window of <strong>minutes, not days</strong>: long enough that a double-click or refresh returns the existing profile, short enough that a genuine re-run next quarter still works, because comps move. <strong>The test that matters:</strong> two requests for the same property seconds apart spend one credit, not two.
+    </div>
+    <div style="background:#16324F;color:#fff;padding:9px 12px;font-size:12px;line-height:1.6">
+      <strong style="color:#F0C79A">The two environment variables</strong><br>
+      <span style="font-family:'IBM Plex Mono',monospace">CONCIERGE_PROFILE_ENABLED = true</span> — exact string, compared lower-cased and trimmed. Unset or malformed means OFF, deliberately, so a missing variable can never read as enabled.<br>
+      <span style="font-family:'IBM Plex Mono',monospace">SITEX_CONCIERGE_FEED_ID = 100001</span> — Title Profile_144. Required, with no fallback to <span style="font-family:'IBM Plex Mono',monospace">SITEX_FEED_ID</span> even though both are 100001 today; set in Preview and Production since 24 Aug 2026.
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <div style="font-size:15px;font-weight:700;color:#16324F">6 · Decisions already made</div>
+    <div style="font-size:12px;line-height:1.5"><strong style="color:#16324F">Comparables, and why the schema exists.</strong> SiteX accepts <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">comp_*</span> options and silently ignores them on our feed, proven with a byte-identical control — so <strong>the filtering is ours</strong>. Every candidate is stored with the first rule it failed, from a fixed list of eight, so a challenged comparable is explained from a record rather than reconstructed. <strong>maxComps is a ceiling, not a quota</strong> — seven qualifying comps means seven shown, never padded; the legacy report loosened filters until it hit a count, then printed the original criteria. Operators cannot hand-pick; they move criteria, on the issued profile, after the spend.</div>
+    <div style="font-size:12px;line-height:1.5"><strong style="color:#16324F">Spend and safety.</strong> An address resolving to anything other than exactly one property produces an error and no report, never a fallback. The presenting rep is resolved server-side, never from the browser. <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">sitex_search_id</span> is recorded on every call — the only handle tying a report to an invoice line.</div>
+    <div style="font-size:12px;line-height:1.5"><strong style="color:#16324F">Where it lives.</strong> A requested courtesy report, not an order document — Gerard's call, and the <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">documents-panel.tsx</span> note was right all along. Requiring an order would mean only a property you already hold a file on could be profiled, which is the opposite of the purpose.</div>
+    <div style="font-size:12px;line-height:1.5"><strong style="color:#16324F">Document and process.</strong> Eight pages, fixed order, letter. All data kept; visual noise removed instead, caveats as one footnote per page. No rebase of <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">feat/concierge-operator-ui</span> — wired fresh against main.</div>
+  </div>
+
+</section>
+
+</doc-page>
+</x-dc>
+</body>
+</html>

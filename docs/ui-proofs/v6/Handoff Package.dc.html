@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  doc-page:not(:defined){visibility:hidden}
+  body{margin:0}
+  a{color:#1B2A4A;text-decoration:none}
+  a:hover{color:#F26B2B}
+  h2{font-size:17px;font-weight:700;color:#1B2A4A;margin:26px 0 8px;padding-bottom:5px;border-bottom:2px solid #1B2A4A}
+  h3{font-size:14px;font-weight:700;color:#1B2A4A;margin:18px 0 5px}
+  p{font-size:12.5px;line-height:1.55;margin:0 0 8px}
+  li{font-size:12.5px;line-height:1.55;margin-bottom:3px}
+  ul,ol{margin:0 0 9px;padding-left:19px}
+  code{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px;background:#F1F2F5;padding:1px 4px;border-radius:3px}
+  table{width:100%;border-collapse:collapse;font-size:11.5px;margin:0 0 10px}
+  th{text-align:left;padding:6px 9px;background:#1B2A4A;color:#fff;font-weight:600}
+  td{padding:6px 9px;border-bottom:1px solid #E2E5EA;vertical-align:top;line-height:1.45}
+  .rule{background:#FFF6EF;border-left:3px solid #F26B2B;padding:10px 13px;margin:0 0 10px}
+  .rule p{margin:0}
+</style>
+<script src="./doc-page.js"></script>
+</helmet>
+
+<doc-page size="letter">
+
+<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#1A1A2E">
+
+<div style="font-size:11px;color:#6B7280;display:flex;justify-content:space-between;padding-bottom:7px;margin-bottom:11px;border-bottom:1px solid #E2E5EA">
+  <span>Implementation handoff</span>
+  <span>td-hub @ main · 17 Sep 2026</span>
+</div>
+
+<div style="font-size:25px;font-weight:700;color:#1B2A4A;letter-spacing:-0.015em;margin-bottom:6px">Reports &amp; Farming PDFs</div>
+<p style="font-size:14px;color:#4B5563;margin-bottom:10px">Implementation spec for four report types: one list page, one modal, one delivery log and three print documents. The design mocks are the picture and this is the translation. Every reference below was read from <code>main</code>.</p>
+<div class="rule" style="background:#F1F5F9;border-left-color:#1B2A4A"><p><strong>Superseded since 17 Sep. Follow the code on these two:</strong> (1) Concierge list wording has no credit language. It reads <em>Property lookup</em> / <em>Failed before the lookup</em> / <em>Failed after the lookup</em>, and a test enforces it. (2) Delivery: green means <em>proved delivered</em> via the event webhook, and SendGrid acceptance reads as <em>Sent</em> (migrations 0060–0061). Wherever this document says "1 credit", "no credit charged" or "delivered", read it that way.</p></div>
+
+<div class="rule">
+  <p><strong>Two decisions that must survive translation.</strong> They are cheap now and expensive later, and both are the kind that get quietly dropped.</p>
+  <p style="margin-top:6px"><strong>1 · Notify rep ≠ Send to agent.</strong> Notifying the branded rep that a report exists and delivering it to an outside agent are different acts. Only the first is in scope. Do not name it "Send".</p>
+  <p style="margin-top:4px"><strong>2 · The log row is written in the same transaction as the attempt.</strong> Including failures. A send that cannot write its log row is not sent. The prelim path has the opposite rule — logging never blocks a send — and recorded 1 delivery out of 1,083.</p>
+</div>
+
+<h2>Part A · Reports list page</h2>
+
+<p><strong>Route:</strong> <code>/reports</code> in the admin shell (the <code>SidebarNav</code> app, not <code>(hub)</code> or <code>(sales)</code>). Add to <code>NAV</code> in <code>src/components/admin/sidebar-nav.tsx</code> as a <code>kind:'link'</code> entry after Documents. Permission via the existing <code>allowedPaths</code> mechanism.</p>
+
+<p><strong>Component:</strong> clone the structure of <code>src/components/admin/contacts/company-type-list-page.tsx</code>. Everything except the columns and the filter values is that file: <code>p-6</code> wrapper, <code>text-2xl font-semibold text-[#1A1A2E]</code> title with <code>text-sm text-[#6B7280] mt-1</code> subtitle, Add New button (<code>bg-[#1B2A4A] … rounded-lg</code> with the plus svg), debounced 300 ms search, segmented filter, right-aligned count, <code>bg-white rounded-lg border border-gray-200 shadow-sm</code> table card with <code>bg-gray-50/60</code> head and <code>divide-y divide-gray-100</code> body, and the pager. <code>PAGE_SIZE = 25</code>.</p>
+
+<h3>Two departures from the pattern, both deliberate</h3>
+<ul>
+  <li><strong>Filter values.</strong> Active / Inactive / All is meaningless for a report. Same control, values <em>All / Farming / Concierge</em>.</li>
+  <li><strong>Subject and Settings are two columns, not one.</strong> This is the only new idea on the screen and the reason one table holds four types. Subject is always the place or property — the thing an agent recognises. Settings is always the type-specific parameters. Never merge them.</li>
+</ul>
+
+<h3>Columns</h3>
+<table>
+  <tr><th>Column</th><th>Content</th><th>Notes</th></tr>
+  <tr><td>Report</td><td>Type name; sub-line is the source</td><td>Sub-line reads "Dataset" for the three farming types, "1 credit spent" / "Generating" / "Failed · no credit charged" for Concierge</td></tr>
+  <tr><td>Subject</td><td>Area, county, or property address; sub-line qualifies it</td><td>Santa Monica / Single family · Orange County / 44 cities · 1247 Ocean Avenue / Santa Monica, CA 90401</td></tr>
+  <tr><td>Settings</td><td>The parameters that built it</td><td>"6 months to August 2026" · "Top 10 by turnover" · "0.5 mi · 12 mo · ±20% size"</td></tr>
+  <tr><td>Branded To</td><td>Sales rep the PDF footer carries</td><td></td></tr>
+  <tr><td>Created</td><td>Short form, "16 Sep, 2:14pm"</td><td></td></tr>
+  <tr><td>Delivery</td><td>Last delivery + dot; opens the log</td><td>Green delivered · red failed · grey never sent. Reads the log, never a boolean on the report row</td></tr>
+  <tr><td>Actions</td><td>Download · Notify rep (or Comparables for Concierge)</td><td>A generating row shows "Building…" and no actions; a failed one shows "Try again"</td></tr>
+</table>
+
+<p><strong>Layout:</strong> use <code>table-layout:fixed</code> with declared column widths and <code>truncate</code> on Report / Subject / Settings / Branded To. With seven columns, <code>table-layout:auto</code> lets un-wrappable content push Actions off-screen — that cost four iterations in the mock.</p>
+
+<p><strong>Data:</strong> one <code>GET /api/reports?page&amp;pageSize&amp;type&amp;search</code> returning a union across the four report tables, sorted <code>created_at desc</code>, each row stamped with its type — the shape <code>getSalesAllReportData()</code> produced in legacy. Include the latest delivery per report so the Delivery cell needs no second fetch.</p>
+
+<h2>Part B · New Report modal</h2>
+
+<p><strong>Shell:</strong> <code>src/components/shared/action-modals/modal-shell.tsx</code> as-is. Navy <code>#1B2A4A</code> header at <code>px-5 py-3</code>, <code>text-sm font-semibold</code> title, <code>text-xs text-white/50 font-mono</code> subtitle carrying the step, Escape closes, <code>size="default"</code> (max-w-lg). Body fields follow <code>company-form-modal.tsx</code>: labels <code>text-xs font-medium</code>, inputs <code>w-full h-10 px-3 border border-gray-200 rounded-lg text-sm</code> with the <code>focus:ring-[#1B2A4A]/20</code> ring, footer two buttons <code>flex-1 h-10</code> — Cancel bordered, submit <code>bg-[#1B2A4A]</code>.</p>
+
+<p><strong>Step 1 — type.</strong> Four rows: Sales Activity, Carrier Route Analysis, County Sales (each "Needs a dataset"), and Concierge Profile, marked with a <code>1 credit</code> pill. Picking Concierge does <em>not</em> continue to step 2 — it opens the existing <code>ConciergeCostGate</code>, which is already built on main and merely unmounted.</p>
+
+<p><strong>Step 2 — dataset and options.</strong> Source first, as a radio pair: <em>Upload a CSV</em> (enabled) and <em>Pull from SiteX Farms</em> (disabled, "not connected yet"). This is the field that makes the file temporary rather than structural. Then per type:</p>
+
+<table>
+  <tr><th>Type</th><th>Fields</th></tr>
+  <tr><td>Sales Activity</td><td>CSV · area name · property type · window (3 / 6 / 12 months) · sales rep</td></tr>
+  <tr><td>Carrier Route Analysis</td><td>CSV · area name · rank by (turnover / non-owner / units / sales / price / years held) · sales rep</td></tr>
+  <tr><td>County Sales</td><td>CSV · county (LA / Orange / Riverside / San Bernardino / San Diego / Ventura) · month · sales rep</td></tr>
+</table>
+
+<p>Sales rep is required on all three and is what the PDF footer prints. Whoever is picked also finds the report in their own list.</p>
+
+<h2>Part C · Delivery log</h2>
+
+<p>Build this with the table, not with the send. Nothing depends on the reports table yet, which makes it the cheap place to get right.</p>
+
+<table>
+  <tr><th>Column</th><th>Purpose</th></tr>
+  <tr><td><code>report_type</code> + <code>report_id</code></td><td>What was delivered</td></tr>
+  <tr><td><code>kind</code></td><td><code>notify_rep</code> today; <code>send_to_agent</code> later without a migration</td></tr>
+  <tr><td><code>recipient_name</code>, <code>recipient_email</code></td><td>A rep today, an agent contact later — same two columns</td></tr>
+  <tr><td><code>sent_by</code></td><td>Acting user</td></tr>
+  <tr><td><code>attempted_at</code></td><td>Of the attempt, not of the success</td></tr>
+  <tr><td><code>outcome</code>, <code>outcome_detail</code></td><td><code>delivered</code> / <code>failed</code> + the provider's reason</td></tr>
+  <tr><td><code>payload_mode</code></td><td><code>attachment</code> or <code>signed_link</code>, and the link's expiry</td></tr>
+</table>
+
+<div class="rule">
+  <p><strong>Write rule.</strong> One row per attempt, in the same transaction as the attempt, failures included. If the log write fails, the send fails. Not best-effort, not fire-and-forget, not a queue that can drop.</p>
+  <p style="margin-top:5px"><strong>Read rule.</strong> The Delivery column derives from this table. Never denormalise to a <code>sent</code> boolean on the report row — a flag and a log disagree eventually, and then neither is trusted.</p>
+  <p style="margin-top:5px"><strong>Never sent reads differently from delivered.</strong> Silence looking like success on every screen anyone checked is the actual failure being designed against.</p>
+</div>
+
+<p><strong>No permanent public link.</strong> Legacy wrote these PDFs to S3 with public read and emailed the raw URL; the URLs are guessable and the reports carry property and sales data. Deliver as an attachment or a short-lived signed link. <code>render.ts</code> already keys PDFs per render under <code>concierge/{id}/profile-{timestamp}.pdf</code> and serves them through our own route — follow that, and record which mode was used.</p>
+
+<h2>Part D · The three farming PDFs</h2>
+
+<p><strong>The most important sentence in this document:</strong> the hub does not render PDFs from HTML. Legacy went HTML → wkhtmltopdf; the hub uses <code>@react-pdf/renderer</code> via <code>renderToBuffer</code>, as in <code>src/lib/domain/concierge/render.ts</code>. So <code>Farming Reports Family.dc.html</code> is a <em>picture of the intended output</em>, not a template. It cannot be dropped in, and lifting its CSS would fail in ways that only show on the page.</p>
+
+<h3>The pattern to follow: profile-document.tsx</h3>
+<p>Build the three as sibling modules to <code>document/profile-document.tsx</code>, reusing its conventions exactly:</p>
+<ul>
+  <li><strong><code>Shell</code> component</strong> — one <code>&lt;Page size="LETTER"&gt;</code> per page with the navy masthead bar and a <code>fixed</code> footer carrying "Page X of Y". This is the shared masthead and footer the family needs; it already exists.</li>
+  <li><strong><code>TEMPLATE_VERSION</code></strong> — stamp it on every generated row so an old PDF is always tied to the template that made it. Bump on layout change.</li>
+  <li><strong>No flex <code>gap</code>.</strong> react-pdf's layout engine ignores it. Use <code>marginRight</code> on every tile plus a <code>tileLast</code> override — the comment in that file records the bug this caused.</li>
+  <li><strong><code>Font.registerHyphenationCallback((w) =&gt; [w])</code></strong> — without it "LOS ANGELES" renders as "LOS ANGE-LES". These reports are full of city names.</li>
+  <li><strong>Absences are rendered, never filled.</strong> <code>GAP = '—'</code> for a missing value, the <code>Absent</code> box for a missing section, with a sentence saying why. Applies directly: a city with no condo sales gets an em dash, not a zero.</li>
+  <li><strong>The <code>fmt</code> helpers</strong> — <code>money</code>, <code>moneyShort</code>, <code>numf</code>, <code>year</code>, <code>sqft</code>, <code>dt</code>. Note <code>year</code> is deliberately separate so a year can never gain a thousands separator. Reuse them; do not write new ones.</li>
+  <li><strong>Charts via react-pdf <code>Svg</code> primitives</strong> (<code>Rect</code>, <code>Line</code>, <code>SvgText</code>), as <code>PriceChart</code> does — not a charting library.</li>
+</ul>
+
+<h3>Tokens: take the document's, not the mock's</h3>
+<p>The mock uses Instrument Sans with <code>#16324F</code> / <code>#C86A2A</code>. The real document component uses Helvetica with <code>NAVY #1B2A4A</code>, <code>ORANGE #F26B2B</code>, <code>MUTED #526174</code>, <code>BORDER #D7DDE5</code>, <code>TINT #F8F9FA</code>. <strong>Use the document component's values.</strong> That makes all four artefacts genuinely one family rather than approximately one, and it is the reason to translate rather than port.</p>
+
+<p>One deliberate divergence: <code>profile-document.tsx</code> sets body text at 8.5pt with 6pt tile labels, which suits a reference document read at a desk. These three are leave-behinds handed across a table. Set body 9.5pt, table cells 8.5pt, tile labels 7pt minimum. Nothing below 7pt.</p>
+
+<h3>Shared footer — the one thing profile-document doesn't have</h3>
+<p>The concierge profile lists the presenting rep as key-value rows. These three are branded leave-behinds: the rep's <strong>photo, name, title, phone and email</strong> sit in an identical block on every page of every report. Build it once as a <code>RepFooter</code> component shared by all three.</p>
+<ul>
+  <li>Photo is a react-pdf <code>&lt;Image&gt;</code> from a data URI loaded out of our own S3 — follow <code>loadImage()</code> in <code>render.ts</code>. Legacy's <code>checkRemoteFile</code> HTTP HEAD does not come across.</li>
+  <li>A rep with no photo renders the block without it. Never a placeholder silhouette.</li>
+  <li>Customer service <code>(866) 724-1050 · cs@pct.com</code> and <code>openorders@pct.com</code> on all three — legacy varied this per report for no reason.</li>
+</ul>
+
+<h3>Report 1 · Sales Activity</h3>
+<p>One page. Six headline tiles in two rows of three (three navy, three tinted), then a month-by-month table, newest first.</p>
+<table>
+  <tr><th>Element</th><th>Value</th><th>Dataset field</th></tr>
+  <tr><td>Tiles</td><td>Homes sold · median sale price · median $/sq ft · typical bedrooms · typical bathrooms · owned by non-occupants %</td><td>count, median(price), median(price/area per sale), median(beds), median(baths), share(ownerOccupied = false)</td></tr>
+  <tr><td>Table</td><td>Month · sales · median price · median $/sq ft · change</td><td>Grouped by calendar month within the window</td></tr>
+  <tr><td>Change</td><td>vs the previous month in the window, one decimal, em dash on the oldest row</td><td>Not year-over-year</td></tr>
+</table>
+<p>Legacy's month filter matched month-<em>number</em> regardless of year, so a 12-month run ignored the year entirely. The dataset window must be a real date range.</p>
+
+<h3>Report 2 · Carrier Route Analysis</h3>
+<p>One page. Six standout tiles, then ten routes ranked by the chosen metric.</p>
+<table>
+  <tr><th>Element</th><th>Value</th></tr>
+  <tr><td>Standout tiles</td><td>Fastest turnover · most non-owner occupied · longest held · largest mail drop · most sales · highest median price</td></tr>
+  <tr><td>Table</td><td>Route · turnover · non-owner · yrs held · units · sales · median price</td></tr>
+  <tr><td>Definitions</td><td>Three one-line explanations under the table: turnover, non-owner, units. Agents read these, not analysts</td></tr>
+</table>
+<div class="rule"><p><strong>Defect fixed, not ported:</strong> each standout tile prints the route that won <em>its own</em> metric. Legacy's "Highest Non-Owner" tile printed the turnover winner's route beside the non-owner percentage. Compute each tile from its own field.</p></div>
+<p>Route ids arrive as ZIP+route concatenated (<code>904031C001</code>) and print hyphenated (<code>90403-1C001</code>) — legacy's <code>separateZipRoute()</code> logic. Standouts are the best of the ten shown, not of the whole file; say so on the page.</p>
+
+<h3>Report 3 · County Sales</h3>
+<p>Multi-page, 22 cities per page, alphabetical, case-normalised. Two column groups — Houses (navy header) and Condominiums (orange header) — each with Sold and Median price, plus a county total row on the last page.</p>
+<div class="rule">
+  <p><strong>Defect fixed, not ported:</strong> the column says Median and legacy computed the mean. The label was right, so the maths changed. Every price in the family is a true median, including price per foot, which is the median of each home's own rate rather than a ratio of two sums.</p>
+  <p style="margin-top:5px"><strong>This is the one constraint on the data source.</strong> A median cannot be computed from pre-averaged city figures, and neither can an honest county total. County Sales needs <em>per-sale rows</em>. If SiteX Farms only ever delivers city-level averages, the median label cannot be honoured and the defect has been rebuilt with better typography. Establish the shape of that feed before this report is built.</p>
+</div>
+
+<h3>Naming, everywhere</h3>
+<p>Three names, used in the class, the route, the list label, the page masthead and the email subject, with no aliases: <strong>Sales Activity</strong>, <strong>Carrier Route Analysis</strong>, <strong>County Sales</strong>. Legacy had <code>SalesActivityReport</code> generating the County report, the list label "Sales Activity" meaning the Snapshot, and the two email subjects swapped. The class that generates County Sales is named for County Sales.</p>
+
+<h2>Dataset contracts, not CSV contracts</h2>
+<p>Each report reads a named dataset. CSV upload is one producer; SiteX Farms will be another. Nothing in the documents changes when the second arrives — which only holds if the dataset, not the file, is the interface.</p>
+<table>
+  <tr><th>Dataset</th><th>Shape</th><th>Row</th></tr>
+  <tr><td>Area sales</td><td>Per-sale rows + area name, window, type filter</td><td>price, floor area, beds, baths, sale date, owner-occupied, property type</td></tr>
+  <tr><td>Route metrics</td><td>Pre-aggregated per route; we rank and format only</td><td>route id, ZIP, city, units, sales, median price, turnover, non-owner share, median years held</td></tr>
+  <tr><td>County sales</td><td>Per-sale rows + county, month</td><td>city, price, property type, sale date</td></tr>
+</table>
+<p>Property type must collapse to a known set. Legacy counted only <code>rsfr</code> and <code>rcon</code> after lowercasing, so <code>Condo</code> and <code>SFR</code> were silently dropped while <code>RCON</code> and <code>RSFR</code> worked — the subtitle promised new homes that no column could hold. Unrecognised types must be reported as a count, not discarded in silence.</p>
+
+<h2>Build order</h2>
+<ol>
+  <li><strong>Concierge first, and separately</strong> — flag off in Production, replace the duplicate-charge guard, remove the order-pane mount, wire the Reports entry point, flag back on. See the Concierge handover; the guard is the blocking item.</li>
+  <li>Reports list page + delivery log table, together.</li>
+  <li>New Report modal, farming types only.</li>
+  <li>The three PDF documents.</li>
+  <li><code>/sales/reports</code> — same table in the sales shell, filtered to the rep, Branded To becomes Made By, no send action. Reps have this list in legacy today, so omitting it permanently is a regression.</li>
+</ol>
+
+<p style="margin-top:14px;padding-top:9px;border-top:1px solid #E2E5EA;font-size:11.5px;color:#6B7280">Design mocks: <code>Reports Section v2.dc.html</code> (list page, modal, delivery log) and <code>Farming Reports Family.dc.html</code> (three PDFs, plus a page of family notes). Concierge wiring is specified separately in <code>Concierge Profile Handover.dc.html</code>. Sample figures in the mocks are realistic and internally consistent but not from a real extract — except the Concierge profile, which is rendered from the stored 25 August payload.</p>
+
+</div>
+
+</doc-page>
+</x-dc>
+</body>
+</html>

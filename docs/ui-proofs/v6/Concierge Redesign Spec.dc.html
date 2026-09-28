@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  doc-page:not(:defined){visibility:hidden}
+  body{margin:0}
+  a{color:#1B2A4A;text-decoration:none}
+  a:hover{color:#F26B2B}
+  h2{font-size:16px;font-weight:700;color:#1B2A4A;margin:22px 0 7px;padding-bottom:5px;border-bottom:2px solid #1B2A4A}
+  p{font-size:12.5px;line-height:1.55;margin:0 0 8px}
+  li{font-size:12.5px;line-height:1.55;margin-bottom:3px}
+  ul,ol{margin:0 0 9px;padding-left:19px}
+  code{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px;background:#F1F2F5;padding:1px 4px;border-radius:3px}
+  table{width:100%;border-collapse:collapse;font-size:11.5px;margin:0 0 10px}
+  th{text-align:left;padding:6px 8px;background:#1B2A4A;color:#fff;font-weight:600}
+  td{padding:6px 8px;border-bottom:1px solid #E2E5EA;vertical-align:top;line-height:1.45}
+  .rule{background:#FFF6EF;border-left:3px solid #F26B2B;padding:10px 13px;margin:0 0 10px}
+  .rule p{margin:0}
+  .ok{color:#15803D;font-weight:600}
+  .derive{color:#1B2A4A;font-weight:600}
+  .gap{color:#B42318;font-weight:600}
+  .ask{color:#92400E;font-weight:600}
+</style>
+<script src="./doc-page.js"></script>
+</helmet>
+
+<doc-page size="letter">
+<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#1A1A2E">
+
+<div style="font-size:11px;color:#6B7280;display:flex;justify-content:space-between;padding-bottom:7px;margin-bottom:11px;border-bottom:1px solid #E2E5EA">
+  <span>Implementation handoff · item 4</span>
+  <span>td-hub @ main · 23 Sep 2026</span>
+</div>
+
+<div style="font-size:25px;font-weight:700;color:#1B2A4A;letter-spacing:-0.015em;margin-bottom:6px">Concierge Profile redesign</div>
+<p style="font-size:14px;color:#4B5563;margin-bottom:12px">This is the redesign of the eight-page document itself: what <code>profile-document.tsx</code> should become. The picture is <code>Concierge Property Profile v3.dc.html</code>, rendered from the stored 24 Aug SiteX payload for 10523 Stonybrook Ave. <code>Concierge Profile Handover.dc.html</code> covers wiring only, not this.</p>
+
+<div class="rule">
+  <p><strong>Short answer to "is it a layout job or a data job":</strong> mostly layout. Every page draws on fields you already store, or on values derived from them, with <strong>one real gap: the legal description</strong>, plus three fields to confirm are kept on transfers and owners. No time series, no photos, no neighbourhood or school data, no listing history. None of the "likely gaps" apply.</p>
+</div>
+
+<h2>Translation rules, same as Part D of the Reports handoff</h2>
+<ul>
+  <li><strong>Tokens come from the document, not the mock.</strong> v3 uses Instrument Sans with <code>#16324F</code> / <code>#C86A2A</code> / warm greys. Keep the component's Helvetica, <code>NAVY #1B2A4A</code>, <code>ORANGE #F26B2B</code>, <code>MUTED #526174</code>, <code>BORDER #D7DDE5</code> and <code>TINT #F8F9FA</code>. The redesign is about structure and hierarchy. The palette shouldn't change.</li>
+  <li><strong>No flex <code>gap</code>.</strong> v3 relies on <code>gap:2px</code> tile grids throughout. Replace them with margins and the <code>tileLast</code> pattern.</li>
+  <li><strong>Keep</strong> <code>Shell</code>, <code>TEMPLATE_VERSION</code> (bump it), the hyphenation callback, the <code>fmt</code> helpers, <code>GAP</code>/<code>Absent</code> and the Svg primitives.</li>
+  <li><strong>Type floor rises.</strong> The current 8.5pt body and 6pt labels become 9.5pt body, 8.5pt table cells and a 7pt minimum, matching the farming family. It's the same audience across a table.</li>
+</ul>
+
+<h2>What the redesign changes, in one list</h2>
+<ul>
+  <li><strong>The value leads.</strong> Page 1 is address, then one headline value with its range, then five facts. It replaces the current three-cell metric bar.</li>
+  <li><strong>Plain section names</strong> that read as sentences: The property · Owners and taxes · Ownership history · Where the comparables are · How they compare · The five sales in detail · Parcel map.</li>
+  <li><strong>Each page opens with a one-line summary</strong> generated from data, e.g. "Two individuals are vested. Taxes for 2025 total $1,956 and are current."</li>
+  <li><strong>One caveat per page</strong>, as a footnote line. No inline caveat tags, no category chips, no mono micro-labels.</li>
+  <li><strong>Orange means one thing:</strong> foreclosure-related records and the one absence that changes the reading (no subject sale). Navy marks the current vesting deed.</li>
+  <li><strong>Tax table goes from ten columns to five:</strong> installment, amount, due, delinquent after, status.</li>
+  <li><strong>Comparable numbers are identical on pages 5, 6 and 7</strong>, and the page says so.</li>
+</ul>
+
+<h2>Page by page: what each needs, against what you store</h2>
+<p style="font-size:11.5px;color:#6B7280"><span class="ok">Stored</span> = in your inventory as-is · <span class="derive">Derived</span> = computed from stored fields, no new data · <span class="ask">Confirm</span> = probably in the raw payload, check it's persisted · <span class="gap">Gap</span> = not stored</p>
+
+<table>
+  <tr><th style="width:17%">Page</th><th>Needs</th><th style="width:30%">Status</th></tr>
+  <tr><td><strong>1 · Overview</strong></td><td>Address, city/ZIP, APN · comp map as hero · headline value + range · building sf, beds/baths, year built, lot sf, comp count · presenting rep name/email/phone · prepared-for · report and capture dates</td><td><span class="ok">Stored</span>, except the value: <span class="derive">Derived</span> as subject area × median $/sf, with the range as area × the selected comps' min/max $/sf. Map is optional; no map means the address sits on a navy band.</td></tr>
+  <tr><td><strong>2 · The property</strong></td><td>House: area, beds, baths, year, use · land: lot sf + acres, coverage %, land and improvement value · legal: tract, lot, county, FIPS, as-recorded string · "no subject sale" callout</td><td>House and land are <span class="ok">Stored</span>; coverage % and acres are <span class="derive">Derived</span>. <span class="gap">Gap: legal description</span> (tract, lot, as-recorded text) isn't in your inventory. The callout comes from the absence of last sale price.</td></tr>
+  <tr><td><strong>3 · Owners and taxes</strong></td><td>Vested owner names, display-cased, with the as-recorded form · assessed total with land/improvement split bar · two installment rows + annual total · tax/assessed %, foreclosure count, document count</td><td><span class="ask">Confirm: owner names.</span> They aren't in your list, but the current page 3 is headed "Ownership", so check where it gets them. Tax is <span class="ok">Stored</span>. Installments and the three tiles are <span class="derive">Derived</span> (see decision 2).</td></tr>
+  <tr><td><strong>4 · Ownership history</strong></td><td>Every transfer: date, document type, document number · current-vesting deed flagged · counts by type · foreclosure records highlighted</td><td><span class="ask">Confirm: transfers keep document type and number</span>, not only date and price. Counts and the current-vesting flag are <span class="derive">Derived</span> from type, meaning the latest deed.</td></tr>
+  <tr><td><strong>5 · Comparable locations</strong></td><td>Comp map · per comp: map number, address, distance · applied radius, furthest selected</td><td><span class="ok">Stored</span> (comps, metrics, comp map).</td></tr>
+  <tr><td><strong>6 · How they compare</strong></td><td>Per comp: price, $/sf, area, year · subject marked against the range · medians</td><td><span class="ok">Stored</span>. Bars are Svg <code>Rect</code>, as in <code>PriceChart</code>.</td></tr>
+  <tr><td><strong>7 · Five sales in detail</strong></td><td>One card per selected comp: address, sale date, price, $/sf, area, beds/baths, year, distance</td><td><span class="ok">Stored</span>. The count is whatever passed the filter, and the heading follows it ("The five sales", "The seven sales").</td></tr>
+  <tr><td><strong>8 · Parcel map and sources</strong></td><td>Plat map · data sources, capture date, <code>sitex_search_id</code> · comp criteria as applied · what's missing from this payload</td><td><span class="ok">Stored</span>. Plat map optional, shown with <code>Absent</code> when missing.</td></tr>
+</table>
+
+<h2>Three decisions to confirm with Gerard before building</h2>
+<ol>
+  <li><strong>A headline value on page 1.</strong> The redesign leads with "$749,400, range $701,900 – $779,200, informational, not an appraisal." It's derived honestly, but printing a single number is a product and compliance call the current document doesn't make. If it's a no, page 1 leads with the median comparable $/sf and range instead, and the layout holds.</li>
+  <li><strong>Installments derived from the annual amount.</strong> The payload has an annual total and a status, so v3 halves it and prints California's statutory due and delinquency dates, and says so on the page. That's correct for California counties only. If coverage ever leaves California, it needs a per-state rule or the table falls back to a single annual row.</li>
+  <li><strong>Legal description: fetch or absent.</strong> Either add it to what's persisted from the payload (check the raw response first, since the v3 sample shows it was present on 24 Aug), or ship page 2 with the <code>Absent</code> box. Don't block the redesign on it.</li>
+</ol>
+
+<h2>Still true from earlier</h2>
+<ul>
+  <li>The Concierge sample has no rep photo, so the photo gap in the farming footer doesn't apply here.</li>
+  <li>The comparables rules stand: stored with the first rule each failed, maxComps is a ceiling, criteria printed as applied, and no hand-picking.</li>
+  <li>List-page wording has been superseded since the Reports handoff. Concierge rows read <em>Property lookup</em> / <em>Failed before the lookup</em> / <em>Failed after the lookup</em>, with no credit language, and green means proved delivered by the event webhook, not accepted. Follow the code, not the 17 Sep handoff, on both.</li>
+</ul>
+
+<p style="margin-top:12px;padding-top:9px;border-top:1px solid #E2E5EA;font-size:11.5px;color:#6B7280">Picture: <code>Concierge Property Profile v3.dc.html</code>, eight pages from the stored payload. Reference implementation: <code>src/lib/domain/concierge/document/profile-document.tsx</code>. The v3 file is plain HTML with inline styles, readable as text. Every value on it traces to the 24 Aug extract (<code>extract-1.txt</code>, <code>extract-2.txt</code>).</p>
+
+</div>
+</doc-page>
+</x-dc>
+</body>
+</html>

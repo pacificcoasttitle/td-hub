@@ -70,6 +70,16 @@ export interface NormalizedSubject {
   /** Null is a legitimate answer — see the module note. */
   lastSaleDate: string | null;
   lastSalePrice: number | null;
+  /**
+   * SiteX's OWN figure, from SaleLoanInfo.PricePerSQFT. Never price / area.
+   *
+   * The payload carries two building areas — PropertyCharacteristics.BuildingArea
+   * and Neighborhood[].BuildingArea, 786 and 793 on the same parcel — so a
+   * computed rate depends on which one you happen to divide by, and nothing
+   * says which is right. concierge_comps.price_per_sqft already carries the
+   * same annotation: recomputing from BuildingArea was the legacy bug.
+   */
+  lastSalePricePerSqft: number | null;
 }
 
 export interface NormalizedTax {
@@ -147,8 +157,18 @@ export function normalizeSubject(feed: Raw): NormalizedSubject {
     yearBuilt: int(ch.YearBuilt),
     latitude: num(ch.Latitude),
     longitude: num(ch.Longitude),
-    lastSaleDate: toIsoDate(sl.LastTransferRecordingDate ?? sl.RecordingDate ?? sl.LastSaleDate),
-    lastSalePrice: num(sl.LastTransferValue ?? sl.SalePrice ?? sl.LastSalePrice),
+    // SalesPrice and TransferDate FIRST, because those are the names feed
+    // 100001 actually uses. The three alternatives each name led with —
+    // LastTransferValue, SalePrice, LastSaleDate — appear in NO stored payload:
+    // SaleLoanInfo carries exactly Book, DocumentNumber, LenderName, LoanAmount,
+    // Page, PricePerSQFT, SalesPrice, SellerName, TitleCompany, TransferDate.
+    // Reading only the absent names is why every profile printed "No subject
+    // sale on record" while the payload held a price and a date.
+    // The others are kept as fallbacks: they cost nothing and another feed id
+    // may well use them.
+    lastSaleDate: toIsoDate(sl.TransferDate ?? sl.LastTransferRecordingDate ?? sl.RecordingDate ?? sl.LastSaleDate),
+    lastSalePrice: num(sl.SalesPrice ?? sl.LastTransferValue ?? sl.SalePrice ?? sl.LastSalePrice),
+    lastSalePricePerSqft: num(sl.PricePerSQFT),
   };
 }
 

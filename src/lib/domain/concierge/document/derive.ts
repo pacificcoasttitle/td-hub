@@ -201,7 +201,15 @@ export interface Installment {
   label: 'First' | 'Second';
   amount: number | null;
   due: string;
-  delinquentAfter: string;
+  /**
+   * The statutory date after which the instalment attracts a penalty.
+   *
+   * Named `lateAfter` rather than the county's own "delinquent after": the
+   * document must not print the word "delinquent" anywhere, and a field name
+   * that carries it invites a column header that does. The date itself is the
+   * same for every California parcel and discloses nothing about an owner.
+   */
+  lateAfter: string;
 }
 
 /**
@@ -223,10 +231,124 @@ export function californiaInstallments(tax: NormalizedTax, state: string | null 
   const half = typeof tax.taxAmount === 'number' && tax.taxAmount > 0 ? tax.taxAmount / 2 : null;
   const y = tax.year;
   return [
-    { label: 'First', amount: half, due: `Nov 1, ${y}`, delinquentAfter: `Dec 10, ${y}` },
-    { label: 'Second', amount: half, due: `Feb 1, ${y + 1}`, delinquentAfter: `Apr 10, ${y + 1}` },
+    { label: 'First', amount: half, due: `Nov 1, ${y}`, lateAfter: `Dec 10, ${y}` },
+    { label: 'Second', amount: half, due: `Feb 1, ${y + 1}`, lateAfter: `Apr 10, ${y + 1}` },
   ];
 }
+
+// ─── Which layer page 4 can be built from ───────────────────────────────────
+//
+// Page 4 has three layers and the middle one has to be visible on the page.
+//
+//   1. TitlePoint's tax report — installments, exemption, special assessments,
+//      bonds, supplementals. Everything the page was specified to show.
+//   2. SiteX AssessmentTaxInfo — assessed value, the land/improvement split
+//      and the annual amount. THINNER, and the page must say so and give an
+//      as-of date, because otherwise a reader cannot tell why one profile
+//      shows installments and another does not.
+//   3. Neither — NO PAGE 4 AT ALL. Seven pages. Not an empty shell and not a
+//      "not available" tile, which is the one thing the handoff rules out
+//      twice.
+//
+// Verified against all three stored payloads: feed 100001 carries 2 of the 7
+// fields page 4 needs (scripts/audit/concierge-tax-fields-available.ts), which
+// is exactly layer 2 and is why layer 2 exists rather than being folded into
+// layer 1 as a degraded case.
+
+/** One statutory instalment as TitlePoint sends it — `Installments.Item`. */
+export interface TaxReportInstallment {
+  /** TitlePoint's own key: '1st' | '2nd'. Kept as sent rather than parsed. */
+  number: string;
+  amount: number | null;
+  dueDate: string | null;
+  /**
+   * Stored, NEVER rendered. Payment status is blocked on the same privacy
+   * reasoning as the delinquency fields — see TITLEPOINT_TAX_REPORT_ELEMENTS.md.
+   * Kept on the type so a future ruling is a render change, not a re-pull.
+   */
+  status: string | null;
+}
+
+export interface TaxLineItem {
+  description: string | null;
+  amount: number | null;
+  /** Bonds carry one and it is genuinely good content: "matures 2031". */
+  maturityDate: string | null;
+}
+
+/**
+ * TitlePoint's tax report, reduced to what a courtesy document may show.
+ *
+ * Tier 1 and Tier 2 of the classification only. The excluded families —
+ * delinquency, tax sales, back taxes, and every protected-characteristic
+ * exemption (senior, disabled, veteran, widow) — are absent from this type on
+ * purpose: a field that is not here cannot be rendered by accident.
+ */
+export interface NormalizedTaxReport {
+  taxYear: number | null;
+  annualAmount: number | null;
+  assessedValue: number | null;
+  landValue: number | null;
+  improvementValue: number | null;
+  taxRate: number | null;
+  taxRateArea: string | null;
+  /** The only exemption that may appear. Never a category name. */
+  homeOwnerExemption: number | null;
+  installments: TaxReportInstallment[];
+  specialAssessments: TaxLineItem[];
+  bonds: TaxLineItem[];
+  supplementals: TaxLineItem[];
+  /** RunDate / IssueDate. Mandatory on a document read weeks later. */
+  asOf: string | null;
+}
+
+export type TaxLayer =
+  | { source: 'titlepoint'; report: NormalizedTaxReport }
+  | { source: 'sitex'; tax: NormalizedTax; installments: Installment[] | null }
+  | null;
+
+/**
+ * Pick the best layer available, or null for no page at all.
+ *
+ * A layer counts as present only when it carries a figure somebody would read.
+ * A tax record that is all nulls is not a tax record — rendering a page of em
+ * dashes is the empty shell the handoff rules out, and it looks identical to a
+ * page whose data simply has not arrived yet.
+ */
+export function resolveTaxLayer(
+  tax: NormalizedTax,
+  state: string | null | undefined,
+  report?: NormalizedTaxReport | null,
+): TaxLayer {
+  if (report && taxReportHasContent(report)) {
+    return { source: 'titlepoint', report };
+  }
+  if (siteXTaxHasContent(tax)) {
+    return { source: 'sitex', tax, installments: californiaInstallments(tax, state) };
+  }
+  return null;
+}
+
+/** At least one figure a reader would look for. Not merely a non-null object. */
+export function taxReportHasContent(r: NormalizedTaxReport): boolean {
+  return num(r.annualAmount) || num(r.assessedValue) || num(r.landValue)
+    || num(r.improvementValue) || r.installments.length > 0
+    || r.specialAssessments.length > 0 || r.bonds.length > 0 || r.supplementals.length > 0;
+}
+
+/**
+ * The SiteX layer needs a figure too.
+ *
+ * `year` alone does NOT qualify: every payload carries a TaxYear, so treating
+ * it as content would make this function return true for every profile and
+ * layer 3 unreachable — the page would always render, empty, which is the
+ * failure this is here to prevent.
+ */
+export function siteXTaxHasContent(tax: NormalizedTax): boolean {
+  return num(tax.taxAmount) || num(tax.assessedValue) || num(tax.landValue) || num(tax.improvementValue);
+}
+
+const num = (v: number | null | undefined): boolean => typeof v === 'number' && Number.isFinite(v) && v > 0;
 
 // ─── Transfers ──────────────────────────────────────────────────────────────
 

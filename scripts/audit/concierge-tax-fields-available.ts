@@ -103,6 +103,10 @@ function keyPaths(node: unknown, prefix = '', out: Map<string, unknown> = new Ma
       console.log(`  profile ${p.id}: payload unreadable (${'error' in got ? got.error : 'unknown'})`);
       continue;
     }
+    if (!got.data) {
+      console.log(`  profile ${p.id}: download reported success with no body`);
+      continue;
+    }
     read += 1;
     let parsed: unknown;
     try {

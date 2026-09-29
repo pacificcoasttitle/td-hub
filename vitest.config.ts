@@ -47,6 +47,20 @@ export default defineConfig({
     environment: 'node',
     maxWorkers: WORKERS,
 
+    // ─── Scratch files cannot fail the gate ────────────────────────────────
+    //
+    // `_scratch_untracked/` is gitignored, per-machine, and deliberately
+    // excluded from the tsconfig CI typechecks (see AGENTS.md). Nothing
+    // excluded it from VITEST, so two half-finished probes left in
+    // `_pre_pull_untracked/` failed every run — one importing a path that does
+    // not exist, one importing a module that was never written.
+    //
+    // That matters more than two red lines: `npm run verify` is the command
+    // AGENTS.md says to run before calling anything ready, and a gate that
+    // cannot go green stops being consulted. The failures were nobody's, on no
+    // branch, and about code that is not in the repo.
+    exclude: ['**/node_modules/**', '**/dist/**', '_scratch_untracked/**'],
+
     // Five seconds is plenty for any test here — they are mocked to the point
     // that the slow ones take milliseconds. It is NOT plenty for a test that
     // spends four of those seconds waiting for a core. Raised deliberately so

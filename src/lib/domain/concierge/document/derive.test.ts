@@ -196,9 +196,11 @@ describe('the two California installments', () => {
     const [first, second] = californiaInstallments(tax, 'CA')!;
     expect(first!.amount).toBe(978);
     expect(first!.due).toBe('Nov 1, 2025');
-    expect(first!.delinquentAfter).toBe('Dec 10, 2025');
+    // Renamed from delinquentAfter: the document must not print the word
+    // "delinquent", and a field carrying it produced a column header that did.
+    expect(first!.lateAfter).toBe('Dec 10, 2025');
     expect(second!.due).toBe('Feb 1, 2026');
-    expect(second!.delinquentAfter).toBe('Apr 10, 2026');
+    expect(second!.lateAfter).toBe('Apr 10, 2026');
   });
 
   it('REFUSES any state but California', () => {

@@ -7,7 +7,7 @@ import { CONCIERGE_GENERATE_ROLES } from '@/lib/domain/concierge/access';
 import { CONTACT_BOOK_READ_ROLES } from '@/lib/security/contact-book-access';
 import {
   AlreadyHavePanel, ConciergeStep, RepPicker, TypeCard,
-  draftProblem, fullAddress, generationBody, typeOptions,
+  applyPickedAddress, draftProblem, fullAddress, generationBody, typeOptions,
   type ConciergeDraft,
 } from './new-report-modal';
 
@@ -132,7 +132,7 @@ describe('what has to be filled in before a credit can be spent', () => {
 
 describe('the property step', () => {
   const step = (over: Partial<ConciergeDraft> = {}, problem: string | null = null) => visible(
-    <ConciergeStep draft={draft(over)} problem={problem} onField={() => {}} repPicker={<span>picker</span>} />,
+    <ConciergeStep draft={draft(over)} problem={problem} onField={() => {}} onAddress={() => {}} repPicker={<span>picker</span>} />,
   );
 
   it('states the comparable criteria the profile will be built with', () => {
@@ -149,6 +149,80 @@ describe('the property step', () => {
 
   it('shows the reason it is blocked rather than only greying the button', () => {
     expect(step({}, 'Enter the city.')).toContain('Enter the city.');
+  });
+
+  it('offers the address field as an instruction, never as an example address', () => {
+    // A real placeholder address read as prefilled, and generating the wrong
+    // property spends a lookup that cannot be undone.
+    //
+    // Read from the MARKUP, not through visible(): placeholder is an attribute
+    // and visible() strips tags, so the first version of this assertion looked
+    // for the placeholder in text that can never contain one.
+    const html = renderToStaticMarkup(
+      <ConciergeStep
+        draft={draft({ street: '' })} problem={null}
+        onField={() => {}} onAddress={() => {}} repPicker={<span>picker</span>}
+      />,
+    );
+    expect(html).toContain('placeholder="Start typing an address');
+    expect(html).not.toContain('1358 5th St,');
+    // And the field is still an ordinary text input with a value — not a
+    // widget that requires a selection before anything can be typed.
+    expect(html).toMatch(/<input[^>]*type="text"/);
+  });
+});
+
+describe('a picked address fills the whole address', () => {
+  const picked = {
+    street: '9 Mammoth Slopes Dr', city: 'Mammoth Lakes', state: 'CA', zip: '93546', placeId: 'x',
+  };
+
+  it('sets street, city, state and zip from one pick', () => {
+    const next = applyPickedAddress(draft({ street: '', city: '', state: '', zip: '' }), picked);
+    expect(next).toMatchObject({
+      street: '9 Mammoth Slopes Dr', city: 'Mammoth Lakes', state: 'CA', zip: '93546',
+    });
+  });
+
+  it('leaves the rep alone — a pick is about the property', () => {
+    const before = draft({ repContactId: 22125, repName: 'Gerardo Hernandez' });
+    const next = applyPickedAddress(before, picked);
+    expect(next.repContactId).toBe(22125);
+    expect(next.repName).toBe('Gerardo Hernandez');
+  });
+
+  it('normalises state the same way typing does', () => {
+    const next = applyPickedAddress(draft(), { ...picked, state: 'california' });
+    expect(next.state).toBe('CA');
+  });
+
+  it('BLANKS a field the pick did not supply rather than keeping a stale one', () => {
+    // The dangerous case: a ZIP left over from a PREVIOUS property sitting
+    // under a new street. Blanking makes draftProblem say so; keeping it would
+    // generate a profile for the wrong parcel and spend the lookup.
+    const afterFirstPick = applyPickedAddress(draft(), picked);
+    expect(afterFirstPick.zip).toBe('93546');
+
+    const secondPickNoZip = { ...picked, street: '1 Rural Route', city: 'Hayfork', zip: '' };
+    const next = applyPickedAddress(afterFirstPick, secondPickNoZip);
+    expect(next.zip).toBe('');
+    expect(draftProblem(next)).toContain('ZIP');
+  });
+
+  it('does not touch draftProblem — autocomplete is an input method, not a check', () => {
+    // Every rule still applies to a picked address.
+    const noZip = applyPickedAddress(draft(), { ...picked, zip: '' });
+    expect(draftProblem(noZip)).toContain('ZIP');
+    const noCity = applyPickedAddress(draft(), { ...picked, city: '' });
+    expect(draftProblem(noCity)).toContain('city');
+    const noStreet = applyPickedAddress(draft(), { ...picked, street: '' });
+    expect(draftProblem(noStreet)).toContain('street');
+  });
+
+  it('accepts a fully hand-typed address with no pick at all', () => {
+    // The rural / new-construction case. Nothing here requires a selection.
+    const typed = draft({ street: '11200 Bachelor Valley Rd', city: 'Witter Springs', state: 'CA', zip: '95493' });
+    expect(draftProblem(typed)).toBeNull();
   });
 });
 

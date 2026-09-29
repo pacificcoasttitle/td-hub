@@ -11,6 +11,12 @@ import {
 } from './derive';
 import type { NormalizedTaxReport, TaxLayer } from './derive';
 import { PCT_LOGO_WHITE } from './brand-assets';
+import { BODY, HEADING, registerDocumentFonts } from './fonts';
+
+// Montserrat for headings, Work Sans for body. Registered at module load so a
+// missing file throws when the module is first imported rather than in the
+// middle of a render, and so nothing has to remember to call it.
+registerDocumentFonts();
 
 // ─── The Concierge Property Profile ──────────────────────────────────────────
 //
@@ -106,11 +112,30 @@ export const GAP = '—';
 const FILL = '#F1F3F6';
 const PAGE_H = 40;
 
+// Type scale from the 23 Sep spec, which the 28 Sep handoff is silent on:
+// 9.5pt body, 8.5pt table cells, 7pt floor. Nothing below FLOOR.
+const FLOOR = 7;
+
+/**
+ * The four type roles, so a weight is chosen once per role rather than 25
+ * times inline. v2 had `...STRONG` at every emphasis and no
+ * way to tell a page title from a bold table cell.
+ *
+ * DISPLAY  Montserrat 800 — page titles, the cover, the address band
+ * HEAD     Montserrat 700 — eyebrows, tile values, anything that labels
+ * STRONG   Work Sans 700  — names, addresses, emphasis in prose
+ * MED      Work Sans 600  — bold values inside tables and key/value rows
+ */
+const DISPLAY = { fontFamily: HEADING, fontWeight: 800 } as const;
+const HEAD = { fontFamily: HEADING, fontWeight: 700 } as const;
+const STRONG = { fontFamily: BODY, fontWeight: 700 } as const;
+const MED = { fontFamily: BODY, fontWeight: 600 } as const;
+
 const s = StyleSheet.create({
   // No vertical padding: the navy bars are full-bleed top and bottom.
-  page: { paddingBottom: 48, fontSize: 9.5, color: '#14181D', fontFamily: 'Helvetica', flexDirection: 'column' },
+  page: { paddingBottom: 48, fontSize: 9.5, color: '#14181D', fontFamily: BODY, fontWeight: 500, flexDirection: 'column' },
   bar: { backgroundColor: NAVY, paddingHorizontal: PAGE_H, paddingVertical: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  brand: { color: '#FFFFFF', fontSize: 10, fontFamily: 'Helvetica-Bold', letterSpacing: 1.4 },
+  brand: { color: '#FFFFFF', fontSize: 10, fontFamily: HEADING, fontWeight: 700, letterSpacing: 1.4 },
   barRight: { color: '#FFFFFF', fontSize: 8.5, opacity: 0.75 },
   body: { paddingHorizontal: PAGE_H },
 
@@ -118,18 +143,18 @@ const s = StyleSheet.create({
   // which is the height the handoff specifies and the height the cover's own
   // band matches so the two read as one device.
   addressBand: { backgroundColor: NAVY, height: 124, paddingHorizontal: PAGE_H, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  bandAddress: { color: '#FFFFFF', fontSize: 16, fontFamily: 'Helvetica-Bold', letterSpacing: -0.3 },
+  bandAddress: { color: '#FFFFFF', fontSize: 16, ...DISPLAY, letterSpacing: -0.3 },
   bandSub: { color: '#FFFFFF', fontSize: 9, marginTop: 5, opacity: 0.8 },
 
-  h1: { fontSize: 20, fontFamily: 'Helvetica-Bold', letterSpacing: -0.3 },
+  h1: { fontSize: 20, ...DISPLAY, letterSpacing: -0.3 },
   lede: { fontSize: 10, color: MUTED, marginTop: 6, lineHeight: 1.45 },
-  eyebrow: { fontSize: 7.5, letterSpacing: 1.1, color: NAVY, fontFamily: 'Helvetica-Bold', marginBottom: 6 },
+  eyebrow: { fontSize: 7.5, letterSpacing: 1.1, color: NAVY, ...HEAD, marginBottom: 6 },
 
   // Filled key/value rows, alternating. The v3 layout replaces ruled rows.
   kv: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 7, paddingHorizontal: 10 },
   kvFill: { backgroundColor: FILL },
   kvKey: { fontSize: 9, color: MUTED },
-  kvVal: { fontSize: 9, fontFamily: 'Helvetica-Bold' },
+  kvVal: { fontSize: 9, ...MED },
   kvAbsent: { fontSize: 9, color: '#8A8580' },
 
   tiles: { flexDirection: 'row' },
@@ -142,25 +167,25 @@ const s = StyleSheet.create({
   tileLabel: { fontSize: 7, color: MUTED },
   tileLabelOn: { fontSize: 7, color: '#FFFFFF', opacity: 0.8 },
   tileLabelWarn: { fontSize: 7, color: '#B4620B' },
-  tileValue: { fontSize: 13, fontFamily: 'Helvetica-Bold', marginTop: 5 },
-  tileValueOn: { fontSize: 13, fontFamily: 'Helvetica-Bold', marginTop: 5, color: '#FFFFFF' },
-  tileValueWarn: { fontSize: 13, fontFamily: 'Helvetica-Bold', marginTop: 5, color: '#B4620B' },
+  tileValue: { fontSize: 13, ...HEAD, marginTop: 5 },
+  tileValueOn: { fontSize: 13, ...HEAD, marginTop: 5, color: '#FFFFFF' },
+  tileValueWarn: { fontSize: 13, ...HEAD, marginTop: 5, color: '#B4620B' },
 
   th: { fontSize: 7.5, color: MUTED, backgroundColor: '#E8EBEF', paddingVertical: 7, paddingHorizontal: 8 },
   td: { fontSize: 8.5, paddingVertical: 7, paddingHorizontal: 8 },
-  tdB: { fontSize: 8.5, fontFamily: 'Helvetica-Bold', paddingVertical: 7, paddingHorizontal: 8 },
+  tdB: { fontSize: 8.5, ...MED, paddingVertical: 7, paddingHorizontal: 8 },
 
   /** The single caveat line at the foot of a page's content. */
   caveat: { fontSize: 8, color: '#8A8580', lineHeight: 1.5, marginTop: 10 },
   callout: { backgroundColor: '#FDF1E7', padding: 14, marginTop: 14 },
-  calloutTitle: { fontSize: 10.5, fontFamily: 'Helvetica-Bold', color: '#B4620B' },
+  calloutTitle: { fontSize: 10.5, ...HEAD, color: '#B4620B' },
   calloutBody: { fontSize: 9, color: '#3C3A36', marginTop: 6, lineHeight: 1.5 },
 
   footBar: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: NAVY, paddingHorizontal: PAGE_H, paddingVertical: 9, flexDirection: 'row', justifyContent: 'space-between' },
   footText: { color: '#FFFFFF', fontSize: 7.5, opacity: 0.7 },
 
   gapBox: { borderWidth: 1, borderColor: BORDER, padding: 12, backgroundColor: TINT, marginTop: 6 },
-  pin: { width: 15, height: 15, borderRadius: 7.5, color: '#FFFFFF', fontSize: 8, fontFamily: 'Helvetica-Bold', textAlign: 'center', paddingTop: 3.5 },
+  pin: { width: 15, height: 15, borderRadius: 7.5, color: '#FFFFFF', fontSize: 8, ...STRONG, textAlign: 'center', paddingTop: 3.5 },
 });
 
 // Exported as a group so the formatting rules are unit-testable. Each of these
@@ -363,7 +388,7 @@ function Tile({ label, value, last, tone }: { label: string; value: string; last
 function Absent({ what, why }: { what: string; why: string }) {
   return (
     <View style={s.gapBox}>
-      <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold' }}>{what} not available</Text>
+      <Text style={{ fontSize: 9, ...STRONG }}>{what} not available</Text>
       <Text style={{ fontSize: 8.5, color: MUTED, marginTop: 4, lineHeight: 1.5 }}>{why}</Text>
     </View>
   );
@@ -402,7 +427,7 @@ function TaxPage({ layer, subject, share, captured }: {
             profile shows instalments and bonds and another shows three
             figures — they would read the thinner page as a thinner property. */}
         <View style={[s.gapBox, { marginTop: 0, marginBottom: 16 }]}>
-          <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold' }}>Assessment data only</Text>
+          <Text style={{ fontSize: 9, ...STRONG }}>Assessment data only</Text>
           <Text style={{ fontSize: 8.5, color: MUTED, marginTop: 4, lineHeight: 1.5 }}>
             {`This page is built from the assessor's summary record${captured ? `, as of ${dtLong(captured)}` : ''}. The detailed tax report — instalment amounts, exemptions, special assessments and bonds — was not available for this parcel, so those sections are absent rather than estimated.`}
           </Text>
@@ -616,7 +641,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
               alone when there is no map, which is why the band is not part of
               the image. */}
           <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: NAVY, opacity: (input.brandPhoto ?? input.compMapImage) ? 0.93 : 1, paddingHorizontal: PAGE_H, paddingVertical: 16 }}>
-            <Text style={{ color: '#FFFFFF', fontSize: 25, fontFamily: 'Helvetica-Bold', letterSpacing: -0.5 }}>
+            <Text style={{ color: '#FFFFFF', fontSize: 25, ...DISPLAY, letterSpacing: -0.5 }}>
               {txt(subject.siteAddress)}
             </Text>
             <Text style={{ color: '#FFFFFF', fontSize: 10.5, marginTop: 6, opacity: 0.85 }}>
@@ -630,7 +655,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             is deleted, not flagged off. */}
         <View style={[s.body, { paddingTop: 26 }]}>
           <Text style={{ fontSize: 8, letterSpacing: 1.4, color: MUTED }}>PACIFIC COAST TITLE</Text>
-          <Text style={{ fontSize: 27, fontFamily: 'Helvetica-Bold', color: NAVY, letterSpacing: -0.5, marginTop: 8 }}>
+          <Text style={{ fontSize: 27, ...DISPLAY, color: NAVY, letterSpacing: -0.5, marginTop: 8 }}>
             Concierge Property Profile
           </Text>
           <View style={{ height: 3, width: 54, backgroundColor: ORANGE, marginTop: 12 }} />
@@ -639,7 +664,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         <View style={[s.body, { flexDirection: 'row', justifyContent: 'space-between', marginTop: 28, marginBottom: 6 }]}>
           <View>
             <Text style={{ fontSize: 8, color: MUTED }}>Presented by</Text>
-            <Text style={{ fontSize: 11, fontFamily: 'Helvetica-Bold', marginTop: 5 }}>{txt(input.presentingRep?.name)}</Text>
+            <Text style={{ fontSize: 11, ...STRONG, marginTop: 5 }}>{txt(input.presentingRep?.name)}</Text>
             <Text style={{ fontSize: 9, color: MUTED, marginTop: 3 }}>
               {[input.presentingRep?.email, input.presentingRep?.phone].filter(Boolean).join(' · ') || GAP}
             </Text>
@@ -684,7 +709,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             /* Visible on the page rather than silent. A missing disclaimer that
                shows up only in a test is a disclaimer that ships missing. */
             <View style={[s.gapBox, { borderColor: ORANGE }]}>
-              <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#B4620B' }}>
+              <Text style={{ fontSize: 9, ...STRONG, color: '#B4620B' }}>
                 Insurance Commissioner disclaimer pending
               </Text>
               <Text style={{ fontSize: 8.5, color: MUTED, marginTop: 4, lineHeight: 1.5 }}>
@@ -697,7 +722,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
           <View style={{ marginTop: 34, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
             <View>
               <View style={{ height: 1, width: 190, backgroundColor: BORDER }} />
-              <Text style={{ fontSize: 10.5, fontFamily: 'Helvetica-Bold', marginTop: 7 }}>{txt(input.presentingRep?.name)}</Text>
+              <Text style={{ fontSize: 10.5, ...STRONG, marginTop: 7 }}>{txt(input.presentingRep?.name)}</Text>
               <Text style={{ fontSize: 9, color: MUTED, marginTop: 3 }}>{txt(input.presentingRep?.title)}</Text>
               <Text style={{ fontSize: 9, color: MUTED, marginTop: 3 }}>
                 {[input.presentingRep?.email, input.presentingRep?.phone].filter(Boolean).join(' · ') || GAP}
@@ -752,7 +777,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
               </View>
               <View style={{ backgroundColor: FILL, padding: 10, marginTop: 3 }}>
                 <Text style={s.tileLabel}>As recorded</Text>
-                <Text style={{ fontSize: 10, fontFamily: 'Helvetica-Bold', marginTop: 5 }}>{legal.asRecorded}</Text>
+                <Text style={{ fontSize: 10, ...STRONG, marginTop: 5 }}>{legal.asRecorded}</Text>
               </View>
             </>
           ) : (
@@ -764,7 +789,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             <View style={{ flexDirection: 'row' }}>
               {owners.slice(0, 3).map((o, i) => (
                 <View key={i} style={[s.tile, ...(i === Math.min(owners.length, 3) - 1 ? [s.tileLast] : [])]}>
-                  <Text style={{ fontSize: 12, fontFamily: 'Helvetica-Bold', letterSpacing: -0.2 }}>{o.display}</Text>
+                  <Text style={{ fontSize: 12, ...STRONG, letterSpacing: -0.2 }}>{o.display}</Text>
                   <Text style={{ fontSize: 8, color: '#8A8580', marginTop: 5 }}>{`Recorded as ${o.recorded}`}</Text>
                 </View>
               ))}
@@ -828,12 +853,12 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             <View style={{ backgroundColor: NAVY, padding: 14, flexDirection: 'row', justifyContent: 'space-between' }}>
               <View style={{ flex: 1, paddingRight: 12 }}>
                 <Text style={{ fontSize: 8, color: '#F0C79A' }}>Current ownership rests on this deed</Text>
-                <Text style={{ fontSize: 12, fontFamily: 'Helvetica-Bold', color: '#FFFFFF', marginTop: 6 }}>
+                <Text style={{ fontSize: 12, ...STRONG, color: '#FFFFFF', marginTop: 6 }}>
                   {owners.map((o) => o.display).join(' & ') || GAP}
                 </Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
-                <Text style={{ fontSize: 11, fontFamily: 'Helvetica-Bold', color: '#FFFFFF' }}>{dt(vesting.recordingDate)}</Text>
+                <Text style={{ fontSize: 11, ...STRONG, color: '#FFFFFF' }}>{dt(vesting.recordingDate)}</Text>
                 <Text style={{ fontSize: 8.5, color: '#FFFFFF', opacity: 0.75, marginTop: 4 }}>
                   {`${txt(vesting.documentType ?? vesting.transactionType)} · ${vesting.documentNumber ?? 'no document number'}`}
                 </Text>
@@ -861,7 +886,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
                   const fg = isVesting ? '#FFFFFF' : fore ? '#B4620B' : '#14181D';
                   return (
                     <View key={t.sourcePosition} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, paddingHorizontal: 9, backgroundColor: bg, marginTop: i === 0 ? 0 : 1 }}>
-                      <Text style={{ fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: fg }}>{dt(t.recordingDate)}</Text>
+                      <Text style={{ fontSize: 8.5, ...STRONG, color: fg }}>{dt(t.recordingDate)}</Text>
                       <Text style={{ fontSize: 8, color: isVesting ? '#F0C79A' : fore ? '#B4620B' : MUTED }}>
                         {isVesting
                           ? `${txt(t.documentType ?? t.transactionType)} · current vesting`
@@ -968,9 +993,9 @@ export function ProfileDocument(input: ProfileDocumentInput) {
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Text style={[s.pin, { backgroundColor: i === 0 ? ORANGE : '#3C3A36', marginRight: 8 }]}>{String(i + 1)}</Text>
-                  <Text style={{ fontSize: 11, fontFamily: 'Helvetica-Bold' }}>{txt(c.address)}</Text>
+                  <Text style={{ fontSize: 11, ...STRONG }}>{txt(c.address)}</Text>
                 </View>
-                <Text style={{ fontSize: 12, fontFamily: 'Helvetica-Bold' }}>{money(c.salePrice)}</Text>
+                <Text style={{ fontSize: 12, ...STRONG }}>{money(c.salePrice)}</Text>
               </View>
               <View style={{ flexDirection: 'row', marginTop: 7 }}>
                 {[
@@ -983,7 +1008,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
                 ].map(([k, v], j) => (
                   <View key={j} style={{ flex: 1 }}>
                     <Text style={{ fontSize: 7, color: MUTED }}>{k}</Text>
-                    <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', marginTop: 3 }}>{v}</Text>
+                    <Text style={{ fontSize: 9, ...STRONG, marginTop: 3 }}>{v}</Text>
                   </View>
                 ))}
               </View>

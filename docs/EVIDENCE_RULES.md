@@ -1,6 +1,6 @@
 # What counts as evidence
 
-Five rules, each one written the day it cost us something. They are all the
+Seven rules, each one written the day it cost us something. They are all the
 same rule wearing different clothes: **an artifact of how we invoked something
 is not a fact about what the system does.**
 
@@ -149,6 +149,56 @@ been checked" are different statements. Collapsing them is how a figure that
 describes what somebody looked at gets reported as a figure describing what is
 there — which is what a sync *rate* reported as a *total* is, and what "four
 guards" was.
+
+## 7 · A fixture is a real stored payload unless there is a reason it cannot be
+
+Six vacuous guards this month, and one factor is common to every single one:
+**the fixture was hand-built and minimal.**
+
+| The fixture | What it could not see |
+| --- | --- |
+| County Sales: symmetric Irvine prices | a mean/median swap — both gave the same number |
+| Carrier-route parity: rejected row kept with nulls | `total === used` whatever the code returned |
+| Transfer audit: `DocumentNumber` set | the normaliser reads `RecorderDocumentNumber`; `undefined === undefined` |
+| Client-bundle guard: five-second timeout | it had not finished, and reported green |
+| Concierge document: **one** comparable | the summary page overflowed to nine sheets on the real four |
+| Concierge document: `compMapImage: null` | the map branch never rendered, so a 420px map measured a page with no map on it |
+
+Every one would have failed on first contact with real data. The last two are
+the clearest: code that passed every assertion against a one-comparable fixture
+rendered **nine sheets instead of eight** the moment it met profile 4 — and the
+overflow guard written to catch that sat green at a 420px map, because the
+fixture had no map in it to overflow.
+
+**The rule.** Build the fixture from a real stored payload. For Concierge and
+the farming reports that is free and already in reach: `raw_storage_key` holds
+exactly what the vendor sent, `downloadFile` reads it, no vendor is contacted.
+`scripts/audit/concierge-render-preview.mts` does it end to end and writes
+nothing.
+
+**Why hand-built is specifically dangerous.** It encodes what the author
+expected the data to look like, which is the thing under test. An author who
+believes one comparable is representative writes a one-comparable fixture, and
+the guard then agrees with them. The real payload has four comparables, two
+different building areas, a null exemption, a tax status that must not print,
+and keys the normaliser does not read — none of which anyone would think to
+type out.
+
+**When minimal is right, and how to keep it honest.** A fixture that must be
+minimal to isolate a branch — the empty case, the malformed case, a boundary —
+is legitimate. Then the branch has to be asserted present before anything is
+asserted about it: the field is populated, the values are asymmetric, the list
+is not empty, the image is not null. That is rule 4's meta-check, and it is the
+only thing that makes a synthetic fixture worth having.
+
+**The corollary that caught a parser.** A real payload also tells you what the
+vendor actually sends. `normalizeSubject` read `LastTransferValue`, `SalePrice`
+and `LastSaleDate`; feed 100001 sends `SalesPrice` and `TransferDate`. Every
+profile printed "No subject sale on record" over a payload holding both a price
+and a date — **and the design then acquired a panel explaining the absence.**
+That is the expensive end of this: a parsing bug became a documented behaviour
+that the next person built around. A hand-built fixture using the names the
+code reads would have passed forever.
 
 ## The shape they share
 

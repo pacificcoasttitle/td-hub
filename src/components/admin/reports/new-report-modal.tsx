@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ModalShell } from '@/components/shared/action-modals/modal-shell';
+import { AddressAutocomplete, type ParsedAddress } from '@/components/ui/address-autocomplete';
 import { ConciergeCostGate } from '@/components/hub/split/concierge-cost-gate';
 import { criteriaSummary } from '@/lib/domain/concierge/list-line';
 import { DEFAULT_CRITERIA } from '@/lib/domain/concierge/comp-filter';
@@ -124,6 +125,32 @@ export function draftProblem(d: ConciergeDraft): string | null {
 
 export function fullAddress(d: ConciergeDraft): string {
   return `${d.street.trim()}, ${d.city.trim()}, ${d.state.trim().toUpperCase()} ${d.zip.trim()}`;
+}
+
+/**
+ * Apply a picked address to the draft.
+ *
+ * A PICK IS AUTHORITATIVE FOR THE WHOLE ADDRESS, including the parts Google did
+ * not supply. The tempting alternative — keep the old value where the pick is
+ * empty — leaves a ZIP from a *previously* picked property sitting under a new
+ * street, which is the one error this modal cannot afford: a wrong property
+ * spends a lookup and cannot be undone. Blanking instead means draftProblem()
+ * immediately says "Enter a 5-digit ZIP code", which is visible and fixable.
+ *
+ * State is normalised the same way the manual field normalises it, so a pick
+ * and a keystroke cannot produce different drafts.
+ */
+export function applyPickedAddress(d: ConciergeDraft, a: ParsedAddress): ConciergeDraft {
+  return {
+    ...d,
+    // No `|| d.zip` fallbacks. Mutation-checked: adding them turns the
+    // stale-value guard red, because a ZIP from a previously picked property
+    // would survive under a new street.
+    street: a.street,
+    city: a.city,
+    state: a.state.toUpperCase().slice(0, 2),
+    zip: a.zip,
+  };
 }
 
 export const DEFAULT_CRITERIA_SUMMARY = criteriaSummary(DEFAULT_CRITERIA);
@@ -276,23 +303,38 @@ export function RepPicker({ chosenName, results, query, searching, onQuery, onCh
 
 // ─── Step two: the property ─────────────────────────────────────────────────
 
-export function ConciergeStep({ draft, problem, onField, repPicker }: {
+export function ConciergeStep({ draft, problem, onField, onAddress, repPicker }: {
   draft: ConciergeDraft;
   problem: string | null;
   onField: (k: keyof ConciergeDraft, v: string) => void;
+  /** One pick fills street, city, state and zip together. */
+  onAddress: (a: ParsedAddress) => void;
   repPicker: React.ReactNode;
 }) {
   const input = 'w-full h-8 px-[9px] border border-[#E5E5E5] rounded-md text-[12px] outline-none focus:ring-1 focus:ring-brand-orange/30 focus:border-brand-orange';
   return (
     <div className="space-y-3">
       <Field label="Street address">
-        {/* No placeholder address. A real one (1358 5th St, La Verne) read as
-            prefilled rather than as an example, and an operator who does not
-            notice it is empty is one keystroke from generating the wrong
-            property — which spends a lookup and cannot be undone. */}
-        <input
+        {/* Autocomplete is an INPUT METHOD, not a replacement for the checks.
+            draftProblem() is untouched: a picked address that came back without
+            a ZIP still fails validation and still says so.
+
+            Manual entry keeps working in three ways that matter — typing never
+            requires a selection, the city/state/ZIP fields below stay editable
+            after a pick, and with no NEXT_PUBLIC_GOOGLE_MAPS_API_KEY the
+            component renders a plain text input. A rural or new-construction
+            parcel Google has never heard of must not become unenterable.
+
+            The placeholder is an instruction, not an address. A real one
+            (1358 5th St, La Verne) read as prefilled rather than as an example,
+            and an operator who does not notice it is empty is one keystroke
+            from generating the wrong property — which spends a lookup and
+            cannot be undone. */}
+        <AddressAutocomplete
           value={draft.street}
-          onChange={(e) => onField('street', e.target.value)}
+          onChange={(v) => onField('street', v)}
+          onSelect={onAddress}
+          placeholder="Start typing an address, or type it in full"
           className={input}
         />
       </Field>
@@ -626,6 +668,7 @@ export function NewReportModal({ onClose, onCreated }: {
               draft={draft}
               problem={showProblem ? problem : null}
               onField={(k, v) => setDraft((d) => ({ ...d, [k]: v }))}
+              onAddress={(a) => setDraft((d) => applyPickedAddress(d, a))}
               repPicker={(
                 <RepPicker
                   chosenName={draft.repName}

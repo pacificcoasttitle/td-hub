@@ -18,6 +18,11 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/api/concierge/**': ['./src/lib/domain/concierge/document/fonts/**'],
     '/api/reports/**': ['./src/lib/domain/concierge/document/fonts/**'],
+    // /api/health reports whether the TTFs are present, and tracing is PER
+    // ROUTE — without this entry it would report them missing from its own
+    // bundle while the Concierge routes had them, which is a false alarm that
+    // costs more than the few hundred KB.
+    '/api/health/**': ['./src/lib/domain/concierge/document/fonts/**'],
   },
 };
 

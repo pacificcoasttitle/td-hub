@@ -1,6 +1,6 @@
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Font } from '@react-pdf/renderer';
+import { BODY, FONT_DIR, FONT_FILES, HEADING, missingFonts } from './font-files';
 
 // ─── Montserrat and Work Sans, from local files ──────────────────────────────
 //
@@ -21,35 +21,12 @@ import { Font } from '@react-pdf/renderer';
 // read from a path built at runtime, so next.config.ts adds them to
 // outputFileTracingIncludes. An <Image> with a bad src renders empty; a missing
 // FONT throws at register time — which is better, but only if somebody sees it.
-// `fontsAvailable()` exists so a test and a health check can both say whether
-// the files are really there rather than assuming the config worked.
+//
+// The file list and the presence check live in font-files.ts, which imports
+// nothing but node:fs, so /api/health can answer "are they here?" without
+// pulling the PDF renderer into its bundle.
 
-const DIR = join(process.cwd(), 'src', 'lib', 'domain', 'concierge', 'document', 'fonts');
-
-export const HEADING = 'Montserrat';
-export const BODY = 'Work Sans';
-
-/** Every file that must exist, as (family, weight, filename). */
-export const FONT_FILES = [
-  // Mutation-checked: pointing these at Montserrat-Variable.ttf turns both the
-  // naming guard and the advance-width measurement red.
-  { family: HEADING, weight: 600, file: 'Montserrat-600.ttf' },
-  { family: HEADING, weight: 700, file: 'Montserrat-700.ttf' },
-  { family: HEADING, weight: 800, file: 'Montserrat-800.ttf' },
-  { family: HEADING, weight: 900, file: 'Montserrat-900.ttf' },
-  { family: BODY, weight: 500, file: 'WorkSans-500.ttf' },
-  { family: BODY, weight: 600, file: 'WorkSans-600.ttf' },
-  { family: BODY, weight: 700, file: 'WorkSans-700.ttf' },
-] as const;
-
-/** Which of the required files are missing. Empty means all present. */
-export function missingFonts(): string[] {
-  return FONT_FILES.filter((f) => !existsSync(join(DIR, f.file))).map((f) => f.file);
-}
-
-export function fontsAvailable(): boolean {
-  return missingFonts().length === 0;
-}
+export { BODY, HEADING, FONT_FILES, missingFonts, fontsAvailable } from './font-files';
 
 let registered = false;
 
@@ -66,7 +43,7 @@ export function registerDocumentFonts(): void {
   const missing = missingFonts();
   if (missing.length > 0) {
     throw new Error(
-      `Concierge document fonts missing from ${DIR}: ${missing.join(', ')}. `
+      `Concierge document fonts missing from ${FONT_DIR}: ${missing.join(', ')}. `
       + 'Run `node scripts/build/instance-fonts.mjs`, and check '
       + 'outputFileTracingIncludes in next.config.ts if this is a deployed build.',
     );
@@ -75,7 +52,7 @@ export function registerDocumentFonts(): void {
     Font.register({
       family,
       fonts: FONT_FILES.filter((f) => f.family === family)
-        .map((f) => ({ src: join(DIR, f.file), fontWeight: f.weight })),
+        .map((f) => ({ src: join(FONT_DIR, f.file), fontWeight: f.weight })),
     });
   }
   registered = true;

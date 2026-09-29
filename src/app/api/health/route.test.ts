@@ -42,7 +42,35 @@ describe('GET /api/health', () => {
     expect(body.app).toBe('td-hub');
     expect(typeof body.timestamp).toBe('string');
     expect(Number.isNaN(Date.parse(body.timestamp))).toBe(false);
-    // Exactly the original three keys plus `commit` — nothing else leaked in.
-    expect(Object.keys(body).sort()).toEqual(['app', 'commit', 'status', 'timestamp']);
+    // Exactly the known keys — nothing else leaked into an unauthenticated
+    // endpoint. `conciergeFonts` was added deliberately; see below.
+    expect(Object.keys(body).sort()).toEqual(['app', 'commit', 'conciergeFonts', 'status', 'timestamp']);
+  });
+});
+
+describe('conciergeFonts — is the deployed bundle carrying the TTFs', () => {
+  // Rule 3: a local render says nothing about the deployed function's
+  // filesystem. Re-rendering a profile there needs a session, and this
+  // endpoint has none — so it reports file presence instead, which one
+  // unauthenticated curl can read after a deploy.
+
+  it('reports every font the document registers', async () => {
+    const body = await (await GET()).json();
+    expect(body.conciergeFonts.expected).toBeGreaterThanOrEqual(7);
+    expect(body.conciergeFonts).toHaveProperty('ok');
+    expect(Array.isArray(body.conciergeFonts.missing)).toBe(true);
+  });
+
+  it('is ok in this checkout, where the files are committed', async () => {
+    const body = await (await GET()).json();
+    expect(body.conciergeFonts.missing).toEqual([]);
+    expect(body.conciergeFonts.ok).toBe(true);
+  });
+
+  it('publishes filenames only — no paths off the server', async () => {
+    const body = await (await GET()).json();
+    const blob = JSON.stringify(body.conciergeFonts);
+    expect(blob).not.toContain('/');
+    expect(blob).not.toContain('\\');
   });
 });

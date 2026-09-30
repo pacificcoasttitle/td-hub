@@ -80,6 +80,19 @@ export interface NormalizedSubject {
    * same annotation: recomputing from BuildingArea was the legacy bug.
    */
   lastSalePricePerSqft: number | null;
+
+  // ── v6 page 3 ──────────────────────────────────────────────────────────
+  // Additive. Every one was already in the payload and simply not read; the
+  // alternative was printing an em dash over data we had bought.
+  // There is no page-grid field in feed 100001 — that row renders a gap.
+  /** PP.MailAddressFull. Differs from the site address on absentee owners. */
+  mailAddressFull: string | null;
+  /** PP.CensusTract. */
+  censusTract: string | null;
+  /** PP.PropertyCharacteristics.GarageTypeWithNumCars, e.g. "Attached / 2". */
+  garage: string | null;
+  pool: string | null;
+  zoning: string | null;
 }
 
 export interface NormalizedTax {
@@ -169,6 +182,18 @@ export function normalizeSubject(feed: Raw): NormalizedSubject {
     lastSaleDate: toIsoDate(sl.TransferDate ?? sl.LastTransferRecordingDate ?? sl.RecordingDate ?? sl.LastSaleDate),
     lastSalePrice: num(sl.SalesPrice ?? sl.LastTransferValue ?? sl.SalePrice ?? sl.LastSalePrice),
     lastSalePricePerSqft: num(sl.PricePerSQFT),
+
+    mailAddressFull: str(p.MailAddressFull),
+    censusTract: str(p.CensusTract),
+    // "/ 0" when there is no garage and no type — a slash and a zero is not a
+    // value a reader can use, so it reads as a gap.
+    garage: (() => {
+      const g = str(ch.GarageTypeWithNumCars);
+      if (!g) return null;
+      return /^[\s/0]*$/.test(g) ? null : g.replace(/^\s*\/\s*/, '').trim() || null;
+    })(),
+    pool: str(ch.Pool),
+    zoning: str(ch.Zoning),
   };
 }
 

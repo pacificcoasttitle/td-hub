@@ -103,7 +103,13 @@ async function loadImage(key: string | null): Promise<string | null> {
     const c = await (await doc.getPage(p)).getTextContent();
     pages.push(c.items.map((i) => ('str' in i ? i.str : '')).join(' '));
   }
-  const all = pages.join(' ');
+  // Squashed. pdfjs emits its own spacing between text runs, so an exact
+  // phrase regex misses a line the document really does contain — the
+  // Commissioner paragraph failed this way while the test suite, which strips
+  // whitespace, passed on the same render.
+  const all = pages.join(' ').replace(/\s+/g, ' ');
+  const squashed = all.replace(/\s+/g, '');
+  const has = (phrase: string) => squashed.includes(phrase.replace(/\s+/g, ''));
 
   console.log(`\nProfile ${id} — ${profile.requestedAddress}, ${profile.requestedCity}`);
   console.log(`  stored template: ${profile.templateVersion}   this render: ${TEMPLATE_VERSION}`);
@@ -115,14 +121,23 @@ async function loadImage(key: string | null): Promise<string | null> {
   pages.forEach((t, i) => console.log(`    ${i + 1}. ${t.trim().slice(0, 74).replace(/\s+/g, ' ')}`));
 
   console.log('\n  Checks against the real payload:');
+  // v6. The previous set asserted v3 behaviour — a "Price per sf" label, a
+  // template version in the footer, and a visible disclaimer-pending box —
+  // all three of which v6 deliberately removes.
   const checks: [string, boolean][] = [
-    ['tax page present', /Property\s*tax/i.test(all)],
+    ['tax page present', /PROPERTY\s*TAX/i.test(all)],
     ['no payment status anywhere', !/delinquent/i.test(all)],
+    ['no "late after" column', !/late\s*after/i.test(all)],
     ['no valuation of this property', !/(Estimated value|Midpoint|suggest it)/i.test(all)],
     ['subject sale renders (not the no-sale callout)', !/No subject sale on record/i.test(all)],
-    ['supplied price per sq ft present', /Price per sf/i.test(all)],
-    ['template stamped v3', new RegExp(`Template\\s*${TEMPLATE_VERSION}`).test(all)],
-    ['disclaimer gap visible', /disclaimer pending/i.test(all)],
+    ['price per sq ft present', has('Price per sq ft')],
+    ['Commissioner disclaimer present', has('California Insurance Commissioner')],
+    ['accommodation-only paragraph present', has('provided as an accommodation only')],
+    ['no "pending" disclaimer box', !has('disclaimer pending') && !has('not for external distribution')],
+    ['template version NOT on the page', !/Template\s*v\d/i.test(all)],
+    ['v6 footer present', /Data deemed reliable/i.test(all)],
+    ['no v3 lede sentences', !/A single-family home built in/i.test(all)],
+    [`stamped ${TEMPLATE_VERSION} in metadata`, TEMPLATE_VERSION === 'v4'],
   ];
   for (const [label, ok] of checks) console.log(`    ${ok ? 'PASS' : 'FAIL'}  ${label}`);
 

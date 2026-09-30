@@ -162,7 +162,26 @@ export const conciergeProfileComps = pgTable('concierge_profile_comps', {
   apn: varchar('apn', { length: 50 }),
 
   salePrice: numeric('sale_price', { precision: 12, scale: 2 }),
-  /** SiteX's own figure. Never recomputed from BuildingArea — that was the legacy bug. */
+  /**
+   * SiteX's own figure, as stored. THE DOCUMENT NO LONGER PRINTS IT.
+   *
+   * This used to read "never recomputed from BuildingArea — that was the
+   * legacy bug", which stopped being true on 2026-09-30: v6 asks for price per
+   * sq ft calculated as sale price ÷ living area, for the subject and for every
+   * comparable, and `pricePerSqft()` in profile-document.tsx does that.
+   *
+   * The annotation is corrected rather than deleted because the caution behind
+   * it was real — the payload carries TWO building areas,
+   * PropertyCharacteristics.BuildingArea (786 on profile 4) and
+   * Neighborhood[].BuildingArea (793), so a computed rate depends on which is
+   * divided by. The document uses PropertyCharacteristics, the same field its
+   * sq ft row and comp table print, so the rate never disagrees with the area
+   * shown beside it.
+   *
+   * The column stays: it is what the vendor said, it round-trips through
+   * comp-row.ts, and a stored figure that disagrees with a computed one is
+   * worth being able to see.
+   */
   pricePerSqft: numeric('price_per_sqft', { precision: 10, scale: 2 }),
   recordingDate: date('recording_date'),
   documentNumber: varchar('document_number', { length: 50 }),

@@ -58,7 +58,7 @@ import { readFileSync } from 'node:fs';
  * comments become blank lines rather than vanishing, so a line number in an
  * error message still points where a reader expects.
  */
-function stripComments(src: string): string {
+export function stripComments(src: string): string {
   return src
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ''))
     .replace(/^[ \t]*\/\/.*$/gm, '');

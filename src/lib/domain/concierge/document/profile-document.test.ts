@@ -1,6 +1,8 @@
+import { join } from 'node:path';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { renderToBuffer } from '@react-pdf/renderer';
 import { describe, expect, it } from 'vitest';
+import { readSource } from '@/test-support/read-source';
 import {
   INSURANCE_DISCLAIMER, ProfileDocument, TEMPLATE_VERSION, pageNo, pagesFor,
   pricePerSqft, typeOf,
@@ -192,10 +194,10 @@ describe('payment status never reaches the page', () => {
     const { text } = await render(input({ taxReport: REPORT }));
     expect(text.toUpperCase()).not.toContain('DELINQUENT');
     expect(text.toUpperCase()).not.toContain('PAID');
-    // ...while the instalments themselves DID render, so the absence is about
-    // the status field and not about a missing section.
-    expect(text).toContain(sq('1st'));
-    expect(text).toContain(sq('2nd'));
+    // ...while the installments themselves DID render, so the absence is
+    // about the status field and not about a missing section.
+    expect(text).toContain(sq('1ST INSTALLMENT'));
+    expect(text).toContain(sq('2ND INSTALLMENT'));
   });
 });
 
@@ -263,7 +265,24 @@ describe('v3 parts are gone', () => {
   it('has no explainer boxes — the reason is a footnote', async () => {
     const { text } = await render(input());
     expect(text).not.toContain(sq('Assessment data only'));
-    expect(text).toContain(sq("Assessor's summary record only"));
+    // The footnote used to say instalment amounts "were not available" while
+    // two installment boxes sat above it. It now states what the page can
+    // actually support: they are the annual total split by statute.
+    expect(text).toContain(sq('Installments are the annual amount split per California statute'));
+    expect(text).not.toContain(sq('were not available for this parcel'));
+  });
+
+  it('uses US spelling for installment throughout', () => {
+    // v6 is a US customer document. "instalment" is the British form and was
+    // in the section bar, the boxes and the footnote.
+    //
+    // readSource, so a rename fails loudly and the prose in this file's own
+    // comments is not read as rendered copy.
+    const src = readSource(
+      join(process.cwd(), 'src/lib/domain/concierge/document/profile-document.tsx'),
+      { mustContain: 'export function ProfileDocument' },
+    );
+    expect(src).not.toMatch(/\bINSTALMENT|\binstalment/);
   });
 
   it('states no value for this property', async () => {

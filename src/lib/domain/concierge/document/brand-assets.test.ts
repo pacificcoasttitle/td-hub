@@ -19,8 +19,8 @@ import { PCT_COVER_PHOTO, PCT_LOGO_WHITE } from './brand-assets';
 const PUBLIC = join(process.cwd(), 'public');
 
 const ASSETS = [
-  { name: 'PCT_LOGO_WHITE', uri: PCT_LOGO_WHITE, file: 'logo2-light.png', mime: 'image/png', magic: '89504e47' },
-  { name: 'PCT_COVER_PHOTO', uri: PCT_COVER_PHOTO, file: 'concierge-cover.jpg', mime: 'image/jpeg', magic: 'ffd8ff' },
+  { name: 'PCT_LOGO_WHITE', uri: PCT_LOGO_WHITE, file: 'logo2-light.png', mime: 'image/png', magic: '89504e47', derived: false },
+  { name: 'PCT_COVER_PHOTO', uri: PCT_COVER_PHOTO, file: 'concierge-cover.jpg', mime: 'image/jpeg', magic: 'ffd8ff', derived: true },
 ] as const;
 
 /** The bytes a data URI actually carries. */
@@ -32,9 +32,19 @@ function decode(uri: string): Buffer {
 
 describe('every committed asset matches its file on disk', () => {
   for (const a of ASSETS) {
-    it(`${a.name} is byte-identical to public/${a.file}`, () => {
+    it(`${a.name} ${a.derived ? 'is derived from' : 'is byte-identical to'} public/${a.file}`, () => {
       const onDisk = readFileSync(join(PUBLIC, a.file));
-      expect(decode(a.uri).equals(onDisk), `${a.file} changed without re-running scripts/build/embed-brand-assets.ts`).toBe(true);
+      if (!a.derived) {
+        expect(decode(a.uri).equals(onDisk), `${a.file} changed without re-running scripts/build/embed-brand-assets.ts`).toBe(true);
+        return;
+      }
+      // The cover has the v6 fade composited in, so it is deliberately NOT
+      // the file on disk. Asserting byte-identity here would either fail
+      // forever or push someone to commit the faded version as the source,
+      // which loses the clean photograph. What must hold is that it came from
+      // this file and was actually darkened — see the fade test below.
+      expect(decode(a.uri).length).toBeGreaterThan(0);
+      expect(onDisk.length).toBeGreaterThan(0);
     });
 
     it(`${a.name} declares ${a.mime} and really is one`, () => {
@@ -61,6 +71,23 @@ describe('nothing oversized gets inlined into source', () => {
   it('the generated module stays under 800 KB', () => {
     const bytes = statSync(join(process.cwd(), 'src', 'lib', 'domain', 'concierge', 'document', 'brand-assets.ts')).size;
     expect(bytes).toBeLessThan(800 * 1024);
+  });
+
+  it('the cover actually carries the fade, and the source does not', async () => {
+    // The whole point of deriving it. Without this the generator could stop
+    // compositing and every test here would still pass — the inlined asset
+    // would just be the plain photograph, and the white logo would go back to
+    // being invisible against the sky with nothing to say so.
+    const sharp = (await import('sharp')).default;
+    const topRow = async (buf: Buffer) => {
+      const { data } = await sharp(buf).extract({ left: 0, top: 0, width: 1, height: 1 })
+        .raw().toBuffer({ resolveWithObject: true });
+      return (data[0]! + data[1]! + data[2]!) / 3;
+    };
+    const clean = await topRow(readFileSync(join(PUBLIC, 'concierge-cover.jpg')));
+    const faded = await topRow(decode(PCT_COVER_PHOTO));
+    expect(faded, 'the inlined cover is no darker at the top than the source — the fade was not composited')
+      .toBeLessThan(clean - 20);
   });
 
   it('the cover is 3x its render size, not the original', () => {

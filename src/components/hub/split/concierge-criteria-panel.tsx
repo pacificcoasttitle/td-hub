@@ -35,7 +35,23 @@ export function ConciergeCriteriaPanel({
 }) {
   const [c, setC] = useState<CompCriteria>(profile.criteria);
 
-  const set = <K extends keyof CompCriteria>(k: K, v: CompCriteria[K]) => setC({ ...c, [k]: v });
+  /**
+   * FUNCTIONAL UPDATE, not a spread of the captured `c`.
+   *
+   * `setC({ ...c, [k]: v })` closes over the `c` of the render that created
+   * the handler. A range input fires onChange continuously while it is
+   * dragged, and React batches those updates, so several writes in one tick
+   * all spread from the SAME stale object and only the last survives.
+   *
+   * The operator moves three sliders, presses Apply, and the criteria that
+   * reach the server are nearly the ones they started with — which is exactly
+   * "I changed the comparables and nothing happened". The filter itself is
+   * fine: selectComps was measured against seven criteria sets on profile 4's
+   * stored comparables and responded to every one
+   * (scripts/audit/concierge-criteria-responds.mts).
+   */
+  const set = <K extends keyof CompCriteria>(k: K, v: CompCriteria[K]) =>
+    setC((prev) => ({ ...prev, [k]: v }));
 
   return (
     <div

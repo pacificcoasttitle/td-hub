@@ -241,10 +241,38 @@ reported:
    fully merged on both readings; those were removed. The other 40 were not
    touched.
 
-**The tell.** A flag that is unanimous — *every* worktree prunable, *every*
-lender with a blank address, *all 120* contacts nameless — is more often a
-statement about the instrument than about the population. Unanimity is a
-prompt to check the instrument, not a finding.
+## The tell: unanimity is a claim about the instrument
+
+This is the general form, and it has earned its own heading because six
+instances is no longer a pattern, it is a property of this codebase.
+
+| The unanimous finding | What it was actually about |
+| --- | --- |
+| *Every* worktree prunable (65 of 68) | git in a container that cannot resolve `C:/Users/...` |
+| *Every* lender returning `Address1: ""` — 1,487 of 1,487 | `GetCompanies` does not carry the field; `GetLookuptable` does |
+| *All 120* contacts nameless | the query selected `first_name`/`last_name`; 106 have a `full_name` |
+| *Every* SiteX candidate at Castello Lane an identical string | `UnitNumber` was being dropped, so six units read as one address |
+| *Every* candidate ever logged carrying `"zip": ""` | the reader looked for `Zip`; SiteX sends `ZIP` |
+| *1,315 files modified* in one worktree | 1,315 **deletions** — the directory was already empty |
+
+**The rule.** A flag true of the entire population is a claim about the
+measurement until proven otherwise. Real populations are ragged: some lenders
+have addresses, some contacts have names, some units differ. Unanimity is the
+signature of a broken instrument, and the check is cheap — find one member of
+the population that should NOT have the property, and see whether it does.
+Rocket Mortgage came back blank too, and that was the whole answer.
+
+**The sixth one is the sharpest, because it is from the script written to
+prevent the first.** The worktree survey counted every non-`??` line of `git
+status` as "modified" and reported 1,315 modified files in a temp directory —
+which became an urgent warning that a thousand files of work were about to be
+lost to a Windows cleanup. They were deletions. The directory had already been
+emptied, the branch was already pushed, and there was nothing there at all.
+
+A survey written specifically to stop a destructive action, taken from a shell
+that could see the host, still produced a number that was a fact about an empty
+folder. **The instrument does not become trustworthy because you built it to
+be careful.**
 
 ## The shape they share
 

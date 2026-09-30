@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ModalShell } from '@/components/shared/action-modals/modal-shell';
 import { AddressAutocomplete, type ParsedAddress } from '@/components/ui/address-autocomplete';
+import { RepCombobox } from './rep-combobox';
 import { ConciergeCostGate } from '@/components/hub/split/concierge-cost-gate';
 import { CriteriaFields } from '@/components/hub/split/concierge-criteria-panel';
 import { criteriaSummary } from '@/lib/domain/concierge/list-line';
@@ -226,81 +227,13 @@ export function TypeCard({ option, selected, onSelect }: {
   );
 }
 
-// ─── The presenting-rep picker ──────────────────────────────────────────────
-
-export interface RepResult {
-  id: number;
-  fullName: string | null;
-  email: string | null;
-  companyName: string | null;
-  /**
-   * Set by /api/contacts/search for sales reps only, and only when the book
-   * holds another row with the SAME name and email. Kevin Cameron is two such
-   * rows; without these the operator is choosing between identical lines and
-   * the wrong choice makes a report he never sees.
-   */
-  ambiguous?: boolean;
-  hasLogin?: boolean;
-  orders?: number;
-  twinLabel?: string | null;
-}
-
-export function RepPicker({ chosenName, results, query, searching, onQuery, onChoose, onClear }: {
-  chosenName: string;
-  results: RepResult[];
-  query: string;
-  searching: boolean;
-  onQuery: (v: string) => void;
-  onChoose: (r: RepResult) => void;
-  onClear: () => void;
-}) {
-  if (chosenName) {
-    return (
-      <div className="flex items-center justify-between rounded-md border border-[#E5E5E5] px-3 py-2">
-        <span className="text-[12px] text-[#171717]">{chosenName}</span>
-        <button type="button" onClick={onClear} className="text-[11px] font-medium text-[#1B2A4A] hover:underline">
-          Change
-        </button>
-      </div>
-    );
-  }
-  return (
-    <div>
-      <input
-        value={query}
-        onChange={(e) => onQuery(e.target.value)}
-        placeholder="Search sales representatives"
-        className="w-full h-8 px-[9px] border border-[#E5E5E5] rounded-md text-[12px] outline-none focus:ring-1 focus:ring-brand-orange/30 focus:border-brand-orange"
-      />
-      {query.trim().length >= 2 ? (
-        <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-[#EDEFF3]">
-          {searching ? (
-            <p className="px-3 py-2 text-[11.5px] text-[#9AA0AA]">Searching…</p>
-          ) : results.length === 0 ? (
-            <p className="px-3 py-2 text-[11.5px] text-[#9AA0AA]">No sales representative by that name.</p>
-          ) : results.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => onChoose(r)}
-              className="block w-full px-3 py-[6px] text-left text-[12px] text-[#171717] hover:bg-[#F5F7FB]"
-            >
-              {r.fullName ?? r.email ?? `Contact ${r.id}`}
-              {r.companyName ? <span className="text-[#9AA0AA]"> · {r.companyName}</span> : null}
-              {/* Two rows a human cannot tell apart get the facts that separate them. */}
-              {r.twinLabel ? (
-                <span className={`block text-[10.5px] ${r.hasLogin ? 'text-[#9AA0AA]' : 'text-[#B45309]'}`}>
-                  {r.twinLabel}
-                  {!r.hasLogin ? ' — they will not see this report in their own list' : ''}
-                </span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
+// ─── The presenting-rep picker lives in rep-combobox.tsx ────────────────────
+//
+// It used to be a search box here: two characters before it showed anything,
+// eight results, a debounce and a request counter. Gerard asked for "all of the
+// list so our user can easily select" and there are 54 reps, so the search and
+// everything supporting it is gone — see RepCombobox for what replaced it and
+// why. /api/contacts/search still serves its other callers unchanged.
 
 // ─── Step two: the property ─────────────────────────────────────────────────
 
@@ -485,12 +418,6 @@ export function NewReportModal({ onClose, onCreated }: {
   const [farming, setFarming] = useState<boolean | null>(null);
   const [farmingDraft, setFarmingDraft] = useState<FarmingDraft>(() => emptyFarmingDraft());
 
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<RepResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const debRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const searchCount = useRef(0);
-
   // Asked on every open, not cached: the flag can be turned on while the page
   // is sitting there, and a stale "not enabled" would hide a feature that works.
   useEffect(() => {
@@ -506,21 +433,6 @@ export function NewReportModal({ onClose, onCreated }: {
       .then((d: { farming?: boolean } | null) => { if (!cancelled) setFarming(!!d?.farming); })
       .catch(() => { if (!cancelled) setFarming(false); });
     return () => { cancelled = true; };
-  }, []);
-
-  const search = useCallback((v: string) => {
-    setQuery(v);
-    clearTimeout(debRef.current);
-    if (v.trim().length < 2) { setResults([]); setSearching(false); return; }
-    setSearching(true);
-    debRef.current = setTimeout(() => {
-      const id = ++searchCount.current;
-      fetch(`/api/contacts/search?type=sales_rep&pageSize=8&q=${encodeURIComponent(v.trim())}`)
-        .then((r) => (r.ok ? r.json() : { results: [] }))
-        .then((d: { results?: RepResult[] }) => { if (id === searchCount.current) setResults(d.results ?? []); })
-        .catch(() => { if (id === searchCount.current) setResults([]); })
-        .finally(() => { if (id === searchCount.current) setSearching(false); });
-    }, 250);
   }, []);
 
   const problem = draftProblem(draft);
@@ -667,16 +579,10 @@ export function NewReportModal({ onClose, onCreated }: {
               onField={(k, v) => setFarmingDraft((d) => ({ ...d, [k]: v }))}
               onFile={(f) => setFarmingDraft((d) => ({ ...d, file: f }))}
               repPicker={(
-                <RepPicker
+                <RepCombobox
                   chosenName={farmingDraft.repName}
-                  results={results}
-                  query={query}
-                  searching={searching}
-                  onQuery={search}
-                  onChoose={(r) => setFarmingDraft((d) => ({
-                    ...d, repContactId: r.id, repName: r.fullName ?? r.email ?? `Contact ${r.id}`,
-                  }))}
-                  onClear={() => { setFarmingDraft((d) => ({ ...d, repContactId: null, repName: '' })); setQuery(''); setResults([]); }}
+                  onChoose={(r) => setFarmingDraft((d) => ({ ...d, repContactId: r.id, repName: r.name }))}
+                  onClear={() => setFarmingDraft((d) => ({ ...d, repContactId: null, repName: '' }))}
                 />
               )}
             />
@@ -698,16 +604,14 @@ export function NewReportModal({ onClose, onCreated }: {
               onAddress={(a) => setDraft((d) => applyPickedAddress(d, a))}
               criteriaControl={<CriteriaFields criteria={criteria} onChange={setCriteria} />}
               repPicker={(
-                <RepPicker
+                /* `r.name`, never `r.label`. The label carries the
+                   disambiguation — "Kevin Cameron · #8821" — which exists to
+                   help the operator choose and must never reach the document's
+                   cover, where it would read as the rep's name. */
+                <RepCombobox
                   chosenName={draft.repName}
-                  results={results}
-                  query={query}
-                  searching={searching}
-                  onQuery={search}
-                  onChoose={(r) => setDraft((d) => ({
-                    ...d, repContactId: r.id, repName: r.fullName ?? r.email ?? `Contact ${r.id}`,
-                  }))}
-                  onClear={() => { setDraft((d) => ({ ...d, repContactId: null, repName: '' })); setQuery(''); setResults([]); }}
+                  onChoose={(r) => setDraft((d) => ({ ...d, repContactId: r.id, repName: r.name }))}
+                  onClear={() => setDraft((d) => ({ ...d, repContactId: null, repName: '' }))}
                 />
               )}
             />

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { CONCIERGE_GENERATE_ROLES } from '@/lib/domain/concierge/access';
 import { CONTACT_BOOK_READ_ROLES } from '@/lib/security/contact-book-access';
 import {
-  AlreadyHavePanel, ConciergeStep, RepPicker, TypeCard,
+  AlreadyHavePanel, ConciergeStep, TypeCard,
   applyPickedAddress, draftProblem, fullAddress, generationBody, typeOptions,
   type ConciergeDraft,
 } from './new-report-modal';
@@ -239,35 +239,11 @@ describe('a picked address fills the whole address', () => {
   });
 });
 
-describe('the representative picker', () => {
-  const picker = (over: Partial<Parameters<typeof RepPicker>[0]> = {}) => visible(
-    <RepPicker
-      chosenName="" results={[]} query="" searching={false}
-      onQuery={() => {}} onChoose={() => {}} onClear={() => {}}
-      {...over}
-    />,
-  );
-
-  it('shows the chosen rep with a way to change it', () => {
-    const text = picker({ chosenName: 'Justin Nouri' });
-    expect(text).toContain('Justin Nouri');
-    expect(text).toContain('Change');
-  });
-
-  it('says plainly when a search found nobody', () => {
-    expect(picker({ query: 'zzz', results: [] })).toContain('No sales representative by that name.');
-  });
-
-  it('does not call an in-flight search an empty result', () => {
-    expect(picker({ query: 'lo', searching: true })).toContain('Searching…');
-  });
-
-  it('lists a match by name and company', () => {
-    const text = picker({ query: 'nou', results: [{ id: 412, fullName: 'Justin Nouri', email: null, companyName: 'PCT' }] });
-    expect(text).toContain('Justin Nouri');
-    expect(text).toContain('PCT');
-  });
-});
+// The representative control is now RepCombobox, and its tests are in
+// rep-combobox.interactive.test.tsx — they need a DOM, because "shows all 54 on
+// focus" is a statement about an interaction and not about a first paint. The
+// four string-render tests that were here asserted the search box that the
+// combobox replaced.
 
 describe('the flag that allows a second credit', () => {
   const body = (allowDuplicate: boolean) => generationBody({

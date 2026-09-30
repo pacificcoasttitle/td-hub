@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { PreparedForField } from './prepared-for-field';
 
 // ─── The confirmation gate ──────────────────────────────────────────────────
 //
@@ -80,23 +80,15 @@ export function ConciergeCostGate(p: CostGateProps) {
         <div className="px-5 py-4 space-y-3">
           <GateRow label="Property" value={p.address} />
 
-          <div>
-            <label className="block text-[9.5px] font-semibold uppercase tracking-[0.09em] text-[#9AA0AA] mb-1">
-              Prepared for
-            </label>
-            <input
-              value={p.preparedForName}
-              onChange={(e) => p.onPreparedForName(e.target.value)}
-              placeholder="Client or agent name"
-              className="w-full h-8 px-[9px] border border-[#E5E5E5] rounded-md text-[12px] outline-none focus:ring-1 focus:ring-brand-orange/30 focus:border-brand-orange"
-            />
-            <input
-              value={p.preparedForCompany}
-              onChange={(e) => p.onPreparedForCompany(e.target.value)}
-              placeholder="Brokerage (optional)"
-              className="w-full h-8 px-[9px] mt-[6px] border border-[#E5E5E5] rounded-md text-[12px] outline-none focus:ring-1 focus:ring-brand-orange/30 focus:border-brand-orange"
-            />
-          </div>
+          {/* Suggestions, not a picker. A new client must stay typeable — see
+              PreparedForField. Nothing about the gate's guards changes: the
+              Generate button is still blocked while this is empty. */}
+          <PreparedForField
+            name={p.preparedForName}
+            company={p.preparedForCompany}
+            onName={p.onPreparedForName}
+            onCompany={p.onPreparedForCompany}
+          />
 
           <GateRow
             label="Presenting representative"

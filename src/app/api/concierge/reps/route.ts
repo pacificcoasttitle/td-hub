@@ -5,6 +5,7 @@ import { canGenerateConcierge } from '@/lib/domain/concierge/access';
 import { db } from '@/lib/db/client';
 import { contacts } from '@/lib/db/schema';
 import { labelReps } from '@/lib/domain/concierge/rep-options';
+import { repTwinFacts, twinLabel } from '@/lib/domain/reports/rep-visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,5 +52,23 @@ export async function GET() {
     company: r.company ?? null,
   })));
 
-  return NextResponse.json({ reps });
+  // The decisive facts, for the rows where a name alone is not enough. Two
+  // queries for the whole book regardless of its size, which is why asking for
+  // all 54 costs the same as asking for eight.
+  //
+  // A LABEL SAYS THE ROWS DIFFER; THIS SAYS WHICH ONE IS THE REP. Both Kevin
+  // Cameron rows are kcameron@pct.com with no company, so the label falls all
+  // the way to "· #8" and "· #22265" — correct, unique, and useless for
+  // choosing. "has login · 76 orders" against "NO login · 0 orders" is the
+  // thing the operator can actually act on.
+  const facts = await repTwinFacts(rows.map((r) => ({
+    id: r.id, fullName: r.name, email: r.email,
+  })));
+
+  const withFacts = reps.map((r) => {
+    const f = facts.get(r.id);
+    return { ...r, detail: f ? twinLabel(f) : null, hasLogin: f?.hasLogin ?? true };
+  });
+
+  return NextResponse.json({ reps: withFacts });
 }

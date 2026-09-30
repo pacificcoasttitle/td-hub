@@ -14,6 +14,29 @@ typecheck.** Twice on 2026-09-09 a green suite went to CI and failed on `tsc` �
 once on a mock missing a field a type had gained, once on a narrowing error.
 Both were two CI round trips that a local command would have caught in one.
 
+**And `npm run verify` passing does not mean the deploy passes: verify does not
+BUNDLE.** On 2026-09-30 a client component imported one constant from the
+Concierge PDF document, which dragged `@react-pdf/renderer`, `node:fs` and
+670 KB of inlined base64 into the browser bundle. Typecheck passed, 2,696 tests
+passed, and Turbopack refused to generate the chunk. Vercel was the only thing
+that saw it.
+
+It is a ladder, and each rung sees something the one below cannot:
+
+| `npm run test` | does not typecheck |
+| `npm run verify` | typechecks, does not bundle |
+| the Vercel build | bundles, and enforces the client/server boundary |
+
+Do not add `build` to verify — it is slow and Vercel is already a required
+check, so the gate exists and worked. **The lesson is that a Vercel failure on
+a branch whose `app` and `scripts` jobs are green is a signal, not flakiness.**
+Read it before assuming the deploy is having a bad day.
+
+That one was caught by SIZE rather than by KIND: the import was wrong whether
+the module was 670 KB or 6 KB, and only broke the build because a cover
+photograph had just made it enormous. `document-stays-server-side.test.ts`
+now checks the import itself, so the small version fails too.
+
 Run it before pushing anything, and read the whole result rather than the tail.
 If the run looks degraded — worker start-up timeouts, far fewer test files than
 usual — the machine is starved, not the code; re-run it before drawing any

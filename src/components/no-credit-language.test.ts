@@ -58,6 +58,20 @@ describe('nothing an operator reads mentions credits', () => {
     expect(uiFiles(COMPONENTS).length).toBeGreaterThan(50);
   });
 
+  it('is reading the files the wording was removed from', () => {
+    // The stronger anchor: not just "some files", but THESE files — the four
+    // surfaces the credit language actually came off. A walk that stopped
+    // reaching them would pass while checking a corner of the tree.
+    const read = new Set(uiFiles(COMPONENTS).map((f) => f.replace(/\\/g, '/')));
+    for (const expected of [
+      'hub/split/concierge-cost-gate.tsx',
+      'admin/reports/new-report-modal.tsx',
+      'admin/reports/reports-list-page.tsx',
+    ]) {
+      expect([...read].some((f) => f.endsWith(expected)), `${expected} is not being scanned`).toBe(true);
+    }
+  });
+
   it('has no credit wording in any component', () => {
     expect(offenders, 'operator-facing credit language. The spend is real and still '
       + 'metered, but it is not the operator\'s to weigh — see the header of this file.')

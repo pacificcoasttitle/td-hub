@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readSource, stripComments } from '@/test-support/read-source';
 
 // ─── The PDF document must not reach the browser ────────────────────────────
 //
@@ -36,7 +37,10 @@ function walk(dir: string, out: string[] = []): string[] {
 const rel = (f: string) => relative(SRC, f).split('\\').join('/');
 
 /** Source with comments removed, so an assertion cannot read prose as code. */
-const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+// ONE implementation, in read-source.ts. This file had its own copy, which is
+// how two subtly different comment strippers end up in a codebase that has
+// been bitten by comments twice.
+const code = stripComments;
 
 /** Modules too heavy for a browser bundle, by the path a client would import. */
 const SERVER_ONLY = [
@@ -78,9 +82,13 @@ describe('the concierge document never enters a client bundle', () => {
   });
 
   it('template-version.ts imports nothing, which is the whole point', () => {
-    const src = readFileSync(join(SRC, 'lib/domain/concierge/document/template-version.ts'), 'utf8');
+    // readSource, not readFileSync: it fails loudly if the anchor is gone
+    // rather than asserting about a file it no longer understands, and it
+    // strips comments so the prose explaining the rule is not read as code.
+    const src = readSource(join(SRC, 'lib/domain/concierge/document/template-version.ts'), {
+      mustContain: 'export const TEMPLATE_VERSION',
+    });
     expect(src).not.toMatch(/^\s*import\s/m);
-    expect(src).toContain('TEMPLATE_VERSION');
   });
 
   it('font-files.ts stays free of the renderer, for the same reason', () => {
@@ -92,7 +100,9 @@ describe('the concierge document never enters a client bundle', () => {
     // explanation as the thing it forbade and failed. AGENTS.md records the
     // mirror image — an assertion passing because the comment above it
     // contained the string it was hunting. Either way the subject is the code.
-    const src = code(readFileSync(join(SRC, 'lib/domain/concierge/document/font-files.ts'), 'utf8'));
+    const src = readSource(join(SRC, 'lib/domain/concierge/document/font-files.ts'), {
+      mustContain: 'export const FONT_FILES',
+    });
     expect(src).not.toContain('@react-pdf/renderer');
   });
 });

@@ -8,6 +8,8 @@ import {
 } from '@/lib/domain/reports/list-types';
 import { NotifyRepControl } from './notify-rep-control';
 import { ComparablesControl, RefreshDocumentControl, RetryControl } from './row-actions';
+import { MenuItem, RowBadge, RowMenu } from './row-menu';
+import { TaxDetailControl } from './tax-detail-control';
 // The template a re-render would produce, read from the document itself so the
 // "older layout" hint cannot drift from what the renderer actually makes.
 import { TEMPLATE_VERSION as CONCIERGE_TEMPLATE } from '@/lib/domain/concierge/document/template-version';
@@ -23,19 +25,36 @@ import { TEMPLATE_VERSION as CONCIERGE_TEMPLATE } from '@/lib/domain/concierge/d
 // 1. The filter is All / Farming / Concierge. Active / Inactive is meaningless
 //    for a report: one was produced, and it exists.
 //
-// 2. Subject and Settings are TWO columns, never merged. Subject is always the
-//    place or property an agent recognises; Settings is always the parameters
-//    that built it. That separation is what lets one table hold four types.
+// 2. Report and Subject are ONE column, stacked. This said the opposite until
+//    2026-09-30 — "TWO columns, never merged", on the reasoning that the
+//    separation is what lets one table hold four types. OVERRIDDEN by Gerard's
+//    design review, and the reasoning did not survive contact with the rendered
+//    page: the type label and the subject are read together, as one
+//    identification of the row, and holding them apart cost ~200px that Actions
+//    then did not have. Stacking keeps both and keeps the separation, in less
+//    space.
 //
-// LAYOUT: table-layout:fixed with declared widths. With seven columns, `auto`
-// lets an un-wrappable subject push Actions off-screen — which is a row whose
-// only action cannot be reached.
+// SETTINGS IS GONE FROM THE HEAD, not from the row. "1 mi · 12 mo · ±30% size"
+// is identical on every Concierge row, so as a column it was 20% of the table
+// spent on something nobody can scan by. It is now the row's tooltip, where it
+// is still there for the one moment anybody wants it.
+//
+// ACTIONS IS A KEBAB. It was a row of text links plus five lines of explanatory
+// body copy inside the cell, which forced horizontal scroll and tripled row
+// height — about six reports to a screen. See row-menu.tsx.
+//
+// WHAT THE MENU IS NOT ALLOWED TO SWALLOW: an older layout, and a tax search in
+// flight. Both stay on the row as badges, because an operator has to see them
+// without opening anything.
+//
+// LAYOUT: table-layout:fixed with declared widths. With `auto`, an un-wrappable
+// subject pushes Actions off-screen — a row whose only action cannot be reached.
 //
 // DELIVERY: reads the log through the API. "Never sent" is grey and says so;
 // it must never look like success, which is the failure this whole column
 // exists to make visible.
 
-const COLUMN_WIDTHS = ['18%', '22%', '20%', '13%', '10%', '9%', '8%'];
+const COLUMN_WIDTHS = ['38%', '17%', '13%', '22%', '10%'];
 
 interface Props {
   /** Concierge is the only type that can be created today. */
@@ -127,8 +146,6 @@ export function ReportsListPage({ onNewReport, reloadToken = 0 }: Props) {
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50/60">
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Report</th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Subject</th>
-                  <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Settings</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Branded To</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Created</th>
                   <th className="text-left px-4 py-3 font-medium text-[#6B7280]">Delivery</th>
@@ -137,10 +154,12 @@ export function ReportsListPage({ onNewReport, reloadToken = 0 }: Props) {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {loading ? Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i}>{Array.from({ length: 7 }).map((__, j) => (
+                  <tr key={i}>{Array.from({ length: COLUMN_WIDTHS.length }).map((__, j) => (
                     <td key={j} className="px-4 py-3"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" /></td>
                   ))}</tr>
-                )) : rows.map((r) => <ReportRow key={`${r.type}-${r.id}`} row={r} onChanged={fetchReports} />)}
+                )) : groupRows(rows).map((g) => (
+                  <ReportGroup key={`${g.rows[0]!.type}-${g.rows[0]!.id}`} group={g} onChanged={fetchReports} />
+                ))}
               </tbody>
             </table>
             {!loading && rows.length === 0 && (
@@ -183,48 +202,183 @@ export function shortWhen(iso: string): string {
   return `${day}, ${time}`;
 }
 
-export function ReportRow({ row, onChanged }: { row: ReportListRow; onChanged?: () => void }) {
-  const building = row.status === 'pending' || row.status === 'retrieved';
-  const failed = row.status === 'failed';
+// ─── Re-runs of the same property, grouped ──────────────────────────────────
+//
+// Five profiles exist on 1358 5th St. Flat, they make the table look broken —
+// five sibling rows, same address, minutes apart. They are not a bug: the claim
+// key normalises punctuation so all five collapse to one key, GET /for-property
+// warned every time, and an operator proceeded anyway.
+//
+// So the relationship is SHOWN, not deduped. The newest is the row; the earlier
+// ones sit under it behind a count that states exactly how many there are and
+// expands on one click. NOTHING IS HIDDEN — each of those five was paid for and
+// each appears on an invoice, so a list that quietly showed one would be a list
+// that disagrees with the bill.
+//
+// GROUPING IS PER PAGE, deliberately and with a limit worth naming: a group
+// straddling a page boundary shows as two groups, one on each page. Fixing that
+// means grouping in SQL and paginating by property rather than by report, which
+// changes what `total` counts. Not worth it at this size, and worse to do
+// halfway — a group that claims "4 earlier" while showing 2 is a lie, whereas
+// two honest partial groups are merely inelegant.
+
+export interface ReportGroupData {
+  rows: ReportListRow[];
+}
+
+export function groupRows(rows: readonly ReportListRow[]): ReportGroupData[] {
+  const out: ReportGroupData[] = [];
+  const byKey = new Map<string, ReportGroupData>();
+
+  for (const r of rows) {
+    // Only Concierge carries a property key. A farming report is never grouped,
+    // and neither is a profile whose key predates the column.
+    if (r.type !== 'concierge_profile' || !r.groupKey) {
+      out.push({ rows: [r] });
+      continue;
+    }
+    const existing = byKey.get(r.groupKey);
+    if (existing) {
+      existing.rows.push(r);
+      continue;
+    }
+    const group: ReportGroupData = { rows: [r] };
+    byKey.set(r.groupKey, group);
+    out.push(group);
+  }
+  return out;
+}
+
+export function ReportGroup({ group, onChanged }: { group: ReportGroupData; onChanged?: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [primary, ...earlier] = group.rows;
+  if (!primary) return null;
 
   return (
-    <tr className="hover:bg-gray-50 transition-colors align-top">
-      <td className="px-4 py-3">
-        <div className="font-medium text-[#1A1A2E] truncate">{row.typeLabel}</div>
-        <div className="text-xs text-[#6B7280] truncate">{row.sourceLine}</div>
+    <>
+      <ReportRow
+        row={primary}
+        onChanged={onChanged}
+        earlierCount={earlier.length}
+        expanded={expanded}
+        onToggleEarlier={() => setExpanded((v) => !v)}
+      />
+      {expanded
+        ? earlier.map((r) => <ReportRow key={`${r.type}-${r.id}`} row={r} onChanged={onChanged} isEarlier />)
+        : null}
+    </>
+  );
+}
+
+export function ReportRow({
+  row, onChanged, earlierCount = 0, expanded = false, onToggleEarlier, isEarlier = false,
+}: {
+  row: ReportListRow;
+  onChanged?: () => void;
+  /** Other profiles on this same property, on this page. */
+  earlierCount?: number;
+  expanded?: boolean;
+  onToggleEarlier?: () => void;
+  /** This row is itself one of the earlier ones, shown indented. */
+  isEarlier?: boolean;
+}) {
+  const building = row.status === 'pending' || row.status === 'retrieved';
+  const failed = row.status === 'failed';
+  const isProfile = row.type === 'concierge_profile';
+  const stale = row.templateVersion !== null && row.templateVersion !== CONCIERGE_TEMPLATE;
+  const href = pdfHref(row);
+  const openable = !building && !failed;
+
+  // ─── CLICKABLE ROW (Gerard), without breaking the table ───────────────────
+  //
+  // The click is a MOUSE CONVENIENCE and nothing more. The first version put
+  // role="link" and tabIndex on the <tr>, which opens the document and destroys
+  // the table: a <tr> with role="link" is no longer a row to a screen reader, so
+  // the whole grid loses its structure to make one shortcut work.
+  //
+  // So the real affordance is an ANCHOR on the subject — keyboard-reachable,
+  // announced as a link, opens in a tab, works with middle-click and
+  // copy-link-address, none of which a synthetic click handler gives you. The row
+  // handler is layered on top for people who click anywhere in the row.
+  //
+  // Only where there IS a document: a row still building or failed has nothing to
+  // open, and a click that does nothing teaches the operator the page is broken.
+  // The kebab stops propagation so its own clicks never reach this.
+  const open = () => { if (openable) window.open(href, '_blank', 'noopener'); };
+
+  return (
+    <tr
+      className={`transition-colors align-top ${openable ? 'cursor-pointer hover:bg-gray-50' : ''} ${isEarlier ? 'bg-[#FCFCFD]' : ''}`}
+      onClick={open}
+    >
+      {/* Report and Subject, stacked. Settings is the tooltip — identical on
+          every Concierge row, so it earns a hover and not a column. */}
+      <td className={`px-4 py-3 ${isEarlier ? 'pl-10' : ''}`} title={row.settings ?? undefined}>
+        {/* An absent subject is an EM DASH, not the type label falling through.
+            The first version of the merged cell did the latter, which reads as a
+            row that has a subject and repeats it underneath — and quietly
+            removed the only signal that the subject is missing. */}
+        <div className="truncate text-[#1A1A2E]">
+          {openable ? (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              // The row's handler would fire too and open a second tab.
+              onClick={(e) => e.stopPropagation()}
+              className="font-medium hover:underline"
+            >
+              {row.subject ?? '—'}
+            </a>
+          ) : (
+            <span className="font-medium">{row.subject ?? '—'}</span>
+          )}
+          {stale ? <RowBadge>{row.templateVersion}</RowBadge> : null}
+          {isProfile && row.taxStatus === 'pending' ? <RowBadge tone="amber">tax running</RowBadge> : null}
+          {isProfile && row.taxStatus === 'ready' ? <RowBadge tone="green">tax</RowBadge> : null}
+        </div>
+        <div className="truncate text-xs text-[#6B7280]">
+          {isEarlier ? 'Earlier profile · ' : ''}{row.typeLabel}
+          {row.subjectDetail ? ` · ${row.subjectDetail}` : ''}
+          {row.sourceLine ? ` · ${row.sourceLine}` : ''}
+        </div>
+        {earlierCount > 0 && onToggleEarlier ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleEarlier(); }}
+            className="mt-1 text-[11px] font-medium text-[#1B2A4A] hover:underline"
+          >
+            {expanded
+              ? 'Hide earlier profiles'
+              : `${earlierCount} earlier profile${earlierCount === 1 ? '' : 's'} on this property`}
+          </button>
+        ) : null}
       </td>
-      <td className="px-4 py-3">
-        <div className="text-[#1A1A2E] truncate">{row.subject ?? '—'}</div>
-        {row.subjectDetail ? <div className="text-xs text-[#6B7280] truncate">{row.subjectDetail}</div> : null}
-      </td>
-      <td className="px-4 py-3 text-[#6B7280] truncate">{row.settings ?? '—'}</td>
       <td className="px-4 py-3 text-[#6B7280] truncate">{row.brandedToName ?? '—'}</td>
       <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">{shortWhen(row.createdAt)}</td>
       <td className="px-4 py-3 whitespace-nowrap"><DeliveryCell row={row} /></td>
       <td className="px-4 py-3 text-right whitespace-nowrap">
         {building ? (
           <span className="text-xs text-[#6B7280]">Building…</span>
-        ) : failed ? (
-          <RetryControl row={row} onChanged={onChanged} />
         ) : (
-          <div className="inline-flex items-center gap-3">
-            <a
-              href={pdfHref(row)}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs font-medium text-[#1B2A4A] hover:underline"
-            >
-              Download
-            </a>
-            {row.type === 'concierge_profile' ? (
-              <>
-                <RefreshDocumentControl row={row} currentTemplate={CONCIERGE_TEMPLATE} onChanged={onChanged} />
-                <ComparablesControl row={row} onChanged={onChanged} />
-              </>
+          <RowMenu>
+            {failed ? (
+              <RetryControl row={row} onChanged={onChanged} />
             ) : (
-              <NotifyRepControl row={row} onChanged={onChanged} />
+              <>
+                <MenuItem label="Download" note="Opens the PDF in a new tab." href={href} />
+                {isProfile ? (
+                  <>
+                    <RefreshDocumentControl row={row} currentTemplate={CONCIERGE_TEMPLATE} onChanged={onChanged} />
+                    <ComparablesControl row={row} onChanged={onChanged} />
+                    <TaxDetailControl row={row} onChanged={onChanged} />
+                  </>
+                ) : (
+                  <NotifyRepControl row={row} onChanged={onChanged} />
+                )}
+              </>
             )}
-          </div>
+          </RowMenu>
         )}
       </td>
     </tr>

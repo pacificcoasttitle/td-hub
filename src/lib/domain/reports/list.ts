@@ -50,6 +50,8 @@ interface RawRow {
   delivery_recipient_name: string | null;
   delivery_recipient_email: string | null;
   made_by: string | null;
+  group_key: string | null;
+  tax_status: string | null;
 }
 
 /**
@@ -76,7 +78,11 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
              r.list_subject, r.list_subject_detail, r.list_settings,
              coalesce(c.full_name, r.branded_to_name) as branded_to_name,
              r.branded_to_email,
-             r.created_at, r.created_by
+             r.created_at, r.created_by,
+             -- Farming reports have no property and no tax detail. Typed nulls,
+             -- because a union takes its column types from the first branch and
+             -- an untyped null makes them text for everybody.
+             null::varchar as group_key, null::varchar as tax_status
         from sales_activity_reports r
         left join contacts c on c.id = r.branded_to_contact_id
        where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}
@@ -86,7 +92,8 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
              r.list_subject, r.list_subject_detail, r.list_settings,
              coalesce(c.full_name, r.branded_to_name) as branded_to_name,
              r.branded_to_email,
-             r.created_at, r.created_by
+             r.created_at, r.created_by,
+             null::varchar as group_key, null::varchar as tax_status
         from carrier_route_reports r
         left join contacts c on c.id = r.branded_to_contact_id
        where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}
@@ -96,7 +103,8 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
              r.list_subject, r.list_subject_detail, r.list_settings,
              coalesce(c.full_name, r.branded_to_name) as branded_to_name,
              r.branded_to_email,
-             r.created_at, r.created_by
+             r.created_at, r.created_by,
+             null::varchar as group_key, null::varchar as tax_status
         from county_sales_reports r
         left join contacts c on c.id = r.branded_to_contact_id
        where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}
@@ -110,7 +118,14 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
              r.list_subject, r.list_subject_detail, r.list_settings,
              r.presenting_rep_name as branded_to_name,
              r.presenting_rep_email as branded_to_email,
-             r.created_at, r.created_by
+             r.created_at, r.created_by,
+             -- THE PROPERTY, as the claim key normalises it. Five profiles on
+             -- 1358 5th St share one key, which is how the list can show the
+             -- re-run relationship instead of five sibling rows that look like a
+             -- broken table. Nothing is hidden: each was paid for and each is on
+             -- an invoice.
+             r.property_key as group_key,
+             r.tax_detail_status as tax_status
         from concierge_profiles r
        where ${matches('r.list_subject', 'r.list_settings', 'r.presenting_rep_name')}`);
   }
@@ -178,6 +193,8 @@ export async function listReports(input: {
       createdAt: String(r.created_at),
       createdBy: r.created_by,
       madeBy: r.made_by,
+      groupKey: r.group_key,
+      taxStatus: r.tax_status,
       delivery: r.delivery_outcome
         ? {
           outcome: r.delivery_outcome === 'sent' ? 'sent' : 'failed',

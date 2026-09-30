@@ -76,6 +76,25 @@ export interface ReportListRow {
   madeBy: string | null;
   /** The latest ATTEMPT. Null means never sent, and must not read as success. */
   delivery: ReportDeliverySummary | null;
+  /**
+   * The property this report is of, normalised — `concierge_profiles.property_key`.
+   * Null for the farming three, which are not about one property.
+   *
+   * Rows sharing a key are RE-RUNS OF THE SAME PROPERTY, and the list groups them
+   * under it. Five profiles exist on 1358 5th St and shown flat they make the
+   * table look broken. Grouping is presentation only: every row is still there,
+   * because every one was paid for and appears on an invoice.
+   */
+  groupKey: string | null;
+  /**
+   * Concierge only: pending | ready | empty | denied | failed, or null when the
+   * TitlePoint tax detail was never asked for.
+   *
+   * The row needs this to know whether to OFFER the tax search, report it as
+   * running, or say the county refused — and offering it on a profile that
+   * already has it would sell the same thing twice.
+   */
+  taxStatus: string | null;
 }
 
 export interface ReportListResult {

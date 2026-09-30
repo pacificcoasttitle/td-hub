@@ -7,7 +7,8 @@ const row = (over: Partial<ReportListRow> = {}): ReportListRow => ({
   type: 'county_sales', id: 3, typeLabel: 'County Sales', sourceLine: 'Dataset',
   subject: 'Orange County', subjectDetail: '44 cities', settings: 'August 2026',
   brandedToName: 'Mark Neveu', brandedToEmail: 'mneveu@pct.com', status: 'generated',
-  createdAt: '2026-09-21 21:14:00', createdBy: 'ops@pct.com', madeBy: 'Jerry Hernandez', delivery: null, templateVersion: 'cs-v1', ...over,
+  createdAt: '2026-09-21 21:14:00', createdBy: 'ops@pct.com', madeBy: 'Jerry Hernandez', delivery: null, templateVersion: 'cs-v1',
+  groupKey: null, taxStatus: null, ...over,
 });
 const text = (r: ReportListRow) => renderToStaticMarkup(<table><tbody><SalesReportRow row={r} /></tbody></table>)
   .replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();

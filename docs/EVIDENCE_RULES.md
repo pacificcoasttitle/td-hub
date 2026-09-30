@@ -1,6 +1,6 @@
 # What counts as evidence
 
-Seven rules, each one written the day it cost us something. They are all the
+Eight rules, each one written the day it cost us something. They are all the
 same rule wearing different clothes: **an artifact of how we invoked something
 is not a fact about what the system does.**
 
@@ -199,6 +199,52 @@ and a date — **and the design then acquired a panel explaining the absence.**
 That is the expensive end of this: a parsing bug became a documented behaviour
 that the next person built around. A hand-built fixture using the names the
 code reads would have passed forever.
+
+## 8 · A tool reports on the environment it runs in, not on the system
+
+`git worktree list` said 65 of 68 worktrees were **prunable**. Prunable means
+the directory is gone. The instruction that followed was the obvious one: prune
+them and remove the dead directories.
+
+**Every one of those directories existed.** The shell that produced the listing
+runs in a Linux container with the Windows filesystem mounted, and git inside
+that container cannot resolve `C:/Users/...`, so it could not find a single
+worktree and marked them all prunable. The flag was **true about the container
+and false about the machine**.
+
+Running it would have deleted 19 worktrees holding work — one with **1,315
+modified files** uncommitted, several with unmerged commits. Nothing was lost,
+because the survey ran before the deletion and reported `prunable: 0` from a
+shell on the host.
+
+**The rule.** Anything a tool tells you about the world outside itself is a
+report about its own environment first. Path existence, file presence, process
+lists, port bindings, clock, user, network reachability — a container answering
+a question about the host is **inference wearing the costume of a
+measurement**.
+
+**This is rule 3 with a different costume.** That one says a local render is
+evidence about the renderer, never about production; this one says a local
+*tool* is evidence about its own environment, never about the machine. The two
+came from opposite directions — rule 3 from an agent's harness, rule 8 from a
+human operator's shell — which is the point. Neither party is the unreliable
+one. The environment is.
+
+**What to do instead.** Before a destructive action keyed on what a tool
+reported:
+
+1. **Re-ask from the environment that owns the thing.** The host shell, not the
+   container. `git worktree list` run where the paths resolve.
+2. **Check the finding against something with independent provenance.** Does
+   the directory listing agree? Does `git status` inside it work?
+3. **Scope the action to what survives both.** 28 worktrees were clean and
+   fully merged on both readings; those were removed. The other 40 were not
+   touched.
+
+**The tell.** A flag that is unanimous — *every* worktree prunable, *every*
+lender with a blank address, *all 120* contacts nameless — is more often a
+statement about the instrument than about the population. Unanimity is a
+prompt to check the instrument, not a finding.
 
 ## The shape they share
 

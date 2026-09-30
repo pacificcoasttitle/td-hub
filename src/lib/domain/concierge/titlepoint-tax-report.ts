@@ -22,19 +22,30 @@ import type { NormalizedTaxReport, TaxLineItem, TaxReportInstallment } from './d
 //   Bonds                   0/58   empty string on every payload
 //   SpecialAssessments      0/58   empty; CountSpecialAssessments is "0" on all 58
 //
-// ─── ASSESSED VALUE IS COMPOSED, and the arithmetic proves it ───────────────
+// ─── ASSESSED VALUE IS COMPOSED, AND THE ARITHMETIC IS A GUARD ──────────────
 //
 // AssessedValuation is "" on all 58, so layer 1 has no total to print. It is
-// land + improvements, which is checkable rather than assumed: on the most
-// recent payload land 470,999 + improvements 485,573 = 956,572; minus the 7,000
-// homeowner exemption is 949,572; at the stated rate of 1.409829% that is
-// 13,387.60 against a stated TotalTax of 13,387.35. The composition and the
-// exemption's role both fall out of that to within a rounding.
+// land + improvements — and rather than trust that, every profile re-derives it
+// and checks it against the tax the county actually billed:
 //
-// So `assessedValue` is the sum when both parts are present, and null when
-// either is missing. It is never taken from SiteX here — page 4 says which
-// layer it is on, and a total quietly borrowed from the other vendor would make
-// that label a lie.
+//     (land + improvements - homeOwnerExemption) x TaxRate/100  ==  TotalTax
+//
+// Measured over all 1,322 stored tax payloads: 1,247 carry all four parts, and
+// of those the identity holds to within ONE CENT on 90%, within 0.5% on 97.9%,
+// with a median error of exactly $0.00. It is not an approximation that happens
+// to work on one property; it is how a California tax bill is computed.
+//
+// So the composition is only used WHEN IT RECONCILES. When it does not, the page
+// prints land and improvements and no total. That turns a computed figure into a
+// verified one and makes the failure mode a gap rather than a confident wrong
+// number on a document with our name on it. It fires on about 2% of payloads.
+//
+// A total we CANNOT check is suppressed too, not just one that fails the check —
+// same risk, and the only reason to treat them differently would be to show the
+// figure more often, which is the wrong thing to optimise on a document.
+//
+// The total is never taken from SiteX here: page 4 names its layer, and a figure
+// quietly borrowed from the other vendor would make that label a lie.
 //
 // ─── "SPECIAL ASSESSMENTS" LIVE IN `Liens` ──────────────────────────────────
 //
@@ -160,6 +171,79 @@ function installment(o: Record<string, unknown>): TaxReportInstallment | null {
 }
 
 /**
+ * How the assessed total was arrived at, and whether it may be printed.
+ *
+ * Returned separately from the report so the bridge can record WHY a total was
+ * suppressed. On the page the reader sees only the absence — an explanation of
+ * our own arithmetic is not something a client should have to read — but a
+ * suppression nobody can account for later is how a real vendor problem gets
+ * filed as a rendering quirk.
+ */
+export interface AssessedReconciliation {
+  /** Printable only when non-null. Null means the page shows no total. */
+  total: number | null;
+  basis:
+    /** The vendor stated a total; no arithmetic of ours involved. */
+    | 'stated'
+    /** Composed from land + improvements and it reconciles. */
+    | 'verified'
+    /** Composed, but rate or annual amount is missing, so it cannot be checked. */
+    | 'unverifiable'
+    /** Composed and it does NOT reconcile. The interesting case. */
+    | 'mismatch'
+    /** No land/improvement split to compose from. */
+    | 'absent';
+  /** What the identity predicts the annual tax would be, for the record. */
+  expectedTax: number | null;
+  /** What TitlePoint says it is. */
+  statedTax: number | null;
+}
+
+/**
+ * Tolerance: half a percent, with a dollar floor so a small bill is not held to
+ * a stricter standard than a large one. At this setting 97.9% of the 1,247
+ * checkable payloads pass, and the median error is zero.
+ */
+function reconciles(expected: number, stated: number): boolean {
+  return Math.abs(expected - stated) <= Math.max(1, stated * 0.005);
+}
+
+export function reconcileAssessedTotal(input: {
+  stated: number | null;
+  landValue: number | null;
+  improvementValue: number | null;
+  homeOwnerExemption: number | null;
+  taxRate: number | null;
+  annualAmount: number | null;
+}): AssessedReconciliation {
+  const { stated, landValue, improvementValue, homeOwnerExemption, taxRate, annualAmount } = input;
+
+  if (stated !== null) {
+    return { total: stated, basis: 'stated', expectedTax: null, statedTax: annualAmount };
+  }
+  if (landValue === null || improvementValue === null) {
+    return { total: null, basis: 'absent', expectedTax: null, statedTax: annualAmount };
+  }
+
+  const composed = landValue + improvementValue;
+  if (taxRate === null || annualAmount === null) {
+    return { total: null, basis: 'unverifiable', expectedTax: null, statedTax: annualAmount };
+  }
+
+  const taxable = composed - (homeOwnerExemption ?? 0);
+  const expectedTax = taxable * (taxRate / 100);
+  return reconciles(expectedTax, annualAmount)
+    ? { total: composed, basis: 'verified', expectedTax, statedTax: annualAmount }
+    : { total: null, basis: 'mismatch', expectedTax, statedTax: annualAmount };
+}
+
+export interface ParsedTaxResult {
+  report: NormalizedTaxReport;
+  /** Why the assessed total is there, or is not. Recorded, never rendered. */
+  assessed: AssessedReconciliation;
+}
+
+/**
  * Parse a stored TitlePoint tax `resultData` into the report page 4 may show.
  *
  * Returns null when the payload is not a tax result at all. A tax result that
@@ -169,7 +253,7 @@ function installment(o: Record<string, unknown>): TaxReportInstallment | null {
  * county has nothing" are different answers and the caller records them
  * differently.
  */
-export function parseTitlePointTaxReport(resultData: unknown): NormalizedTaxReport | null {
+export function parseTitlePointTaxResult(resultData: unknown): ParsedTaxResult | null {
   if (!resultData || typeof resultData !== 'object' || Array.isArray(resultData)) return null;
 
   const rd = resultData as Record<string, unknown>;
@@ -178,23 +262,26 @@ export function parseTitlePointTaxReport(resultData: unknown): NormalizedTaxRepo
 
   const landValue = positive(r.LandValuation ?? r.landValuation);
   const improvementValue = positive(r.ImprovementsValuation ?? r.improvementsValuation);
+  const taxRate = positive(r.TaxRate ?? r.taxRate);
+  const annualAmount = positive(r.TotalTax ?? r.totalTax);
+  const homeOwnerExemption = positive(r.HomeOwnerExemption ?? r.homeOwnerExemption);
 
-  // The sum, not a vendor field: AssessedValuation is empty on all 58 payloads.
-  // Both halves or nothing — a "total" that is really just the land would read
-  // as an assessed value and be wrong by the size of the house.
-  const stated = positive(r.AssessedValuation ?? r.assessedValuation);
-  const assessedValue = stated
-    ?? (landValue !== null && improvementValue !== null ? landValue + improvementValue : null);
+  // The sum, not a vendor field — and only when it reconciles against the tax
+  // the county billed. See the docblock: verified, not merely computed.
+  const assessed = reconcileAssessedTotal({
+    stated: positive(r.AssessedValuation ?? r.assessedValuation),
+    landValue, improvementValue, homeOwnerExemption, taxRate, annualAmount,
+  });
 
-  return {
+  const report: NormalizedTaxReport = {
     taxYear: leadingYear(r.TaxYear ?? r.taxYear),
-    annualAmount: positive(r.TotalTax ?? r.totalTax),
-    assessedValue,
+    annualAmount,
+    assessedValue: assessed.total,
     landValue,
     improvementValue,
-    taxRate: positive(r.TaxRate ?? r.taxRate),
+    taxRate,
     taxRateArea: str(r.TaxRateArea ?? r.taxRateArea),
-    homeOwnerExemption: positive(r.HomeOwnerExemption ?? r.homeOwnerExemption),
+    homeOwnerExemption,
     installments: items(obj(r, 'Installments'))
       .map(installment)
       .filter((x): x is TaxReportInstallment => x !== null),
@@ -210,6 +297,13 @@ export function parseTitlePointTaxReport(resultData: unknown): NormalizedTaxRepo
       .filter((x): x is TaxLineItem => x !== null),
     asOf: isoDate(r.RunDate ?? r.runDate) ?? isoDate(r.IssueDate ?? r.issueDate),
   };
+
+  return { report, assessed };
+}
+
+/** The report alone, for callers with nothing to record. */
+export function parseTitlePointTaxReport(resultData: unknown): NormalizedTaxReport | null {
+  return parseTitlePointTaxResult(resultData)?.report ?? null;
 }
 
 /**

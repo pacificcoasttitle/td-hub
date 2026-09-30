@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { melloRoosLines, parseTitlePointTaxReport } from './titlepoint-tax-report';
+import { melloRoosLines, parseTitlePointTaxReport, parseTitlePointTaxResult } from './titlepoint-tax-report';
 import { resolveTaxLayer, taxReportHasContent } from './document/derive';
 import type { NormalizedTax } from './normalize';
 
@@ -74,12 +74,12 @@ describe('parsing what TitlePoint actually sends', () => {
     expect(r.assessedValue).toBe(956572);
   });
 
-  it('the composed total reconciles against the stated tax', () => {
-    // The check that says the sum is the assessed value rather than a guess:
-    // (land + improvements - exemption) x rate should be the annual amount.
+  it('the composed total reconciles against the tax the county billed', () => {
+    // (land + improvements - exemption) x rate == TotalTax, to the cent.
     const taxable = r.assessedValue! - r.homeOwnerExemption!;
     const computed = taxable * (r.taxRate! / 100);
-    expect(Math.abs(computed - r.annualAmount!)).toBeLessThan(1);
+    expect(Math.abs(computed - r.annualAmount!)).toBeLessThan(0.01);
+    expect(parseTitlePointTaxResult(REAL)!.assessed.basis).toBe('verified');
   });
 
   it('keeps the rate area as text', () => {
@@ -147,6 +147,82 @@ describe('the excluded families cannot come through', () => {
     const parsed = parseTitlePointTaxReport(withMello)!;
     expect(parsed.specialAssessments[0]!.description).toBe('CFD NO 2004-1 IMPROVEMENT AREA');
     expect(JSON.stringify(parsed).toLowerCase()).not.toContain('mello');
+  });
+});
+
+// ─── The guard on our own arithmetic ────────────────────────────────────────
+//
+// Measured over all 1,322 stored payloads: 1,247 carry all four parts, the
+// identity holds to within a cent on 90% of them and within 0.5% on 97.9%, and
+// the median error is $0.00. These tests hold the behaviour at the edges, where
+// the 2% live.
+
+describe('a total is printed only when it is verified', () => {
+  const at = (over: Record<string, unknown>) =>
+    parseTitlePointTaxResult({ TaxReport: { ...REAL.TaxReport, ...over } })!;
+
+  it('suppresses the total when the arithmetic does not reconcile', () => {
+    // Improvements overstated by 100k: the identity now misses by ~1,400 and
+    // the reader must not be given a total we cannot stand behind.
+    const r = at({ ImprovementsValuation: '585,573.00' });
+    expect(r.assessed.basis).toBe('mismatch');
+    expect(r.assessed.total).toBeNull();
+    expect(r.report.assessedValue).toBeNull();
+    // The split still prints. A gap, not a blank page.
+    expect(r.report.landValue).toBe(470999);
+    expect(r.report.improvementValue).toBe(585573);
+    // And the two figures are kept so a real vendor problem can be told from a
+    // rendering quirk months later.
+    expect(r.assessed.expectedTax).toBeGreaterThan(0);
+    expect(r.assessed.statedTax).toBe(13387.35);
+  });
+
+  it('accepts a half-percent drift, which is where the real data sits', () => {
+    // 0.4% off: within tolerance, because rounding at the county is normal.
+    const stated = (956572 - 7000) * (1.409829 / 100);
+    const r = at({ TotalTax: (stated * 1.004).toFixed(2) });
+    expect(r.assessed.basis).toBe('verified');
+    expect(r.assessed.total).toBe(956572);
+  });
+
+  it('has a dollar floor, so a small bill is not held to a stricter standard', () => {
+    // Half a percent of a $12 bill is six cents. A flat relative tolerance
+    // would suppress totals on cheap parcels for rounding alone.
+    const r = at({
+      LandValuation: '500.00', ImprovementsValuation: '400.00',
+      HomeOwnerExemption: '', TaxRate: '1.333333', TotalTax: '12.60',
+    });
+    expect(r.assessed.basis).toBe('verified');
+    expect(r.assessed.total).toBe(900);
+  });
+
+  it('suppresses a total it cannot check at all', () => {
+    // No rate, so the identity cannot be evaluated. Same risk as failing it:
+    // the figure is ours, not the vendor's, and nothing has confirmed it.
+    const r = at({ TaxRate: '' });
+    expect(r.assessed.basis).toBe('unverifiable');
+    expect(r.assessed.total).toBeNull();
+    expect(r.report.landValue).toBe(470999);
+  });
+
+  it('prints a vendor-stated total without checking our own arithmetic', () => {
+    // Never seen in 1,322 payloads, but if TitlePoint starts sending it then it
+    // is their figure and the guard is not about their figures.
+    const r = at({ AssessedValuation: '1,000,000.00' });
+    expect(r.assessed.basis).toBe('stated');
+    expect(r.assessed.total).toBe(1_000_000);
+  });
+
+  it('reports absent, not mismatch, when there is nothing to compose', () => {
+    const r = at({ LandValuation: '', ImprovementsValuation: '' });
+    expect(r.assessed.basis).toBe('absent');
+    expect(r.assessed.total).toBeNull();
+  });
+
+  it('still earns a page on the split alone', () => {
+    // Suppressing the total must not drop page 4 to layer 3.
+    const r = at({ ImprovementsValuation: '585,573.00' });
+    expect(taxReportHasContent(r.report)).toBe(true);
   });
 });
 

@@ -29,7 +29,40 @@ import { readFileSync } from 'node:fs';
  *
  * Line endings are normalised for the same reason: a guard's subject is the
  * code, not whether the machine that checked it out uses CRLF.
+ *
+ * ─── COMMENTS ARE STRIPPED, AND THE ANCHOR IS CHECKED AGAINST THE CODE ──────
+ *
+ * The same hazard from both directions, twice:
+ *
+ *   - A sidebar guard PASSED because the explanatory comment above the
+ *     container contained the literal strings it was searching for. It was
+ *     asserting against its own documentation.
+ *   - A bundle guard FAILED because font-files.ts explains in prose why it
+ *     does not import @react-pdf/renderer, and the assertion read that
+ *     explanation as the import it forbade.
+ *
+ * Both times the fix was "remember to strip comments", which is a habit. A
+ * habit does not survive a handoff, so it lives here instead: every guard that
+ * reads through this helper sees code and never prose, and no future one has
+ * to know why.
+ *
+ * The ANCHOR is matched against the stripped source too. Anchoring a guard on
+ * a comment means the guard survives the code being deleted, which is the same
+ * failure wearing the same coat.
  */
+
+/**
+ * Source with comments removed and line count preserved.
+ *
+ * `//` only when it starts a line, so a URL inside a string survives. Block
+ * comments become blank lines rather than vanishing, so a line number in an
+ * error message still points where a reader expects.
+ */
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ''))
+    .replace(/^[ \t]*\/\/.*$/gm, '');
+}
 export function readSource(path: string, opts: {
   /**
    * Text that must appear in the file for this guard to mean anything —
@@ -44,13 +77,21 @@ export function readSource(path: string, opts: {
   } catch {
     throw new Error(`readSource: ${path} could not be read. A guard cannot assert anything about a file that is not there.`);
   }
-  const src = raw.replace(/\r\n/g, '\n');
+  const src = stripComments(raw.replace(/\r\n/g, '\n'));
 
   const anchors = typeof opts.mustContain === 'string' ? [opts.mustContain] : opts.mustContain;
   const missing = anchors.filter((a) => !src.includes(a));
   if (missing.length > 0) {
+    // Said explicitly, because "it is right there" is the first reaction when
+    // the anchor is sitting in a comment three lines above the code.
+    const inComment = anchors.filter((a) => !src.includes(a) && raw.includes(a));
     throw new Error(
       `readSource: ${path} no longer contains ${missing.map((m) => JSON.stringify(m)).join(', ')}.\n`
+      + (inComment.length > 0
+        ? `${inComment.map((m) => JSON.stringify(m)).join(', ')} appears only inside a COMMENT. `
+          + 'Comments are stripped before anything is asserted, because a guard that anchors on prose '
+          + 'survives the code being deleted. Anchor on the declaration instead.\n'
+        : '')
       + 'The guard reading this file is now asserting things about code that has moved or been renamed. '
       + 'Update the anchor and the assertions together — do not delete the anchor to make this pass.',
     );

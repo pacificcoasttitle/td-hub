@@ -73,3 +73,57 @@ describe('a slice that cannot find its end is an error', () => {
     expect(() => sliceFrom('abc', 'zzz', 'x')).toThrow(/is not in this source/);
   });
 });
+
+describe('comments are stripped, so a guard reads code and never prose', () => {
+  // Hit from both directions in one month. A sidebar guard PASSED because the
+  // comment above the container held the strings it was hunting; a bundle
+  // guard FAILED because font-files.ts explains in prose why it does not
+  // import the renderer. Both fixes were "remember to strip comments", which
+  // is a habit — so it lives in the helper instead.
+
+  it('a line comment containing the forbidden text does not satisfy a search', () => {
+    const p = write('prose.ts', [
+      'export const x = 1;',
+      '// this file deliberately does not call forbiddenThing()',
+    ].join('\n'));
+    const src = readSource(p, { mustContain: 'export const x' });
+    expect(src, 'the comment was read as code').not.toContain('forbiddenThing');
+  });
+
+  it('a block comment does not either', () => {
+    const p = write('block.ts', [
+      '/**',
+      ' * Never import @react-pdf/renderer here.',
+      ' */',
+      'export const y = 2;',
+    ].join('\n'));
+    const src = readSource(p, { mustContain: 'export const y' });
+    expect(src).not.toContain('@react-pdf/renderer');
+    expect(src).toContain('export const y');
+  });
+
+  it('keeps the line count, so a reported line number still points somewhere', () => {
+    const p = write('lines.ts', [
+      '/**', ' * two', ' */', 'export const z = 3;',
+    ].join('\n'));
+    const src = readSource(p, { mustContain: 'export const z' });
+    expect(src.split('\n')).toHaveLength(4);
+  });
+
+  it('leaves a URL inside a string alone', () => {
+    // `//` only counts when it starts a line.
+    const p = write('url.ts', "export const u = 'https://example.com/x';");
+    const src = readSource(p, { mustContain: 'export const u' });
+    expect(src).toContain('https://example.com/x');
+  });
+
+  it('refuses an anchor that exists only in a comment, and says so', () => {
+    // A guard anchored on prose survives the code being deleted.
+    const p = write('anchored-on-prose.ts', [
+      '// export function gone() {}',
+      'export const other = 1;',
+    ].join('\n'));
+    expect(() => readSource(p, { mustContain: 'export function gone' }))
+      .toThrow(/only inside a COMMENT/);
+  });
+});

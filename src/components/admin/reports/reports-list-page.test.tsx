@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { ReportDeliverySummary } from '@/lib/domain/reports/list-types';
 import type { ReportListRow } from '@/lib/domain/reports/list-types';
 import { DeliveryCell, ReportRow, shortWhen } from './reports-list-page';
+import { TEMPLATE_VERSION as CONCIERGE_TEMPLATE } from '@/lib/domain/concierge/document/template-version';
 
 // Rendered and read as text, like documents-panel.test.tsx: grepping source for
 // UI strings has failed silently in this project before.
@@ -22,8 +23,52 @@ const row = (over: Partial<ReportListRow> = {}): ReportListRow => ({
   type: 'county_sales', id: 3, typeLabel: 'County Sales', sourceLine: 'Dataset',
   subject: 'Orange County', subjectDetail: '44 cities', settings: 'August 2026',
   brandedToName: 'Maria Lopez', brandedToEmail: 'mlopez@pct.com', status: 'generated',
-  createdAt: '2026-09-16 21:14:00', createdBy: 'ops@pct.com', madeBy: 'Operations', delivery: null,
+  createdAt: '2026-09-16 21:14:00', createdBy: 'ops@pct.com', madeBy: 'Operations', delivery: null, templateVersion: 'cs-v1',
   ...over,
+});
+
+describe('refreshing a profile is offered, and says it is free', () => {
+  // Two Concierge credits were spent in two days generating fresh profiles on
+  // one parcel to see what a template change looked like. Generating gets you
+  // fresh DATA on whatever template is deployed; it does not get you a fresh
+  // DOCUMENT. The capability to re-render free already existed on three routes
+  // and none of them said so.
+  const profile = (over: Partial<ReportListRow> = {}) => row({
+    type: 'concierge_profile', typeLabel: 'Concierge Profile',
+    templateVersion: 'v2', status: 'generated', ...over,
+  });
+
+  it('offers the refresh and calls it free', () => {
+    const text = visible(<ReportRow row={profile()} />);
+    expect(text).toContain('Refresh document (free)');
+  });
+
+  it('says so when the profile is on an older layout', () => {
+    // The prompt, not just the permission. Without this the operator has no
+    // way to know a newer document exists.
+    const text = visible(<ReportRow row={profile({ templateVersion: 'v2' })} />);
+    expect(text).toContain('older layout');
+    expect(text).toContain('v2');
+    expect(text).toContain('calls no vendor');
+  });
+
+  it('does not nag when the profile is already current', () => {
+    const text = visible(<ReportRow row={profile({ templateVersion: CONCIERGE_TEMPLATE })} />);
+    expect(text).toContain('Refresh document (free)');
+    expect(text).not.toContain('older layout');
+  });
+
+  it('is not offered on the farming types, which re-render differently', () => {
+    const text = visible(<ReportRow row={row({ type: 'county_sales' })} />);
+    expect(text).not.toContain('Refresh document');
+  });
+
+  it('the word free is on the control itself, not only in a tooltip', () => {
+    // Next to a Generate button that plainly costs something, silence reads as
+    // "probably also costs".
+    const markup = renderToStaticMarkup(<table><tbody><ReportRow row={profile()} /></tbody></table>);
+    expect(markup).toMatch(/<button[^>]*>[^<]*Refresh document \(free\)/);
+  });
 });
 
 describe('a report row', () => {

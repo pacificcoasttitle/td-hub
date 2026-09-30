@@ -49,6 +49,71 @@ export function RetryControl({ row, onChanged }: { row: ReportListRow; onChanged
   );
 }
 
+/**
+ * Re-render a profile on the CURRENT template, free.
+ *
+ * WHY THIS EXISTS AS ITS OWN CONTROL. Generating a new profile does not get
+ * you a newer document — it gets newer DATA rendered by whatever template is
+ * deployed. Two Concierge credits were spent in two days generating fresh
+ * profiles on the same parcel to see what a template change looked like, and
+ * the second one came back on the OLD layout because the new one had not
+ * merged yet. The credit bought nothing that was not already on file.
+ *
+ * Nothing in the interface separated "fresh data", which costs a credit, from
+ * "fresh document", which is free and calls no vendor. `renderProfile()` cannot
+ * spend: it imports nothing from integrations/sitex and a test asserts that.
+ * The capability was always there; only the affordance was missing.
+ *
+ * The label says FREE, because next to a Generate button that plainly costs
+ * something, silence reads as "probably also costs".
+ */
+export function RefreshDocumentControl({ row, currentTemplate, onChanged }: {
+  row: ReportListRow;
+  /** The template a re-render would produce. */
+  currentTemplate: string;
+  onChanged?: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const stale = row.templateVersion !== null && row.templateVersion !== currentTemplate;
+
+  async function refresh() {
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(`/api/concierge/profiles/${row.id}/render`, { method: 'POST' });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) { setError(body?.error ?? `That did not work (${res.status}).`); return; }
+      setDone(true);
+      onChanged?.();
+    } catch {
+      setError('Network error. Nothing was charged — re-rendering never is.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span className="inline-flex flex-col items-end gap-1">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={refresh}
+        className="text-xs font-medium text-[#1B2A4A] hover:underline disabled:text-[#9AA0AA] disabled:no-underline"
+      >
+        {busy ? 'Refreshing…' : done ? 'Refreshed' : 'Refresh document (free)'}
+      </button>
+      {stale && !done ? (
+        <span className="max-w-[240px] whitespace-normal text-right text-[11px] text-[#6B7280]">
+          {`Made with an older layout (${row.templateVersion}). Refreshing is free — it re-renders what we already paid for and calls no vendor.`}
+        </span>
+      ) : null}
+      {error ? <span className="max-w-[220px] whitespace-normal text-right text-[11px] text-[#8E2A1E]">{error}</span> : null}
+    </span>
+  );
+}
+
 /** Open the criteria panel on a concierge profile; applying re-renders for free. */
 export function ComparablesControl({ row, onChanged }: { row: ReportListRow; onChanged?: () => void }) {
   const [profile, setProfile] = useState<ProfileSummary | null>(null);

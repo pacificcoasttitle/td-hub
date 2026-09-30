@@ -7,7 +7,7 @@ import {
   acres, currentVestingDeed, parseLegal, parseOwners, resolveTaxLayer, transferCounts,
 } from './derive';
 import type { NormalizedTaxReport, TaxLayer } from './derive';
-import { PCT_LOGO_WHITE } from './brand-assets';
+import { PCT_COVER_PHOTO, PCT_LOGO_DARK, PCT_LOGO_WHITE } from './brand-assets';
 import { BODY, HEADING, registerDocumentFonts } from './fonts';
 import {
   Band, DASH_NOTE, Footer, Footnote, NavyStrip, Row, Row4, SectionBar, StatBox,
@@ -66,7 +66,10 @@ export { NAVY, ORANGE, MUTED, BORDER, TINT, GAP } from './parts';
  */
 Font.registerHyphenationCallback((word) => [word]);
 
-export const TEMPLATE_VERSION = 'v4';
+// Defined in template-version.ts, which imports nothing, so a client
+// component can read it without pulling this module — and @react-pdf,
+// node:fs and 670 KB of inlined base64 — into the browser bundle.
+export { TEMPLATE_VERSION } from './template-version';
 
 /**
  * The Insurance Commissioner disclaimer, from Pacific Coast Title's own legacy
@@ -242,7 +245,12 @@ export function ProfileDocument(input: ProfileDocumentInput) {
   const TOTAL = pagesFor(hasTax).length;
   const no = (k: PageKey) => pageNo(k, hasTax) ?? 0;
 
+  // Both brand assets default here rather than at a caller, because no caller
+  // passes either — render.ts and generate.ts build the input and never
+  // mention them. `undefined` means "use the brand asset"; an explicit `null`
+  // means "render without it", which is what the cover-fallback test needs.
   const logo = input.brandLogo === undefined ? PCT_LOGO_WHITE : input.brandLogo;
+  const coverPhoto = input.brandPhoto === undefined ? PCT_COVER_PHOTO : input.brandPhoto;
   const band: BandProps = {
     address: txt(subject.siteAddress),
     sub: `${txt(subject.siteCityState)} · APN ${txt(subject.apn)}`,
@@ -279,13 +287,18 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         <View style={{ height: 471, backgroundColor: COVER_FALLBACK, position: 'relative' }}>
           {/* NEVER the comp map. A map of other people's sales is not this
               property, and v6 asks for a brand photograph or nothing. */}
-          {input.brandPhoto
+          {coverPhoto
             // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf <Image> is a PDF primitive
-            ? <Image src={input.brandPhoto} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ? <Image src={coverPhoto} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             : null}
+          {/* THE DARK WORDMARK HERE, the white one on the navy bands.
+              The photograph's top-right corner is bright sky: with the white
+              mark, only the coloured swoosh survived and "PACIFIC COAST TITLE
+              COMPANY" vanished completely. The photo is the same on every
+              profile, so that is every cover, not an unlucky one. */}
           {logo
             // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf <Image> is a PDF primitive
-            ? <Image src={logo} style={{ position: 'absolute', top: 22.5, right: SIDE, height: 23, objectFit: 'contain' }} />
+            ? <Image src={coverPhoto ? PCT_LOGO_DARK : logo} style={{ position: 'absolute', top: 22.5, right: SIDE, height: 23, objectFit: 'contain' }} />
             : null}
         </View>
 

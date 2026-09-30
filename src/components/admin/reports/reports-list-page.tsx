@@ -7,7 +7,10 @@ import {
   type ReportFilter,
 } from '@/lib/domain/reports/list-types';
 import { NotifyRepControl } from './notify-rep-control';
-import { ComparablesControl, RetryControl } from './row-actions';
+import { ComparablesControl, RefreshDocumentControl, RetryControl } from './row-actions';
+// The template a re-render would produce, read from the document itself so the
+// "older layout" hint cannot drift from what the renderer actually makes.
+import { TEMPLATE_VERSION as CONCIERGE_TEMPLATE } from '@/lib/domain/concierge/document/template-version';
 
 // ─── Reports ────────────────────────────────────────────────────────────────
 //
@@ -214,7 +217,10 @@ export function ReportRow({ row, onChanged }: { row: ReportListRow; onChanged?: 
               Download
             </a>
             {row.type === 'concierge_profile' ? (
-              <ComparablesControl row={row} onChanged={onChanged} />
+              <>
+                <RefreshDocumentControl row={row} currentTemplate={CONCIERGE_TEMPLATE} onChanged={onChanged} />
+                <ComparablesControl row={row} onChanged={onChanged} />
+              </>
             ) : (
               <NotifyRepControl row={row} onChanged={onChanged} />
             )}

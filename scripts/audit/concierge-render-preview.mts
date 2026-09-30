@@ -44,7 +44,11 @@ async function loadImage(key: string | null): Promise<string | null> {
 }
 
 (async () => {
-  const id = Number(process.argv[2] ?? '4');
+  // The first NON-FLAG argument. `npm run concierge:pages -- 4` puts
+  // --raster at argv[2], and reading that as the id gave NaN and a query that
+  // failed with the whole SELECT printed.
+  const id = Number(process.argv.slice(2).find((a) => !a.startsWith('-')) ?? '4');
+  if (!Number.isInteger(id)) throw new Error(`not a profile id: ${process.argv.slice(2).join(' ')}`);
   const [profile] = await db.select().from(conciergeProfiles).where(eq(conciergeProfiles.id, id)).limit(1);
   if (!profile) throw new Error(`No profile ${id}`);
   if (!profile.rawStorageKey) throw new Error(`Profile ${id} has no stored payload`);
@@ -141,5 +145,20 @@ async function loadImage(key: string | null): Promise<string | null> {
   ];
   for (const [label, ok] of checks) console.log(`    ${ok ? 'PASS' : 'FAIL'}  ${label}`);
 
-  process.exit(0);
+  // --raster turns the PDF into one PNG per page, because the question this
+  // script exists for is "does the page read right", and that is not a
+  // question text can answer. Three data faults this month were found by a
+  // person looking at a rendered page and none by a test: a test asserts that
+  // a field renders, only a reader asks whether the sentence is true.
+  if (process.argv.includes('--raster')) {
+    const { execFileSync } = await import('node:child_process');
+    const dir = join(process.cwd(), '_scratch_untracked', `concierge-${id}-pages`);
+    execFileSync(process.execPath, [
+      join(process.cwd(), 'scripts', 'audit', 'rasterise-pdf.mjs'), out, dir, '1.25',
+    ], { stdio: 'inherit' });
+  }
+
+  const failed = checks.filter(([, ok]) => !ok).length;
+  if (failed > 0) console.log(`\n  ${failed} check(s) failed.`);
+  process.exit(failed > 0 ? 1 : 0);
 })().catch((e) => { console.error('FAILED:', e instanceof Error ? e.message : String(e)); process.exit(1); });

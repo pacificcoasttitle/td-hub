@@ -51,15 +51,35 @@ for (const t of trees) {
   if (!existsSync(t.path)) { rows.push({ ...t, missing: true }); continue; }
   const status = git(['status', '--porcelain'], t.path);
   const lines = status ? status.split('\n').filter(Boolean) : [];
-  const modified = lines.filter((l) => !l.startsWith('??')).length;
   const untracked = lines.filter((l) => l.startsWith('??')).length;
+
+  // DELETIONS ARE NOT EDITS, and conflating them produced this survey's worst
+  // number. The first version counted every non-`??` line as "modified" and
+  // reported w4 as holding 1,315 modified files — which became an urgent
+  // warning that a thousand files of work were sitting in a temp folder.
+  //
+  // They were 1,315 DELETIONS: the directory had already been emptied, so git
+  // reported every tracked file as gone. There was no work there at all, and
+  // the branch was pushed anyway. A tree where everything is deleted is a
+  // husk, and it is the opposite of a tree full of work.
+  const deleted = lines.filter((l) => /^.?D/.test(l)).length;
+  const edited = lines.filter((l) => !l.startsWith('??') && !/^.?D/.test(l)).length;
+  const modified = edited;
+  const tracked = Number(git(['ls-files'], t.path).split('\n').filter(Boolean).length || '0');
+  const husk = tracked > 0 && deleted >= tracked;
 
   // Commits on this branch that origin/main does not already contain.
   const ahead = t.branch
     ? Number(git(['rev-list', '--count', `origin/main..${t.branch}`], t.path) || '0')
     : Number(git(['rev-list', '--count', 'origin/main..HEAD'], t.path) || '0');
 
-  rows.push({ ...t, modified, untracked, ahead, missing: false });
+  // Is the branch on the remote? A pushed branch cannot be lost with the
+  // directory, which is the difference between "at risk" and "tidy up later".
+  const pushed = t.branch
+    ? git(['ls-remote', '--heads', 'origin', t.branch], t.path).trim().length > 0
+    : false;
+
+  rows.push({ ...t, modified, deleted, untracked, ahead, husk, pushed, missing: false });
 }
 
 const safe = rows.filter((r) => !r.missing && r.modified === 0 && r.untracked === 0 && r.ahead === 0);
@@ -73,9 +93,18 @@ console.log(`  ${'untracked files only'.padEnd(34)} ${onlyUntracked.length}`);
 console.log(`  ${'HAS WORK (modified or unmerged)'.padEnd(34)} ${work.length}`);
 console.log(`  ${'directory missing'.padEnd(34)} ${rows.filter((r) => r.missing).length}`);
 
+const husks = rows.filter((r) => r.husk);
+if (husks.length > 0) {
+  console.log('\n── HUSKS: the directory is empty, git sees every file deleted ──\n');
+  for (const r of husks) {
+    console.log(`  ${r.path.split(/[\\/]/).pop().padEnd(42)} ${String(r.branch ?? '(detached)').padEnd(40)} ${r.deleted} deleted · ${r.pushed ? 'BRANCH IS PUSHED — nothing at risk' : 'NOT PUSHED — the commits are still in the shared object store, but push them'}`);
+  }
+}
+
 console.log('\n── HAS WORK — do not remove these ──\n');
 for (const r of work.sort((a, b) => b.ahead - a.ahead)) {
-  console.log(`  ${r.path.split(/[\\/]/).pop().padEnd(42)} ${String(r.branch ?? '(detached)').padEnd(46)} +${r.ahead} commits, ${r.modified} modified, ${r.untracked} untracked`);
+  const risk = r.pushed ? 'pushed' : 'LOCAL ONLY';
+  console.log(`  ${r.path.split(/[\\/]/).pop().padEnd(42)} ${String(r.branch ?? '(detached)').padEnd(40)} +${r.ahead} commits (${risk}), ${r.modified} edited, ${r.deleted} deleted, ${r.untracked} untracked`);
 }
 
 console.log('\n── SAFE: clean tree, nothing origin/main lacks ──\n');

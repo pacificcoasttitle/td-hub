@@ -50,6 +50,16 @@ export interface ReportListRow {
   typeLabel: string;
   /** "Dataset" for the farming three; what the credit did for Concierge. */
   sourceLine: string;
+  /**
+   * The template this row's PDF was rendered on.
+   *
+   * Carried so the list can say "this was made with an older layout, and
+   * refreshing it is free". Without it the operator has no way to tell that a
+   * newer document exists — which is how two Concierge credits were spent
+   * generating fresh profiles to see a template change that a free re-render
+   * would have shown. See docs/tickets/SEEING_THE_DOCUMENT_SHOULD_NOT_COST_A_CREDIT.md.
+   */
+  templateVersion: string | null;
   subject: string | null;
   subjectDetail: string | null;
   settings: string | null;

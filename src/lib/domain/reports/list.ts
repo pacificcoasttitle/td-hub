@@ -37,6 +37,7 @@ interface RawRow {
   id: number;
   status: string;
   credits_charged: number | null;
+  template_version: string | null;
   list_subject: string | null;
   list_subject_detail: string | null;
   list_settings: string | null;
@@ -71,7 +72,7 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
   const parts = [];
   if (filter !== 'concierge') {
     parts.push(sql`
-      select 'sales_activity' as type, r.id, r.status, null::int as credits_charged,
+      select 'sales_activity' as type, r.id, r.status, null::int as credits_charged, r.template_version,
              r.list_subject, r.list_subject_detail, r.list_settings,
              coalesce(c.full_name, r.branded_to_name) as branded_to_name,
              r.branded_to_email,
@@ -81,7 +82,7 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
        where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}
          and ${repFilter}`);
     parts.push(sql`
-      select 'carrier_route' as type, r.id, r.status, null::int as credits_charged,
+      select 'carrier_route' as type, r.id, r.status, null::int as credits_charged, r.template_version,
              r.list_subject, r.list_subject_detail, r.list_settings,
              coalesce(c.full_name, r.branded_to_name) as branded_to_name,
              r.branded_to_email,
@@ -91,7 +92,7 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
        where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}
          and ${repFilter}`);
     parts.push(sql`
-      select 'county_sales' as type, r.id, r.status, null::int as credits_charged,
+      select 'county_sales' as type, r.id, r.status, null::int as credits_charged, r.template_version,
              r.list_subject, r.list_subject_detail, r.list_settings,
              coalesce(c.full_name, r.branded_to_name) as branded_to_name,
              r.branded_to_email,
@@ -105,7 +106,7 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
   // legacy's rep list held only the farming three — so a rep's list is farming.
   if (filter !== 'farming' && forRep === null) {
     parts.push(sql`
-      select 'concierge_profile' as type, r.id, r.status, r.sitex_credits_charged as credits_charged,
+      select 'concierge_profile' as type, r.id, r.status, r.sitex_credits_charged as credits_charged, r.template_version,
              r.list_subject, r.list_subject_detail, r.list_settings,
              r.presenting_rep_name as branded_to_name,
              r.presenting_rep_email as branded_to_email,
@@ -167,6 +168,7 @@ export async function listReports(input: {
       id: r.id,
       typeLabel: REPORT_TYPE_LABELS[r.type as ReportType] ?? r.type,
       sourceLine: sourceLineFor(r.type as ReportType, r.status, r.credits_charged),
+      templateVersion: r.template_version,
       subject: r.list_subject,
       subjectDetail: r.list_subject_detail,
       settings: r.list_settings,

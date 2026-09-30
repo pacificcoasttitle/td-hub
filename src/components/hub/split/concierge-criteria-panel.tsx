@@ -36,19 +36,27 @@ export function ConciergeCriteriaPanel({
   const [c, setC] = useState<CompCriteria>(profile.criteria);
 
   /**
-   * FUNCTIONAL UPDATE, not a spread of the captured `c`.
+   * Functional update rather than a spread of the captured `c`.
    *
-   * `setC({ ...c, [k]: v })` closes over the `c` of the render that created
-   * the handler. A range input fires onChange continuously while it is
-   * dragged, and React batches those updates, so several writes in one tick
-   * all spread from the SAME stale object and only the last survives.
+   * THIS IS NOT THE FIX FOR "the criteria control does nothing", and an
+   * earlier version of this comment claimed it was. The claim was tested and
+   * is false: stale-closure-probe.test.tsx drives both idioms with two writes
+   * batched into one act() under React 19, and the captured-spread version
+   * keeps BOTH — {"a":5,"b":7}. `change` is a discrete event, so React
+   * flushes it synchronously and the closure is never stale between slider
+   * moves.
    *
-   * The operator moves three sliders, presses Apply, and the criteria that
-   * reach the server are nearly the ones they started with — which is exactly
-   * "I changed the comparables and nothing happened". The filter itself is
-   * fine: selectComps was measured against seven criteria sets on profile 4's
-   * stored comparables and responded to every one
-   * (scripts/audit/concierge-criteria-responds.mts).
+   * Kept anyway, because it is correct under any batching regime and costs
+   * nothing: if these handlers ever move to a continuous event, a transition,
+   * or an async boundary, the spread version starts losing writes and this one
+   * does not.
+   *
+   * What IS established about the report: the filter responds correctly to
+   * every criteria set (scripts/audit/concierge-criteria-responds.mts), the
+   * PATCH route validates and re-renders, renderProfile rewrites the stored
+   * criteria and listSettings, the PDF route sends no-store, onChanged is
+   * wired to a refetch, and the panel is not clipped. The cause is still
+   * unknown.
    */
   const set = <K extends keyof CompCriteria>(k: K, v: CompCriteria[K]) =>
     setC((prev) => ({ ...prev, [k]: v }));

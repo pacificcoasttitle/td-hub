@@ -83,6 +83,20 @@ const FADE_PT = 90;
 const COVER_RENDER_PT = 471;
 const FADE_FROM = 0.7;
 
+/**
+ * Hold the full opacity until the logo has cleared, THEN fade.
+ *
+ * A straight linear ramp from 0.7 at the top edge to 0 at 90 pt spends half
+ * its darkness on empty sky above the mark: by 45.5 pt — the bottom of the
+ * logo — it is down to ~0.35, and over a bright cloud that left "TITLE
+ * COMPANY" legible but pale.
+ *
+ * The band is still 90 pt, still starts at 0.7, still reaches nothing at 90.
+ * Only the curve changes, so the fade does its work where the logo actually
+ * is. The logo sits at top 22.5 with height 23, hence 45.5.
+ */
+const LOGO_BOTTOM_PT = 45.5;
+
 async function withCoverFade(jpeg: Buffer): Promise<Buffer> {
   const sharp = (await import('sharp')).default;
   const meta = await sharp(jpeg).metadata();
@@ -91,10 +105,14 @@ async function withCoverFade(jpeg: Buffer): Promise<Buffer> {
   if (!w || !h) throw new Error('cover has no dimensions');
 
   // 90 pt of the 471 pt the cover renders at, scaled to the asset's pixels.
-  const fadePx = Math.round((FADE_PT / COVER_RENDER_PT) * h);
+  const ptToPx = h / COVER_RENDER_PT;
+  const fadePx = Math.round(FADE_PT * ptToPx);
+  const holdPx = Math.round(LOGO_BOTTOM_PT * ptToPx);
   const overlay = Buffer.alloc(w * fadePx * 4);
   for (let y = 0; y < fadePx; y++) {
-    const alpha = Math.round(255 * FADE_FROM * (1 - y / (fadePx - 1)));
+    // Flat at FADE_FROM through the logo's depth, then linear to nothing.
+    const t = y <= holdPx ? 1 : 1 - (y - holdPx) / (fadePx - 1 - holdPx);
+    const alpha = Math.round(255 * FADE_FROM * Math.max(0, t));
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4;
       overlay[i] = 27; overlay[i + 1] = 42; overlay[i + 2] = 74; overlay[i + 3] = alpha;

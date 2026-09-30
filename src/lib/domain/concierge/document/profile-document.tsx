@@ -66,7 +66,10 @@ export { NAVY, ORANGE, MUTED, BORDER, TINT, GAP } from './parts';
  */
 Font.registerHyphenationCallback((word) => [word]);
 
-export const TEMPLATE_VERSION = 'v4';
+// Defined in template-version.ts, which imports nothing, so a client
+// component can read it without pulling this module — and @react-pdf,
+// node:fs and 670 KB of inlined base64 — into the browser bundle.
+export { TEMPLATE_VERSION } from './template-version';
 
 /**
  * The Insurance Commissioner disclaimer, from Pacific Coast Title's own legacy

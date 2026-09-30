@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { ReportDeliverySummary } from '@/lib/domain/reports/list-types';
 import type { ReportListRow } from '@/lib/domain/reports/list-types';
 import { DeliveryCell, ReportRow, shortWhen } from './reports-list-page';
-import { TEMPLATE_VERSION as CONCIERGE_TEMPLATE } from '@/lib/domain/concierge/document/profile-document';
+import { TEMPLATE_VERSION as CONCIERGE_TEMPLATE } from '@/lib/domain/concierge/document/template-version';
 
 // Rendered and read as text, like documents-panel.test.tsx: grepping source for
 // UI strings has failed silently in this project before.

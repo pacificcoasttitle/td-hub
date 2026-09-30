@@ -10,7 +10,7 @@ import { NotifyRepControl } from './notify-rep-control';
 import { ComparablesControl, RefreshDocumentControl, RetryControl } from './row-actions';
 // The template a re-render would produce, read from the document itself so the
 // "older layout" hint cannot drift from what the renderer actually makes.
-import { TEMPLATE_VERSION as CONCIERGE_TEMPLATE } from '@/lib/domain/concierge/document/profile-document';
+import { TEMPLATE_VERSION as CONCIERGE_TEMPLATE } from '@/lib/domain/concierge/document/template-version';
 
 // ─── Reports ────────────────────────────────────────────────────────────────
 //

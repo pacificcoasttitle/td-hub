@@ -38,6 +38,9 @@ export interface CostGateProps {
   spend: { thisMonth: number; allTime: number } | null;
   submitting: boolean;
   error: string | null;
+  /** Opt-in, and it is a second billable search. Default off. */
+  taxDetail: boolean;
+  onTaxDetail: (v: boolean) => void;
   onPreparedForName: (v: string) => void;
   onPreparedForCompany: (v: string) => void;
   onCancel: () => void;
@@ -125,6 +128,40 @@ export function ConciergeCostGate(p: CostGateProps) {
               So the tick goes and those two stay prominent. If duplicates rise
               after this, the answer is to make those two louder, not to put
               the checkbox back. */}
+
+          {/* ─── The one opt-in on this dialog, and it costs ────────────────
+              DEFAULT OFF (Gerard). The label names the charge — "one
+              additional search" — rather than saying "include taxes", because
+              "include" reads like a formatting choice and this is a second
+              purchase from a second vendor.
+
+              It is NOT the acknowledgement checkbox coming back. That one asked
+              the operator to confirm something they had already decided, and
+              every one of the five duplicate profiles was generated with it
+              ticked. This one changes what happens.
+
+              It also says what NOT ticking costs, which is nothing: page 4
+              still renders from the assessment detail the SiteX call already
+              paid for. An opt-in that reads as "or go without a tax page" gets
+              ticked every time, and then it is not opt-in. */}
+          <label className="flex items-start gap-2 cursor-pointer select-none rounded-md border border-[#EDEFF3] bg-[#FAFAFB] px-3 py-2">
+            <input
+              type="checkbox"
+              checked={p.taxDetail}
+              disabled={p.submitting}
+              onChange={(e) => p.onTaxDetail(e.target.checked)}
+              className="mt-[2px] w-[14px] h-[14px] rounded border-gray-300 text-brand-orange"
+            />
+            <span className="text-[11.5px] text-[#3C4557]">
+              <strong className="font-semibold">Add property tax detail</strong>
+              {' — one additional search.'}
+              <span className="block text-[10.5px] text-[#6B7280] mt-[2px]">
+                Installments, due dates, the rate area and any direct assessments. It runs after
+                the profile is delivered and adds a page for free when it lands. Without it the
+                tax page still shows the assessment detail this lookup already includes.
+              </span>
+            </span>
+          </label>
 
           {p.error && (
             <p className="text-[11.5px] text-[#8E2A1E] bg-[#FDECEA] border border-[#F2C4BD] rounded-md px-3 py-2">

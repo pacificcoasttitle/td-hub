@@ -274,19 +274,25 @@ export function ConciergeStep({ draft, problem, onField, onAddress, repPicker, c
           className={input}
         />
       </Field>
+      {/* aria-label on each, because Field's <label> carries no htmlFor and the
+          input is its sibling — so these three had no accessible name at all.
+          Not fixed by wrapping them in the label: Field also wraps the rep
+          combobox, and a click on an option inside a <label> would bounce focus
+          back to the input and cancel the pick. */}
       <div className="grid grid-cols-[1fr_70px_110px] gap-2">
         <Field label="City">
-          <input value={draft.city} onChange={(e) => onField('city', e.target.value)} className={input} />
+          <input aria-label="City" value={draft.city} onChange={(e) => onField('city', e.target.value)} className={input} />
         </Field>
         <Field label="State">
           <input
+            aria-label="State"
             value={draft.state}
             onChange={(e) => onField('state', e.target.value.toUpperCase().slice(0, 2))}
             className={input}
           />
         </Field>
         <Field label="ZIP">
-          <input value={draft.zip} onChange={(e) => onField('zip', e.target.value)} className={input} />
+          <input aria-label="ZIP" value={draft.zip} onChange={(e) => onField('zip', e.target.value)} className={input} />
         </Field>
       </div>
 
@@ -405,6 +411,17 @@ export function NewReportModal({ onClose, onCreated }: {
   const [criteria, setCriteria] = useState<CompCriteria>(DEFAULT_CRITERIA);
   const [preparedForName, setPreparedForName] = useState('');
   const [preparedForCompany, setPreparedForCompany] = useState('');
+  /**
+   * The TitlePoint tax search. DEFAULT FALSE.
+   *
+   * It has to live here, because the follow-up POST happens after the gate is
+   * gone. But the gate is mounted only while open SO THAT A SPEND CANNOT SURVIVE
+   * A CANCEL, and a flag held out here would quietly break that: tick it, cancel,
+   * reopen, and the second generation carries a charge nobody asked for on this
+   * pass. So openGate() puts it back to false every time — the reset is what
+   * makes state up here equivalent to state inside a remounted dialog.
+   */
+  const [taxDetail, setTaxDetail] = useState(false);
   const [gateOpen, setGateOpen] = useState(false);
   const [spend, setSpend] = useState<{ thisMonth: number; allTime: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -500,6 +517,11 @@ export function NewReportModal({ onClose, onCreated }: {
 
   function openGate() {
     setError(null);
+    // EVERY OPEN STARTS UNARMED. The gate itself is remounted on each open so
+    // that nothing about a spend survives a cancel; this flag lives outside it
+    // because the POST it controls happens after the gate is gone, so it has to
+    // be reset by hand to keep the same property.
+    setTaxDetail(false);
     setGateOpen(true);
     // Read when the gate opens, so the number is current rather than whatever
     // it was when the page loaded.
@@ -535,7 +557,25 @@ export function NewReportModal({ onClose, onCreated }: {
         if (body?.profileId) onCreated(body.profileId as number);
         return;
       }
-      onCreated(body.profileId as number);
+      const profileId = body.profileId as number;
+
+      // ─── The tax search, AFTER the profile exists ────────────────────────
+      //
+      // Deliberately not part of the generate request. TitlePoint tax is
+      // create/poll/fetch and takes minutes; holding the charging request open
+      // for it is the charged-but-incomplete failure resume exists for.
+      //
+      // AND A FAILURE HERE DOES NOT FAIL THE PROFILE. The profile is generated,
+      // paid for and complete without page 4 — it renders the tax page from the
+      // assessment detail SiteX already gave us. So this is fire-and-forget: the
+      // modal closes either way, and the row's own tax status is where the
+      // operator learns what happened. Surfacing an error here would tell them
+      // something went wrong with a report that is sitting in the list, fine.
+      if (taxDetail) {
+        void fetch(`/api/concierge/profiles/${profileId}/tax`, { method: 'POST' }).catch(() => {});
+      }
+
+      onCreated(profileId);
       onClose();
     } catch {
       setError('Network error — the profile may or may not have been generated. Check the list before trying again.');
@@ -666,8 +706,9 @@ export function NewReportModal({ onClose, onCreated }: {
         </div>
       </ModalShell>
 
-      {/* MOUNTED ONLY WHILE OPEN, so the acknowledgement cannot survive a cancel
-          and pre-arm the next generation. */}
+      {/* MOUNTED ONLY WHILE OPEN, so nothing about a spend survives a cancel and
+          pre-arms the next generation. taxDetail is the one flag that has to live
+          outside — openGate() resets it for exactly this reason. */}
       {gateOpen ? (
         <ConciergeCostGate
           address={fullAddress(draft)}
@@ -679,6 +720,8 @@ export function NewReportModal({ onClose, onCreated }: {
           spend={spend}
           submitting={submitting}
           error={error}
+          taxDetail={taxDetail}
+          onTaxDetail={setTaxDetail}
           onPreparedForName={setPreparedForName}
           onPreparedForCompany={setPreparedForCompany}
           onCancel={() => { if (!submitting) { setGateOpen(false); setError(null); } }}

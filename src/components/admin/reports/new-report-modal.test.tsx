@@ -343,12 +343,43 @@ describe('the modal as wired', () => {
   const src = () => strip(join(HERE, 'new-report-modal.tsx'));
   const src2 = src;
 
-  it('spends through the one route that spends, and no other', () => {
-    // Two POSTs now: the concierge profile, which spends, and a farming report,
-    // which does not. Exactly one may go to the spending route.
+  it('posts to exactly these three routes, and no others', () => {
+    // THREE POSTs now, and the third is new (2026-09-30). Enumerated rather than
+    // counted, because the useful question is not "how many" but "which":
+    //
+    //   /api/concierge/profiles          SiteX. Buys the property. One credit.
+    //   /api/concierge/profiles/{id}/tax TitlePoint. Buys page 4, on a property
+    //                                    already paid for. Opt-in, default off.
+    //   /api/reports/farming             Free.
+    //
+    // This guard caught the tax POST the moment it was added, which is what it is
+    // for. Adding the string was not the fix — naming what it buys is, so that a
+    // fourth entry has to be justified the same way.
     const s = src();
     const posts = [...s.matchAll(/fetch\((['`])([^'`]+)\1,\s*\{[^}]*method: 'POST'/g)].map((m) => m[2]);
-    expect(posts.sort()).toEqual(['/api/concierge/profiles', '/api/reports/farming']);
+    expect(posts.sort()).toEqual([
+      '/api/concierge/profiles',
+      '/api/reports/farming',
+      '/api/concierge/profiles/${profileId}/tax',
+    ].sort());
+  });
+
+  it('asks for the tax detail only after the profile exists, and never unasked', () => {
+    const s = src();
+    // The tax POST must be inside confirm(), AFTER the generate response has
+    // yielded a profile id — never built from the draft, which would mean
+    // guessing at an id, and never at generate time, which would put a
+    // create/poll/fetch taking minutes inside the request that charges.
+    expect(s).toMatch(/const profileId = body\.profileId as number/);
+    expect(s.indexOf('const profileId = body.profileId'))
+      .toBeLessThan(s.indexOf('/tax'));
+    // And it is conditional on the opt-in. An unconditional call would spend on
+    // every generation.
+    expect(s).toMatch(/if \(taxDetail\) \{/);
+    // Reset on every gate open, so a tick cannot survive a cancel and arm the
+    // next generation. Driven in new-report-modal.interactive.test.tsx; asserted
+    // here too because the reset is one line and deletable.
+    expect(s).toMatch(/function openGate\(\)[\s\S]{0,200}setTaxDetail\(false\)/);
   });
 
   it('sends a farming report through the farming route, never the concierge one', () => {

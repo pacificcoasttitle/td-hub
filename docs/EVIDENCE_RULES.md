@@ -1,6 +1,6 @@
 # What counts as evidence
 
-Eight rules, each one written the day it cost us something. They are all the
+Nine rules, each one written the day it cost us something. They are all the
 same rule wearing different clothes: **an artifact of how we invoked something
 is not a fact about what the system does.**
 
@@ -273,6 +273,42 @@ A survey written specifically to stop a destructive action, taken from a shell
 that could see the host, still produced a number that was a fact about an empty
 folder. **The instrument does not become trustworthy because you built it to
 be careful.**
+
+## 9 · A claim of coverage is not coverage
+
+`scripts/build/embed-brand-assets.ts` carried this in its header for a week:
+
+> brand-assets.test.ts checks the committed file matches the PNG on disk, so a
+> logo changed without re-running this fails rather than drifting.
+
+**There was no `brand-assets.test.ts`.** Nothing checked the generated file
+against anything. The sentence was written as an intention and read, by
+everyone afterwards including its author, as a description.
+
+`SOURCE_OF_TRUTH.md` did the same thing at higher stakes: it described a
+confirmation gate the code does not implement. That one was believed and
+passed on to Jerry as fact.
+
+**The rule.** A comment or a document asserting that a guard exists is **worse
+than no comment at all**, because it stops the next person from looking. An
+absent comment invites the question; a confident one closes it. Treat any
+documentation claiming coverage as a claim about *the past* — true when
+written, unverified since — not about the present.
+
+**What to do instead.**
+
+- **Name the file, so the claim is checkable in one keystroke.** "See
+  `foo.test.ts`" can be verified; "this is tested" cannot.
+- **When you write the comment before the test, say so.** "TODO: no test yet"
+  is honest and survives; a future-tense promise written in the present tense
+  becomes a lie the moment the session ends.
+- **Grep for the named file before trusting the claim.** It costs nothing and
+  it is the only thing that catches this.
+
+**Why it belongs beside rule 4.** Rule 4 is about a guard that runs and proves
+nothing. This is about a guard that does not exist and is believed anyway. The
+first is a test you should not trust; the second is a test you should not
+believe in. Both present as coverage, and neither is.
 
 ## The shape they share
 

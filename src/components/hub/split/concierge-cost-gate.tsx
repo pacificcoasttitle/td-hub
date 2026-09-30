@@ -45,11 +45,11 @@ export interface CostGateProps {
 }
 
 export function ConciergeCostGate(p: CostGateProps) {
-  const [ack, setAck] = useState(false);
+
 
   const missingPreparedFor = p.preparedForName.trim() === '';
   const missingRep = p.presentingRepName.trim() === '';
-  const blocked = missingPreparedFor || missingRep || !ack || p.submitting;
+  const blocked = missingPreparedFor || missingRep || p.submitting;
 
   return (
     <div
@@ -116,21 +116,23 @@ export function ConciergeCostGate(p: CostGateProps) {
 
               WHAT CARRIES THE DELIBERATENESS NOW. The words were never the
               real guard. The guard is this dialog existing at all — Cancel
-              focused, Enter swallowed, an explicit tick, disabled in flight —
-              plus the duplicate check keyed on the normalised property over
-              all time, which is the thing that actually stops a second
-              lookup on a property we already hold. */}
-          <label className="flex items-start gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={ack}
-              onChange={(e) => setAck(e.target.checked)}
-              className="mt-[2px] w-[14px] h-[14px] rounded border-gray-300 text-brand-orange"
-            />
-            <span className="text-[11.5px] text-[#3C4557]">
-              I have checked the property above and want to generate this profile.
-            </span>
-          </label>
+              focused, Enter swallowed, disabled in flight — plus the duplicate
+              check keyed on the normalised property over all time, which is
+              the thing that actually stops a second lookup on a property we
+              already hold.
+
+              ─── The acknowledgement tick is GONE (Gerard, 2026-09-30) ───────
+              An extra step, and not the one doing the work. Five near-duplicate
+              profiles exist on one parcel and every one of them was ticked:
+              an operator who has decided to generate will tick anything in the
+              way. What stopped those was never available to them — the
+              "we already hold this" panel tells them the profile exists, and
+              the free re-render gives them the reason most of those five were
+              bought in the first place, which was wanting to see the document.
+
+              So the tick goes and those two stay prominent. If duplicates rise
+              after this, the answer is to make those two louder, not to put
+              the checkbox back. */}
 
           {p.error && (
             <p className="text-[11.5px] text-[#8E2A1E] bg-[#FDECEA] border border-[#F2C4BD] rounded-md px-3 py-2">

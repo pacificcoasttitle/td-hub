@@ -132,11 +132,24 @@ describe('what has to be filled in before a credit can be spent', () => {
 
 describe('the property step', () => {
   const step = (over: Partial<ConciergeDraft> = {}, problem: string | null = null) => visible(
-    <ConciergeStep draft={draft(over)} problem={problem} onField={() => {}} onAddress={() => {}} repPicker={<span>picker</span>} />,
+    <ConciergeStep draft={draft(over)} problem={problem} onField={() => {}} onAddress={() => {}} repPicker={<span>picker</span>} criteriaControl={<span>criteria</span>} />,
   );
 
-  it('states the comparable criteria the profile will be built with', () => {
-    expect(step()).toContain('1 mi · 12 mo · ±30% size');
+  it('offers the comparable criteria as a control, not a fixed summary', () => {
+    // It used to print "1 mi · 12 mo · ±30% size" and offer no way to change
+    // it. The operator went looking for that control during creation, found
+    // nothing, and reported the criteria as broken — the control existed only
+    // after generation.
+    expect(step()).toContain('Comparable criteria');
+  });
+
+  it('says the criteria do not change what is searched for, or the cost', () => {
+    // fetchConciergeProfile sends addr, lastLine and feedId and nothing else.
+    // A wider radius does not search wider; a narrower one does not cost less.
+    // An operator who believes otherwise will tune these to save money.
+    const html = step();
+    expect(html).toContain('do not change what is searched for');
+    expect(html).toContain('free');
   });
 
   it('says adjusting them afterwards is free, because it is', () => {
@@ -161,7 +174,7 @@ describe('the property step', () => {
     const html = renderToStaticMarkup(
       <ConciergeStep
         draft={draft({ street: '' })} problem={null}
-        onField={() => {}} onAddress={() => {}} repPicker={<span>picker</span>}
+        onField={() => {}} onAddress={() => {}} repPicker={<span>picker</span>} criteriaControl={<span>criteria</span>}
       />,
     );
     expect(html).toContain('placeholder="Start typing an address');

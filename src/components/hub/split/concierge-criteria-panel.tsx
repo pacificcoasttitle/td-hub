@@ -84,23 +84,7 @@ export function ConciergeCriteriaPanel({
             {' '}<strong>{profile.compsShown}</strong> shown
           </div>
 
-          <Toggle
-            label="Same property type only"
-            checked={c.sameUseCode}
-            onChange={(v) => set('sameUseCode', v)}
-          />
-          <Slider label="Living area within" unit="%" value={c.livingAreaPct} min={0} max={200} step={5}
-            onChange={(v) => set('livingAreaPct', v)} />
-          <Slider label="Bedrooms within" unit="" value={c.bedDelta} min={0} max={5} step={1}
-            onChange={(v) => set('bedDelta', v)} />
-          <Slider label="Bathrooms within" unit="" value={c.bathDelta} min={0} max={5} step={1}
-            onChange={(v) => set('bathDelta', v)} />
-          <Slider label="Radius" unit=" mi" value={c.radiusMiles} min={0} max={10} step={0.25}
-            onChange={(v) => set('radiusMiles', v)} />
-          <Slider label="Sold within" unit=" months" value={c.months} min={1} max={60} step={1}
-            onChange={(v) => set('months', v)} />
-          <Slider label="Show at most" unit="" value={c.maxComps} min={1} max={30} step={1} required
-            onChange={(v) => set('maxComps', v ?? 12)} />
+          <CriteriaFields criteria={c} onChange={setC} />
 
           {/* The count is a CEILING, not a quota. The document shows fewer when
               fewer qualify, and never pads to reach the number. */}
@@ -140,6 +124,44 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
         className="w-[14px] h-[14px] rounded border-gray-300 text-brand-orange" />
       <span className="text-[12px] text-[#3C4557]">{label}</span>
     </label>
+  );
+}
+
+/**
+ * The six controls, with no chrome around them.
+ *
+ * EXTRACTED SO ONE CONTROL SERVES BOTH PLACEMENTS. The criteria are set twice
+ * in this product and for different reasons: in the create modal as a starting
+ * guess, and here after generation where the yield is visible. Two copies of
+ * six sliders would drift, and the bounds have to match the PATCH route's
+ * schema in both.
+ *
+ * `onChange` takes an updater, not a value, so a caller cannot reintroduce a
+ * captured-spread write.
+ */
+export function CriteriaFields({ criteria: c, onChange }: {
+  criteria: CompCriteria;
+  onChange: (next: (prev: CompCriteria) => CompCriteria) => void;
+}) {
+  const set = <K extends keyof CompCriteria>(k: K, v: CompCriteria[K]) =>
+    onChange((prev) => ({ ...prev, [k]: v }));
+
+  return (
+    <>
+      <Toggle label="Same property type only" checked={c.sameUseCode} onChange={(v) => set('sameUseCode', v)} />
+      <Slider label="Living area within" unit="%" value={c.livingAreaPct} min={0} max={200} step={5}
+        onChange={(v) => set('livingAreaPct', v)} />
+      <Slider label="Bedrooms within" unit="" value={c.bedDelta} min={0} max={5} step={1}
+        onChange={(v) => set('bedDelta', v)} />
+      <Slider label="Bathrooms within" unit="" value={c.bathDelta} min={0} max={5} step={1}
+        onChange={(v) => set('bathDelta', v)} />
+      <Slider label="Radius" unit=" mi" value={c.radiusMiles} min={0} max={10} step={0.25}
+        onChange={(v) => set('radiusMiles', v)} />
+      <Slider label="Sold within" unit=" months" value={c.months} min={1} max={60} step={1}
+        onChange={(v) => set('months', v)} />
+      <Slider label="Show at most" unit="" value={c.maxComps} min={1} max={30} step={1} required
+        onChange={(v) => set('maxComps', v ?? 12)} />
+    </>
   );
 }
 

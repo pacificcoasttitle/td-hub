@@ -4,8 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ModalShell } from '@/components/shared/action-modals/modal-shell';
 import { AddressAutocomplete, type ParsedAddress } from '@/components/ui/address-autocomplete';
 import { ConciergeCostGate } from '@/components/hub/split/concierge-cost-gate';
+import { CriteriaFields } from '@/components/hub/split/concierge-criteria-panel';
 import { criteriaSummary } from '@/lib/domain/concierge/list-line';
-import { DEFAULT_CRITERIA } from '@/lib/domain/concierge/comp-filter';
+import { DEFAULT_CRITERIA, type CompCriteria } from '@/lib/domain/concierge/comp-filter';
 import type { ReportType } from '@/lib/domain/reports/list-types';
 import {
   FarmingStep, emptyFarmingDraft, farmingFormData, farmingProblem, isFarming, type FarmingDraft,
@@ -303,13 +304,15 @@ export function RepPicker({ chosenName, results, query, searching, onQuery, onCh
 
 // ─── Step two: the property ─────────────────────────────────────────────────
 
-export function ConciergeStep({ draft, problem, onField, onAddress, repPicker }: {
+export function ConciergeStep({ draft, problem, onField, onAddress, repPicker, criteriaControl }: {
   draft: ConciergeDraft;
   problem: string | null;
   onField: (k: keyof ConciergeDraft, v: string) => void;
   /** One pick fills street, city, state and zip together. */
   onAddress: (a: ParsedAddress) => void;
   repPicker: React.ReactNode;
+  /** The comparable criteria, set before generating. */
+  criteriaControl: React.ReactNode;
 }) {
   const input = 'w-full h-8 px-[9px] border border-[#E5E5E5] rounded-md text-[12px] outline-none focus:ring-1 focus:ring-brand-orange/30 focus:border-brand-orange';
   return (
@@ -361,11 +364,27 @@ export function ConciergeStep({ draft, problem, onField, onAddress, repPicker }:
         </p>
       </Field>
 
-      <div className="rounded-md bg-[#FAFAFB] border border-[#EDEFF3] px-3 py-2">
-        <p className="text-[10px] uppercase tracking-[0.09em] font-semibold text-[#9AA0AA]">Comparable criteria</p>
-        <p className="text-[11.5px] text-[#3C4557]">{DEFAULT_CRITERIA_SUMMARY}</p>
-        <p className="text-[10px] text-[#9AA0AA] mt-[2px]">Adjustable after it is generated — changing them is free.</p>
-      </div>
+      {/* ─── The criteria live in BOTH places, and here is why ──────────────
+          THE CRITERIA NEVER REACH SiteX. fetchConciergeProfile sends exactly
+          three parameters — addr, lastLine and feedId. The vendor returns
+          whatever comparables it holds for the parcel and selectComps filters
+          that stored set locally. A wider radius does not search wider; a
+          narrower one does not cost less.
+
+          The corollary is that nobody can know what a criteria set yields
+          until the payload has arrived. So these are a STARTING GUESS, and the
+          free panel after generation is where tuning happens with the yield in
+          front of you. Both need to exist. The operator looked for this
+          control during creation and found nothing, which is the whole of the
+          "criteria control does nothing" report. */}
+      <Field label="Comparable criteria">
+        {criteriaControl}
+        <p className="mt-1 text-[10.5px] text-[#9AA0AA]">
+          A starting point. These filter the comparables the search returns — they
+          do not change what is searched for, or the cost. Adjusting them after the
+          profile exists is free, and shows how many sales each setting keeps.
+        </p>
+      </Field>
 
       {problem ? <p className="text-[11.5px] text-[#B4620B]">{problem}</p> : null}
     </div>
@@ -448,6 +467,9 @@ export function NewReportModal({ onClose, onCreated }: {
   const [selected, setSelected] = useState<ReportType | null>(null);
   const [step, setStep] = useState<'type' | 'details'>('type');
   const [draft, setDraft] = useState<ConciergeDraft>(EMPTY);
+  // The starting guess. These filter what the search returns; they are not
+  // sent to SiteX and do not change the cost — see ConciergeStep.
+  const [criteria, setCriteria] = useState<CompCriteria>(DEFAULT_CRITERIA);
   const [preparedForName, setPreparedForName] = useState('');
   const [preparedForCompany, setPreparedForCompany] = useState('');
   const [gateOpen, setGateOpen] = useState(false);
@@ -614,10 +636,15 @@ export function NewReportModal({ onClose, onCreated }: {
 
   return (
     <>
+      {/* WIDE on the details step, default when choosing a type.
+          The type list is four cards and does not want the room; the details
+          step carries an address, a rep dropdown and the comparable criteria,
+          and at max-w-lg the criteria sliders had nowhere to go. */}
       <ModalShell
         open
         onClose={onClose}
         title="New Report"
+        size={step === 'details' ? 'wide' : undefined}
         subtitle={step === 'type' ? 'Choose a type' : (options.find((o) => o.type === selected)?.label ?? '')}
       >
         <div className="px-5 py-4">
@@ -669,6 +696,7 @@ export function NewReportModal({ onClose, onCreated }: {
               problem={showProblem ? problem : null}
               onField={(k, v) => setDraft((d) => ({ ...d, [k]: v }))}
               onAddress={(a) => setDraft((d) => applyPickedAddress(d, a))}
+              criteriaControl={<CriteriaFields criteria={criteria} onChange={setCriteria} />}
               repPicker={(
                 <RepPicker
                   chosenName={draft.repName}

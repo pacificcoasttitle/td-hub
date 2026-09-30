@@ -74,6 +74,56 @@ export const conciergeProfiles = pgTable('concierge_profiles', {
   taxAmount: numeric('tax_amount', { precision: 12, scale: 2 }),
   taxStatus: varchar('tax_status', { length: 50 }),
 
+  // ─── Page 4, layer 1: the TitlePoint tax detail (migration 0062) ──────────
+  //
+  // Layer 2 (SiteX) needs no columns — it is re-derived from raw_storage_key on
+  // every render. Layer 1 is a separate billable TitlePoint search that takes
+  // minutes, so it cannot be re-derived and has to be stored.
+
+  /** Opt-in, and it costs money, so the default is false. */
+  taxDetailRequested: boolean('tax_detail_requested').notNull().default(false),
+  /**
+   * pending | ready | empty | denied | failed. NULL means never asked for.
+   *
+   * `pending` includes a poll that TIMED OUT. The call was paid for the moment
+   * TitlePoint accepted it, so a timeout must never look like "not started" —
+   * that is the charged-but-incomplete failure `resume` exists for on the SiteX
+   * side, and it must not be reintroduced here.
+   */
+  taxDetailStatus: varchar('tax_detail_status', { length: 20 }),
+  /** Which layer page 4 actually rendered on: 'titlepoint' | 'sitex'. */
+  taxDetailSource: varchar('tax_detail_source', { length: 20 }),
+  taxDetailError: text('tax_detail_error'),
+  /**
+   * parseTitlePointTaxReport() output — NEVER the raw payload.
+   *
+   * DelinquencyInformation is on 1,322 of 1,322 stored tax payloads. Those
+   * families are excluded from the document on privacy grounds, and the raw
+   * already has a governed home in title_point_data. This type has no field for
+   * them, so they cannot arrive here at all.
+   */
+  taxReport: jsonb('tax_report'),
+  /**
+   * Why the assessed total is present or absent: verified | mismatch |
+   * unverifiable | absent | stated. Layer 1 carries no total — it is composed
+   * and only printed when it reconciles — and a suppression nobody can account
+   * for later is how a vendor problem gets filed as a rendering quirk.
+   */
+  taxAssessedBasis: varchar('tax_assessed_basis', { length: 20 }),
+
+  /** TitlePoint's per-call id: the handle that maps an invoice line here. */
+  titlePointRequestId: varchar('titlepoint_request_id', { length: 100 }),
+  /** The title_point_data row holding the raw. Evidence, not a dependency. */
+  titlePointDataId: integer('titlepoint_data_id'),
+  /**
+   * SEPARATE FROM sitex_credits_charged, deliberately. Different vendor,
+   * different unit, different invoice — a blended number reconciles against
+   * neither bill, and the admin usage view shows the two side by side.
+   */
+  titlePointCharges: integer('titlepoint_charges').notNull().default(0),
+  titlePointRequestedAt: timestamp('titlepoint_requested_at'),
+  titlePointDurationMs: integer('titlepoint_duration_ms'),
+
   /** What we ASKED FOR. The report prints these — never values derived from results. */
   criteriaSameUseCode: boolean('criteria_same_use_code').notNull(),
   criteriaLivingAreaPct: integer('criteria_living_area_pct'),
@@ -128,6 +178,9 @@ export const conciergeProfiles = pgTable('concierge_profiles', {
   apnIdx: index('concierge_profiles_apn_idx').on(t.subjectApn),
   searchIdx: index('concierge_profiles_searchid_idx').on(t.sitexSearchId),
   propertyKeyIdx: index('concierge_profiles_property_key_idx').on(t.propertyKey, t.createdAt),
+  /** Partial in SQL (migration 0062): "which profiles are still waiting?" */
+  taxPendingIdx: index('concierge_profiles_tax_pending_idx').on(t.titlePointRequestedAt),
+  tpRequestIdx: index('concierge_profiles_tp_request_idx').on(t.titlePointRequestId),
 }));
 
 /**

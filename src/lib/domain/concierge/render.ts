@@ -11,6 +11,7 @@ import { ProfileDocument, TEMPLATE_VERSION } from './document/profile-document';
 import { compFromRow } from './comp-row';
 import { subjectFactsFromRow } from './subject-facts';
 import { normalizeSubject, normalizeTax, normalizeTransfers } from './normalize';
+import { resolveTaxLayer } from './document/derive';
 
 // ─── Rendering: the path that CANNOT spend a credit ─────────────────────────
 //
@@ -128,9 +129,36 @@ export async function renderProfile(
   const tax = normalizeTax(feed);
   const transfers = normalizeTransfers(feed);
 
+  // ─── Page 4, layer 1 ──────────────────────────────────────────────────────
+  //
+  // The ONE thing on this document that is not re-derived from the stored SiteX
+  // payload, because it did not come from SiteX. A TitlePoint tax search is a
+  // separate billable call taking minutes, so it cannot be re-derived on demand
+  // and is read from the column the bridge wrote.
+  //
+  // Stored as the NORMALIZED report, never the raw payload — the raw carries
+  // delinquency and redemption data on every response and has a governed home
+  // in title_point_data. See migration 0062.
+  //
+  // Absent on every profile that never asked for it, and resolveTaxLayer then
+  // falls to SiteX exactly as before: adding this cannot change what an existing
+  // profile renders.
+  const taxReport = (profile.taxReport as Parameters<typeof ProfileDocument>[0]['taxReport']) ?? null;
+
+  // WHICH LAYER THIS RENDER ACTUALLY USED, recorded rather than asserted. The
+  // bridge writes tax_detail_source when the search lands, but the bridge is
+  // guessing at what the document will do; this is the same function the
+  // document calls, on the same inputs, so it is the answer. It also covers the
+  // profiles the bridge never touched.
+  // The state is read back out of siteCityState exactly as profile-document.tsx
+  // does it — a second way of deriving it here would eventually disagree with
+  // the document about whether Californian installment dates apply.
+  const subjectState = (subject.siteCityState ?? '').match(/,\s*([A-Z]{2})\b/)?.[1] ?? null;
+  const renderedLayer = resolveTaxLayer(tax, subjectState, taxReport);
+
   const { renderToBuffer } = await import('@react-pdf/renderer');
   const buf = await renderToBuffer(ProfileDocument({
-    subject, tax,
+    subject, tax, taxReport,
     transfers,
     filter, metrics, criteria: applied,
     compMapImage, platMapImage,
@@ -173,6 +201,8 @@ export async function renderProfile(
     criteriaRadiusMiles: applied.radiusMiles === null ? null : String(applied.radiusMiles),
     criteriaMonths: applied.months,
     criteriaMaxComps: applied.maxComps,
+    /** Null when page 4 was not rendered at all — layer 3, seven pages. */
+    taxDetailSource: renderedLayer?.source ?? null,
     // Rewritten on every render: a profile re-filtered to half a mile must not
     // go on advertising the mile it was created with.
     listSettings: criteriaSummary(applied),

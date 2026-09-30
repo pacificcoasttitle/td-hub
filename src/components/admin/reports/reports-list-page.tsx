@@ -239,6 +239,10 @@ export function groupRows(rows: readonly ReportListRow[]): ReportGroupData[] {
     }
     const existing = byKey.get(r.groupKey);
     if (existing) {
+      // COLLECTED, never dropped. Losing the sibling here is the one mutation
+      // that turns this function into a dedupe, and a list that shows one row
+      // where five were invoiced disagrees with the bill. The count-in equals
+      // count-out test in the interactive file is what holds it.
       existing.rows.push(r);
       continue;
     }

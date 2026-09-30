@@ -174,7 +174,14 @@ describe('re-runs on one property are grouped, and nothing is hidden', () => {
   });
 
   it('states the count of earlier profiles and does not hide them', () => {
-    render(<table><tbody><ReportGroup group={{ rows: five }} /></tbody></table>);
+    // THROUGH groupRows, not a hand-built group. The first version of this test
+    // passed `{ rows: five }` directly, so the one mutation that matters —
+    // dropping the siblings instead of collecting them, which is dedupe by
+    // hiding — left the test whose NAME promises this invariant perfectly green.
+    // Only the shape test caught it.
+    const groups = groupRows(five);
+    expect(groups, 'grouping collapsed to one group').toHaveLength(1);
+    render(<table><tbody><ReportGroup group={groups[0]!} /></tbody></table>);
 
     // COLLAPSED IS NOT HIDDEN. The count is on screen, exact, before any click:
     // all five were paid for and all five are on an invoice.
@@ -190,8 +197,17 @@ describe('re-runs on one property are grouped, and nothing is hidden', () => {
   });
 
   it('says "1 earlier profile", not "1 earlier profiles"', () => {
-    render(<table><tbody><ReportGroup group={{ rows: five.slice(0, 2) }} /></tbody></table>);
+    render(<table><tbody><ReportGroup group={groupRows(five.slice(0, 2))[0]!} /></tbody></table>);
     expect(screen.getByText('1 earlier profile on this property')).toBeTruthy();
+  });
+
+  it('keeps every paid-for row, counted against the input', () => {
+    // The invariant stated as arithmetic rather than as a rendering: whatever
+    // grouping does to the shape, the number of reports in must equal the number
+    // out. This is the assertion that a dedupe cannot pass.
+    const mixed = [...five, row({ id: 9 }), profile({ id: 10, groupKey: 'other|key' })];
+    const total = groupRows(mixed).reduce((n, g) => n + g.rows.length, 0);
+    expect(total).toBe(mixed.length);
   });
 
   it('offers no toggle on a property with a single profile', () => {

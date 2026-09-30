@@ -14,6 +14,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
+    "concierge:look": "tsx --env-file=.env.local scripts/audit/concierge-render-preview.mts",
+    "concierge:pages": "tsx --env-file=.env.local scripts/audit/concierge-render-preview.mts --raster",
     "db:seed": "tsx src/lib/db/seed.ts",
     "db:verify-rls": "tsx --env-file=.env.local scripts/audit/verify-rls-production.ts"
   },

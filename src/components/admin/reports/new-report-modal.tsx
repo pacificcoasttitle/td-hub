@@ -1,11 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ModalShell } from '@/components/shared/action-modals/modal-shell';
 import { AddressAutocomplete, type ParsedAddress } from '@/components/ui/address-autocomplete';
+import { RepCombobox } from './rep-combobox';
 import { ConciergeCostGate } from '@/components/hub/split/concierge-cost-gate';
+import { CriteriaFields } from '@/components/hub/split/concierge-criteria-panel';
 import { criteriaSummary } from '@/lib/domain/concierge/list-line';
-import { DEFAULT_CRITERIA } from '@/lib/domain/concierge/comp-filter';
+import { DEFAULT_CRITERIA, type CompCriteria } from '@/lib/domain/concierge/comp-filter';
 import type { ReportType } from '@/lib/domain/reports/list-types';
 import {
   FarmingStep, emptyFarmingDraft, farmingFormData, farmingProblem, isFarming, type FarmingDraft,
@@ -225,91 +227,25 @@ export function TypeCard({ option, selected, onSelect }: {
   );
 }
 
-// ─── The presenting-rep picker ──────────────────────────────────────────────
-
-export interface RepResult {
-  id: number;
-  fullName: string | null;
-  email: string | null;
-  companyName: string | null;
-  /**
-   * Set by /api/contacts/search for sales reps only, and only when the book
-   * holds another row with the SAME name and email. Kevin Cameron is two such
-   * rows; without these the operator is choosing between identical lines and
-   * the wrong choice makes a report he never sees.
-   */
-  ambiguous?: boolean;
-  hasLogin?: boolean;
-  orders?: number;
-  twinLabel?: string | null;
-}
-
-export function RepPicker({ chosenName, results, query, searching, onQuery, onChoose, onClear }: {
-  chosenName: string;
-  results: RepResult[];
-  query: string;
-  searching: boolean;
-  onQuery: (v: string) => void;
-  onChoose: (r: RepResult) => void;
-  onClear: () => void;
-}) {
-  if (chosenName) {
-    return (
-      <div className="flex items-center justify-between rounded-md border border-[#E5E5E5] px-3 py-2">
-        <span className="text-[12px] text-[#171717]">{chosenName}</span>
-        <button type="button" onClick={onClear} className="text-[11px] font-medium text-[#1B2A4A] hover:underline">
-          Change
-        </button>
-      </div>
-    );
-  }
-  return (
-    <div>
-      <input
-        value={query}
-        onChange={(e) => onQuery(e.target.value)}
-        placeholder="Search sales representatives"
-        className="w-full h-8 px-[9px] border border-[#E5E5E5] rounded-md text-[12px] outline-none focus:ring-1 focus:ring-brand-orange/30 focus:border-brand-orange"
-      />
-      {query.trim().length >= 2 ? (
-        <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-[#EDEFF3]">
-          {searching ? (
-            <p className="px-3 py-2 text-[11.5px] text-[#9AA0AA]">Searching…</p>
-          ) : results.length === 0 ? (
-            <p className="px-3 py-2 text-[11.5px] text-[#9AA0AA]">No sales representative by that name.</p>
-          ) : results.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => onChoose(r)}
-              className="block w-full px-3 py-[6px] text-left text-[12px] text-[#171717] hover:bg-[#F5F7FB]"
-            >
-              {r.fullName ?? r.email ?? `Contact ${r.id}`}
-              {r.companyName ? <span className="text-[#9AA0AA]"> · {r.companyName}</span> : null}
-              {/* Two rows a human cannot tell apart get the facts that separate them. */}
-              {r.twinLabel ? (
-                <span className={`block text-[10.5px] ${r.hasLogin ? 'text-[#9AA0AA]' : 'text-[#B45309]'}`}>
-                  {r.twinLabel}
-                  {!r.hasLogin ? ' — they will not see this report in their own list' : ''}
-                </span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
+// ─── The presenting-rep picker lives in rep-combobox.tsx ────────────────────
+//
+// It used to be a search box here: two characters before it showed anything,
+// eight results, a debounce and a request counter. Gerard asked for "all of the
+// list so our user can easily select" and there are 54 reps, so the search and
+// everything supporting it is gone — see RepCombobox for what replaced it and
+// why. /api/contacts/search still serves its other callers unchanged.
 
 // ─── Step two: the property ─────────────────────────────────────────────────
 
-export function ConciergeStep({ draft, problem, onField, onAddress, repPicker }: {
+export function ConciergeStep({ draft, problem, onField, onAddress, repPicker, criteriaControl }: {
   draft: ConciergeDraft;
   problem: string | null;
   onField: (k: keyof ConciergeDraft, v: string) => void;
   /** One pick fills street, city, state and zip together. */
   onAddress: (a: ParsedAddress) => void;
   repPicker: React.ReactNode;
+  /** The comparable criteria, set before generating. */
+  criteriaControl: React.ReactNode;
 }) {
   const input = 'w-full h-8 px-[9px] border border-[#E5E5E5] rounded-md text-[12px] outline-none focus:ring-1 focus:ring-brand-orange/30 focus:border-brand-orange';
   return (
@@ -338,19 +274,25 @@ export function ConciergeStep({ draft, problem, onField, onAddress, repPicker }:
           className={input}
         />
       </Field>
+      {/* aria-label on each, because Field's <label> carries no htmlFor and the
+          input is its sibling — so these three had no accessible name at all.
+          Not fixed by wrapping them in the label: Field also wraps the rep
+          combobox, and a click on an option inside a <label> would bounce focus
+          back to the input and cancel the pick. */}
       <div className="grid grid-cols-[1fr_70px_110px] gap-2">
         <Field label="City">
-          <input value={draft.city} onChange={(e) => onField('city', e.target.value)} className={input} />
+          <input aria-label="City" value={draft.city} onChange={(e) => onField('city', e.target.value)} className={input} />
         </Field>
         <Field label="State">
           <input
+            aria-label="State"
             value={draft.state}
             onChange={(e) => onField('state', e.target.value.toUpperCase().slice(0, 2))}
             className={input}
           />
         </Field>
         <Field label="ZIP">
-          <input value={draft.zip} onChange={(e) => onField('zip', e.target.value)} className={input} />
+          <input aria-label="ZIP" value={draft.zip} onChange={(e) => onField('zip', e.target.value)} className={input} />
         </Field>
       </div>
 
@@ -361,11 +303,27 @@ export function ConciergeStep({ draft, problem, onField, onAddress, repPicker }:
         </p>
       </Field>
 
-      <div className="rounded-md bg-[#FAFAFB] border border-[#EDEFF3] px-3 py-2">
-        <p className="text-[10px] uppercase tracking-[0.09em] font-semibold text-[#9AA0AA]">Comparable criteria</p>
-        <p className="text-[11.5px] text-[#3C4557]">{DEFAULT_CRITERIA_SUMMARY}</p>
-        <p className="text-[10px] text-[#9AA0AA] mt-[2px]">Adjustable after it is generated — changing them is free.</p>
-      </div>
+      {/* ─── The criteria live in BOTH places, and here is why ──────────────
+          THE CRITERIA NEVER REACH SiteX. fetchConciergeProfile sends exactly
+          three parameters — addr, lastLine and feedId. The vendor returns
+          whatever comparables it holds for the parcel and selectComps filters
+          that stored set locally. A wider radius does not search wider; a
+          narrower one does not cost less.
+
+          The corollary is that nobody can know what a criteria set yields
+          until the payload has arrived. So these are a STARTING GUESS, and the
+          free panel after generation is where tuning happens with the yield in
+          front of you. Both need to exist. The operator looked for this
+          control during creation and found nothing, which is the whole of the
+          "criteria control does nothing" report. */}
+      <Field label="Comparable criteria">
+        {criteriaControl}
+        <p className="mt-1 text-[10.5px] text-[#9AA0AA]">
+          A starting point. These filter the comparables the search returns — they
+          do not change what is searched for, or the cost. Adjusting them after the
+          profile exists is free, and shows how many sales each setting keeps.
+        </p>
+      </Field>
 
       {problem ? <p className="text-[11.5px] text-[#B4620B]">{problem}</p> : null}
     </div>
@@ -448,8 +406,22 @@ export function NewReportModal({ onClose, onCreated }: {
   const [selected, setSelected] = useState<ReportType | null>(null);
   const [step, setStep] = useState<'type' | 'details'>('type');
   const [draft, setDraft] = useState<ConciergeDraft>(EMPTY);
+  // The starting guess. These filter what the search returns; they are not
+  // sent to SiteX and do not change the cost — see ConciergeStep.
+  const [criteria, setCriteria] = useState<CompCriteria>(DEFAULT_CRITERIA);
   const [preparedForName, setPreparedForName] = useState('');
   const [preparedForCompany, setPreparedForCompany] = useState('');
+  /**
+   * The TitlePoint tax search. DEFAULT FALSE.
+   *
+   * It has to live here, because the follow-up POST happens after the gate is
+   * gone. But the gate is mounted only while open SO THAT A SPEND CANNOT SURVIVE
+   * A CANCEL, and a flag held out here would quietly break that: tick it, cancel,
+   * reopen, and the second generation carries a charge nobody asked for on this
+   * pass. So openGate() puts it back to false every time — the reset is what
+   * makes state up here equivalent to state inside a remounted dialog.
+   */
+  const [taxDetail, setTaxDetail] = useState(false);
   const [gateOpen, setGateOpen] = useState(false);
   const [spend, setSpend] = useState<{ thisMonth: number; allTime: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -462,12 +434,6 @@ export function NewReportModal({ onClose, onCreated }: {
   const [freshRequested, setFreshRequested] = useState(false);
   const [farming, setFarming] = useState<boolean | null>(null);
   const [farmingDraft, setFarmingDraft] = useState<FarmingDraft>(() => emptyFarmingDraft());
-
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<RepResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const debRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const searchCount = useRef(0);
 
   // Asked on every open, not cached: the flag can be turned on while the page
   // is sitting there, and a stale "not enabled" would hide a feature that works.
@@ -484,21 +450,6 @@ export function NewReportModal({ onClose, onCreated }: {
       .then((d: { farming?: boolean } | null) => { if (!cancelled) setFarming(!!d?.farming); })
       .catch(() => { if (!cancelled) setFarming(false); });
     return () => { cancelled = true; };
-  }, []);
-
-  const search = useCallback((v: string) => {
-    setQuery(v);
-    clearTimeout(debRef.current);
-    if (v.trim().length < 2) { setResults([]); setSearching(false); return; }
-    setSearching(true);
-    debRef.current = setTimeout(() => {
-      const id = ++searchCount.current;
-      fetch(`/api/contacts/search?type=sales_rep&pageSize=8&q=${encodeURIComponent(v.trim())}`)
-        .then((r) => (r.ok ? r.json() : { results: [] }))
-        .then((d: { results?: RepResult[] }) => { if (id === searchCount.current) setResults(d.results ?? []); })
-        .catch(() => { if (id === searchCount.current) setResults([]); })
-        .finally(() => { if (id === searchCount.current) setSearching(false); });
-    }, 250);
   }, []);
 
   const problem = draftProblem(draft);
@@ -566,6 +517,11 @@ export function NewReportModal({ onClose, onCreated }: {
 
   function openGate() {
     setError(null);
+    // EVERY OPEN STARTS UNARMED. The gate itself is remounted on each open so
+    // that nothing about a spend survives a cancel; this flag lives outside it
+    // because the POST it controls happens after the gate is gone, so it has to
+    // be reset by hand to keep the same property.
+    setTaxDetail(false);
     setGateOpen(true);
     // Read when the gate opens, so the number is current rather than whatever
     // it was when the page loaded.
@@ -601,7 +557,25 @@ export function NewReportModal({ onClose, onCreated }: {
         if (body?.profileId) onCreated(body.profileId as number);
         return;
       }
-      onCreated(body.profileId as number);
+      const profileId = body.profileId as number;
+
+      // ─── The tax search, AFTER the profile exists ────────────────────────
+      //
+      // Deliberately not part of the generate request. TitlePoint tax is
+      // create/poll/fetch and takes minutes; holding the charging request open
+      // for it is the charged-but-incomplete failure resume exists for.
+      //
+      // AND A FAILURE HERE DOES NOT FAIL THE PROFILE. The profile is generated,
+      // paid for and complete without page 4 — it renders the tax page from the
+      // assessment detail SiteX already gave us. So this is fire-and-forget: the
+      // modal closes either way, and the row's own tax status is where the
+      // operator learns what happened. Surfacing an error here would tell them
+      // something went wrong with a report that is sitting in the list, fine.
+      if (taxDetail) {
+        void fetch(`/api/concierge/profiles/${profileId}/tax`, { method: 'POST' }).catch(() => {});
+      }
+
+      onCreated(profileId);
       onClose();
     } catch {
       setError('Network error — the profile may or may not have been generated. Check the list before trying again.');
@@ -614,10 +588,15 @@ export function NewReportModal({ onClose, onCreated }: {
 
   return (
     <>
+      {/* WIDE on the details step, default when choosing a type.
+          The type list is four cards and does not want the room; the details
+          step carries an address, a rep dropdown and the comparable criteria,
+          and at max-w-lg the criteria sliders had nowhere to go. */}
       <ModalShell
         open
         onClose={onClose}
         title="New Report"
+        size={step === 'details' ? 'wide' : undefined}
         subtitle={step === 'type' ? 'Choose a type' : (options.find((o) => o.type === selected)?.label ?? '')}
       >
         <div className="px-5 py-4">
@@ -640,16 +619,10 @@ export function NewReportModal({ onClose, onCreated }: {
               onField={(k, v) => setFarmingDraft((d) => ({ ...d, [k]: v }))}
               onFile={(f) => setFarmingDraft((d) => ({ ...d, file: f }))}
               repPicker={(
-                <RepPicker
+                <RepCombobox
                   chosenName={farmingDraft.repName}
-                  results={results}
-                  query={query}
-                  searching={searching}
-                  onQuery={search}
-                  onChoose={(r) => setFarmingDraft((d) => ({
-                    ...d, repContactId: r.id, repName: r.fullName ?? r.email ?? `Contact ${r.id}`,
-                  }))}
-                  onClear={() => { setFarmingDraft((d) => ({ ...d, repContactId: null, repName: '' })); setQuery(''); setResults([]); }}
+                  onChoose={(r) => setFarmingDraft((d) => ({ ...d, repContactId: r.id, repName: r.name }))}
+                  onClear={() => setFarmingDraft((d) => ({ ...d, repContactId: null, repName: '' }))}
                 />
               )}
             />
@@ -669,17 +642,16 @@ export function NewReportModal({ onClose, onCreated }: {
               problem={showProblem ? problem : null}
               onField={(k, v) => setDraft((d) => ({ ...d, [k]: v }))}
               onAddress={(a) => setDraft((d) => applyPickedAddress(d, a))}
+              criteriaControl={<CriteriaFields criteria={criteria} onChange={setCriteria} />}
               repPicker={(
-                <RepPicker
+                /* `r.name`, never `r.label`. The label carries the
+                   disambiguation — "Kevin Cameron · #8821" — which exists to
+                   help the operator choose and must never reach the document's
+                   cover, where it would read as the rep's name. */
+                <RepCombobox
                   chosenName={draft.repName}
-                  results={results}
-                  query={query}
-                  searching={searching}
-                  onQuery={search}
-                  onChoose={(r) => setDraft((d) => ({
-                    ...d, repContactId: r.id, repName: r.fullName ?? r.email ?? `Contact ${r.id}`,
-                  }))}
-                  onClear={() => { setDraft((d) => ({ ...d, repContactId: null, repName: '' })); setQuery(''); setResults([]); }}
+                  onChoose={(r) => setDraft((d) => ({ ...d, repContactId: r.id, repName: r.name }))}
+                  onClear={() => setDraft((d) => ({ ...d, repContactId: null, repName: '' }))}
                 />
               )}
             />
@@ -734,8 +706,9 @@ export function NewReportModal({ onClose, onCreated }: {
         </div>
       </ModalShell>
 
-      {/* MOUNTED ONLY WHILE OPEN, so the acknowledgement cannot survive a cancel
-          and pre-arm the next generation. */}
+      {/* MOUNTED ONLY WHILE OPEN, so nothing about a spend survives a cancel and
+          pre-arms the next generation. taxDetail is the one flag that has to live
+          outside — openGate() resets it for exactly this reason. */}
       {gateOpen ? (
         <ConciergeCostGate
           address={fullAddress(draft)}
@@ -747,6 +720,8 @@ export function NewReportModal({ onClose, onCreated }: {
           spend={spend}
           submitting={submitting}
           error={error}
+          taxDetail={taxDetail}
+          onTaxDetail={setTaxDetail}
           onPreparedForName={setPreparedForName}
           onPreparedForCompany={setPreparedForCompany}
           onCancel={() => { if (!submitting) { setGateOpen(false); setError(null); } }}

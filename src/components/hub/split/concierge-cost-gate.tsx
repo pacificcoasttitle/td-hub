@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { PreparedForField } from './prepared-for-field';
 
 // ─── The confirmation gate ──────────────────────────────────────────────────
 //
@@ -38,6 +38,9 @@ export interface CostGateProps {
   spend: { thisMonth: number; allTime: number } | null;
   submitting: boolean;
   error: string | null;
+  /** Opt-in, and it is a second billable search. Default off. */
+  taxDetail: boolean;
+  onTaxDetail: (v: boolean) => void;
   onPreparedForName: (v: string) => void;
   onPreparedForCompany: (v: string) => void;
   onCancel: () => void;
@@ -45,11 +48,11 @@ export interface CostGateProps {
 }
 
 export function ConciergeCostGate(p: CostGateProps) {
-  const [ack, setAck] = useState(false);
+
 
   const missingPreparedFor = p.preparedForName.trim() === '';
   const missingRep = p.presentingRepName.trim() === '';
-  const blocked = missingPreparedFor || missingRep || !ack || p.submitting;
+  const blocked = missingPreparedFor || missingRep || p.submitting;
 
   return (
     <div
@@ -80,23 +83,15 @@ export function ConciergeCostGate(p: CostGateProps) {
         <div className="px-5 py-4 space-y-3">
           <GateRow label="Property" value={p.address} />
 
-          <div>
-            <label className="block text-[9.5px] font-semibold uppercase tracking-[0.09em] text-[#9AA0AA] mb-1">
-              Prepared for
-            </label>
-            <input
-              value={p.preparedForName}
-              onChange={(e) => p.onPreparedForName(e.target.value)}
-              placeholder="Client or agent name"
-              className="w-full h-8 px-[9px] border border-[#E5E5E5] rounded-md text-[12px] outline-none focus:ring-1 focus:ring-brand-orange/30 focus:border-brand-orange"
-            />
-            <input
-              value={p.preparedForCompany}
-              onChange={(e) => p.onPreparedForCompany(e.target.value)}
-              placeholder="Brokerage (optional)"
-              className="w-full h-8 px-[9px] mt-[6px] border border-[#E5E5E5] rounded-md text-[12px] outline-none focus:ring-1 focus:ring-brand-orange/30 focus:border-brand-orange"
-            />
-          </div>
+          {/* Suggestions, not a picker. A new client must stay typeable — see
+              PreparedForField. Nothing about the gate's guards changes: the
+              Generate button is still blocked while this is empty. */}
+          <PreparedForField
+            name={p.preparedForName}
+            company={p.preparedForCompany}
+            onName={p.onPreparedForName}
+            onCompany={p.onPreparedForCompany}
+          />
 
           <GateRow
             label="Presenting representative"
@@ -116,19 +111,55 @@ export function ConciergeCostGate(p: CostGateProps) {
 
               WHAT CARRIES THE DELIBERATENESS NOW. The words were never the
               real guard. The guard is this dialog existing at all — Cancel
-              focused, Enter swallowed, an explicit tick, disabled in flight —
-              plus the duplicate check keyed on the normalised property over
-              all time, which is the thing that actually stops a second
-              lookup on a property we already hold. */}
-          <label className="flex items-start gap-2 cursor-pointer select-none">
+              focused, Enter swallowed, disabled in flight — plus the duplicate
+              check keyed on the normalised property over all time, which is
+              the thing that actually stops a second lookup on a property we
+              already hold.
+
+              ─── The acknowledgement tick is GONE (Gerard, 2026-09-30) ───────
+              An extra step, and not the one doing the work. Five near-duplicate
+              profiles exist on one parcel and every one of them was ticked:
+              an operator who has decided to generate will tick anything in the
+              way. What stopped those was never available to them — the
+              "we already hold this" panel tells them the profile exists, and
+              the free re-render gives them the reason most of those five were
+              bought in the first place, which was wanting to see the document.
+
+              So the tick goes and those two stay prominent. If duplicates rise
+              after this, the answer is to make those two louder, not to put
+              the checkbox back. */}
+
+          {/* ─── The one opt-in on this dialog, and it costs ────────────────
+              DEFAULT OFF (Gerard). The label names the charge — "one
+              additional search" — rather than saying "include taxes", because
+              "include" reads like a formatting choice and this is a second
+              purchase from a second vendor.
+
+              It is NOT the acknowledgement checkbox coming back. That one asked
+              the operator to confirm something they had already decided, and
+              every one of the five duplicate profiles was generated with it
+              ticked. This one changes what happens.
+
+              It also says what NOT ticking costs, which is nothing: page 4
+              still renders from the assessment detail the SiteX call already
+              paid for. An opt-in that reads as "or go without a tax page" gets
+              ticked every time, and then it is not opt-in. */}
+          <label className="flex items-start gap-2 cursor-pointer select-none rounded-md border border-[#EDEFF3] bg-[#FAFAFB] px-3 py-2">
             <input
               type="checkbox"
-              checked={ack}
-              onChange={(e) => setAck(e.target.checked)}
+              checked={p.taxDetail}
+              disabled={p.submitting}
+              onChange={(e) => p.onTaxDetail(e.target.checked)}
               className="mt-[2px] w-[14px] h-[14px] rounded border-gray-300 text-brand-orange"
             />
             <span className="text-[11.5px] text-[#3C4557]">
-              I have checked the property above and want to generate this profile.
+              <strong className="font-semibold">Add property tax detail</strong>
+              {' — one additional search.'}
+              <span className="block text-[10.5px] text-[#6B7280] mt-[2px]">
+                Installments, due dates, the rate area and any direct assessments. It runs after
+                the profile is delivered and adds a page for free when it lands. Without it the
+                tax page still shows the assessment detail this lookup already includes.
+              </span>
             </span>
           </label>
 

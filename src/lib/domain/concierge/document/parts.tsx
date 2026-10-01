@@ -165,6 +165,88 @@ export function StatBox({ number, label, tone, last, small }: {
   );
 }
 
+/**
+ * The cover fade: navy at 70% along the top edge, transparent by `height`.
+ *
+ * NOT AN SVG GRADIENT, and not for want of trying. v6 asks for
+ * rgba(27,42,74,.7) → transparent and react-pdf offers <LinearGradient>, but
+ * its stops carry no alpha. Measured down the left edge of the rendered page:
+ *
+ *   stopOpacity={0.7} / {0}   solid 27,42,74 for the whole 90 pt, then a hard
+ *                             edge — the fade simply does not happen
+ *   stopOpacity="0.7" / "0"   identical; string or number makes no difference
+ *   stopColor="rgba(...)"     interpolates, but mis-parsed: rgb(255,74,177),
+ *                             magenta, with the alpha landing in the blue
+ *                             channel
+ *
+ * View opacity IS honoured, so the fade is a stack of bands. 60 of them across
+ * 90 pt is 1.5 pt each and ~0.012 opacity per step; at 30 the steps were
+ * visible as rings when the page was magnified. Raising the height without
+ * raising the step count brings them back.
+ */
+const FADE_STEPS = 60;
+
+export function CoverFade({ width, height, colour = NAVY, from = 0.7 }: {
+  width: number; height: number; colour?: string; from?: number;
+}) {
+  const band = height / FADE_STEPS;
+  return (
+    <View style={{ position: 'absolute', top: 0, left: 0, width, height }}>
+      {Array.from({ length: FADE_STEPS }, (_, i) => (
+        // ABSOLUTE AND OVERLAPPING, not stacked in flow. Bands laid out in
+        // normal flow at 1.5 pt each land on half-points, and the seam between
+        // two adjacent fills anti-aliases into a visible hairline — the fade
+        // came out striped. Positioning each one and giving it a full band of
+        // overlap removes the seams; the extra height on the last band is
+        // clipped by the parent.
+        <View
+          key={i}
+          style={{
+            position: 'absolute',
+            top: i * band,
+            left: 0,
+            right: 0,
+            height: band * 2,
+            backgroundColor: colour,
+            opacity: from * (1 - i / (FADE_STEPS - 1)) / 2,
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+/**
+ * A tax installment. ITS OWN PART, not a StatBox.
+ *
+ * A StatBox leads with the number and captions it underneath, which is right
+ * for "3 Deeds" and wrong here — the build rendered "$2,697 / First · due Nov
+ * 1, 2025" and the reader meets an amount before knowing which installment it
+ * belongs to. v6 inverts it: which installment, then how much, then when.
+ *
+ * NO STATUS. Not "paid", not "delinquent", no "late after" column. v6 itself
+ * showed PAID badges here and they were removed from v6 as well as from this.
+ */
+export function InstallmentBox({ label, amount, due, last }: {
+  label: string; amount: string; due: string; last?: boolean;
+}) {
+  return (
+    <View style={[
+      { flex: 1, backgroundColor: BOX_BG, borderTopWidth: 2.25, borderTopColor: NAVY, paddingVertical: 10.5, paddingHorizontal: 12 },
+      ...(last ? [] : [{ marginRight: 7.5 }]),
+    ]}>
+      <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 8.25, color: ORANGE, letterSpacing: 0.5 }}>{label}</Text>
+      <Text style={{ fontFamily: HEADING, fontWeight: 800, fontSize: 16.5, color: NAVY, marginTop: 4.5 }}>{amount}</Text>
+      <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 9.4, color: MUTED, marginTop: 3 }}>{due}</Text>
+    </View>
+  );
+}
+
+/** A 6 pt square in a type colour, 5 pt before its label. */
+export function Swatch({ colour }: { colour: string }) {
+  return <View style={{ width: 6, height: 6, backgroundColor: colour, marginRight: 5 }} />;
+}
+
 /** White, ruled, at the foot of pages 2–8. NOT a navy bar, and no template id. */
 export function Footer({ page, total }: { page: number; total: number }) {
   return (

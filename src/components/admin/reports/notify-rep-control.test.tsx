@@ -8,7 +8,8 @@ const row = (over: Partial<ReportListRow> = {}): ReportListRow => ({
   type: 'county_sales', id: 3, typeLabel: 'County Sales', sourceLine: 'Dataset',
   subject: 'Orange County', subjectDetail: '44 cities', settings: 'August 2026',
   brandedToName: 'Mark Neveu', brandedToEmail: 'mneveu@pct.com', status: 'generated',
-  createdAt: '2026-09-21 21:14:00', createdBy: 'ops@pct.com', madeBy: 'Operations', delivery: null, templateVersion: 'cs-v1', ...over,
+  createdAt: '2026-09-21 21:14:00', createdBy: 'ops@pct.com', madeBy: 'Operations', delivery: null, templateVersion: 'cs-v1',
+  groupKey: null, taxStatus: null, ...over,
 });
 
 const text = (el: React.ReactElement) => renderToStaticMarkup(el).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -25,13 +26,18 @@ describe('the confirmation', () => {
 });
 
 describe('when there is nowhere to send it', () => {
-  it('turns the button off and says why', () => {
+  it('turns the item off and says why, in text rather than a tooltip', () => {
     const r = row({ brandedToEmail: null });
     expect(notifyBlockedReason(r)).toBe('Mark Neveu has no email address on the report.');
     const html = renderToStaticMarkup(<NotifyRepControl row={r} />);
     // The attribute, not the word: the Tailwind classes contain "disabled:".
     expect(html).toContain('disabled=""');
-    expect(html).toContain('title="Mark Neveu has no email address on the report."');
+    // CHANGED 2026-09-30: this was a `title`, which a touch device never shows
+    // and a screen reader never announces — so the one explanation of why the
+    // control is dead was invisible to anyone not hovering a mouse. In the kebab
+    // it is simply read.
+    expect(html).toContain('Mark Neveu has no email address on the report.');
+    expect(html).not.toContain('title=');
   });
 
   it('treats a blank address as none', () => {
@@ -47,15 +53,20 @@ describe('when there is nowhere to send it', () => {
 describe('on the list', () => {
   const inTable = (r: ReportListRow) => renderToStaticMarkup(<table><tbody><ReportRow row={r} /></tbody></table>);
 
-  it('offers Notify rep on a generated farming report', () => {
-    expect(text(<table><tbody><ReportRow row={row()} /></tbody></table>)).toContain('Notify rep');
-  });
+  // The row's kebab is closed until it is opened, so "the list offers Notify rep"
+  // is now a statement about an interaction and is driven in
+  // reports-list-page.interactive.test.tsx. What survives here is the NEGATIVE
+  // half, which is still true of a closed menu and is the half that matters: a
+  // row must not carry this control at all where sending would be wrong.
 
   it('does not offer it on a concierge profile', () => {
+    // A profile is branded to a presenting rep by name and email, not by contact
+    // id, and legacy's rep list held only the farming three.
     expect(inTable(row({ type: 'concierge_profile', typeLabel: 'Concierge Profile' }))).not.toContain('Notify rep');
   });
 
   it('does not offer it on a report still building or one that failed', () => {
+    // There is nothing to attach to an email.
     expect(inTable(row({ status: 'pending' }))).not.toContain('Notify rep');
     expect(inTable(row({ status: 'failed' }))).not.toContain('Notify rep');
   });

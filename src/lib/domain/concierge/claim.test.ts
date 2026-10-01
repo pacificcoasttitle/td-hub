@@ -103,7 +103,7 @@ vi.mock('./already-have', async () => {
 });
 vi.mock('./render', () => ({ renderProfile: async () => ({ ok: true, compsShown: 6 }) }));
 
-import { claimProperty, propertyRequestKey, releaseClaim } from './claim';
+import { claimProperty, propertyRequestKey, releaseClaim, scopedClaimKey } from './claim';
 import type { ExistingProfile } from './already-have';
 import { generateConciergeProfile } from './generate';
 
@@ -191,6 +191,46 @@ describe('the key a claim is taken on', () => {
   it('does not collide across the field boundaries', () => {
     expect(propertyRequestKey({ street: '1 A', city: 'B', state: 'CA', zip: '91750' }))
       .not.toBe(propertyRequestKey({ street: '1', city: 'A B', state: 'CA', zip: '91750' }));
+  });
+});
+
+describe('scoping the claim to what is being bought', () => {
+  const key = propertyRequestKey(ADDRESS);
+
+  it('leaves the profile scope byte-for-byte unchanged', () => {
+    // LOAD-BEARING. Every claim row in production and every property_key on
+    // every profile was written with no suffix. A scheme that suffixed both
+    // would silently stop matching them, and that failure is a second SiteX
+    // charge on a property we already hold.
+    expect(scopedClaimKey(key, 'profile')).toBe(key);
+  });
+
+  it('gives the tax search its own key, so the two do not block each other', () => {
+    // A generate and a tax search on one property are different purchases.
+    expect(scopedClaimKey(key, 'tax')).not.toBe(key);
+    expect(scopedClaimKey(key, 'tax')).toBe(`${key}|tax`);
+  });
+
+  it('still fits the column when the address is at the 200-char limit', () => {
+    const long = propertyRequestKey({
+      street: 'x'.repeat(400), city: 'somewhere', state: 'CA', zip: '91750',
+    });
+    expect(long.length).toBe(200);
+    const scoped = scopedClaimKey(long, 'tax');
+    expect(scoped.length).toBeLessThanOrEqual(200);
+    // And the suffix survives the truncation — a key trimmed back to exactly
+    // the property key would collide with the profile claim and refuse a
+    // legitimate generate.
+    expect(scoped.endsWith('|tax')).toBe(true);
+    expect(scoped).not.toBe(long);
+  });
+
+  it('keeps two different long properties apart once scoped', () => {
+    const a = scopedClaimKey(propertyRequestKey({ ...ADDRESS, street: `${'a'.repeat(190)} 1` }), 'tax');
+    const b = scopedClaimKey(propertyRequestKey({ ...ADDRESS, street: `${'a'.repeat(190)} 2` }), 'tax');
+    // Truncation is the hazard here: two addresses that differ only past the
+    // cut would share a claim and the second would be refused as a duplicate.
+    expect(a).not.toBe(b);
   });
 });
 

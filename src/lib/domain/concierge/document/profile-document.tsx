@@ -1,5 +1,5 @@
 import React from 'react';
-import { Document, Image, Page, Text, View, Font } from '@react-pdf/renderer';
+import { Document, Font, Image, Page, Text, View } from '@react-pdf/renderer';
 import type { CompFilterResult, CompCriteria } from '../comp-filter';
 import type { MarketMetrics } from '../metrics';
 import type { NormalizedSubject, NormalizedTax, NormalizedTransfer } from '../normalize';
@@ -7,12 +7,12 @@ import {
   acres, currentVestingDeed, parseLegal, parseOwners, resolveTaxLayer, transferCounts,
 } from './derive';
 import type { NormalizedTaxReport, TaxLayer } from './derive';
-import { PCT_COVER_PHOTO, PCT_LOGO_DARK, PCT_LOGO_WHITE } from './brand-assets';
+import { PCT_COVER_PHOTO, PCT_LOGO_WHITE } from './brand-assets';
 import { BODY, HEADING, registerDocumentFonts } from './fonts';
 import {
-  Band, DASH_NOTE, Footer, Footnote, NavyStrip, Row, Row4, SectionBar, StatBox,
+  Band, DASH_NOTE, Footer, Footnote, InstallmentBox, NavyStrip, Row, Row4, SectionBar, StatBox, Swatch,
   BORDER, BOX_BG, COVER_FALLBACK, COVER_PANEL, FORECLOSURE_BG, GAP, INK, MEDIAN_FILL,
-  MUTED, NAVY, ORANGE, PLAT_BG, PREPARED_LABEL, SIDE, TYPE_COLOUR, s, type TypeKey,
+  LABEL_W, MUTED, NAVY, ORANGE, PLAT_BG, PREPARED_LABEL, SIDE, TYPE_COLOUR, s, type TypeKey,
 } from './parts';
 
 // ─── The Concierge Property Profile ──────────────────────────────────────────
@@ -291,32 +291,47 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf <Image> is a PDF primitive
             ? <Image src={coverPhoto} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             : null}
-          {/* THE DARK WORDMARK HERE, the white one on the navy bands.
-              The photograph's top-right corner is bright sky: with the white
-              mark, only the coloured swoosh survived and "PACIFIC COAST TITLE
-              COMPANY" vanished completely. The photo is the same on every
-              profile, so that is every cover, not an unlucky one. */}
+          {/* THE PHOTO IS FADED, NOT THE LOGO SWAPPED.
+              The white mark disappeared against bright sky, and the 29 Sep fix
+              was to use the dark wordmark. v6 solves it the other way: darken
+              the top of the photograph so the white mark reads, which keeps one
+              logo everywhere. That call was made without this on the table.
+              react-pdf has no CSS gradient on a View, so it is an <Svg> with a
+              <LinearGradient>, absolutely positioned over the photo. */}
+          {/* No runtime fade element: the navy-to-transparent gradient over the
+              top 90 pt is composited into PCT_COVER_PHOTO by
+              scripts/build/embed-brand-assets.ts. react-pdf cannot draw it —
+              its gradient stops carry no alpha, and a stack of opacity Views
+              seams into visible stripes. Both were measured off the rendered
+              page before this was chosen. */}
           {logo
             // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf <Image> is a PDF primitive
-            ? <Image src={coverPhoto ? PCT_LOGO_DARK : logo} style={{ position: 'absolute', top: 22.5, right: SIDE, height: 23, objectFit: 'contain' }} />
+            ? <Image src={logo} style={{ position: 'absolute', top: 22.5, right: SIDE, height: 23, objectFit: 'contain' }} />
             : null}
         </View>
 
         {/* The navy block overlaps the photo by 72. */}
-        <View style={{ marginTop: -72, width: 560, height: 241.5, backgroundColor: NAVY, paddingVertical: 29, paddingHorizontal: SIDE }}>
+        {/* CENTRED VERTICALLY, not top-padded. The build pinned the three
+            lines to a 29 pt top pad inside a 241.5 pt block, which left the
+            lower two-thirds empty. v6 centres them. */}
+        <View style={{ marginTop: -72, width: 560, height: 241.5, backgroundColor: NAVY, justifyContent: 'center', paddingHorizontal: SIDE }}>
           <Text style={{ fontFamily: HEADING, fontWeight: 700, fontSize: 11.25, color: ORANGE, letterSpacing: 2 }}>
             CONCIERGE PROPERTY PROFILE
           </Text>
-          <Text style={{ fontFamily: HEADING, fontWeight: 900, fontSize: 30, color: '#FFFFFF', marginTop: 14 }}>
+          <Text style={{ fontFamily: HEADING, fontWeight: 900, fontSize: 30, color: '#FFFFFF', marginTop: 12, letterSpacing: -0.45, lineHeight: 1.08 }}>
             {txt(subject.siteAddress)}
           </Text>
-          <Text style={{ fontFamily: HEADING, fontWeight: 600, fontSize: 18.75, color: '#FFFFFF', opacity: 0.82, marginTop: 8 }}>
+          <Text style={{ fontFamily: HEADING, fontWeight: 600, fontSize: 18.75, color: '#FFFFFF', opacity: 0.82, marginTop: 7.5 }}>
             {txt(subject.siteCityState)}
           </Text>
         </View>
 
-        <View style={{ width: 530, flexGrow: 1, backgroundColor: COVER_PANEL, paddingVertical: 24, paddingHorizontal: SIDE, flexDirection: 'row' }}>
-          <View style={{ flex: 1, paddingRight: 18 }}>
+        {/* ONE LINE under each name, at full white. The build stacked email
+            and phone as separate lines at 75% opacity; v6 joins them with
+            " · " and keeps them white. Columns centre vertically in whatever
+            height is left, with a 30 pt gap — marginRight, never flex gap. */}
+        <View style={{ width: 530, flexGrow: 1, backgroundColor: COVER_PANEL, paddingHorizontal: SIDE, flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ flex: 1, marginRight: 30 }}>
             <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 8.25, color: PREPARED_LABEL, letterSpacing: 1 }}>PREPARED FOR</Text>
             <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 14.25, color: '#FFFFFF', marginTop: 7 }}>
               {txt(input.preparedFor?.name)}
@@ -324,7 +339,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             {input.preparedFor?.company
               ? <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 10.5, color: '#FFFFFF', marginTop: 4 }}>{input.preparedFor.company}</Text>
               : null}
-            <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 10.5, color: '#FFFFFF', opacity: 0.75, marginTop: 4 }}>
+            <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 10.5, color: '#FFFFFF', marginTop: 4 }}>
               {dtLong(input.generatedAt)}
             </Text>
           </View>
@@ -333,12 +348,9 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 14.25, color: '#FFFFFF', marginTop: 7 }}>
               {txt(input.presentingRep?.name)}
             </Text>
-            {input.presentingRep?.email
-              ? <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 10.5, color: '#FFFFFF', marginTop: 4 }}>{input.presentingRep.email}</Text>
-              : null}
-            {input.presentingRep?.phone
-              ? <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 10.5, color: '#FFFFFF', marginTop: 4 }}>{input.presentingRep.phone}</Text>
-              : null}
+            <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 10.5, color: '#FFFFFF', marginTop: 4 }}>
+              {[input.presentingRep?.email, input.presentingRep?.phone].filter(Boolean).join(' · ') || GAP}
+            </Text>
           </View>
         </View>
       </Page>
@@ -399,8 +411,19 @@ export function ProfileDocument(input: ProfileDocumentInput) {
 
         <SectionBar marginTop={SECTION_GAP_PT}>MOST RECENT TRANSFER</SectionBar>
         <Row4 label="Recording date" value={dt(subject.lastSaleDate ?? saleDoc?.recordingDate ?? null)} label2="Document #" value2={saleDoc?.documentNumber ?? null} />
-        <Row4 label="Sale amount" value={money(subject.lastSalePrice)} label2="Document type" value2={saleDoc?.documentType ?? saleDoc?.transactionType ?? null} />
-        <Row4 label="Price per sq ft" value={rate(subjectRate)} label2="Living area" value2={sqft(subject.buildingArea)} />
+        {/* TWO ROWS, not three. The build added Price per sq ft / Living area,
+            which is not in v6 and repeated the square footage printed in the
+            section directly above. The rate rides on the sale amount instead —
+            "$369,000 · $469/sq ft" — where it describes the thing it is
+            derived from. */}
+        <Row4
+          label="Sale amount"
+          value={subjectRate !== null && subject.lastSalePrice !== null
+            ? `${money(subject.lastSalePrice)} · ${rate(subjectRate)}/sq ft`
+            : money(subject.lastSalePrice)}
+          label2="Document type"
+          value2={saleDoc?.documentType ?? saleDoc?.transactionType ?? null}
+        />
 
         <Footnote>{`${DASH_NOTE} Price per sq ft is the sale price divided by living area.`}</Footnote>
       </Sheet>
@@ -670,29 +693,26 @@ function TaxPage({ layer, subject, captured }: {
     const { tax, installments } = layer;
     return (
       <>
-        <SectionBar>{`PROPERTY TAX · ${year(tax.year)}`}</SectionBar>
+        <SectionBar>{`PROPERTY TAX · ${fiscalYear(tax.year)}`}</SectionBar>
         <View style={{ marginTop: 7.5 }}>
-          <NavyStrip
-            cells={[
-              { label: 'ANNUAL TAX', value: money(tax.taxAmount) },
-              { label: 'TAX YEAR', value: year(tax.year) },
-              { label: 'TAX RATE', value: GAP },
-              { label: 'TRA', value: GAP },
-            ]}
-          />
+          {/* CELLS WITH NO DATA ARE DROPPED, not printed as dashes. Half a
+              navy strip of em dashes is the empty-shell rule hit from inside:
+              the page renders a section it has nothing to put in. TAX RATE and
+              TRA exist only in TitlePoint's report, so on this layer the strip
+              is two cells. */}
+          <NavyStrip cells={taxStripCells({ annual: money(tax.taxAmount), taxYear: fiscalYear(tax.year), rate: null, rateArea: null })} />
         </View>
 
         {installments ? (
           <>
-            <SectionBar marginTop={SECTION_GAP_PT}>INSTALMENTS</SectionBar>
+            <SectionBar marginTop={SECTION_GAP_PT}>INSTALLMENTS</SectionBar>
             <View style={{ flexDirection: 'row', marginTop: 7.5 }}>
               {installments.map((it, i) => (
-                // No status, and no "late after" column.
-                <StatBox
+                <InstallmentBox
                   key={it.label}
-                  number={money(it.amount)}
-                  label={`${it.label} · due ${it.due}`}
-                  tone={NAVY}
+                  label={`${it.label.toUpperCase()} INSTALLMENT`}
+                  amount={money(it.amount)}
+                  due={`Due ${numericDate(it.due)}`}
                   last={i === installments.length - 1}
                 />
               ))}
@@ -702,12 +722,16 @@ function TaxPage({ layer, subject, captured }: {
 
         <SectionBar marginTop={SECTION_GAP_PT}>ASSESSED VALUE</SectionBar>
         <AssessedBar land={tax.landValue} improvements={tax.improvementValue} />
-        <Row label="Land" value={money(tax.landValue)} />
-        <Row label="Improvements" value={money(tax.improvementValue)} />
-        <Row label="Total assessed" value={money(tax.assessedValue)} />
+        <SwatchRow label="Land" colour={NAVY} value={money(tax.landValue)} />
+        <SwatchRow label="Improvements" colour={TYPE_COLOUR.mortgage} value={money(tax.improvementValue)} />
+        <TotalAssessedRow value={money(tax.assessedValue)} />
 
         <Footnote>
-          {`Assessor's summary record only${captured ? `, as of ${dtLong(captured)}` : ''}${county ? ` · ${county}` : ''} — instalment amounts, exemptions, special assessments and bonds were not available for this parcel. ${DASH_NOTE}`}
+          {/* The old footnote said instalment amounts "were not available"
+              while printing two installment boxes above it. They ARE shown —
+              derived from the annual total by statute, which is a different
+              claim and the one the page can support. */}
+          {`Installments are the annual amount split per California statute. Exemptions, special assessments and bonds were not in the record we received${captured ? `, as of ${dtLong(captured)}` : ''}${county ? ` · ${county}` : ''}. ${DASH_NOTE}`}
         </Footnote>
       </>
     );
@@ -717,30 +741,27 @@ function TaxPage({ layer, subject, captured }: {
   const exemption = typeof r.homeOwnerExemption === 'number' && r.homeOwnerExemption > 0 ? r.homeOwnerExemption : null;
   return (
     <>
-      <SectionBar>{`PROPERTY TAX · ${year(r.taxYear)}`}</SectionBar>
+      <SectionBar>{`PROPERTY TAX · ${fiscalYear(r.taxYear)}`}</SectionBar>
       <View style={{ marginTop: 7.5 }}>
-        <NavyStrip
-          cells={[
-            { label: 'ANNUAL TAX', value: money(r.annualAmount) },
-            { label: 'TAX YEAR', value: year(r.taxYear) },
-            { label: 'TAX RATE', value: r.taxRate !== null ? `${r.taxRate}%` : GAP },
-            { label: 'TRA', value: txt(r.taxRateArea) },
-          ]}
-        />
+        <NavyStrip cells={taxStripCells({
+          annual: money(r.annualAmount),
+          taxYear: fiscalYear(r.taxYear),
+          rate: r.taxRate !== null ? `${r.taxRate}%` : null,
+          rateArea: r.taxRateArea,
+        })} />
       </View>
 
       {r.installments.length > 0 ? (
         <>
-          <SectionBar marginTop={SECTION_GAP_PT}>INSTALMENTS</SectionBar>
+          <SectionBar marginTop={SECTION_GAP_PT}>INSTALLMENTS</SectionBar>
           <View style={{ flexDirection: 'row', marginTop: 7.5 }}>
             {r.installments.map((it, i) => (
-              // it.status is deliberately not rendered. v6 showed PAID badges
-              // here and they were removed from v6 as well as from this.
-              <StatBox
+              // it.status is deliberately not rendered.
+              <InstallmentBox
                 key={it.number}
-                number={money(it.amount)}
-                label={`${it.number} · due ${dt(it.dueDate)}`}
-                tone={NAVY}
+                label={`${it.number.toUpperCase()} INSTALLMENT`}
+                amount={money(it.amount)}
+                due={`Due ${numericDate(dt(it.dueDate))}`}
                 last={i === r.installments.length - 1}
               />
             ))}
@@ -750,12 +771,9 @@ function TaxPage({ layer, subject, captured }: {
 
       <SectionBar marginTop={SECTION_GAP_PT}>ASSESSED VALUE</SectionBar>
       <AssessedBar land={r.landValue} improvements={r.improvementValue} />
-      <Row label="Land" value={money(r.landValue)} />
-      <Row label="Improvements" value={money(r.improvementValue)} />
-      <View style={s.row}>
-        <Text style={s.rowLabel}>Total assessed</Text>
-        <Text style={{ flex: 1, fontFamily: BODY, fontWeight: 700, fontSize: 9.75, color: NAVY }}>{money(r.assessedValue)}</Text>
-      </View>
+      <SwatchRow label="Land" colour={NAVY} value={money(r.landValue)} />
+      <SwatchRow label="Improvements" colour={TYPE_COLOUR.mortgage} value={money(r.improvementValue)} />
+      <TotalAssessedRow value={money(r.assessedValue)} />
       {/* Homeowner's only, and never a category name. Every other exemption
           type discloses age, disability, veteran status or bereavement. */}
       {exemption ? <Row label="Homeowner's exemption" value={money(exemption)} /> : null}
@@ -793,6 +811,73 @@ function TaxPage({ layer, subject, captured }: {
   );
 }
 
+/**
+ * "2025–2026". California property tax runs on a fiscal year, and printing the
+ * assessment year alone reads as a calendar year to anyone who does not know
+ * that. En dash, not a hyphen — it is a range.
+ */
+export function fiscalYear(y: number | null | undefined): string {
+  if (typeof y !== 'number' || !Number.isFinite(y)) return GAP;
+  const n = Math.round(y);
+  return `${n}–${n + 1}`;
+}
+
+/** "Nov 1, 2025" -> "11/01/2025". The due line is a date, not prose. */
+export function numericDate(v: string): string {
+  const d = new Date(`${v} UTC`);
+  if (Number.isNaN(d.getTime())) return v;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())}/${d.getUTCFullYear()}`;
+}
+
+/**
+ * The strip cells that actually have a value.
+ *
+ * A cell printing an em dash is the empty-shell rule from inside: the page
+ * renders a heading it has nothing to put under. On the SiteX layer TAX RATE
+ * and TAX RATE AREA do not exist at all, so the strip is two cells wide rather
+ * than four with half of them blank.
+ */
+export function taxStripCells(v: {
+  annual: string; taxYear: string; rate: string | null; rateArea: string | null;
+}): { label: string; value: string }[] {
+  const cells = [
+    { label: 'ANNUAL TAX', value: v.annual },
+    { label: 'TAX YEAR', value: v.taxYear },
+    { label: 'TAX RATE', value: v.rate },
+    // TAX RATE AREA, not TRA. The abbreviation is trade shorthand and this is
+    // a document for a homeowner.
+    { label: 'TAX RATE AREA', value: v.rateArea },
+  ];
+  return cells
+    .filter((c): c is { label: string; value: string } => !!c.value && c.value !== GAP)
+    .map((c) => ({ label: c.label, value: c.value }));
+}
+
+/** A row whose label carries the colour it has in the bar above it. */
+function SwatchRow({ label, colour, value }: { label: string; colour: string; value: string }) {
+  const missing = !value || value === GAP;
+  return (
+    <View style={s.row}>
+      <View style={{ width: LABEL_W, flexDirection: 'row', alignItems: 'center' }}>
+        <Swatch colour={colour} />
+        <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 9.75, color: ORANGE }}>{label}</Text>
+      </View>
+      <Text style={missing ? s.rowGap : s.rowValue}>{missing ? GAP : value}</Text>
+    </View>
+  );
+}
+
+/** "Total assessed value" — bold navy on BOTH layers, not just TitlePoint's. */
+function TotalAssessedRow({ value }: { value: string }) {
+  return (
+    <View style={s.row}>
+      <Text style={s.rowLabel}>Total assessed value</Text>
+      <Text style={{ flex: 1, fontFamily: BODY, fontWeight: 700, fontSize: 9.75, color: NAVY }}>{value}</Text>
+    </View>
+  );
+}
+
 /** A 9 pt bar split land / improvements. Renders nothing without both. */
 function AssessedBar({ land, improvements }: { land: number | null; improvements: number | null }) {
   if (typeof land !== 'number' || typeof improvements !== 'number') return null;
@@ -800,7 +885,9 @@ function AssessedBar({ land, improvements }: { land: number | null; improvements
   if (total <= 0) return null;
   const landPct = Math.round((land / total) * 100);
   return (
-    <View style={{ flexDirection: 'row', height: 9, marginTop: 9, marginBottom: 3 }}>
+    // Inset 9 each side, so the bar sits inside the rows beneath it rather
+    // than running the full body width and reading as a rule.
+    <View style={{ flexDirection: 'row', height: 9, marginTop: 9, marginBottom: 3, marginHorizontal: 9 }}>
       <View style={{ width: `${landPct}%`, backgroundColor: NAVY }} />
       <View style={{ width: `${100 - landPct}%`, backgroundColor: TYPE_COLOUR.mortgage }} />
     </View>

@@ -62,6 +62,37 @@ export function propertyRequestKey(a: PropertyAddress): string {
   return [part(a.street), part(a.city), part(a.state), zip].join('|').slice(0, 200);
 }
 
+/**
+ * What is being claimed for this property.
+ *
+ * ─── ONE MECHANISM, TWO SCOPES (Gerard, 2026-09-29) ─────────────────────────
+ *
+ * The TitlePoint tax search is a second billable call on the same property, and
+ * it needed the same protection: two clicks must not buy two tax searches. The
+ * instruction was to EXTEND this rather than invent a second guard, because this
+ * one is the only piece of Concierge already proven in production — a real
+ * double-click came back 409 with 0 charged.
+ *
+ * The two scopes must not block each other. A profile generate and a tax search
+ * on the same property are different purchases, and a tax search that holds the
+ * property key would make the SiteX guard refuse a legitimate generate. So the
+ * scope is part of the key.
+ *
+ * `'profile'` RETURNS THE KEY UNCHANGED. That is load-bearing, not tidiness:
+ * every claim row in production today, and every property_key on every profile,
+ * was written by propertyRequestKey() with no suffix. A scheme that suffixed
+ * both would silently stop matching them, and the failure would be a second
+ * SiteX charge on a property we already hold.
+ */
+export type ClaimScope = 'profile' | 'tax';
+
+/** The 200-char column budget, spent on the property first. */
+export function scopedClaimKey(propertyKey: string, scope: ClaimScope): string {
+  if (scope === 'profile') return propertyKey;
+  const suffix = `|${scope}`;
+  return `${propertyKey.slice(0, 200 - suffix.length)}${suffix}`;
+}
+
 export type ClaimResult =
   | { held: true }
   | { held: false; profileId: number | null; claimedAt: Date };

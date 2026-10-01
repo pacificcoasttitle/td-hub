@@ -24,6 +24,8 @@ const row = (over: Partial<ReportListRow> = {}): ReportListRow => ({
   subject: 'Orange County', subjectDetail: '44 cities', settings: 'August 2026',
   brandedToName: 'Maria Lopez', brandedToEmail: 'mlopez@pct.com', status: 'generated',
   createdAt: '2026-09-16 21:14:00', createdBy: 'ops@pct.com', madeBy: 'Operations', delivery: null, templateVersion: 'cs-v1',
+  // A county-sales report is not about one property and has no tax detail.
+  groupKey: null, taxStatus: null,
   ...over,
 });
 
@@ -38,46 +40,63 @@ describe('refreshing a profile is offered, and says it is free', () => {
     templateVersion: 'v2', status: 'generated', ...over,
   });
 
-  it('offers the refresh and calls it free', () => {
-    const text = visible(<ReportRow row={profile()} />);
-    expect(text).toContain('Refresh document (free)');
-  });
+  // THE CONTROLS MOVED INTO A KEBAB (Gerard, 2026-09-30), so a static render no
+  // longer sees them — the menu is closed until somebody opens it. The
+  // assertions about what the menu OFFERS and what it says about cost now live
+  // in reports-list-page.interactive.test.tsx, which opens it.
+  //
+  // What has to stay visible WITHOUT opening anything is the prompt: that this
+  // profile was made on an older layout. A menu is a fine home for a control and
+  // a terrible home for a signal nobody knows to look for — the operator has no
+  // reason to open a kebab on a row that looks finished. So the row keeps a
+  // badge, and these are the tests for it.
 
-  it('says so when the profile is on an older layout', () => {
-    // The prompt, not just the permission. Without this the operator has no
-    // way to know a newer document exists.
+  it('badges the row when the profile is on an older layout', () => {
     const text = visible(<ReportRow row={profile({ templateVersion: 'v2' })} />);
-    expect(text).toContain('older layout');
     expect(text).toContain('v2');
-    expect(text).toContain('calls no vendor');
   });
 
-  it('does not nag when the profile is already current', () => {
+  it('does not badge a profile that is already current', () => {
     const text = visible(<ReportRow row={profile({ templateVersion: CONCIERGE_TEMPLATE })} />);
-    expect(text).toContain('Refresh document (free)');
-    expect(text).not.toContain('older layout');
+    expect(text).not.toContain(CONCIERGE_TEMPLATE);
   });
 
-  it('is not offered on the farming types, which re-render differently', () => {
-    const text = visible(<ReportRow row={row({ type: 'county_sales' })} />);
-    expect(text).not.toContain('Refresh document');
+  it('badges a tax search in flight, because it resolves itself later', () => {
+    // The row changes on its own when the search lands. An operator looking at a
+    // profile with no page 4 needs to know whether to wait.
+    expect(visible(<ReportRow row={profile({ taxStatus: 'pending' })} />)).toContain('tax running');
+    expect(visible(<ReportRow row={profile({ taxStatus: 'ready' })} />)).toContain('tax');
+    expect(visible(<ReportRow row={profile({ taxStatus: null })} />)).not.toContain('tax');
   });
 
-  it('the word free is on the control itself, not only in a tooltip', () => {
-    // Next to a Generate button that plainly costs something, silence reads as
-    // "probably also costs".
-    const markup = renderToStaticMarkup(<table><tbody><ReportRow row={profile()} /></tbody></table>);
-    expect(markup).toMatch(/<button[^>]*>[^<]*Refresh document \(free\)/);
+  it('badges nothing about tax on a farming report, which has none', () => {
+    expect(visible(<ReportRow row={row({ type: 'county_sales', taxStatus: 'pending' })} />)).not.toContain('tax running');
   });
 });
 
 describe('a report row', () => {
-  it('shows the subject and the settings as separate things', () => {
-    // The one new idea on the screen, and the reason one table holds four types.
+  it('leads with the subject and keeps the type under it', () => {
+    // CHANGED 2026-09-30 (Gerard's design review). This used to assert Subject
+    // and Settings as separate COLUMNS, on the reasoning that the separation is
+    // what lets one table hold four types. The separation survives — subject on
+    // the first line, type and detail on the second — but as one column, which
+    // gives Actions the ~200px it did not have.
     const text = visible(<ReportRow row={row()} />);
     expect(text).toContain('Orange County');
+    expect(text).toContain('County Sales');
     expect(text).toContain('44 cities');
-    expect(text).toContain('August 2026');
+  });
+
+  it('keeps Settings reachable as a tooltip, not as a column', () => {
+    // "1 mi · 12 mo · ±30% size" is identical on every Concierge row, so as a
+    // column it spent 20% of the table on something nobody can scan by. It is
+    // still THERE — dropping it outright would lose the one moment somebody
+    // wants it — just not occupying a column.
+    const html = renderToStaticMarkup(<table><tbody><ReportRow row={row()} /></tbody></table>);
+    expect(html).toContain('title="August 2026"');
+    // And it is no longer its own cell.
+    expect(visible(<ReportRow row={row() } />)).toContain('Orange County');
+    expect(html.match(/<th/g) ?? []).toHaveLength(0);
   });
 
   it('says what the source was — a dataset, or what the credit did', () => {
@@ -92,15 +111,32 @@ describe('a report row', () => {
     expect(text).not.toContain('Download');
   });
 
-  it('offers a retry, not a download, on a failed one', () => {
-    const text = visible(<ReportRow row={row({ status: 'failed' })} />);
-    expect(text).toContain('Try again');
-    expect(text).not.toContain('Download');
+  it('offers a menu on a finished report and none while it builds', () => {
+    // What the menu CONTAINS is driven in the interactive file; this is only that
+    // there is one to open, and that a row with nothing to offer offers nothing.
+    const done = renderToStaticMarkup(<table><tbody><ReportRow row={row()} /></tbody></table>);
+    expect(done).toContain('aria-label="Actions"');
+    const building = renderToStaticMarkup(<table><tbody><ReportRow row={row({ status: 'pending' })} /></tbody></table>);
+    expect(building).not.toContain('aria-label="Actions"');
   });
 
-  it('offers Comparables on a profile and Notify rep on a farming report', () => {
-    expect(visible(<ReportRow row={row({ type: 'concierge_profile' })} />)).toContain('Comparables');
-    expect(visible(<ReportRow row={row()} />)).toContain('Notify rep');
+  it('makes a finished row openable and a building row not', () => {
+    // A click that does nothing teaches the operator the page is broken, so the
+    // affordance only exists where there is a document behind it.
+    //
+    // The affordance is an ANCHOR on the subject plus a click handler on the row,
+    // never role="link" on the <tr> — that opens the document and takes the row
+    // out of the table for anyone using a screen reader. See ReportRow.
+    const done = renderToStaticMarkup(<table><tbody><ReportRow row={row()} /></tbody></table>);
+    expect(done).toContain('cursor-pointer');
+    expect(done).toMatch(/<a href="[^"]*\/pdf"/);
+    expect(done).not.toContain('role="link"');
+
+    for (const status of ['pending', 'retrieved', 'failed']) {
+      const html = renderToStaticMarkup(<table><tbody><ReportRow row={row({ status })} /></tbody></table>);
+      expect(html, status).not.toContain('cursor-pointer');
+      expect(html, status).not.toMatch(/<a href="[^"]*\/pdf"/);
+    }
   });
 
   it('never calls notifying the branded rep a "send"', () => {
@@ -179,7 +215,20 @@ describe('the page itself', () => {
   it('declares column widths with a fixed layout, so Actions cannot be pushed off-screen', () => {
     const src = page();
     expect(src).toContain("tableLayout: 'fixed'");
-    expect(src.match(/COLUMN_WIDTHS = \[[^\]]+\]/)![0].split(',').length).toBe(7);
+    // FIVE now, not seven: Report and Subject merged, Settings became a tooltip.
+    const widths = src.match(/COLUMN_WIDTHS = \[[^\]]+\]/)![0].split(',');
+    expect(widths).toHaveLength(5);
+    // The header count has to match, or every cell lands under the wrong label.
+    // Counted from the <th> elements rather than trusted to review.
+    expect(src.match(/<th /g) ?? []).toHaveLength(5);
+  });
+
+  it('declares widths that add up to 100%', () => {
+    // A fixed layout with widths summing to less than 100 leaves the last column
+    // stretched and the head out of step with the body.
+    const src = page();
+    const nums = [...src.match(/COLUMN_WIDTHS = \[[^\]]+\]/)![0].matchAll(/(\d+)%/g)].map((m) => Number(m[1]));
+    expect(nums.reduce((a, b) => a + b, 0)).toBe(100);
   });
 
   it('is reachable from the sidebar, after Documents', () => {

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { CONCIERGE_GENERATE_ROLES } from '@/lib/domain/concierge/access';
 import { CONTACT_BOOK_READ_ROLES } from '@/lib/security/contact-book-access';
 import {
-  AlreadyHavePanel, ConciergeStep, RepPicker, TypeCard,
+  AlreadyHavePanel, ConciergeStep, TypeCard,
   applyPickedAddress, draftProblem, fullAddress, generationBody, typeOptions,
   type ConciergeDraft,
 } from './new-report-modal';
@@ -132,11 +132,24 @@ describe('what has to be filled in before a credit can be spent', () => {
 
 describe('the property step', () => {
   const step = (over: Partial<ConciergeDraft> = {}, problem: string | null = null) => visible(
-    <ConciergeStep draft={draft(over)} problem={problem} onField={() => {}} onAddress={() => {}} repPicker={<span>picker</span>} />,
+    <ConciergeStep draft={draft(over)} problem={problem} onField={() => {}} onAddress={() => {}} repPicker={<span>picker</span>} criteriaControl={<span>criteria</span>} />,
   );
 
-  it('states the comparable criteria the profile will be built with', () => {
-    expect(step()).toContain('1 mi · 12 mo · ±30% size');
+  it('offers the comparable criteria as a control, not a fixed summary', () => {
+    // It used to print "1 mi · 12 mo · ±30% size" and offer no way to change
+    // it. The operator went looking for that control during creation, found
+    // nothing, and reported the criteria as broken — the control existed only
+    // after generation.
+    expect(step()).toContain('Comparable criteria');
+  });
+
+  it('says the criteria do not change what is searched for, or the cost', () => {
+    // fetchConciergeProfile sends addr, lastLine and feedId and nothing else.
+    // A wider radius does not search wider; a narrower one does not cost less.
+    // An operator who believes otherwise will tune these to save money.
+    const html = step();
+    expect(html).toContain('do not change what is searched for');
+    expect(html).toContain('free');
   });
 
   it('says adjusting them afterwards is free, because it is', () => {
@@ -161,7 +174,7 @@ describe('the property step', () => {
     const html = renderToStaticMarkup(
       <ConciergeStep
         draft={draft({ street: '' })} problem={null}
-        onField={() => {}} onAddress={() => {}} repPicker={<span>picker</span>}
+        onField={() => {}} onAddress={() => {}} repPicker={<span>picker</span>} criteriaControl={<span>criteria</span>}
       />,
     );
     expect(html).toContain('placeholder="Start typing an address');
@@ -226,35 +239,11 @@ describe('a picked address fills the whole address', () => {
   });
 });
 
-describe('the representative picker', () => {
-  const picker = (over: Partial<Parameters<typeof RepPicker>[0]> = {}) => visible(
-    <RepPicker
-      chosenName="" results={[]} query="" searching={false}
-      onQuery={() => {}} onChoose={() => {}} onClear={() => {}}
-      {...over}
-    />,
-  );
-
-  it('shows the chosen rep with a way to change it', () => {
-    const text = picker({ chosenName: 'Justin Nouri' });
-    expect(text).toContain('Justin Nouri');
-    expect(text).toContain('Change');
-  });
-
-  it('says plainly when a search found nobody', () => {
-    expect(picker({ query: 'zzz', results: [] })).toContain('No sales representative by that name.');
-  });
-
-  it('does not call an in-flight search an empty result', () => {
-    expect(picker({ query: 'lo', searching: true })).toContain('Searching…');
-  });
-
-  it('lists a match by name and company', () => {
-    const text = picker({ query: 'nou', results: [{ id: 412, fullName: 'Justin Nouri', email: null, companyName: 'PCT' }] });
-    expect(text).toContain('Justin Nouri');
-    expect(text).toContain('PCT');
-  });
-});
+// The representative control is now RepCombobox, and its tests are in
+// rep-combobox.interactive.test.tsx — they need a DOM, because "shows all 54 on
+// focus" is a statement about an interaction and not about a first paint. The
+// four string-render tests that were here asserted the search box that the
+// combobox replaced.
 
 describe('the flag that allows a second credit', () => {
   const body = (allowDuplicate: boolean) => generationBody({
@@ -354,12 +343,43 @@ describe('the modal as wired', () => {
   const src = () => strip(join(HERE, 'new-report-modal.tsx'));
   const src2 = src;
 
-  it('spends through the one route that spends, and no other', () => {
-    // Two POSTs now: the concierge profile, which spends, and a farming report,
-    // which does not. Exactly one may go to the spending route.
+  it('posts to exactly these three routes, and no others', () => {
+    // THREE POSTs now, and the third is new (2026-09-30). Enumerated rather than
+    // counted, because the useful question is not "how many" but "which":
+    //
+    //   /api/concierge/profiles          SiteX. Buys the property. One credit.
+    //   /api/concierge/profiles/{id}/tax TitlePoint. Buys page 4, on a property
+    //                                    already paid for. Opt-in, default off.
+    //   /api/reports/farming             Free.
+    //
+    // This guard caught the tax POST the moment it was added, which is what it is
+    // for. Adding the string was not the fix — naming what it buys is, so that a
+    // fourth entry has to be justified the same way.
     const s = src();
     const posts = [...s.matchAll(/fetch\((['`])([^'`]+)\1,\s*\{[^}]*method: 'POST'/g)].map((m) => m[2]);
-    expect(posts.sort()).toEqual(['/api/concierge/profiles', '/api/reports/farming']);
+    expect(posts.sort()).toEqual([
+      '/api/concierge/profiles',
+      '/api/reports/farming',
+      '/api/concierge/profiles/${profileId}/tax',
+    ].sort());
+  });
+
+  it('asks for the tax detail only after the profile exists, and never unasked', () => {
+    const s = src();
+    // The tax POST must be inside confirm(), AFTER the generate response has
+    // yielded a profile id — never built from the draft, which would mean
+    // guessing at an id, and never at generate time, which would put a
+    // create/poll/fetch taking minutes inside the request that charges.
+    expect(s).toMatch(/const profileId = body\.profileId as number/);
+    expect(s.indexOf('const profileId = body.profileId'))
+      .toBeLessThan(s.indexOf('/tax'));
+    // And it is conditional on the opt-in. An unconditional call would spend on
+    // every generation.
+    expect(s).toMatch(/if \(taxDetail\) \{/);
+    // Reset on every gate open, so a tick cannot survive a cancel and arm the
+    // next generation. Driven in new-report-modal.interactive.test.tsx; asserted
+    // here too because the reset is one line and deletable.
+    expect(s).toMatch(/function openGate\(\)[\s\S]{0,200}setTaxDetail\(false\)/);
   });
 
   it('sends a farming report through the farming route, never the concierge one', () => {

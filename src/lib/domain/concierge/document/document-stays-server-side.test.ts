@@ -67,11 +67,14 @@ describe('the concierge document never enters a client bundle', () => {
   it('no client component imports the document, its fonts or its assets', () => {
     const offenders: string[] = [];
     for (const f of clientFiles) {
-      const src = readFileSync(f, 'utf8');
-      const body = code(src);
+      // `body`, not `src`: a client component that MENTIONS the document in a
+      // comment — "deliberately does not import profile-document" — is not
+      // importing it, and flagging that is the comment problem in the
+      // direction that produces false alarms.
+      const body = code(readFileSync(f, 'utf8'));
       for (const mod of SERVER_ONLY) {
         // Matches '@/lib/domain/concierge/document/x' and relative forms.
-        if (new RegExp(`from\\s+['"][^'"]*${mod.replace(/\//g, '\\/')}['"]`).test(src)) {
+        if (new RegExp(`from\\s+['"][^'"]*${mod.replace(/\//g, '\\/')}['"]`).test(body)) {
           offenders.push(`${rel(f)} imports ${mod}`);
         }
       }

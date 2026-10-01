@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { ReportListRow } from '@/lib/domain/reports/list-types';
+import { MenuItem } from './row-menu';
 
 // ─── Notify rep ─────────────────────────────────────────────────────────────
 //
@@ -55,15 +56,15 @@ export function NotifyRepControl({ row, onChanged }: { row: ReportListRow; onCha
 
   return (
     <>
-      <button
-        type="button"
+      {/* `blocked` was only ever a title attribute, which a touch device never
+          shows and a keyboard user never hears. As a note it is simply read. */}
+      <MenuItem
+        label="Notify rep"
+        note={blocked ?? 'Emails the branded representative a link to this report.'}
+        tone={blocked ? 'muted' : 'default'}
         disabled={!!blocked}
-        title={blocked ?? undefined}
-        onClick={() => { setError(null); setOpen(true); }}
-        className="text-xs font-medium text-[#1B2A4A] hover:underline disabled:text-[#9AA0AA] disabled:no-underline disabled:cursor-not-allowed"
-      >
-        Notify rep
-      </button>
+        onSelect={() => { setError(null); setOpen(true); }}
+      />
       {open ? (
         <div
           className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4"

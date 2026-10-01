@@ -5,6 +5,7 @@ import type { ReportListRow } from '@/lib/domain/reports/list-types';
 import type { ProfileSummary } from '@/lib/domain/concierge/profiles';
 import type { CompCriteria } from '@/lib/domain/concierge/comp-filter';
 import { ConciergeCriteriaPanel } from '@/components/hub/split/concierge-criteria-panel';
+import { MenuItem } from './row-menu';
 
 // ─── The two row actions that used to do nothing ────────────────────────────
 //
@@ -35,17 +36,13 @@ export function RetryControl({ row, onChanged }: { row: ReportListRow; onChanged
   }
 
   return (
-    <span className="inline-flex flex-col items-end gap-1">
-      <button
-        type="button"
-        disabled={busy}
-        onClick={retry}
-        className="text-xs font-medium text-[#1B2A4A] hover:underline disabled:text-[#9AA0AA] disabled:no-underline"
-      >
-        {busy ? 'Trying…' : 'Try again'}
-      </button>
-      {error ? <span className="max-w-[220px] whitespace-normal text-right text-[11px] text-[#8E2A1E]">{error}</span> : null}
-    </span>
+    <MenuItem
+      label={busy ? 'Trying…' : 'Try again — free'}
+      note={error ?? 'Retrying never costs anything: it finishes what was already paid for.'}
+      tone={error ? 'danger' : 'default'}
+      disabled={busy}
+      onSelect={retry}
+    />
   );
 }
 
@@ -94,23 +91,24 @@ export function RefreshDocumentControl({ row, currentTemplate, onChanged }: {
     }
   }
 
+  // THE EXPLANATION MOVED, IT DID NOT GO. It used to be five lines of body copy
+  // inside a table cell, which is what forced the horizontal scroll. Here it is
+  // a note on the item it explains, and the ROW carries a small badge saying the
+  // layout is old — because that is the part an operator has to see without
+  // opening anything. See ReportRow.
+  const note = error
+    ?? (stale && !done
+      ? `Made with an older layout (${row.templateVersion}). Free — it re-renders what we already paid for and calls no vendor.`
+      : 'Re-renders the document on the current layout. Calls no vendor.');
+
   return (
-    <span className="inline-flex flex-col items-end gap-1">
-      <button
-        type="button"
-        disabled={busy}
-        onClick={refresh}
-        className="text-xs font-medium text-[#1B2A4A] hover:underline disabled:text-[#9AA0AA] disabled:no-underline"
-      >
-        {busy ? 'Refreshing…' : done ? 'Refreshed' : 'Refresh document (free)'}
-      </button>
-      {stale && !done ? (
-        <span className="max-w-[240px] whitespace-normal text-right text-[11px] text-[#6B7280]">
-          {`Made with an older layout (${row.templateVersion}). Refreshing is free — it re-renders what we already paid for and calls no vendor.`}
-        </span>
-      ) : null}
-      {error ? <span className="max-w-[220px] whitespace-normal text-right text-[11px] text-[#8E2A1E]">{error}</span> : null}
-    </span>
+    <MenuItem
+      label={busy ? 'Refreshing…' : done ? 'Refreshed' : 'Refresh document — free'}
+      note={note}
+      tone={error ? 'danger' : 'default'}
+      disabled={busy || done}
+      onSelect={refresh}
+    />
   );
 }
 
@@ -157,17 +155,13 @@ export function ComparablesControl({ row, onChanged }: { row: ReportListRow; onC
 
   return (
     <>
-      <span className="inline-flex flex-col items-end gap-1">
-        <button
-          type="button"
-          disabled={loading}
-          onClick={open}
-          className="text-xs font-medium text-[#1B2A4A] hover:underline disabled:text-[#9AA0AA] disabled:no-underline"
-        >
-          {loading ? 'Opening…' : 'Comparables'}
-        </button>
-        {openError ? <span className="max-w-[220px] whitespace-normal text-right text-[11px] text-[#8E2A1E]">{openError}</span> : null}
-      </span>
+      <MenuItem
+        label={loading ? 'Opening…' : 'Comparables — free'}
+        note={openError ?? 'Adjust the criteria and re-render. The comparables are already stored; nothing is looked up again.'}
+        tone={openError ? 'danger' : 'default'}
+        disabled={loading}
+        onSelect={open}
+      />
       {/* Mounted only while open, so the sliders start from the criteria the
           profile actually has — the panel's own rule. */}
       {profile ? (

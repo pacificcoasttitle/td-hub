@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { melloRoosLines, parseTitlePointTaxReport, parseTitlePointTaxResult } from './titlepoint-tax-report';
+import { melloRoosLines, melloRoosTotal, parseTitlePointTaxReport, parseTitlePointTaxResult } from './titlepoint-tax-report';
 import { resolveTaxLayer, taxReportHasContent } from './document/derive';
 import type { NormalizedTax } from './normalize';
 
@@ -74,12 +74,11 @@ describe('parsing what TitlePoint actually sends', () => {
     expect(r.assessedValue).toBe(956572);
   });
 
-  it('the composed total reconciles against the tax the county billed', () => {
-    // (land + improvements - exemption) x rate == TotalTax, to the cent.
-    const taxable = r.assessedValue! - r.homeOwnerExemption!;
-    const computed = taxable * (r.taxRate! / 100);
-    expect(Math.abs(computed - r.annualAmount!)).toBeLessThan(0.01);
-    expect(parseTitlePointTaxResult(REAL)!.assessed.basis).toBe('verified');
+  it('composes the total, and says it had nothing to check it against', () => {
+    // This payload's Liens are all fixed-dollar, so there is no base levy line
+    // and nothing independent to confirm the composition. That is 'composed',
+    // not 'verified' — see the next describe for why the difference matters.
+    expect(parseTitlePointTaxResult(REAL)!.assessed.basis).toBe('composed');
   });
 
   it('keeps the rate area as text', () => {
@@ -150,79 +149,163 @@ describe('the excluded families cannot come through', () => {
   });
 });
 
-// ─── The guard on our own arithmetic ────────────────────────────────────────
+// ─── The check that is not circular ─────────────────────────────────────────
 //
-// Measured over all 1,322 stored payloads: 1,247 carry all four parts, the
-// identity holds to within a cent on 90% of them and within 0.5% on 97.9%, and
-// the median error is $0.00. These tests hold the behaviour at the edges, where
-// the 2% live.
+// THE PREVIOUS VERSION OF THESE TESTS GUARDED AN IDENTITY. It asserted that
+// (land + improvements − exemption) × TaxRate/100 == TotalTax, and reported
+// that it held to the cent on 90% of payloads — which it does, because TaxRate
+// IS TotalTax / net × 100. Measured on the real book: it matches to five
+// decimal places on 1,240 of 1,282 payloads (96.7%). The check could not fail,
+// so it confirmed nothing, and the result said "verified".
+//
+// What is independent is the county's own base levy line, which arrives in
+// `Liens` at a ~1% rate on the counties that itemise. Its amount over its rate
+// is the net assessed value the COUNTY used, derived from a different field
+// than the one we composed. It agrees on 204 of the 207 parseable payloads.
+//
+// This fixture is Riverside-shaped: an itemised bill that opens with the base.
 
-describe('a total is printed only when it is verified', () => {
-  const at = (over: Record<string, unknown>) =>
-    parseTitlePointTaxResult({ TaxReport: { ...REAL.TaxReport, ...over } })!;
+const ITEMISED = {
+  TaxReport: {
+    ...REAL.TaxReport,
+    // 78,027 + 449,343 − 7,000 = 520,370 net.
+    LandValuation: '78,027.00',
+    ImprovementsValuation: '449,343.00',
+    HomeOwnerExemption: '7,000.00',
+    TotalTax: '9,557.80',
+    TaxRate: '1.836731',
+    // All eleven lines as stored, not an abridgement — the first draft kept
+    // four and then could not reproduce TotalTax, which is the one property
+    // this fixture exists to demonstrate.
+    Liens: {
+      Item: [
+        // 5,203.70 / 1% = 520,370 — the same net, from the county's side.
+        { Account: '01-0000', Amount: '5,203.70', Rate: '1.000000', IsMelloRoos: 'false', Description: 'GENERAL PURPOSE' },
+        { Account: '03-3201', Amount: '624.44', Rate: '0.120000', IsMelloRoos: 'false', Description: 'HEMET UNIFIED SCHOOL B & I' },
+        { Account: '03-9201', Amount: '16.13', Rate: '0.003100', IsMelloRoos: 'false', Description: 'MT SAN JACINTO JR COLLEGE' },
+        { Account: '04-5301', Amount: '44.23', Rate: '0.008500', IsMelloRoos: 'false', Description: 'METROPOLITAN WATER EAST' },
+        { Account: '68-0308', Amount: '2,533.86', Rate: '0.000000', IsMelloRoos: 'true', Description: 'FC CFD 2021-1 IA-2 HEMET USD MELLO ROOS' },
+        { Account: '68-0479', Amount: '519.68', Rate: '0.000000', IsMelloRoos: 'true', Description: 'FC CFD 2021-02 HERITAGE POINTE MELLO ROOS' },
+        { Account: '68-1377', Amount: '3.14', Rate: '0.000000', IsMelloRoos: 'false', Description: 'FLOOD CONTROL STORMWATER / CLEANWATER/SANTA ANA' },
+        { Account: '68-2390', Amount: '572.04', Rate: '0.000000', IsMelloRoos: 'true', Description: 'HEMET CFD 2005-1 PUB SAFETY SERV MELLO-ROOS' },
+        { Account: '68-4647', Amount: '22.14', Rate: '0.000000', IsMelloRoos: 'false', Description: 'V-WIDE REGIONAL FAC LMD 88-1' },
+        { Account: '68-5305', Amount: '6.94', Rate: '0.000000', IsMelloRoos: 'false', Description: 'METRO WATER DISTRICT STANDBY EAST' },
+        { Account: '68-5402', Amount: '11.50', Rate: '0.000000', IsMelloRoos: 'false', Description: 'EASTERN MUNIIPAL WATER DISTRICT  STDBY-COMBINED CHG' },
+      ],
+    },
+  },
+};
 
-  it('suppresses the total when the arithmetic does not reconcile', () => {
-    // Improvements overstated by 100k: the identity now misses by ~1,400 and
-    // the reader must not be given a total we cannot stand behind.
-    const r = at({ ImprovementsValuation: '585,573.00' });
+describe('the assessed total is checked against the county, not against itself', () => {
+  it('confirms the composition from the base levy line', () => {
+    const { assessed, report } = parseTitlePointTaxResult(ITEMISED)!;
+    expect(assessed.basis).toBe('levy');
+    expect(assessed.impliedNet).toBeCloseTo(520_370, 0);
+    expect(assessed.composedNet).toBe(520_370);
+    expect(report.assessedValue).toBe(527_370);
+  });
+
+  it('suppresses the total when the base levy contradicts the composition', () => {
+    // Improvements overstated by 100k: the county's own line says otherwise.
+    const r = parseTitlePointTaxResult({
+      TaxReport: { ...ITEMISED.TaxReport, ImprovementsValuation: '549,343.00' },
+    })!;
     expect(r.assessed.basis).toBe('mismatch');
     expect(r.assessed.total).toBeNull();
     expect(r.report.assessedValue).toBeNull();
-    // The split still prints. A gap, not a blank page.
-    expect(r.report.landValue).toBe(470999);
-    expect(r.report.improvementValue).toBe(585573);
-    // And the two figures are kept so a real vendor problem can be told from a
-    // rendering quirk months later.
-    expect(r.assessed.expectedTax).toBeGreaterThan(0);
-    expect(r.assessed.statedTax).toBe(13387.35);
+    // The split still prints — a gap, not a blank page — and it still earns one.
+    expect(r.report.landValue).toBe(78_027);
+    expect(taxReportHasContent(r.report)).toBe(true);
   });
 
-  it('accepts a half-percent drift, which is where the real data sits', () => {
-    // 0.4% off: within tolerance, because rounding at the county is normal.
-    const stated = (956572 - 7000) * (1.409829 / 100);
-    const r = at({ TotalTax: (stated * 1.004).toFixed(2) });
-    expect(r.assessed.basis).toBe('verified');
-    expect(r.assessed.total).toBe(956572);
+  it('still prints a total when there is no base levy line to check it', () => {
+    // 84% of parcels do not itemise. Suppressing the figure on all of them to
+    // avoid one that cannot be proved would discard a correct number: the rule
+    // holds on 204 of 207 wherever it CAN be checked.
+    const r = parseTitlePointTaxResult(REAL)!;
+    expect(r.assessed.basis).toBe('composed');
+    expect(r.assessed.total).toBe(956_572);
+    expect(r.assessed.impliedNet).toBeNull();
   });
 
-  it('has a dollar floor, so a small bill is not held to a stricter standard', () => {
-    // Half a percent of a $12 bill is six cents. A flat relative tolerance
-    // would suppress totals on cheap parcels for rounding alone.
-    const r = at({
-      LandValuation: '500.00', ImprovementsValuation: '400.00',
-      HomeOwnerExemption: '', TaxRate: '1.333333', TotalTax: '12.60',
-    });
-    expect(r.assessed.basis).toBe('verified');
-    expect(r.assessed.total).toBe(900);
+  it('does not mistake a school bond rate for the base levy', () => {
+    // 0.12% would imply a net of 520,366,666. The window is 0.99–1.01.
+    const r = parseTitlePointTaxResult({
+      TaxReport: {
+        ...ITEMISED.TaxReport,
+        Liens: { Item: [ITEMISED.TaxReport.Liens.Item[1], ITEMISED.TaxReport.Liens.Item[2]] },
+      },
+    })!;
+    expect(r.assessed.basis).toBe('composed');
   });
 
-  it('suppresses a total it cannot check at all', () => {
-    // No rate, so the identity cannot be evaluated. Same risk as failing it:
-    // the figure is ours, not the vendor's, and nothing has confirmed it.
-    const r = at({ TaxRate: '' });
-    expect(r.assessed.basis).toBe('unverifiable');
-    expect(r.assessed.total).toBeNull();
-    expect(r.report.landValue).toBe(470999);
-  });
-
-  it('prints a vendor-stated total without checking our own arithmetic', () => {
-    // Never seen in 1,322 payloads, but if TitlePoint starts sending it then it
-    // is their figure and the guard is not about their figures.
-    const r = at({ AssessedValuation: '1,000,000.00' });
+  it('prints a vendor-stated total without any arithmetic of ours', () => {
+    const r = parseTitlePointTaxResult({
+      TaxReport: { ...ITEMISED.TaxReport, AssessedValuation: '1,000,000.00' },
+    })!;
     expect(r.assessed.basis).toBe('stated');
     expect(r.assessed.total).toBe(1_000_000);
   });
 
   it('reports absent, not mismatch, when there is nothing to compose', () => {
-    const r = at({ LandValuation: '', ImprovementsValuation: '' });
+    const r = parseTitlePointTaxResult({
+      TaxReport: { ...ITEMISED.TaxReport, LandValuation: '', ImprovementsValuation: '' },
+    })!;
     expect(r.assessed.basis).toBe('absent');
     expect(r.assessed.total).toBeNull();
   });
+});
 
-  it('still earns a page on the split alone', () => {
-    // Suppressing the total must not drop page 4 to layer 3.
-    const r = at({ ImprovementsValuation: '585,573.00' });
-    expect(taxReportHasContent(r.report)).toBe(true);
+// ─── `Liens` is the whole bill, not a list of special assessments ───────────
+
+describe('only fixed-dollar lines are shown as direct assessments', () => {
+  it('leaves the base levy and the school bond out', () => {
+    // Printing "GENERAL PURPOSE $5,203.70" under special assessments tells a
+    // homeowner their base property tax is a special assessment. It happens on
+    // 16.1% of parcels, which is where the base line appears.
+    const r = parseTitlePointTaxResult(ITEMISED)!;
+    const shown = r.report.specialAssessments.map((a) => a.description);
+    expect(shown).not.toContain('GENERAL PURPOSE');
+    expect(shown).not.toContain('HEMET UNIFIED SCHOOL B & I');
+    expect(shown).not.toContain('MT SAN JACINTO JR COLLEGE');
+    expect(shown).not.toContain('METROPOLITAN WATER EAST');
+  });
+
+  it('keeps every rate-zero line, including the ones that are not Mello-Roos', () => {
+    // Seven of the eleven are fixed-dollar: three Mello-Roos districts, flood
+    // control, a landscape district and two water standby charges.
+    const r = parseTitlePointTaxResult(ITEMISED)!;
+    expect(r.report.specialAssessments).toHaveLength(7);
+    expect(r.report.specialAssessments[0]!.amount).toBe(2533.86);
+  });
+
+  it('the two halves reproduce the bill, which is why Rate is the discriminator', () => {
+    // 639 of 639 complete blocks do this. If it ever stops holding, the split
+    // is wrong and the page is misattributing lines.
+    const num = (s: string) => Number(s.replace(/,/g, ''));
+    const lines = ITEMISED.TaxReport.Liens.Item;
+    const adValorem = lines.filter((l) => num(l.Rate) > 0).reduce((a, l) => a + num(l.Amount), 0);
+    const fixed = lines.filter((l) => num(l.Rate) === 0).reduce((a, l) => a + num(l.Amount), 0);
+    expect(adValorem).toBeCloseTo(5888.50, 2);
+    expect(fixed).toBeCloseTo(3669.30, 2);
+    expect(adValorem + fixed).toBeCloseTo(num(ITEMISED.TaxReport.TotalTax), 2);
+  });
+
+  it('reports the Mello-Roos total, which is INSIDE the annual amount', () => {
+    // The wording question: the Liens block sums to TotalTax, so the special
+    // tax is a line WITHIN the figure page 4 prints as the annual amount — not
+    // something a reader should add to it. Three districts on this parcel.
+    expect(melloRoosTotal(ITEMISED)).toBeCloseTo(3625.58, 2);
+    const liensSum = ITEMISED.TaxReport.Liens.Item
+      .reduce((a, l) => a + Number(l.Amount.replace(/,/g, '')), 0);
+    expect(liensSum).toBeCloseTo(9557.80, 2);
+    expect(liensSum).toBeCloseTo(Number(ITEMISED.TaxReport.TotalTax.replace(/,/g, '')), 2);
+    // So the special tax is strictly less than the annual amount it sits in.
+    expect(melloRoosTotal(ITEMISED)!).toBeLessThan(liensSum);
+  });
+
+  it('returns null where there is no district', () => {
+    expect(melloRoosTotal(REAL)).toBeNull();
   });
 });
 

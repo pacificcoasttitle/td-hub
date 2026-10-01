@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { melloRoosLines, melloRoosTotal, parseTitlePointTaxReport, parseTitlePointTaxResult } from './titlepoint-tax-report';
+import { melloRoosDisclosure } from './document/derive';
 import { resolveTaxLayer, taxReportHasContent } from './document/derive';
 import type { NormalizedTax } from './normalize';
 
@@ -126,14 +127,19 @@ describe('the excluded families cannot come through', () => {
     const r = parseTitlePointTaxReport(REAL)!;
     expect(Object.keys(r).sort()).toEqual([
       'annualAmount', 'asOf', 'assessedValue', 'bonds', 'homeOwnerExemption',
-      'improvementValue', 'installments', 'landValue', 'specialAssessments',
-      'supplementals', 'taxRate', 'taxRateArea', 'taxYear',
+      'improvementValue', 'installments', 'landValue', 'melloRoos',
+      'specialAssessments', 'supplementals', 'taxRate', 'taxRateArea', 'taxYear',
     ]);
   });
 
-  it('parses Mello-Roos without promoting it to the page', () => {
-    // 3 of 58 payloads carry one. Parsed so a ruling is a render change; this
-    // fixture has none, which is the common case.
+  it('now promotes Mello-Roos to a disclosure, because Jerry ruled on it', () => {
+    // CHANGED 2026-10-01. This used to assert the OPPOSITE — that nothing about
+    // Mello-Roos reached the report — on the reasoning that "this parcel is in
+    // a Mello-Roos district" is a disclosure and disclosures are Jerry's to
+    // word, not ours to invent. That reasoning was right and it has been
+    // answered: he supplied the wording, so the field exists and is rendered.
+    //
+    // It is still not a badge. It is a named paragraph with his sentence in it.
     expect(melloRoosLines(REAL)).toEqual([]);
     const withMello = {
       TaxReport: {
@@ -142,10 +148,13 @@ describe('the excluded families cannot come through', () => {
       },
     };
     expect(melloRoosLines(withMello)).toEqual(['CFD NO 2004-1 IMPROVEMENT AREA']);
-    // And it is still just a line item on the page, with no badge.
+
     const parsed = parseTitlePointTaxReport(withMello)!;
+    // The charge appears once in the assessments table...
     expect(parsed.specialAssessments[0]!.description).toBe('CFD NO 2004-1 IMPROVEMENT AREA');
-    expect(JSON.stringify(parsed).toLowerCase()).not.toContain('mello');
+    // ...and once more as the disclosure's own data, which is not more money.
+    expect(parsed.melloRoos).toEqual({ districts: ['CFD NO 2004-1 IMPROVEMENT AREA'], total: 812.44 });
+    expect(parsed.melloRoos!.total).toBe(parsed.specialAssessments[0]!.amount);
   });
 });
 
@@ -360,5 +369,135 @@ describe('the shapes that would fail silently', () => {
     expect(r.improvementValue).toBeNull();
     // And so there is no composed total either.
     expect(r.assessedValue).toBeNull();
+  });
+});
+
+// ─── The disclosure ─────────────────────────────────────────────────────────
+//
+// Jerry's wording, final 2026-10-01. These tests hold the three things he was
+// careful about, because each one is a sentence somebody could get wrong later
+// without noticing it changed meaning.
+
+describe('the Mello-Roos disclosure says what was decided', () => {
+  const m = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  const say = (r: Parameters<typeof melloRoosDisclosure>[0]) => melloRoosDisclosure(r, m) ?? '';
+
+  const THREE = { districts: ['FC CFD 2021-1 IA-2 HEMET USD', 'FC CFD 2021-02 HERITAGE POINTE', 'HEMET CFD 2005-1 PUB SAFETY SERV'], total: 3625.58 };
+
+  it('says the special tax is INCLUDED IN the annual amount, not added to it', () => {
+    // THE WHOLE POINT. The Liens block sums to TotalTax on 82.9% of Mello-Roos
+    // payloads, so the figure is already inside the annual tax the page prints.
+    // An earlier draft said "levied in addition to the base property tax",
+    // which is true of the base and makes a reader add it to a total that
+    // already contains it.
+    const t = say(THREE);
+    expect(t).toContain('included in the annual property tax shown above');
+    expect(t).not.toMatch(/levied in addition to the annual/i);
+  });
+
+  it('still says it is in addition to the BASE tax, which is the true relation', () => {
+    expect(say(THREE)).toContain('in addition to the base property tax');
+  });
+
+  it('calls it a special tax, never a fee', () => {
+    // Its legal character. "Fee" invites the question of whether it can be
+    // negotiated away, and it cannot.
+    const t = say(THREE);
+    expect(t).toMatch(/Special taxes/);
+    expect(t.toLowerCase()).not.toContain('fee');
+  });
+
+  it('does not predict when the term ends', () => {
+    // The maturity date only comes with bond records: populated on 28 of 1,322
+    // payloads and on NONE in Riverside or San Bernardino, where the districts
+    // are. "Typically 20 to 40 years" is true of the category, unverified for
+    // the parcel, and the kind of thing that gets quoted back at us.
+    const t = say(THREE);
+    expect(t).not.toMatch(/\b\d+\s*(to|-|–)\s*\d+\s*years?\b/i);
+    expect(t).not.toMatch(/typically|usually|generally|around/i);
+    expect(t).toContain('a fixed term set when its district was formed');
+    expect(t).toContain('The county tax collector can confirm');
+  });
+
+  it('avoids the jargon, because a homeowner reads this', () => {
+    expect(say(THREE).toLowerCase()).not.toContain('ad valorem');
+  });
+
+  it('names the districts, which is what makes them lookupable', () => {
+    const t = say(THREE);
+    expect(t).toContain('FC CFD 2021-1 IA-2 HEMET USD');
+    expect(t).toContain('FC CFD 2021-02 HERITAGE POINTE');
+    expect(t).toContain('HEMET CFD 2005-1 PUB SAFETY SERV');
+    // Serial comma: these are names, and "A, B and C" reads as two items.
+    expect(t).toContain('HERITAGE POINTE, and HEMET CFD');
+  });
+
+  it('branches on the count rather than writing around it', () => {
+    expect(say(THREE)).toContain('within three Community Facilities Districts');
+    expect(say({ districts: ['CFD NO 2004-1'], total: 812.44 }))
+      .toContain('within a Community Facilities District: CFD NO 2004-1');
+    expect(say({ districts: ['A DISTRICT', 'B DISTRICT'], total: 100 }))
+      .toContain('within two Community Facilities Districts: A DISTRICT and B DISTRICT');
+  });
+
+  it('uses the singular verb and noun for one district', () => {
+    const one = say({ districts: ['CFD NO 2004-1'], total: 812.44 });
+    expect(one).toContain('A special tax of $812 is included');
+    expect(one).toContain('the special tax runs for a fixed term set when the district was formed');
+    expect(one).not.toContain('Special taxes totalling');
+  });
+
+  it('states the combined figure for several districts', () => {
+    expect(say(THREE)).toContain('Special taxes totalling $3,626 are included');
+  });
+
+  it('falls back to the count alone when a name could not be read', () => {
+    // The parcel is still in the district; only our copy of its name is missing.
+    // Naming two of three and implying that is all of them would be worse.
+    const t = say({ districts: ['ONLY ONE NAMED'], total: 500 });
+    expect(t).toContain('within a Community Facilities District: ONLY ONE NAMED');
+    const partial = melloRoosDisclosure({ districts: [], total: 500 }, m)!;
+    expect(partial).toContain('within a Community Facilities District.');
+    expect(partial).not.toContain(':');
+  });
+
+  it('says nothing at all when the parcel is in no district', () => {
+    expect(melloRoosDisclosure(null, m)).toBeNull();
+    expect(melloRoosDisclosure({ districts: [], total: 0 }, m)).toBeNull();
+  });
+});
+
+describe('the parser supplies what the disclosure needs', () => {
+  it('reads the districts and the combined total off the real payload', () => {
+    const r = parseTitlePointTaxResult(ITEMISED)!;
+    expect(r.report.melloRoos).not.toBeNull();
+    expect(r.report.melloRoos!.districts).toHaveLength(3);
+    expect(r.report.melloRoos!.total).toBeCloseTo(3625.58, 2);
+  });
+
+  it('drops the redundant MELLO ROOS marker and changes nothing else', () => {
+    // The block is already headed Mello-Roos. Everything else stays as the
+    // county wrote it, because the name has to match for a lookup to work.
+    const names = parseTitlePointTaxResult(ITEMISED)!.report.melloRoos!.districts;
+    expect(names).toEqual([
+      'FC CFD 2021-1 IA-2 HEMET USD',
+      'FC CFD 2021-02 HERITAGE POINTE',
+      'HEMET CFD 2005-1 PUB SAFETY SERV',
+    ]);
+    for (const n of names) expect(n.toLowerCase()).not.toContain('mello');
+  });
+
+  it('is null on a parcel with no district', () => {
+    expect(parseTitlePointTaxResult(REAL)!.report.melloRoos).toBeNull();
+  });
+
+  it('does not double-count: the same lines are still direct assessments', () => {
+    // melloRoos is the disclosure's data, not a second copy of the money. The
+    // charges appear once in the assessments table and are described here.
+    const r = parseTitlePointTaxResult(ITEMISED)!;
+    const inTable = r.report.specialAssessments
+      .filter((a) => (a.description ?? '').includes('CFD'))
+      .reduce((a, x) => a + (x.amount ?? 0), 0);
+    expect(inTable).toBeCloseTo(r.report.melloRoos!.total, 2);
   });
 });

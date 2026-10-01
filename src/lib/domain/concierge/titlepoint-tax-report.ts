@@ -175,6 +175,35 @@ function lineItem(o: Record<string, unknown>): TaxLineItem | null {
 
 const rateOf = (o: Record<string, unknown>): number => money(o.Rate ?? o.rate) ?? 0;
 
+const isMello = (o: Record<string, unknown>): boolean =>
+  String(o.IsMelloRoos ?? o.isMelloRoos ?? '').toLowerCase() === 'true';
+
+/**
+ * The district's name, as the county writes it, minus the redundant marker.
+ *
+ * KEPT VERBATIM OTHERWISE, and that is a deliberate limit. The county's string
+ * is "FC CFD 2021-1 IA-2 HEMET USD MELLO ROOS"; the trailing "MELLO ROOS" is
+ * dropped because the block it appears under is already headed Mello-Roos, and
+ * nothing else is touched.
+ *
+ * WHY NOT TIDY IT FURTHER. A homeowner reads this in order to look the district
+ * up, so the name has to match what the county calls it. Shortening
+ * "HEMET CFD 2005-1 PUB SAFETY SERV" to "Hemet CFD 2005-1" reads better and is
+ * an editorial judgement about which words are the name — get it wrong and the
+ * document names a district that cannot be found. Three worked examples do not
+ * generalise into a rule, so this does the part that is mechanical and leaves
+ * the rest alone.
+ */
+function districtName(o: Record<string, unknown>): string | null {
+  const raw = str(o.Description ?? o.description);
+  if (!raw) return null;
+  const cleaned = raw
+    .replace(/\s*MELLO[\s-]*ROOS\s*/i, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned === '' ? raw : cleaned;
+}
+
 /** Fixed-dollar charges only — what "direct assessment" means on a CA bill. */
 const isDirectAssessment = (o: Record<string, unknown>): boolean => rateOf(o) === 0;
 
@@ -367,6 +396,13 @@ export function parseTitlePointTaxResult(resultData: unknown): ParsedTaxResult |
     supplementals: items(obj(r, 'Supplementals'))
       .map(lineItem)
       .filter((x): x is TaxLineItem => x !== null),
+    melloRoos: (() => {
+      const lines = liens.filter(isMello);
+      if (lines.length === 0) return null;
+      const districts = lines.map(districtName).filter((n): n is string => n !== null);
+      const total = lines.reduce((a, l) => a + (money(l.Amount ?? l.amount) ?? 0), 0);
+      return total > 0 ? { districts, total } : null;
+    })(),
     asOf: isoDate(r.RunDate ?? r.runDate) ?? isoDate(r.IssueDate ?? r.issueDate),
   };
 

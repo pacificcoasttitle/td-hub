@@ -156,6 +156,76 @@ function lineItem(o: Record<string, unknown>): TaxLineItem | null {
   return { description, amount, maturityDate: isoDate(o.MaturityDate ?? o.maturityDate) };
 }
 
+// ─── `Liens` is not a list of special assessments ───────────────────────────
+//
+// On about half the payloads (631 of 1,282) the Liens block sums to TotalTax:
+// it is the WHOLE BILL, line by line, and that includes the ad valorem levies.
+// Riverside #4840 opens with "GENERAL PURPOSE $5,203.70" at rate 1.000000 —
+// the base 1% — followed by "HEMET UNIFIED SCHOOL B & I" at 0.12%. San
+// Bernardino #4553 calls the same thing "ZZSECURED". Printing those under
+// "special assessments" tells a homeowner their base property tax is a special
+// assessment, on 16.1% of parcels.
+//
+// `Rate` IS THE DISCRIMINATOR, and it is exact. A line with a rate is a
+// percentage of assessed value and is already inside the annual figure's rate;
+// a line at 0.000000 is a fixed-dollar charge levied per parcel — Mello-Roos,
+// parcel taxes, vector control, sewer. Splitting on it and summing the two
+// halves reproduces TotalTax on 639 of 639 payloads where the block is
+// complete. Every Mello-Roos line observed is in the rate-0 half.
+
+const rateOf = (o: Record<string, unknown>): number => money(o.Rate ?? o.rate) ?? 0;
+
+const isMello = (o: Record<string, unknown>): boolean =>
+  String(o.IsMelloRoos ?? o.isMelloRoos ?? '').toLowerCase() === 'true';
+
+/**
+ * The district's name, as the county writes it, minus the redundant marker.
+ *
+ * KEPT VERBATIM OTHERWISE, and that is a deliberate limit. The county's string
+ * is "FC CFD 2021-1 IA-2 HEMET USD MELLO ROOS"; the trailing "MELLO ROOS" is
+ * dropped because the block it appears under is already headed Mello-Roos, and
+ * nothing else is touched.
+ *
+ * WHY NOT TIDY IT FURTHER. A homeowner reads this in order to look the district
+ * up, so the name has to match what the county calls it. Shortening
+ * "HEMET CFD 2005-1 PUB SAFETY SERV" to "Hemet CFD 2005-1" reads better and is
+ * an editorial judgement about which words are the name — get it wrong and the
+ * document names a district that cannot be found. Three worked examples do not
+ * generalise into a rule, so this does the part that is mechanical and leaves
+ * the rest alone.
+ */
+function districtName(o: Record<string, unknown>): string | null {
+  const raw = str(o.Description ?? o.description);
+  if (!raw) return null;
+  const cleaned = raw
+    .replace(/\s*MELLO[\s-]*ROOS\s*/i, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned === '' ? raw : cleaned;
+}
+
+/** Fixed-dollar charges only — what "direct assessment" means on a CA bill. */
+const isDirectAssessment = (o: Record<string, unknown>): boolean => rateOf(o) === 0;
+
+/**
+ * The base ad valorem levy line, if the county itemises one.
+ *
+ * Its amount over its rate is the net assessed value the COUNTY used, which is
+ * the only independent check available on our composed total — see
+ * reconcileAssessedTotal.
+ */
+function baseLevyOf(liens: readonly Record<string, unknown>[]): { amount: number; rate: number } | null {
+  for (const l of liens) {
+    const rate = rateOf(l);
+    const amount = money(l.Amount ?? l.amount);
+    // The 1% constitutional base. Bounded rather than exact because a county
+    // may carry it as 1.000000 or 0.010000 scaled differently; only the former
+    // has been observed, and a wider net would catch a school bond.
+    if (amount !== null && rate >= 0.99 && rate <= 1.01) return { amount, rate };
+  }
+  return null;
+}
+
 function installment(o: Record<string, unknown>): TaxReportInstallment | null {
   const number = str(o.Number ?? o.number);
   const amount = money(o.Amount ?? o.amount);
@@ -185,27 +255,50 @@ export interface AssessedReconciliation {
   basis:
     /** The vendor stated a total; no arithmetic of ours involved. */
     | 'stated'
-    /** Composed from land + improvements and it reconciles. */
-    | 'verified'
-    /** Composed, but rate or annual amount is missing, so it cannot be checked. */
-    | 'unverifiable'
-    /** Composed and it does NOT reconcile. The interesting case. */
+    /** Composed, and the county's own base levy line confirms it. */
+    | 'levy'
+    /** Composed. Nothing independent to check it against on this payload. */
+    | 'composed'
+    /** The base levy line CONTRADICTS the composition. Suppressed. */
     | 'mismatch'
     /** No land/improvement split to compose from. */
     | 'absent';
-  /** What the identity predicts the annual tax would be, for the record. */
-  expectedTax: number | null;
-  /** What TitlePoint says it is. */
-  statedTax: number | null;
+  /** Net assessed value implied by the base levy line, where there is one. */
+  impliedNet: number | null;
+  /** The composition's own net, for comparison. */
+  composedNet: number | null;
 }
 
 /**
- * Tolerance: half a percent, with a dollar floor so a small bill is not held to
- * a stricter standard than a large one. At this setting 97.9% of the 1,247
- * checkable payloads pass, and the median error is zero.
+ * ─── THE CHECK THAT IS NOT CIRCULAR ─────────────────────────────────────────
+ *
+ * The first version of this verified the composition with
+ *
+ *     (land + improvements - exemption) x TaxRate/100  ==  TotalTax
+ *
+ * and reported that it held to the cent on 90% of payloads, which it does —
+ * because TAXRATE IS DERIVED FROM TOTALTAX. Measured: TaxRate equals
+ * TotalTax / net x 100 to five decimal places on 1,240 of 1,282 payloads
+ * (96.7%). The identity was an identity. It could not fail, so it confirmed
+ * nothing, and the word "verified" on the result was wrong.
+ *
+ * What IS independent: on counties that itemise the bill, `Liens` carries the
+ * base ad valorem levy as its own line at a ~1% rate — "GENERAL PURPOSE",
+ * "ZZSECURED". That line's amount divided by its rate gives the net assessed
+ * value the COUNTY used, from a different field than the one we composed. It
+ * agrees with land + improvements - exemption on 204 of the 207 payloads where
+ * both are parseable, usually to the dollar.
+ *
+ * So: where that line exists, it decides. Where it does not, the total is still
+ * composed and printed — the rule is confirmed at 98.6% wherever it can be
+ * checked, and suppressing the figure on the 84% of parcels that happen not to
+ * itemise would discard a correct number to avoid an unprovable one. The basis
+ * records which case this was, so nobody later mistakes 'composed' for checked.
  */
-function reconciles(expected: number, stated: number): boolean {
-  return Math.abs(expected - stated) <= Math.max(1, stated * 0.005);
+function agrees(implied: number, composed: number): boolean {
+  // A few dollars, or 0.2%. The disagreements are not near-misses: they are
+  // either exact or out by a different parcel's worth.
+  return Math.abs(implied - composed) <= Math.max(5, composed * 0.002);
 }
 
 export function reconcileAssessedTotal(input: {
@@ -213,28 +306,29 @@ export function reconcileAssessedTotal(input: {
   landValue: number | null;
   improvementValue: number | null;
   homeOwnerExemption: number | null;
-  taxRate: number | null;
-  annualAmount: number | null;
+  /** The ~1% base ad valorem line from Liens, when the county itemises. */
+  baseLevy: { amount: number; rate: number } | null;
 }): AssessedReconciliation {
-  const { stated, landValue, improvementValue, homeOwnerExemption, taxRate, annualAmount } = input;
+  const { stated, landValue, improvementValue, homeOwnerExemption, baseLevy } = input;
 
   if (stated !== null) {
-    return { total: stated, basis: 'stated', expectedTax: null, statedTax: annualAmount };
+    return { total: stated, basis: 'stated', impliedNet: null, composedNet: null };
   }
   if (landValue === null || improvementValue === null) {
-    return { total: null, basis: 'absent', expectedTax: null, statedTax: annualAmount };
+    return { total: null, basis: 'absent', impliedNet: null, composedNet: null };
   }
 
   const composed = landValue + improvementValue;
-  if (taxRate === null || annualAmount === null) {
-    return { total: null, basis: 'unverifiable', expectedTax: null, statedTax: annualAmount };
+  const composedNet = composed - (homeOwnerExemption ?? 0);
+
+  if (!baseLevy || baseLevy.rate <= 0) {
+    return { total: composed, basis: 'composed', impliedNet: null, composedNet };
   }
 
-  const taxable = composed - (homeOwnerExemption ?? 0);
-  const expectedTax = taxable * (taxRate / 100);
-  return reconciles(expectedTax, annualAmount)
-    ? { total: composed, basis: 'verified', expectedTax, statedTax: annualAmount }
-    : { total: null, basis: 'mismatch', expectedTax, statedTax: annualAmount };
+  const impliedNet = baseLevy.amount / (baseLevy.rate / 100);
+  return agrees(impliedNet, composedNet)
+    ? { total: composed, basis: 'levy', impliedNet, composedNet }
+    : { total: null, basis: 'mismatch', impliedNet, composedNet };
 }
 
 export interface ParsedTaxResult {
@@ -266,11 +360,15 @@ export function parseTitlePointTaxResult(resultData: unknown): ParsedTaxResult |
   const annualAmount = positive(r.TotalTax ?? r.totalTax);
   const homeOwnerExemption = positive(r.HomeOwnerExemption ?? r.homeOwnerExemption);
 
-  // The sum, not a vendor field — and only when it reconciles against the tax
-  // the county billed. See the docblock: verified, not merely computed.
+  const liens = items(obj(r, 'Liens'));
+
+  // The sum, not a vendor field — checked against the county's own base levy
+  // line where there is one. See reconcileAssessedTotal for why the previous
+  // check, against TaxRate, could not fail.
   const assessed = reconcileAssessedTotal({
     stated: positive(r.AssessedValuation ?? r.assessedValuation),
-    landValue, improvementValue, homeOwnerExemption, taxRate, annualAmount,
+    landValue, improvementValue, homeOwnerExemption,
+    baseLevy: baseLevyOf(liens),
   });
 
   const report: NormalizedTaxReport = {
@@ -285,8 +383,11 @@ export function parseTitlePointTaxResult(resultData: unknown): ParsedTaxResult |
     installments: items(obj(r, 'Installments'))
       .map(installment)
       .filter((x): x is TaxReportInstallment => x !== null),
-    // `Liens`, because SpecialAssessments is empty on every payload we hold.
-    specialAssessments: items(obj(r, 'Liens'))
+    // `Liens`, because SpecialAssessments is empty on every payload we hold —
+    // but ONLY its fixed-dollar lines. The rate-bearing ones are ad valorem
+    // and belong to the annual figure, not beside it.
+    specialAssessments: liens
+      .filter(isDirectAssessment)
       .map(lineItem)
       .filter((x): x is TaxLineItem => x !== null),
     bonds: items(obj(r, 'Bonds'))
@@ -295,6 +396,13 @@ export function parseTitlePointTaxResult(resultData: unknown): ParsedTaxResult |
     supplementals: items(obj(r, 'Supplementals'))
       .map(lineItem)
       .filter((x): x is TaxLineItem => x !== null),
+    melloRoos: (() => {
+      const lines = liens.filter(isMello);
+      if (lines.length === 0) return null;
+      const districts = lines.map(districtName).filter((n): n is string => n !== null);
+      const total = lines.reduce((a, l) => a + (money(l.Amount ?? l.amount) ?? 0), 0);
+      return total > 0 ? { districts, total } : null;
+    })(),
     asOf: isoDate(r.RunDate ?? r.runDate) ?? isoDate(r.IssueDate ?? r.issueDate),
   };
 
@@ -321,4 +429,28 @@ export function melloRoosLines(resultData: unknown): string[] {
     .filter((o) => String(o.IsMelloRoos ?? '').toLowerCase() === 'true')
     .map((o) => str(o.Description) ?? '')
     .filter((s) => s !== '');
+}
+
+/**
+ * The Mello-Roos special tax for this parcel, in dollars.
+ *
+ * ─── IT IS ALREADY INSIDE THE ANNUAL AMOUNT ─────────────────────────────────
+ *
+ * Measured, because the disclosure wording turns on it: on 97 of the 117
+ * Mello-Roos payloads (82.9%) the Liens block sums to TotalTax, and the
+ * rate-split reproduces TotalTax on every complete block. So the special tax is
+ * a line INSIDE the figure page 4 prints as the annual amount, not something a
+ * reader should add to it.
+ *
+ * That is the opposite of what "levied in addition to the base property tax"
+ * invites, which is why it is worth a function rather than a comment.
+ */
+export function melloRoosTotal(resultData: unknown): number | null {
+  const rd = resultData && typeof resultData === 'object' ? resultData as Record<string, unknown> : {};
+  const r = obj(rd, 'TaxReport');
+  const lines = items(obj(r, 'Liens'))
+    .filter((o) => String(o.IsMelloRoos ?? '').toLowerCase() === 'true');
+  if (lines.length === 0) return null;
+  const sum = lines.reduce((a, o) => a + (money(o.Amount ?? o.amount) ?? 0), 0);
+  return sum > 0 ? sum : null;
 }

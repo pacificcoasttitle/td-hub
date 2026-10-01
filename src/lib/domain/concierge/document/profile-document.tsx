@@ -4,7 +4,7 @@ import type { CompFilterResult, CompCriteria } from '../comp-filter';
 import type { MarketMetrics } from '../metrics';
 import type { NormalizedSubject, NormalizedTax, NormalizedTransfer } from '../normalize';
 import {
-  acres, currentVestingDeed, parseLegal, parseOwners, resolveTaxLayer, transferCounts,
+  acres, currentVestingDeed, melloRoosDisclosure, parseLegal, parseOwners, resolveTaxLayer, transferCounts,
 } from './derive';
 import type { NormalizedTaxReport, TaxLayer } from './derive';
 import { PCT_COVER_PHOTO, PCT_LOGO_WHITE } from './brand-assets';
@@ -794,6 +794,25 @@ function TaxPage({ layer, subject, captured }: {
             </View>
           ))}
         </>
+      ) : null}
+
+      {/* ─── Mello-Roos ────────────────────────────────────────────────────
+          A DISCLOSURE, not a data row, which is why it is a paragraph under its
+          own heading rather than a line in the table above. Those same charges
+          DO appear in the table as direct assessments; this says what they are.
+
+          Wording is Jerry's and is assembled in melloRoosDisclosure() — see the
+          note there for why it says "included in" rather than "in addition to",
+          and why it does not predict when the term ends. */}
+      {melloRoosDisclosure(r.melloRoos, money) ? (
+        <View style={{ backgroundColor: BOX_BG, borderLeftWidth: 2.25, borderLeftColor: ORANGE, padding: 9, marginTop: 12 }}>
+          <Text style={{ fontFamily: HEADING, fontWeight: 700, fontSize: 8.25, letterSpacing: 0.6, color: NAVY, marginBottom: 3.75 }}>
+            COMMUNITY FACILITIES DISTRICT (MELLO-ROOS)
+          </Text>
+          <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK, lineHeight: 1.5 }}>
+            {melloRoosDisclosure(r.melloRoos, money)}
+          </Text>
+        </View>
       ) : null}
 
       {r.supplementals.length > 0 ? (

@@ -33,22 +33,38 @@ import postgres from 'postgres';
 const sql = postgres(process.env.DATABASE_URL!, { max: 1, prepare: false });
 const APPLY = process.argv.includes('--apply');
 
-/** `concierge/9/profile-2026-10-05T17-11-20-638Z.pdf` -> Date, or null. */
-function writtenAt(key: string | null): Date | null {
+/**
+ * `concierge/9/profile-2026-10-05T17-11-20-638Z.pdf` -> "2026-10-05T17:11:20".
+ *
+ * ─── AS TEXT, NEVER AS A DATE ───────────────────────────────────────────────
+ *
+ * The first version parsed this into a Date — correctly, as UTC, because
+ * pdfKey() uses toISOString(). Then it compared that against
+ * titlepoint_requested_at, which is `timestamp` WITHOUT time zone, so the
+ * driver read the naive value as LOCAL and handed back an instant seven hours
+ * out on a PDT machine. Every profile looked stale. All three would have been
+ * restated, and all three were fine.
+ *
+ * Production runs UTC, so the naive column holds UTC numerals and the key holds
+ * UTC numerals. Comparing the two as STRINGS — with the database formatting its
+ * side via to_char so the driver never gets to interpret it — keeps both in one
+ * frame and cannot be shifted by whose machine runs the script.
+ */
+function writtenAt(key: string | null): string | null {
   if (!key) return null;
-  const m = /profile-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.pdf$/.exec(key);
-  if (!m) return null;
-  const d = new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`);
-  return Number.isNaN(d.getTime()) ? null : d;
+  const m = /profile-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})/.exec(key);
+  return m ? `${m[1]}T${m[2]}:${m[3]}:${m[4]}` : null;
 }
 
 (async () => {
   const rows = await sql<Array<{
-    id: number; pdf_storage_key: string | null; titlepoint_requested_at: Date | null;
-    tax_detail_status: string | null; has_report: boolean;
+    id: number; pdf_storage_key: string | null; search_naive: string | null;
+    tax_detail_status: string | null;
   }>>`
-    SELECT id, pdf_storage_key, titlepoint_requested_at, tax_detail_status,
-           (tax_report IS NOT NULL) AS has_report
+    SELECT id, pdf_storage_key, tax_detail_status,
+           -- Formatted BY POSTGRES, so the driver never interprets it. See
+           -- writtenAt() for why that matters.
+           to_char(titlepoint_requested_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS search_naive
       FROM concierge_profiles
      WHERE tax_detail_status = 'ready'
        AND tax_report IS NOT NULL
@@ -57,15 +73,15 @@ function writtenAt(key: string | null): Date | null {
 
   console.log(`profiles marked 'ready' with a stored report: ${rows.length}`);
 
-  const stale = rows.filter((r) => {
+  const isStale = (r: typeof rows[number]) => {
     const w = writtenAt(r.pdf_storage_key);
-    return w !== null && r.titlepoint_requested_at !== null && w < r.titlepoint_requested_at;
-  });
+    return w !== null && r.search_naive !== null && w < r.search_naive;
+  };
+  const stale = rows.filter(isStale);
 
   for (const r of rows) {
     const w = writtenAt(r.pdf_storage_key);
-    const isStale = w && r.titlepoint_requested_at && w < r.titlepoint_requested_at;
-    console.log(`  #${r.id}  pdf ${w ? w.toISOString() : '(unparseable key)'}  search ${r.titlepoint_requested_at?.toISOString()}  ${isStale ? 'STALE' : 'ok'}`);
+    console.log(`  #${r.id}  pdf ${w ?? '(unparseable key)'}  search ${r.search_naive}  ${isStale(r) ? 'STALE' : 'ok'}`);
   }
 
   console.log(`\nstale: ${stale.length}`);

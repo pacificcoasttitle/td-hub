@@ -34,7 +34,19 @@ export const FORECLOSURE_BG = '#FEF3EC';
 export const PLAT_BG = '#F3F5F8';
 export const COVER_PANEL = '#222A48';
 export const COVER_FALLBACK = '#2A3A5C';
-export const PREPARED_LABEL = '#046744';
+/**
+ * PREPARED FOR / PRESENTED BY. ORANGE, like the eyebrow above them.
+ *
+ * This was #046744 — a green — from 2026-09-30 to 2026-10-05, transcribed off a
+ * rendered image of the corrections PDF and wrong. There is no green anywhere
+ * in the palette, and these are the same kind of label as the CONCIERGE
+ * PROPERTY PROFILE eyebrow, so they are the same colour as it.
+ *
+ * Kept as its own token rather than folded into ORANGE because the two are the
+ * same value for a reason, not by coincidence, and a future change to one of
+ * them should have to say which it means.
+ */
+export const PREPARED_LABEL = ORANGE;
 
 /** Recorded-document type colours. Orange means foreclosure and nothing else. */
 export const TYPE_COLOUR = {

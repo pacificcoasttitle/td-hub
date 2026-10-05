@@ -298,8 +298,126 @@ export interface NormalizedTaxReport {
   specialAssessments: TaxLineItem[];
   bonds: TaxLineItem[];
   supplementals: TaxLineItem[];
+  /**
+   * The Community Facilities Districts this parcel sits in, and what they cost.
+   *
+   * SEPARATE FROM specialAssessments, which already contains these same lines.
+   * It is not a second copy of the money — it is the disclosure's own data, and
+   * the disclosure has to name the districts and state a combined figure, which
+   * a flat list of line items cannot do.
+   *
+   * `total` IS PART OF THE ANNUAL AMOUNT, not additional to it. Measured: the
+   * Liens block sums to TotalTax on 82.9% of Mello-Roos payloads, and the
+   * rate-split reproduces TotalTax on every complete block. The wording on the
+   * page depends on that and says "included in".
+   */
+  melloRoos: { districts: string[]; total: number } | null;
   /** RunDate / IssueDate. Mandatory on a document read weeks later. */
   asOf: string | null;
+}
+
+// ─── The Mello-Roos disclosure ──────────────────────────────────────────────
+//
+// WORDING IS JERRY'S, final 2026-10-01, and is reproduced here rather than
+// paraphrased. It is a disclosure on a document a buyer reads, so it is not
+// ours to improve — this function's whole job is to put his sentence together
+// with the right number of districts in it.
+//
+// THREE THINGS IT IS CAREFUL ABOUT:
+//
+//   "special tax", never "fee" — that is its legal character, and "fee" invites
+//   the question of whether it is negotiable.
+//
+//   "INCLUDED IN the annual property tax shown above". Measured, not assumed:
+//   the Liens block sums to TotalTax on 82.9% of Mello-Roos payloads. An
+//   earlier draft said "levied in addition to", which is true of the base tax
+//   and would make a reader add the figure to a total that already contains it.
+//
+//   It does not predict when the term ends. The maturity date only arrives with
+//   bond records, which are populated on 28 of 1,322 payloads and on NONE in
+//   Riverside or San Bernardino, where the districts actually are. "Typically
+//   20 to 40 years" would be true of the category, unverified for the parcel,
+//   and quoted back at us.
+//
+// No "ad valorem": precise, and jargon. "The base property tax" says it.
+
+const COUNT_WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+
+/** "A and B" / "A, B, and C" — the serial comma, because these are names. */
+function joinNames(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+}
+
+/**
+ * The disclosure, in three parts, or null when the parcel is in no district.
+ *
+ * ─── WHY IT IS NOT ONE STRING ───────────────────────────────────────────────
+ *
+ * The district names are the county's, verbatim, which means SCREAMING CAPS in
+ * the middle of a sentence. The ruling is that the characters do not change and
+ * the loudness is handled by styling — so the names have to be separable from
+ * the prose to carry a style of their own. Returning one string would force the
+ * document to find them again by substring, which breaks the moment a district
+ * is called something that also appears in the sentence.
+ *
+ * `money` is passed in so this module stays free of the document's formatters.
+ */
+export interface MelloRoosDisclosure {
+  /** Up to and including the colon, or the full stop when nothing is named. */
+  lead: string;
+  /** The county's strings, verbatim. Empty when none could be read. */
+  names: string[];
+  /** From "Special taxes totalling…" to the end. */
+  body: string;
+}
+
+export function melloRoosDisclosure(
+  mello: { districts: readonly string[]; total: number } | null | undefined,
+  money: (n: number) => string,
+): MelloRoosDisclosure | null {
+  if (!mello || mello.total <= 0) return null;
+
+  const n = mello.districts.length;
+  // A district we could not name is still a district the parcel is in, so the
+  // count comes from the LINES, not from the names we managed to read.
+  const named = mello.districts.filter((d) => d.trim() !== '');
+  const amount = money(mello.total);
+  const complete = named.length === n && n > 0;
+
+  if (n <= 1) {
+    return {
+      lead: complete ? 'This parcel lies within a Community Facilities District:' : 'This parcel lies within a Community Facilities District.',
+      names: complete ? [named[0]!] : [],
+      body: `A special tax of ${amount} is included in the annual property tax shown above, in addition to the base property tax. `
+        + 'These districts fund local infrastructure and services such as schools, roads and utilities, and the special tax runs for a fixed term set when the district was formed. '
+        + 'The county tax collector can confirm the term and current balance.',
+    };
+  }
+
+  const count = COUNT_WORDS[n] ?? String(n);
+  return {
+    lead: complete
+      ? `This parcel lies within ${count} Community Facilities Districts:`
+      : `This parcel lies within ${count} Community Facilities Districts.`,
+    names: complete ? [...named] : [],
+    body: `Special taxes totalling ${amount} are included in the annual property tax shown above, in addition to the base property tax. `
+      + 'These districts fund local infrastructure and services such as schools, roads and utilities, and each special tax runs for a fixed term set when its district was formed. '
+      + 'The county tax collector can confirm the term and current balance.',
+  };
+}
+
+/**
+ * The same thing as one string, for assertions and any caller with nowhere to
+ * put a second style. The serial comma lives here because it is punctuation
+ * between names, not part of a name.
+ */
+export function melloRoosText(d: MelloRoosDisclosure | null): string | null {
+  if (!d) return null;
+  return d.names.length > 0
+    ? `${d.lead} ${joinNames(d.names)}. ${d.body}`
+    : `${d.lead} ${d.body}`;
 }
 
 export type TaxLayer =

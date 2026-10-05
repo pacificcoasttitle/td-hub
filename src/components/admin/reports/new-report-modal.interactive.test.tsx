@@ -29,7 +29,7 @@ function stubApi(over: Record<string, unknown> = {}) {
     '/api/concierge/profiles': { profileId: 9 },
     ...over,
   };
-  const f = vi.fn(async (url: string) => {
+  const f = vi.fn(async (url: string, _init?: RequestInit) => {
     calls.push(url);
     const key = Object.keys(bodies).find((k) => url.startsWith(k));
     return { ok: true, json: async () => (key ? bodies[key] : {}) };
@@ -121,11 +121,19 @@ describe('a ticked tax search cannot survive a cancel', () => {
     expect(calls.indexOf('/api/concierge/profiles')).toBeLessThan(calls.findIndex((u) => u.includes('/tax')));
   });
 
-  it('still closes when the tax call fails, because the profile is complete', async () => {
-    // The profile is generated, paid for, and renders its tax page from the
-    // assessment detail SiteX already gave us. A failed second purchase must not
-    // report the report as broken.
+  it('says so when the tax search could not be started, instead of closing silently', async () => {
+    // CHANGED 2026-10-05, and it is the whole point of the fix. This used to
+    // assert that the modal closed anyway: the call was `void fetch(...)
+    // .catch(() => {})` followed immediately by onClose(), which is
+    // unfalsifiable — not awaited, unmounted underneath, every error discarded.
+    // The comment defending it said the row's tax status would report the
+    // problem, but a request that never lands creates no row, so that channel
+    // does not exist. Tick, close, silence. Which is what Gerard saw.
+    //
+    // The profile IS still fine, so the notice says both halves and the report
+    // is handed to the list regardless.
     const onClose = vi.fn();
+    const onCreated = vi.fn();
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       calls.push(url);
@@ -137,7 +145,7 @@ describe('a ticked tax search cannot survive a cancel', () => {
       return { ok: true, json: async () => ({}) };
     }));
 
-    render(<NewReportModal onClose={onClose} onCreated={() => {}} />);
+    render(<NewReportModal onClose={onClose} onCreated={onCreated} />);
     await waitFor(() => expect(screen.getByText('Concierge Profile')).toBeTruthy());
     fireEvent.click(screen.getByText('Concierge Profile'));
     fireEvent.click(screen.getByRole('button', { name: /^Continue$/ }));
@@ -156,7 +164,33 @@ describe('a ticked tax search cannot survive a cancel', () => {
     fireEvent.click(taxBox());
     fireEvent.click(screen.getByRole('button', { name: /Generate profile/i }));
 
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(screen.queryByText(/Network error/i)).toBeNull();
+    // The notice appears and the modal STAYS OPEN. A close here is the silence.
+    await waitFor(() => expect(screen.getByText(/The tax search was not started/i)).toBeTruthy());
+    expect(onClose).not.toHaveBeenCalled();
+
+    // It says the report is fine, so nobody reads this as a failed generation.
+    expect(screen.getByText('The profile was created. The tax search was not started.')).toBeTruthy();
+    // And where to do the thing that did not happen.
+    expect(screen.getByText(/row in Reports/i)).toBeTruthy();
+    // The row still reaches the list — the profile exists and was paid for.
+    expect(onCreated).toHaveBeenCalledWith(9);
+
+    // Dismissing is what closes it, so the operator has to have seen it.
+    fireEvent.click(screen.getByRole('button', { name: /Understood/i }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('sends the tax request with keepalive, so the close cannot cancel it', async () => {
+    // The modal unmounts immediately after. Without keepalive the browser is
+    // free to abort an in-flight request from a document that is going away,
+    // which is one of the ways "I ticked it and nothing happened" happens.
+    const { calls, fetchMock } = stubApi();
+    await reachTheGate();
+    fireEvent.click(taxBox());
+    fireEvent.click(screen.getByRole('button', { name: /Generate profile/i }));
+
+    await waitFor(() => expect(calls.some((u) => u.includes('/tax'))).toBe(true));
+    const taxCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/tax'))!;
+    expect(taxCall[1]).toMatchObject({ method: 'POST', keepalive: true });
   });
 });

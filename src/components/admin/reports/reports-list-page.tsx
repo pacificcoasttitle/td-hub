@@ -339,6 +339,9 @@ export function ReportRow({
           )}
           {stale ? <RowBadge>{row.templateVersion}</RowBadge> : null}
           {isProfile && row.taxStatus === 'pending' ? <RowBadge tone="amber">tax running</RowBadge> : null}
+          {/* Bought, not yet on the document. Amber because it needs a click —
+              the state profile 9 sat in while calling itself ready. */}
+          {isProfile && row.taxStatus === 'fetched' ? <RowBadge tone="amber">tax not shown</RowBadge> : null}
           {isProfile && row.taxStatus === 'ready' ? <RowBadge tone="green">tax</RowBadge> : null}
         </div>
         <div className="truncate text-xs text-[#6B7280]">

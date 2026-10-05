@@ -124,6 +124,8 @@ const REPORT: NormalizedTaxReport = {
   ],
   specialAssessments: [{ description: 'VECTOR CONTROL', amount: 12.34, maturityDate: null }],
   bonds: [{ description: 'SCHOOL BOND 2016', amount: 210.5, maturityDate: '2031-07-01' }],
+  // No district on this parcel — the common case, 91.4% of payloads.
+  melloRoos: null,
   supplementals: [],
   asOf: '2026-09-20',
 };
@@ -336,5 +338,58 @@ describe('the cover never shows the comparables map', () => {
     // supplied here and must appear only on page 6.
     const r = await render(input());
     expect(r.parts[0]!.replace(/\s+/g, '')).not.toContain('Stonybrook');
+  });
+});
+
+// ─── Mello-Roos reaches the page ────────────────────────────────────────────
+//
+// The wording is held in titlepoint-tax-report.test.ts, where it is assembled.
+// These render the real document and read the text back, because a correct
+// sentence that never leaves the function is not a disclosure.
+
+describe('the Mello-Roos disclosure', () => {
+  // The county's strings exactly, as the parser now yields them — suffix, caps
+  // and all. Using tidied names here would test a shape the parser never emits.
+  const THREE = {
+    districts: [
+      'FC CFD 2021-1 IA-2 HEMET USD MELLO ROOS',
+      'FC CFD 2021-02 HERITAGE POINTE MELLO ROOS',
+      'HEMET CFD 2005-1 PUB SAFETY SERV MELLO-ROOS',
+    ],
+    total: 3625.58,
+  };
+
+  it('prints under its own heading when the parcel is in a district', async () => {
+    const { text } = await render(input({ taxReport: { ...REPORT, melloRoos: THREE } }));
+    expect(text.toUpperCase()).toContain(sq('COMMUNITY FACILITIES DISTRICT (MELLO-ROOS)'));
+    expect(text).toContain(sq('within three Community Facilities Districts'));
+    expect(text).toContain(sq('included in the annual property tax shown above'));
+  });
+
+  it('names every district on the page, not just the first', async () => {
+    const { text } = await render(input({ taxReport: { ...REPORT, melloRoos: THREE } }));
+    for (const d of THREE.districts) expect(text, d).toContain(sq(d));
+  });
+
+  it('does not tell the reader to add the figure to the annual tax', async () => {
+    // The whole reason the wording changed: the special tax is already inside
+    // the annual amount printed above it.
+    const { text } = await render(input({ taxReport: { ...REPORT, melloRoos: THREE } }));
+    expect(text).not.toContain(sq('in addition to the annual'));
+    expect(text).toContain(sq('in addition to the base property tax'));
+    expect(text).toContain(sq('Special taxes totalling'));
+  });
+
+  it('says nothing at all on a parcel with no district', async () => {
+    // 91.4% of parcels. An absent district must leave no trace — not a heading,
+    // not an empty box, not "none".
+    const { text } = await render(input({ taxReport: { ...REPORT, melloRoos: null } }));
+    expect(text.toUpperCase()).not.toContain('MELLO');
+    expect(text.toUpperCase()).not.toContain('COMMUNITY FACILITIES');
+  });
+
+  it('is absent entirely on the SiteX layer, which has no such data', async () => {
+    const { text } = await render(input({ taxReport: null }));
+    expect(text.toUpperCase()).not.toContain('MELLO');
   });
 });

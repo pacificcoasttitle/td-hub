@@ -422,6 +422,12 @@ export function NewReportModal({ onClose, onCreated }: {
    * makes state up here equivalent to state inside a remounted dialog.
    */
   const [taxDetail, setTaxDetail] = useState(false);
+  /**
+   * The profile was made and the tax search was NOT started. Held on screen,
+   * like repWarning, rather than flashed — it is the only notice an operator
+   * gets that something they asked for did not happen.
+   */
+  const [taxProblem, setTaxProblem] = useState<string | null>(null);
   const [gateOpen, setGateOpen] = useState(false);
   const [spend, setSpend] = useState<{ thisMonth: number; allTime: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -563,16 +569,48 @@ export function NewReportModal({ onClose, onCreated }: {
       //
       // Deliberately not part of the generate request. TitlePoint tax is
       // create/poll/fetch and takes minutes; holding the charging request open
-      // for it is the charged-but-incomplete failure resume exists for.
+      // for it is the charged-but-incomplete failure resume exists for. This
+      // call only STARTS it and returns as soon as the spend is decided.
       //
-      // AND A FAILURE HERE DOES NOT FAIL THE PROFILE. The profile is generated,
-      // paid for and complete without page 4 — it renders the tax page from the
-      // assessment detail SiteX already gave us. So this is fire-and-forget: the
-      // modal closes either way, and the row's own tax status is where the
-      // operator learns what happened. Surfacing an error here would tell them
-      // something went wrong with a report that is sitting in the list, fine.
+      // ─── IT IS AWAITED, AND ITS ANSWER IS READ ───────────────────────────
+      //
+      // This was `void fetch(...).catch(() => {})` followed immediately by
+      // onClose(). That is unfalsifiable: the request is not awaited, the modal
+      // unmounts underneath it, and every possible error is discarded. The
+      // comment defending it said the row's tax status is where the operator
+      // learns what happened — but a request that never lands creates no row,
+      // so the channel meant to report the problem does not exist either. Tick
+      // the box, modal closes, nothing anywhere says a word.
+      //
+      // A FAILURE STILL DOES NOT FAIL THE PROFILE. It is generated, paid for
+      // and complete without page 4. So this reports that the tax search could
+      // not be STARTED, and leaves the profile alone.
       if (taxDetail) {
-        void fetch(`/api/concierge/profiles/${profileId}/tax`, { method: 'POST' }).catch(() => {});
+        try {
+          const taxRes = await fetch(`/api/concierge/profiles/${profileId}/tax`, {
+            method: 'POST',
+            // Survives the unmount that follows, so the request cannot be
+            // cancelled by the very close it precedes.
+            keepalive: true,
+          });
+          const taxBody = await taxRes.json().catch(() => null);
+          if (!taxRes.ok || taxBody?.ok === false) {
+            onCreated(profileId);
+            // THE GATE HAS TO GO FIRST. It is a fixed overlay, so leaving it up
+            // would put this notice behind the very dialog the operator just
+            // confirmed — a silent failure dressed as a visible one. Caught by
+            // the test, which found "row in Reports" twice on screen.
+            setGateOpen(false);
+            setTaxProblem(taxBody?.message
+              ?? `The tax search could not be started (${taxRes.status}). You can add tax detail from the report’s row in Reports.`);
+            return;
+          }
+        } catch {
+          onCreated(profileId);
+          setGateOpen(false);
+          setTaxProblem('The request did not reach the server, so no tax search was started and nothing was charged for one. You can add tax detail from the report’s row in Reports.');
+          return;
+        }
       }
 
       onCreated(profileId);
@@ -675,6 +713,24 @@ export function NewReportModal({ onClose, onCreated }: {
               <button
                 type="button"
                 onClick={() => { setRepWarning(null); onClose(); }}
+                className="mt-2 text-[11px] font-medium text-[#1B2A4A] hover:underline"
+              >
+                Understood — close
+              </button>
+            </div>
+          ) : null}
+
+          {/* THE PROFILE IS FINE AND THE THING THEY TICKED DID NOT HAPPEN.
+              Amber, not red, and it says both halves — an operator who reads
+              only "could not be started" must not think the report failed. It
+              also says where to do it instead, because the row action can. */}
+          {taxProblem ? (
+            <div className="mt-3 text-[11.5px] text-[#7C4A03] bg-[#FEF6E7] border border-[#F3D9A4] rounded-md px-3 py-2">
+              <p className="font-medium">The profile was created. The tax search was not started.</p>
+              <p className="mt-1">{taxProblem}</p>
+              <button
+                type="button"
+                onClick={() => { setTaxProblem(null); onClose(); }}
                 className="mt-2 text-[11px] font-medium text-[#1B2A4A] hover:underline"
               >
                 Understood — close

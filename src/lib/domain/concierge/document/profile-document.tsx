@@ -4,9 +4,9 @@ import type { CompFilterResult, CompCriteria } from '../comp-filter';
 import type { MarketMetrics } from '../metrics';
 import type { NormalizedSubject, NormalizedTax, NormalizedTransfer } from '../normalize';
 import {
-  acres, currentVestingDeed, parseLegal, parseOwners, resolveTaxLayer, transferCounts,
+  acres, currentVestingDeed, melloRoosDisclosure, parseLegal, parseOwners, resolveTaxLayer, transferCounts,
 } from './derive';
-import type { NormalizedTaxReport, TaxLayer } from './derive';
+import type { MelloRoosDisclosure, NormalizedTaxReport, TaxLayer } from './derive';
 import { PCT_COVER_PHOTO, PCT_LOGO_WHITE } from './brand-assets';
 import { BODY, HEADING, registerDocumentFonts } from './fonts';
 import {
@@ -314,7 +314,12 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         {/* CENTRED VERTICALLY, not top-padded. The build pinned the three
             lines to a 29 pt top pad inside a 241.5 pt block, which left the
             lower two-thirds empty. v6 centres them. */}
-        <View style={{ marginTop: -72, width: 560, height: 241.5, backgroundColor: NAVY, justifyContent: 'center', paddingHorizontal: SIDE }}>
+        {/* FULL BLEED. The spec said 560pt and the page is 612, which left
+            52 points of photograph showing down the right edge of both navy
+            blocks — read on the proof as the block "stopping short". The
+            blocks are meant to run off the edge, so they run off the edge.
+            SIDE padding keeps the text where it was. */}
+        <View style={{ marginTop: -72, width: '100%', height: 241.5, backgroundColor: NAVY, justifyContent: 'center', paddingHorizontal: SIDE }}>
           <Text style={{ fontFamily: HEADING, fontWeight: 700, fontSize: 11.25, color: ORANGE, letterSpacing: 2 }}>
             CONCIERGE PROPERTY PROFILE
           </Text>
@@ -330,7 +335,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             and phone as separate lines at 75% opacity; v6 joins them with
             " · " and keeps them white. Columns centre vertically in whatever
             height is left, with a 30 pt gap — marginRight, never flex gap. */}
-        <View style={{ width: 530, flexGrow: 1, backgroundColor: COVER_PANEL, paddingHorizontal: SIDE, flexDirection: 'row', alignItems: 'center' }}>
+        <View style={{ width: '100%', flexGrow: 1, backgroundColor: COVER_PANEL, paddingHorizontal: SIDE, flexDirection: 'row', alignItems: 'center' }}>
           <View style={{ flex: 1, marginRight: 30 }}>
             <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 8.25, color: PREPARED_LABEL, letterSpacing: 1 }}>PREPARED FOR</Text>
             <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 14.25, color: '#FFFFFF', marginTop: 7 }}>
@@ -739,6 +744,7 @@ function TaxPage({ layer, subject, captured }: {
 
   const r = layer.report;
   const exemption = typeof r.homeOwnerExemption === 'number' && r.homeOwnerExemption > 0 ? r.homeOwnerExemption : null;
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- MelloRoosNote is declared below, with the other page-4 parts.
   return (
     <>
       <SectionBar>{`PROPERTY TAX · ${fiscalYear(r.taxYear)}`}</SectionBar>
@@ -795,6 +801,9 @@ function TaxPage({ layer, subject, captured }: {
           ))}
         </>
       ) : null}
+
+      {/* A DISCLOSURE, not a data row — see MelloRoosNote. */}
+      <MelloRoosNote disclosure={melloRoosDisclosure(r.melloRoos, money)} />
 
       {r.supplementals.length > 0 ? (
         <View style={{ backgroundColor: BOX_BG, borderLeftWidth: 2.25, borderLeftColor: NAVY, padding: 9, marginTop: 12 }}>
@@ -892,4 +901,58 @@ function AssessedBar({ land, improvements }: { land: number | null; improvements
       <View style={{ width: `${100 - landPct}%`, backgroundColor: TYPE_COLOUR.mortgage }} />
     </View>
   );
+}
+
+/**
+ * The Mello-Roos disclosure block.
+ *
+ * A DISCLOSURE, not a data row, which is why it is a paragraph under its own
+ * heading rather than a line in the assessments table. Those same charges DO
+ * appear in that table as direct assessments; this says what they are.
+ *
+ * Wording is Jerry's and is assembled in melloRoosDisclosure() — see the note
+ * there for why it says "included in" rather than "in addition to", and why it
+ * does not predict when the term ends.
+ *
+ * ─── THE NAMES ARE STYLED, NEVER EDITED ─────────────────────────────────────
+ *
+ * They are the county's strings verbatim, so they arrive in capitals:
+ * "FC CFD 2021-1 IA-2 HEMET USD MELLO ROOS". Shortening them makes a district
+ * un-lookupable and title-casing turns that into "Fc Cfd 2021-1 Ia-2 Hemet Usd".
+ * So the characters stand and the loudness is answered here, with a smaller
+ * size and the muted ink — which is also how a reader sees at a glance that the
+ * names are quoted material rather than our prose.
+ */
+function MelloRoosNote({ disclosure }: { disclosure: MelloRoosDisclosure | null }) {
+  if (!disclosure) return null;
+  const { lead, names, body } = disclosure;
+  return (
+    <View style={{ backgroundColor: BOX_BG, borderLeftWidth: 2.25, borderLeftColor: ORANGE, padding: 9, marginTop: 12 }}>
+      <Text style={{ fontFamily: HEADING, fontWeight: 700, fontSize: 8.25, letterSpacing: 0.6, color: NAVY, marginBottom: 3.75 }}>
+        COMMUNITY FACILITIES DISTRICT (MELLO-ROOS)
+      </Text>
+      <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK, lineHeight: 1.5 }}>
+        {lead}
+        {names.length > 0 ? (
+          <>
+            {' '}
+            <Text style={{ fontSize: 8.25, color: MUTED }}>{joinDistricts(names)}</Text>
+            {'. '}
+          </>
+        ) : ' '}
+        {body}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * "A and B" / "A, B, and C". The serial comma is punctuation BETWEEN names, so
+ * it belongs to the sentence and not to any name — which is why this joins here
+ * rather than the names arriving pre-joined and unstylable.
+ */
+function joinDistricts(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
 }

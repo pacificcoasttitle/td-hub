@@ -25,7 +25,7 @@ import { db } from '../../src/lib/db/client';
 import { parseTitlePointTaxResult, melloRoosLines } from '../../src/lib/domain/concierge/titlepoint-tax-report';
 import { taxReportHasContent } from '../../src/lib/domain/concierge/document/derive';
 
-type Basis = 'stated' | 'verified' | 'unverifiable' | 'mismatch' | 'absent';
+type Basis = 'stated' | 'levy' | 'composed' | 'mismatch' | 'absent';
 
 async function main() {
   const rows = await db.execute(sql`
@@ -60,9 +60,9 @@ async function main() {
     const b = result.assessed.basis;
     basis.set(b, (basis.get(b) ?? 0) + 1);
 
-    if (b === 'mismatch' && result.assessed.expectedTax !== null && result.assessed.statedTax !== null) {
-      const e = result.assessed.expectedTax;
-      const s = result.assessed.statedTax;
+    if (b === 'mismatch' && result.assessed.impliedNet !== null && result.assessed.composedNet !== null) {
+      const e = result.assessed.impliedNet;
+      const s = result.assessed.composedNet;
       if (mismatches.length < 15) {
         mismatches.push({ id: row.id, expected: e, stated: s, off: `${(((e - s) / s) * 100).toFixed(1)}%` });
       }
@@ -77,7 +77,7 @@ async function main() {
   const pct = (n: number) => `${((n / parsed) * 100).toFixed(1)}%`;
 
   console.log('=== assessed total: what the guard decides ===');
-  for (const b of ['verified', 'mismatch', 'unverifiable', 'absent', 'stated'] as Basis[]) {
+  for (const b of ['levy', 'composed', 'mismatch', 'absent', 'stated'] as Basis[]) {
     const n = basis.get(b) ?? 0;
     console.log(`  ${b.padEnd(14)} ${String(n).padStart(5)}  ${pct(n)}`);
   }
@@ -90,9 +90,9 @@ async function main() {
   console.log(`  Mello-Roos line present    ${mello}  ${pct(mello)}`);
 
   if (mismatches.length > 0) {
-    console.log('\n=== mismatches: a split will print, no total (first 15) ===');
+    console.log('\n=== mismatches: county levy disagrees with land+improvements (first 15) ===');
     for (const m of mismatches) {
-      console.log(`  #${String(m.id).padEnd(7)} expected $${m.expected.toFixed(2).padStart(12)}  stated $${m.stated.toFixed(2).padStart(12)}  off ${m.off}`);
+      console.log(`  #${String(m.id).padEnd(7)} county net $${m.expected.toFixed(0).padStart(12)}  composed net $${m.stated.toFixed(0).padStart(12)}  off ${m.off}`);
     }
   }
   process.exit(0);

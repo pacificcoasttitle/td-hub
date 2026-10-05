@@ -310,9 +310,63 @@ nothing. This is about a guard that does not exist and is believed anyway. The
 first is a test you should not trust; the second is a test you should not
 believe in. Both present as coverage, and neither is.
 
+## 10 · When broken and correct produce the same output, check the other side
+
+`/api/concierge/prepared-for` returned an empty list for every operator on every
+keystroke from the day it shipped. Nobody could tell, for five days, because
+**an empty list is the honest answer for an operator with no history** — and
+with nine profiles in the system, that is the common case.
+
+The generate route writes `createdBy: session.email`. The suggestions route
+asked for `session.id`, a Supabase UUID. Measured on the real table: **0 rows
+matched the UUID, 9 matched the email.** Three names were sitting there the
+whole time.
+
+**This is a different flavour from the rest of this file.** Rules 2 and 4 are
+about checks that cannot fail. Rule 8 is about a tool reporting on the wrong
+environment. This is a defect whose output is a *legitimate value* — not an
+error, not a blank where a number should be, not a crash. The feature worked:
+the field called the endpoint, the endpoint authorised the session, ran its
+query and returned a valid, correct-looking `[]`.
+
+**The tell is that the failure mode and the common correct case are the same
+observation.** When "it is working and there is nothing to show" and "it is
+broken" produce identical output, no amount of looking at that output will
+separate them. You have to look somewhere else.
+
+So:
+
+- **Ask what the broken version would look like.** If the answer is "the same",
+  stop testing the output. The question has to move to the inputs — in this
+  case, *does anything in that table match what I am asking for?*, which is one
+  query and would have ended it.
+- **A defect in the gap between two components passes a test of either one.**
+  Both routes here were internally correct. The guard that catches it reads
+  BOTH and compares what one writes against what the other reads, so changing
+  either side fails even if somebody updates only one test:
+  ```
+  const written = /createdBy:\s*session\.(\w+)/.exec(generate)?.[1];
+  const queried = /preparedForSuggestions\(session\.(\w+)/.exec(suggest)?.[1];
+  expect(queried).toBe(written);
+  ```
+- **Prefer the design where empty is rare.** This list was scoped to one
+  operator, which made "legitimately empty" the normal state and gave the bug
+  somewhere to hide. Pooling it company-wide was argued on its merits, but it
+  also removes the camouflage: a list that should almost always have something
+  in it reports its own failure.
+- **An explanation can be confident and detailed and about nothing.** The
+  comment above the broken call explained at length why one rep must not see
+  another's client list, while the query matched nobody at all. A guard that
+  excludes everyone is not a strict guard; it is a broken query wearing a
+  guard's explanation. Rule 4 says prove a guard can fail — this says check it
+  can *pass*.
+
 ## The shape they share
 
 In every case the reassuring reading was available and cheap, and the
 disconfirming check was available and nearly as cheap. The habit worth keeping
 is not suspicion — it is asking *what would I see if this were broken?* before
 deciding it is not.
+
+Rule 10 is that question with the uncomfortable answer: sometimes you would see
+exactly what you are seeing now.

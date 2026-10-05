@@ -33,6 +33,12 @@ export interface PreparedForSuggestion {
  * same weight as the real one. Frequency demotes it without anyone having to
  * clean anything up.
  */
+/**
+ * @param createdBy the operator's EMAIL, because that is what
+ *   concierge_profiles.created_by holds — the generate route writes
+ *   `createdBy: session.email`. Passing session.id here matches nothing, which
+ *   is exactly what happened from 2026-09-30 to 2026-10-05.
+ */
 export async function preparedForSuggestions(
   createdBy: string,
   query: string,
@@ -50,7 +56,11 @@ export async function preparedForSuggestions(
     })
     .from(conciergeProfiles)
     .where(and(
-      eq(conciergeProfiles.createdBy, createdBy),
+      // Case-insensitive: an email that round-trips through a different
+      // identity provider can come back capitalised differently, and the
+      // failure mode of an exact match here is a silently empty list — which
+      // is precisely the failure this column already produced once.
+      sql`lower(${conciergeProfiles.createdBy}) = lower(${createdBy})`,
       isNotNull(conciergeProfiles.preparedForName),
       ne(conciergeProfiles.preparedForName, ''),
       // Matched anywhere, not just as a prefix: operators reach for a surname

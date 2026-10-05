@@ -16,11 +16,13 @@
  * IT WRITES TO PRODUCTION — a new PDF object and the pdf_* columns on the row —
  * so it lives here, committed, rather than being pasted into a shell.
  *
- *   npx tsx --env-file=.env.local scripts/audit/concierge-rerender.ts 9
+ *   npx tsx --env-file=.env.local scripts/audit/concierge-rerender.mts 9
  */
 import { eq } from 'drizzle-orm';
 import { db } from '../../src/lib/db/client';
-import { conciergeProfiles } from '../../src/lib/db/schema';
+// The concrete module, not the barrel: under ESM the barrel's re-exports do not
+// resolve here, which is the same reason concierge-render-preview.mts does it.
+import { conciergeProfiles } from '../../src/lib/db/schema/concierge';
 import { renderProfile } from '../../src/lib/domain/concierge/render';
 
 async function main() {

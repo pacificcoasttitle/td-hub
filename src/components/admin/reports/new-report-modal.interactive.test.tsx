@@ -29,9 +29,15 @@ function stubApi(over: Record<string, unknown> = {}) {
     '/api/concierge/profiles': { profileId: 9 },
     ...over,
   };
+  // LONGEST PREFIX WINS. Plain startsWith made '/api/concierge/profiles' swallow
+  // '/api/concierge/profiles/9/tax', so the tax route answered with the generate
+  // route's body — and a test asserting "two tax calls" passed because the stub
+  // had made the first one look unfinished. A stub that answers the wrong route
+  // is worse than no stub: every assertion downstream is about fiction.
+  const keys = Object.keys(bodies).sort((a, b) => b.length - a.length);
   const f = vi.fn(async (url: string, _init?: RequestInit) => {
     calls.push(url);
-    const key = Object.keys(bodies).find((k) => url.startsWith(k));
+    const key = keys.find((k) => url.startsWith(k));
     return { ok: true, json: async () => (key ? bodies[key] : {}) };
   });
   vi.stubGlobal('fetch', f);
@@ -107,18 +113,93 @@ describe('a ticked tax search cannot survive a cancel', () => {
     expect(calls.some((u) => u.includes('/tax'))).toBe(false);
   });
 
-  it('calls the tax route once, after the profile exists, when it is ticked', async () => {
-    const { calls } = stubApi();
+  it('buys the tax search then waits for it, after the profile exists', async () => {
+    // TWO calls to one route, and that is the design: the first buys the
+    // search, the second finishes it inside a request somebody is waiting on —
+    // rather than in a promise fired after the response, which is what died on
+    // profile 9. Measured median is 2.4s, so the wait is short.
+    // The real sequence: creating the search answers 'pending' — it has been
+    // accepted, not finished — and the second call is what polls and renders.
+    const calls: string[] = [];
+    let taxCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url.includes('/tax')) {
+        taxCalls += 1;
+        return taxCalls === 1
+          ? { ok: true, json: async () => ({ ok: true, taxStatus: 'pending', titlePointCharges: 1, message: 'running' }) }
+          : { ok: true, json: async () => ({ ok: true, taxStatus: 'ready', titlePointCharges: 0, message: 'done' }) };
+      }
+      if (url.startsWith('/api/concierge/access')) return { ok: true, json: async () => ({ canGenerate: true, featureOn: true }) };
+      if (url.startsWith('/api/reports/access')) return { ok: true, json: async () => ({ farming: false }) };
+      if (url.startsWith('/api/concierge/reps')) return { ok: true, json: async () => ({ reps: [{ id: 412, label: 'Justin Nouri', name: 'Justin Nouri', email: null, company: null, detail: null, hasLogin: true }] }) };
+      if (url.startsWith('/api/concierge/profiles')) return { ok: true, json: async () => ({ profileId: 9 }) };
+      return { ok: true, json: async () => ({}) };
+    }));
+
     await reachTheGate();
 
     fireEvent.click(taxBox());
     fireEvent.click(screen.getByRole('button', { name: /Generate profile/i }));
 
-    await waitFor(() => expect(calls.some((u) => u.includes('/tax'))).toBe(true));
+    await waitFor(() => expect(calls.filter((u) => u.includes('/tax'))).toHaveLength(2));
+    // Finished cleanly, so no notice and the modal is free to close.
+    expect(screen.queryByText(/taking longer than usual/i)).toBeNull();
 
     // The profile id from the generate response, not a guess — and AFTER it.
-    expect(calls.filter((u) => u.includes('/tax'))).toEqual(['/api/concierge/profiles/9/tax']);
+    expect(calls.filter((u) => u.includes('/tax')))
+      .toEqual(['/api/concierge/profiles/9/tax', '/api/concierge/profiles/9/tax']);
     expect(calls.indexOf('/api/concierge/profiles')).toBeLessThan(calls.findIndex((u) => u.includes('/tax')));
+  });
+
+  it('does not hold the operator when the search is already finished', async () => {
+    // A county with nothing on record answers 'empty' on the first call. There
+    // is nothing to wait for, so there is no second call and no spinner.
+    const { calls } = stubApi({
+      '/api/concierge/profiles/9/tax': { ok: true, taxStatus: 'empty', titlePointCharges: 1, message: 'no record' },
+    });
+    await reachTheGate();
+    fireEvent.click(taxBox());
+    fireEvent.click(screen.getByRole('button', { name: /Generate profile/i }));
+
+    await waitFor(() => expect(calls.some((u) => u.includes('/tax'))).toBe(true));
+    expect(calls.filter((u) => u.includes('/tax'))).toHaveLength(1);
+  });
+
+  it('stops waiting and says the document will update itself', async () => {
+    // The finish call never resolves. The operator must not be held, and must
+    // not be told the report failed — it did not, and the search is paid for.
+    let settle: (v: unknown) => void = () => {};
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url.includes('/tax')) {
+        const n = calls.filter((u) => u.includes('/tax')).length;
+        if (n === 1) return { ok: true, json: async () => ({ ok: true, taxStatus: 'pending', message: 'running' }) };
+        return new Promise((r) => { settle = r; });
+      }
+      if (url.startsWith('/api/concierge/access')) return { ok: true, json: async () => ({ canGenerate: true, featureOn: true }) };
+      if (url.startsWith('/api/reports/access')) return { ok: true, json: async () => ({ farming: false }) };
+      if (url.startsWith('/api/concierge/reps')) return { ok: true, json: async () => ({ reps: [{ id: 412, label: 'Justin Nouri', name: 'Justin Nouri', email: null, company: null, detail: null, hasLogin: true }] }) };
+      if (url.startsWith('/api/concierge/profiles')) return { ok: true, json: async () => ({ profileId: 9 }) };
+      return { ok: true, json: async () => ({}) };
+    }));
+
+    await reachTheGate();
+    fireEvent.click(taxBox());
+    fireEvent.click(screen.getByRole('button', { name: /Generate profile/i }));
+
+    // The spinner says what is happening, and claims no position — see the gate.
+    await waitFor(() => expect(screen.getByText(/Searching county tax records/i)).toBeTruthy());
+    expect(screen.queryByRole('progressbar')).toBeNull();
+
+    // The ceiling is 15s of real time, so rather than wait it out, let the
+    // request fail the way an abort does and assert the handling.
+    settle({ ok: false, status: 504, json: async () => null });
+    await waitFor(() => expect(screen.getByText(/taking longer than usual/i)).toBeTruthy());
+    expect(screen.getByText(/will finish on its own/i)).toBeTruthy();
+    // Not reported as a failed report, because it is not one.
+    expect(screen.getByText('The profile was created. The tax search was not started.')).toBeTruthy();
   });
 
   it('says so when the tax search could not be started, instead of closing silently', async () => {

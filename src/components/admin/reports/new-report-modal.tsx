@@ -428,6 +428,8 @@ export function NewReportModal({ onClose, onCreated }: {
    * gets that something they asked for did not happen.
    */
   const [taxProblem, setTaxProblem] = useState<string | null>(null);
+  /** Holding the gate open while the county is searched. See confirm(). */
+  const [taxWaiting, setTaxWaiting] = useState(false);
   const [gateOpen, setGateOpen] = useState(false);
   const [spend, setSpend] = useState<{ thisMonth: number; allTime: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -586,30 +588,41 @@ export function NewReportModal({ onClose, onCreated }: {
       // and complete without page 4. So this reports that the tax search could
       // not be STARTED, and leaves the profile alone.
       if (taxDetail) {
-        try {
-          const taxRes = await fetch(`/api/concierge/profiles/${profileId}/tax`, {
-            method: 'POST',
-            // Survives the unmount that follows, so the request cannot be
-            // cancelled by the very close it precedes.
-            keepalive: true,
-          });
-          const taxBody = await taxRes.json().catch(() => null);
-          if (!taxRes.ok || taxBody?.ok === false) {
+        const started = await startTaxSearch(profileId);
+        if (!started.ok) {
+          onCreated(profileId);
+          // THE GATE HAS TO GO FIRST. It is a fixed overlay, so leaving it up
+          // would put this notice behind the very dialog the operator just
+          // confirmed — a silent failure dressed as a visible one. Caught by
+          // the test, which found "row in Reports" twice on screen.
+          setGateOpen(false);
+          setTaxProblem(started.message);
+          return;
+        }
+
+        // ─── Wait for it, because it is quick ───────────────────────────────
+        //
+        // Measured over 405 completed searches: median 2.4s, p90 3.8s, max
+        // 11.8s, and 100% inside 15 seconds. Handing over a report whose tax
+        // page is about to change, three seconds before it changes, is how
+        // Gerard ended up with a document that did not match its own status.
+        //
+        // Calling the route AGAIN is what finishes it: the first call buys the
+        // search, the second polls and re-renders inside the request, so the
+        // work happens where somebody is waiting rather than in a promise that
+        // can be frozen. It cannot buy a second search.
+        if (started.status === 'pending') {
+          setTaxWaiting(true);
+          const done = await finishTaxSearch(profileId);
+          setTaxWaiting(false);
+          if (!done.ok) {
+            // NOT AN ERROR. The search is paid for and the sweeper will finish
+            // it; the operator simply should not be held any longer.
             onCreated(profileId);
-            // THE GATE HAS TO GO FIRST. It is a fixed overlay, so leaving it up
-            // would put this notice behind the very dialog the operator just
-            // confirmed — a silent failure dressed as a visible one. Caught by
-            // the test, which found "row in Reports" twice on screen.
             setGateOpen(false);
-            setTaxProblem(taxBody?.message
-              ?? `The tax search could not be started (${taxRes.status}). You can add tax detail from the report’s row in Reports.`);
+            setTaxProblem(done.message);
             return;
           }
-        } catch {
-          onCreated(profileId);
-          setGateOpen(false);
-          setTaxProblem('The request did not reach the server, so no tax search was started and nothing was charged for one. You can add tax detail from the report’s row in Reports.');
-          return;
         }
       }
 
@@ -777,6 +790,7 @@ export function NewReportModal({ onClose, onCreated }: {
           submitting={submitting}
           error={error}
           taxDetail={taxDetail}
+          taxWaiting={taxWaiting}
           onTaxDetail={setTaxDetail}
           onPreparedForName={setPreparedForName}
           onPreparedForCompany={setPreparedForCompany}
@@ -786,4 +800,85 @@ export function NewReportModal({ onClose, onCreated }: {
       ) : null}
     </>
   );
+}
+
+// ─── The tax search, from the browser's side ────────────────────────────────
+//
+// Two calls to one route. The first buys the search; the second finishes it.
+// Both are the same endpoint because finishing is what asking again DOES — a
+// search already paid for is polled and re-rendered, never re-bought.
+
+interface TaxStep { ok: boolean; status?: string; message: string }
+
+/** Buy it. Fast — this returns as soon as TitlePoint has accepted the search. */
+async function startTaxSearch(profileId: number): Promise<TaxStep> {
+  try {
+    const res = await fetch(`/api/concierge/profiles/${profileId}/tax`, {
+      method: 'POST',
+      // Survives an unmount, so a close cannot cancel a request that spends.
+      keepalive: true,
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || body?.ok === false) {
+      return {
+        ok: false,
+        message: body?.message
+          ?? `The tax search could not be started (${res.status}). You can add tax detail from the report’s row in Reports.`,
+      };
+    }
+    return { ok: true, status: String(body?.taxStatus ?? 'pending'), message: '' };
+  } catch {
+    return {
+      ok: false,
+      message: 'The request did not reach the server, so no tax search was started and nothing was charged for one. You can add tax detail from the report’s row in Reports.',
+    };
+  }
+}
+
+/**
+ * Finish it, with a ceiling on how long an operator is held.
+ *
+ * FIFTEEN SECONDS, from the measurement: 405 completed searches, median 2.4s,
+ * p90 3.8s, max 11.8s — every one of them inside fifteen. So the cap is past
+ * the worst case we have ever recorded rather than a round number, and hitting
+ * it means something genuinely unusual.
+ *
+ * GIVING UP IS NOT FAILING. The search is bought and stored either way, and
+ * concierge.tax_finish sweeps whatever is outstanding. All this decides is
+ * whether the operator waits.
+ */
+const TAX_WAIT_CEILING_MS = 15_000;
+
+async function finishTaxSearch(profileId: number): Promise<TaxStep> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), TAX_WAIT_CEILING_MS);
+  try {
+    const res = await fetch(`/api/concierge/profiles/${profileId}/tax`, {
+      method: 'POST',
+      signal: ac.signal,
+    });
+    const body = await res.json().catch(() => null);
+    const status = String(body?.taxStatus ?? '');
+    if (status === 'ready' || status === 'empty') return { ok: true, status, message: '' };
+    if (status === 'denied') {
+      return {
+        ok: false, status,
+        message: body?.message ?? 'This county is not entitled for tax searches, so nothing was charged. The profile is complete without page 4.',
+      };
+    }
+    return {
+      ok: false, status,
+      message: body?.message
+        ?? 'The tax search is taking longer than usual. It is paid for and will finish on its own — the document updates itself, and the report’s row shows where it is.',
+    };
+  } catch {
+    // Includes the abort. Deliberately the same message: from the operator's
+    // side "still going" and "I stopped waiting" are the same fact.
+    return {
+      ok: false,
+      message: 'The tax search is taking longer than usual. It is paid for and will finish on its own — the document updates itself, and the report’s row shows where it is.',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }

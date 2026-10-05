@@ -27,8 +27,33 @@ const SEARCH_TYPE_DOC_CATEGORY: Record<TitlePointSearchType, string> = {
   tax: 'tax',
 };
 
-const POLL_MAX_ATTEMPTS = 3;
-const POLL_INTERVAL_MS = 5_000;
+// ─── Polling cadence ────────────────────────────────────────────────────────
+//
+// WAS 3 ATTEMPTS AT 5 SECONDS. Measured over 405 completed tax searches, the
+// result is in hand at a median of 2.4s and a p90 of 3.8s — but the durations
+// land on a five-second grid, because that was the interval, not because that
+// is how long TitlePoint takes. A search ready in under a second still waited
+// five. Gerard's own search took 9.2s: the data was almost certainly sitting
+// there at four, and it waited for the second poll.
+//
+// THE BIMODAL SHAPE WAS OURS. 1.5s x 10 keeps the same window — (3-1) x 5s =
+// 10s of polling becomes (10-1) x 1.5s = 13.5s — and the same 60s hard
+// deadline, while letting a fast search finish fast.
+//
+// MORE ATTEMPTS IS MORE HTTP, and worth being honest about: a search that needs
+// the whole window now makes ten status calls instead of three. The volume
+// barely moves in practice — historically 4,040 get_request_summaries against
+// 4,203 create_service, so very nearly every search resolves on its FIRST poll
+// and never reaches the second. Status checks are not the billable unit either;
+// billing attaches to the search, which is why a denied county issues no
+// request id and costs nothing. That is inference from the denial evidence
+// rather than something an invoice has confirmed, so it is worth a glance at
+// the next TitlePoint bill.
+//
+// SHARED WITH THE ORDER FLOW. executePipeline drives pre-initiate's tax and
+// legal_vesting searches as well as the Concierge bridge; both poll faster now.
+const POLL_MAX_ATTEMPTS = 10;
+const POLL_INTERVAL_MS = 1_500;
 const PIPELINE_TIMEOUT_MS = 60_000;
 
 // ─── Initiate Search ────────────────────────────────────────────────────────

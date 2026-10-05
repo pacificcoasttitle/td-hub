@@ -33,6 +33,10 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/jobs/run?name=concierge.tax_finish",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/jobs/run?name=notifications.process_outbox",
       "schedule": "*/1 * * * *"
     },

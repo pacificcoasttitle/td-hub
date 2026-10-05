@@ -208,12 +208,23 @@ export async function requestTaxDetail(profileId: number): Promise<TaxDetailOutc
     titlePointCharges: 1,
   }).where(eq(conciergeProfiles.id, profileId));
 
-  // Background. The caller gets its answer now; page 4 appears when this lands.
-  void finishTaxDetail(profileId, record!.id, tp.requestId).catch(async (err) => {
-    await db.update(conciergeProfiles).set({
-      taxDetailError: (err instanceof Error ? err.message : 'Tax pipeline failed').slice(0, 2000),
-    }).where(eq(conciergeProfiles.id, profileId));
-  });
+  // ─── NOTHING IS KICKED OFF AFTER THE RESPONSE ─────────────────────────────
+  //
+  // This used to be `void finishTaxDetail(...)` — work started here and left to
+  // run after the route had answered. A serverless function is free to freeze
+  // once it has answered, and on profile 9 it did: the DB write survived and the
+  // render did not, leaving a profile marked ready with a document written five
+  // seconds before its own search started. The promise that would have reported
+  // the problem was the promise that died.
+  //
+  // Finishing now happens where somebody is waiting for it:
+  //   - the caller asks again, and finishTaxDetail runs inside THAT request —
+  //     the modal does this while showing a spinner, and a search resolves in
+  //     a median 2.4s;
+  //   - and concierge.tax_finish sweeps anything still outstanding, so a closed
+  //     tab or a failed render cannot strand a search that was paid for.
+  //
+  // Both are idempotent and free. Neither can start a second search.
 
   return {
     ok: true, profileId, status: 'pending', titlePointCharges: 1, requestId: tp.requestId,

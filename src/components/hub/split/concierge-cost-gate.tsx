@@ -41,6 +41,8 @@ export interface CostGateProps {
   /** Opt-in, and it is a second billable search. Default off. */
   taxDetail: boolean;
   onTaxDetail: (v: boolean) => void;
+  /** The profile is made and the county is being searched. */
+  taxWaiting?: boolean;
   onPreparedForName: (v: string) => void;
   onPreparedForCompany: (v: string) => void;
   onCancel: () => void;
@@ -162,6 +164,33 @@ export function ConciergeCostGate(p: CostGateProps) {
               </span>
             </span>
           </label>
+
+          {/* ─── A SPINNER, NOT A PROGRESS BAR ──────────────────────────────
+              We do not know how far along it is. A bar would have to invent a
+              position, and the real distribution would make it lie twice: most
+              searches finish in about two seconds, so the bar would jump
+              straight to done, and the slow ones would sit at a number that
+              means nothing. A spinner claims only what is true — this is
+              running.
+
+              It says what it is doing and that the money is already spent, so
+              nobody reads the wait as "still deciding". */}
+          {p.taxWaiting ? (
+            <div className="flex items-start gap-2.5 rounded-md border border-[#EDEFF3] bg-[#FAFAFB] px-3 py-2.5">
+              <span
+                aria-hidden="true"
+                className="mt-[2px] h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[#E5E5E5] border-t-brand-orange"
+              />
+              <span className="text-[11.5px] text-[#3C4557]" role="status">
+                <strong className="font-semibold">Searching county tax records…</strong>
+                <span className="mt-[2px] block text-[10.5px] text-[#6B7280]">
+                  The profile is created and the search is paid for. This usually takes a few
+                  seconds; if it runs long we will stop waiting and the document will update
+                  itself when it lands.
+                </span>
+              </span>
+            </div>
+          ) : null}
 
           {p.error && (
             <p className="text-[11.5px] text-[#8E2A1E] bg-[#FDECEA] border border-[#F2C4BD] rounded-md px-3 py-2">

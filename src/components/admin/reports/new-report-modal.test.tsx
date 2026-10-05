@@ -357,10 +357,21 @@ describe('the modal as wired', () => {
     // fourth entry has to be justified the same way.
     const s = src();
     const posts = [...s.matchAll(/fetch\((['`])([^'`]+)\1,\s*\{[^}]*method: 'POST'/g)].map((m) => m[2]);
+    // THE TAX ROUTE APPEARS TWICE and that is the design, not a duplicate: the
+    // first call buys the search, the second finishes it. Finishing IS asking
+    // again — the route polls a search already paid for and re-renders — and it
+    // cannot buy a second one, which routes.test.ts holds on the bridge itself.
     expect(posts.sort()).toEqual([
       '/api/concierge/profiles',
-      '/api/reports/farming',
       '/api/concierge/profiles/${profileId}/tax',
+      '/api/concierge/profiles/${profileId}/tax',
+      '/api/reports/farming',
+    ].sort());
+    // Distinct destinations, so a fourth URL still has to be justified here.
+    expect([...new Set(posts)].sort()).toEqual([
+      '/api/concierge/profiles',
+      '/api/concierge/profiles/${profileId}/tax',
+      '/api/reports/farming',
     ].sort());
   });
 

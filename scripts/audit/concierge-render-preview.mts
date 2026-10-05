@@ -83,6 +83,16 @@ async function loadImage(key: string | null): Promise<string | null> {
   const { renderToBuffer } = await import('@react-pdf/renderer');
   const buf = await renderToBuffer(ProfileDocument({
     subject, tax, transfers, filter, metrics, criteria: applied,
+    // PAGE 4, LAYER 1. This was missing from 2026-09-30, when renderProfile
+    // gained it, until 2026-10-05 — while the docblock above went on claiming
+    // this script "mirrors renderProfile() exactly".
+    //
+    // It cost a wrong diagnosis. Profile 9 HAS a stored TitlePoint report with
+    // a rate, a rate area and nine assessments; this preview rendered the thin
+    // SiteX page and was read as evidence that the data had not arrived. A tool
+    // whose whole job is to be evidence about the renderer has to BE the
+    // renderer's input, or it reports on something else and says it did not.
+    taxReport: (profile.taxReport as Parameters<typeof ProfileDocument>[0]['taxReport']) ?? null,
     compMapImage: await loadImage(profile.compMapStorageKey),
     platMapImage: await loadImage(profile.platmapStorageKey),
     platMapStatus: profile.platmapStatus,

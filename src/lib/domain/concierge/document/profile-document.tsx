@@ -314,7 +314,12 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         {/* CENTRED VERTICALLY, not top-padded. The build pinned the three
             lines to a 29 pt top pad inside a 241.5 pt block, which left the
             lower two-thirds empty. v6 centres them. */}
-        <View style={{ marginTop: -72, width: 560, height: 241.5, backgroundColor: NAVY, justifyContent: 'center', paddingHorizontal: SIDE }}>
+        {/* FULL BLEED. The spec said 560pt and the page is 612, which left
+            52 points of photograph showing down the right edge of both navy
+            blocks — read on the proof as the block "stopping short". The
+            blocks are meant to run off the edge, so they run off the edge.
+            SIDE padding keeps the text where it was. */}
+        <View style={{ marginTop: -72, width: '100%', height: 241.5, backgroundColor: NAVY, justifyContent: 'center', paddingHorizontal: SIDE }}>
           <Text style={{ fontFamily: HEADING, fontWeight: 700, fontSize: 11.25, color: ORANGE, letterSpacing: 2 }}>
             CONCIERGE PROPERTY PROFILE
           </Text>
@@ -330,7 +335,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             and phone as separate lines at 75% opacity; v6 joins them with
             " · " and keeps them white. Columns centre vertically in whatever
             height is left, with a 30 pt gap — marginRight, never flex gap. */}
-        <View style={{ width: 530, flexGrow: 1, backgroundColor: COVER_PANEL, paddingHorizontal: SIDE, flexDirection: 'row', alignItems: 'center' }}>
+        <View style={{ width: '100%', flexGrow: 1, backgroundColor: COVER_PANEL, paddingHorizontal: SIDE, flexDirection: 'row', alignItems: 'center' }}>
           <View style={{ flex: 1, marginRight: 30 }}>
             <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 8.25, color: PREPARED_LABEL, letterSpacing: 1 }}>PREPARED FOR</Text>
             <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 14.25, color: '#FFFFFF', marginTop: 7 }}>

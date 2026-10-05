@@ -50,6 +50,15 @@ export function taxOffer(status: string | null): {
         note: 'Already paid for. Checking finishes it and costs nothing; it never starts a second search.',
         tone: 'default',
       };
+    case 'fetched':
+      // The data is here and the document is not showing it yet. This is the
+      // state profile 9 was silently in while reporting itself as ready.
+      return {
+        kind: 'finish',
+        label: 'Tax detail ready — add it to the document',
+        note: 'The search is done and paid for. This re-renders the document to show page 4 and costs nothing.',
+        tone: 'default',
+      };
     case 'empty':
       return { kind: 'none', label: 'No county tax record', note: 'The search ran and found nothing for this parcel. Page 4 shows the assessment detail we already hold.', tone: 'muted' };
     case 'denied':

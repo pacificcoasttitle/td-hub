@@ -56,7 +56,13 @@ import { renderProfile } from './render';
 /** TitlePoint's own words when a county is not entitled. */
 const DENIAL = /access is currently denied/i;
 
-export type TaxDetailStatus = 'pending' | 'ready' | 'empty' | 'denied' | 'failed';
+/**
+ * `fetched` sits between `pending` and `ready`: the search is paid for and its
+ * result is stored, but the document has not been re-rendered yet. It exists
+ * because `ready` used to mean "the data arrived", which an operator cannot
+ * check — the only thing they can check is the document.
+ */
+export type TaxDetailStatus = 'pending' | 'fetched' | 'ready' | 'empty' | 'denied' | 'failed';
 
 export interface TaxDetailOutcome {
   ok: boolean;
@@ -99,7 +105,10 @@ export async function requestTaxDetail(profileId: number): Promise<TaxDetailOutc
   }
 
   // ALREADY PAID. Finish it; never create a second search.
-  if (profile.taxDetailStatus === 'pending' && profile.titlePointDataId) {
+  //
+  // 'fetched' joins 'pending' here: the search is bought and its result stored,
+  // and only the re-render is outstanding. Both finish for nothing.
+  if ((profile.taxDetailStatus === 'pending' || profile.taxDetailStatus === 'fetched') && profile.titlePointDataId) {
     return finishTaxDetail(profileId, profile.titlePointDataId, profile.titlePointRequestId);
   }
 
@@ -257,8 +266,25 @@ export async function finishTaxDetail(
 
   const hasContent = taxReportHasContent(parsed.report);
 
+  // ─── 'fetched', NOT 'ready', until the document actually shows it ─────────
+  //
+  // Profile 9 is why. The tax search ran, the report stored, the status went
+  // straight to 'ready' — and the PDF on file was written five seconds BEFORE
+  // the search even started, because the re-render after it never took effect.
+  // Status said done, the document was the thin SiteX page, and nothing
+  // anywhere disagreed. Gerard ticked the box, got the data, and could not see
+  // it.
+  //
+  // The likely mechanism is the background promise: this runs after the route
+  // has already answered, and a serverless function is free to be frozen once
+  // it has. The DB write survived; the render — download the payload, lay out
+  // eight pages, upload — did not.
+  //
+  // So 'ready' now means "on the document", which is the only thing an operator
+  // can check. The row action offers to finish a 'fetched' profile, free,
+  // exactly as it does a timed-out one, and finishing is idempotent.
   await db.update(conciergeProfiles).set({
-    taxDetailStatus: hasContent ? 'ready' : 'empty',
+    taxDetailStatus: hasContent ? 'fetched' : 'empty',
     // The NORMALIZED report only. The raw stays in title_point_data — see
     // migration 0062 for why that boundary is not cosmetic.
     taxReport: hasContent ? (parsed.report as unknown as Record<string, unknown>) : null,
@@ -267,20 +293,38 @@ export async function finishTaxDetail(
     taxDetailError: null,
   }).where(eq(conciergeProfiles.id, profileId));
 
-  // The free re-render. This is what makes page 4 appear without anyone
-  // clicking anything, and it spends nothing: renderProfile reads the stored
-  // payload and never calls a vendor.
+  if (!hasContent) {
+    return {
+      ok: true, profileId, status: 'empty', titlePointCharges: 0, requestId,
+      message: 'The tax search ran and the county holds no record for this parcel. Page 4 will show the assessment detail we already hold.',
+    };
+  }
+
+  // The free re-render. This is what puts page 4 on the document, and it spends
+  // nothing: renderProfile reads the stored payload and never calls a vendor.
   const rendered = await renderProfile(profileId);
 
+  if (!rendered.ok) {
+    // STAYS 'fetched', and the reason is RECORDED. The previous version
+    // returned this message to a caller that was a background promise with
+    // nobody listening, so a failed render left a profile marked 'ready' with a
+    // stale document and no trace of why.
+    await db.update(conciergeProfiles).set({
+      taxDetailError: `Tax detail stored, but the document could not be re-rendered: ${rendered.message}`.slice(0, 2000),
+    }).where(eq(conciergeProfiles.id, profileId));
+    return {
+      ok: false, profileId, status: 'fetched', titlePointCharges: 0, requestId,
+      message: `The tax detail is stored and paid for, but the document was not re-rendered: ${rendered.message} Asking again finishes it and costs nothing.`,
+    };
+  }
+
+  await db.update(conciergeProfiles).set({
+    taxDetailStatus: 'ready',
+    taxDetailError: null,
+  }).where(eq(conciergeProfiles.id, profileId));
+
   return {
-    ok: true, profileId,
-    status: hasContent ? 'ready' : 'empty',
-    titlePointCharges: 0,
-    requestId,
-    message: hasContent
-      ? (rendered.ok
-        ? 'The tax detail is on the profile and page 4 has been added. Nothing further was charged.'
-        : `The tax detail is stored, but the re-render failed: ${rendered.message}`)
-      : 'The tax search ran and the county holds no record for this parcel. Page 4 will show the assessment detail we already hold.',
+    ok: true, profileId, status: 'ready', titlePointCharges: 0, requestId,
+    message: 'The tax detail is on the profile and page 4 has been added. Nothing further was charged.',
   };
 }

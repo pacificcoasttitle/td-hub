@@ -348,8 +348,14 @@ describe('the cover never shows the comparables map', () => {
 // sentence that never leaves the function is not a disclosure.
 
 describe('the Mello-Roos disclosure', () => {
+  // The county's strings exactly, as the parser now yields them — suffix, caps
+  // and all. Using tidied names here would test a shape the parser never emits.
   const THREE = {
-    districts: ['FC CFD 2021-1 IA-2 HEMET USD', 'FC CFD 2021-02 HERITAGE POINTE', 'HEMET CFD 2005-1 PUB SAFETY SERV'],
+    districts: [
+      'FC CFD 2021-1 IA-2 HEMET USD MELLO ROOS',
+      'FC CFD 2021-02 HERITAGE POINTE MELLO ROOS',
+      'HEMET CFD 2005-1 PUB SAFETY SERV MELLO-ROOS',
+    ],
     total: 3625.58,
   };
 

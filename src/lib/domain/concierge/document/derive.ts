@@ -351,14 +351,32 @@ function joinNames(names: readonly string[]): string {
 }
 
 /**
- * The disclosure paragraph, or null when the parcel is in no district.
+ * The disclosure, in three parts, or null when the parcel is in no district.
+ *
+ * ─── WHY IT IS NOT ONE STRING ───────────────────────────────────────────────
+ *
+ * The district names are the county's, verbatim, which means SCREAMING CAPS in
+ * the middle of a sentence. The ruling is that the characters do not change and
+ * the loudness is handled by styling — so the names have to be separable from
+ * the prose to carry a style of their own. Returning one string would force the
+ * document to find them again by substring, which breaks the moment a district
+ * is called something that also appears in the sentence.
  *
  * `money` is passed in so this module stays free of the document's formatters.
  */
+export interface MelloRoosDisclosure {
+  /** Up to and including the colon, or the full stop when nothing is named. */
+  lead: string;
+  /** The county's strings, verbatim. Empty when none could be read. */
+  names: string[];
+  /** From "Special taxes totalling…" to the end. */
+  body: string;
+}
+
 export function melloRoosDisclosure(
   mello: { districts: readonly string[]; total: number } | null | undefined,
   money: (n: number) => string,
-): string | null {
+): MelloRoosDisclosure | null {
   if (!mello || mello.total <= 0) return null;
 
   const n = mello.districts.length;
@@ -366,23 +384,40 @@ export function melloRoosDisclosure(
   // count comes from the LINES, not from the names we managed to read.
   const named = mello.districts.filter((d) => d.trim() !== '');
   const amount = money(mello.total);
+  const complete = named.length === n && n > 0;
 
   if (n <= 1) {
-    const where = named.length === 1
-      ? `a Community Facilities District: ${named[0]}`
-      : 'a Community Facilities District';
-    return `This parcel lies within ${where}. A special tax of ${amount} is included in the annual property tax shown above, in addition to the base property tax. `
-      + 'These districts fund local infrastructure and services such as schools, roads and utilities, and the special tax runs for a fixed term set when the district was formed. '
-      + 'The county tax collector can confirm the term and current balance.';
+    return {
+      lead: complete ? 'This parcel lies within a Community Facilities District:' : 'This parcel lies within a Community Facilities District.',
+      names: complete ? [named[0]!] : [],
+      body: `A special tax of ${amount} is included in the annual property tax shown above, in addition to the base property tax. `
+        + 'These districts fund local infrastructure and services such as schools, roads and utilities, and the special tax runs for a fixed term set when the district was formed. '
+        + 'The county tax collector can confirm the term and current balance.',
+    };
   }
 
   const count = COUNT_WORDS[n] ?? String(n);
-  const where = named.length === n
-    ? `${count} Community Facilities Districts: ${joinNames(named)}`
-    : `${count} Community Facilities Districts`;
-  return `This parcel lies within ${where}. Special taxes totalling ${amount} are included in the annual property tax shown above, in addition to the base property tax. `
-    + 'These districts fund local infrastructure and services such as schools, roads and utilities, and each special tax runs for a fixed term set when its district was formed. '
-    + 'The county tax collector can confirm the term and current balance.';
+  return {
+    lead: complete
+      ? `This parcel lies within ${count} Community Facilities Districts:`
+      : `This parcel lies within ${count} Community Facilities Districts.`,
+    names: complete ? [...named] : [],
+    body: `Special taxes totalling ${amount} are included in the annual property tax shown above, in addition to the base property tax. `
+      + 'These districts fund local infrastructure and services such as schools, roads and utilities, and each special tax runs for a fixed term set when its district was formed. '
+      + 'The county tax collector can confirm the term and current balance.',
+  };
+}
+
+/**
+ * The same thing as one string, for assertions and any caller with nowhere to
+ * put a second style. The serial comma lives here because it is punctuation
+ * between names, not part of a name.
+ */
+export function melloRoosText(d: MelloRoosDisclosure | null): string | null {
+  if (!d) return null;
+  return d.names.length > 0
+    ? `${d.lead} ${joinNames(d.names)}. ${d.body}`
+    : `${d.lead} ${d.body}`;
 }
 
 export type TaxLayer =

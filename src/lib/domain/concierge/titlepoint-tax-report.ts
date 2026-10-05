@@ -179,29 +179,32 @@ const isMello = (o: Record<string, unknown>): boolean =>
   String(o.IsMelloRoos ?? o.isMelloRoos ?? '').toLowerCase() === 'true';
 
 /**
- * The district's name, as the county writes it, minus the redundant marker.
+ * The district's name: THE COUNTY'S STRING, EXACTLY. Caps and all.
  *
- * KEPT VERBATIM OTHERWISE, and that is a deliberate limit. The county's string
- * is "FC CFD 2021-1 IA-2 HEMET USD MELLO ROOS"; the trailing "MELLO ROOS" is
- * dropped because the block it appears under is already headed Mello-Roos, and
- * nothing else is touched.
+ * ─── Ruled 2026-10-05, and it overrides two earlier drafts ──────────────────
  *
- * WHY NOT TIDY IT FURTHER. A homeowner reads this in order to look the district
- * up, so the name has to match what the county calls it. Shortening
- * "HEMET CFD 2005-1 PUB SAFETY SERV" to "Hemet CFD 2005-1" reads better and is
- * an editorial judgement about which words are the name — get it wrong and the
- * document names a district that cannot be found. Three worked examples do not
- * generalise into a rule, so this does the part that is mechanical and leaves
- * the rest alone.
+ * A homeowner reads this in order to look the district up, so the characters
+ * have to be the county's. Every transformation that read better turned out to
+ * break that:
+ *
+ *   SHORTENING makes it un-lookupable. "HEMET CFD 2005-1 PUB SAFETY SERV" to
+ *   "Hemet CFD 2005-1" is an editorial judgement about which words are the
+ *   name, and three worked examples do not generalise into a rule.
+ *
+ *   TITLE-CASING mangles it. "FC CFD 2021-1 IA-2 HEMET USD" becomes
+ *   "Fc Cfd 2021-1 Ia-2 Hemet Usd".
+ *
+ *   EVEN DROPPING THE TRAILING "MELLO ROOS" is a change to the characters. The
+ *   second draft did that, on the reasoning that it is redundant under a block
+ *   already headed Mello-Roos. It is redundant, and it is still the county's
+ *   string, and redundant is not a reason to edit a identifier somebody will
+ *   type into a search box.
+ *
+ * The caps are loud in a paragraph. That is a STYLING problem and it is solved
+ * in the document — the names render smaller and muted — not by touching this.
  */
 function districtName(o: Record<string, unknown>): string | null {
-  const raw = str(o.Description ?? o.description);
-  if (!raw) return null;
-  const cleaned = raw
-    .replace(/\s*MELLO[\s-]*ROOS\s*/i, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned === '' ? raw : cleaned;
+  return str(o.Description ?? o.description);
 }
 
 /** Fixed-dollar charges only — what "direct assessment" means on a CA bill. */

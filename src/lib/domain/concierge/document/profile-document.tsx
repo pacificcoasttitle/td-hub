@@ -6,7 +6,7 @@ import type { NormalizedSubject, NormalizedTax, NormalizedTransfer } from '../no
 import {
   acres, currentVestingDeed, melloRoosDisclosure, parseLegal, parseOwners, resolveTaxLayer, transferCounts,
 } from './derive';
-import type { NormalizedTaxReport, TaxLayer } from './derive';
+import type { MelloRoosDisclosure, NormalizedTaxReport, TaxLayer } from './derive';
 import { PCT_COVER_PHOTO, PCT_LOGO_WHITE } from './brand-assets';
 import { BODY, HEADING, registerDocumentFonts } from './fonts';
 import {
@@ -739,6 +739,7 @@ function TaxPage({ layer, subject, captured }: {
 
   const r = layer.report;
   const exemption = typeof r.homeOwnerExemption === 'number' && r.homeOwnerExemption > 0 ? r.homeOwnerExemption : null;
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- MelloRoosNote is declared below, with the other page-4 parts.
   return (
     <>
       <SectionBar>{`PROPERTY TAX · ${fiscalYear(r.taxYear)}`}</SectionBar>
@@ -796,24 +797,8 @@ function TaxPage({ layer, subject, captured }: {
         </>
       ) : null}
 
-      {/* ─── Mello-Roos ────────────────────────────────────────────────────
-          A DISCLOSURE, not a data row, which is why it is a paragraph under its
-          own heading rather than a line in the table above. Those same charges
-          DO appear in the table as direct assessments; this says what they are.
-
-          Wording is Jerry's and is assembled in melloRoosDisclosure() — see the
-          note there for why it says "included in" rather than "in addition to",
-          and why it does not predict when the term ends. */}
-      {melloRoosDisclosure(r.melloRoos, money) ? (
-        <View style={{ backgroundColor: BOX_BG, borderLeftWidth: 2.25, borderLeftColor: ORANGE, padding: 9, marginTop: 12 }}>
-          <Text style={{ fontFamily: HEADING, fontWeight: 700, fontSize: 8.25, letterSpacing: 0.6, color: NAVY, marginBottom: 3.75 }}>
-            COMMUNITY FACILITIES DISTRICT (MELLO-ROOS)
-          </Text>
-          <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK, lineHeight: 1.5 }}>
-            {melloRoosDisclosure(r.melloRoos, money)}
-          </Text>
-        </View>
-      ) : null}
+      {/* A DISCLOSURE, not a data row — see MelloRoosNote. */}
+      <MelloRoosNote disclosure={melloRoosDisclosure(r.melloRoos, money)} />
 
       {r.supplementals.length > 0 ? (
         <View style={{ backgroundColor: BOX_BG, borderLeftWidth: 2.25, borderLeftColor: NAVY, padding: 9, marginTop: 12 }}>
@@ -911,4 +896,58 @@ function AssessedBar({ land, improvements }: { land: number | null; improvements
       <View style={{ width: `${100 - landPct}%`, backgroundColor: TYPE_COLOUR.mortgage }} />
     </View>
   );
+}
+
+/**
+ * The Mello-Roos disclosure block.
+ *
+ * A DISCLOSURE, not a data row, which is why it is a paragraph under its own
+ * heading rather than a line in the assessments table. Those same charges DO
+ * appear in that table as direct assessments; this says what they are.
+ *
+ * Wording is Jerry's and is assembled in melloRoosDisclosure() — see the note
+ * there for why it says "included in" rather than "in addition to", and why it
+ * does not predict when the term ends.
+ *
+ * ─── THE NAMES ARE STYLED, NEVER EDITED ─────────────────────────────────────
+ *
+ * They are the county's strings verbatim, so they arrive in capitals:
+ * "FC CFD 2021-1 IA-2 HEMET USD MELLO ROOS". Shortening them makes a district
+ * un-lookupable and title-casing turns that into "Fc Cfd 2021-1 Ia-2 Hemet Usd".
+ * So the characters stand and the loudness is answered here, with a smaller
+ * size and the muted ink — which is also how a reader sees at a glance that the
+ * names are quoted material rather than our prose.
+ */
+function MelloRoosNote({ disclosure }: { disclosure: MelloRoosDisclosure | null }) {
+  if (!disclosure) return null;
+  const { lead, names, body } = disclosure;
+  return (
+    <View style={{ backgroundColor: BOX_BG, borderLeftWidth: 2.25, borderLeftColor: ORANGE, padding: 9, marginTop: 12 }}>
+      <Text style={{ fontFamily: HEADING, fontWeight: 700, fontSize: 8.25, letterSpacing: 0.6, color: NAVY, marginBottom: 3.75 }}>
+        COMMUNITY FACILITIES DISTRICT (MELLO-ROOS)
+      </Text>
+      <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK, lineHeight: 1.5 }}>
+        {lead}
+        {names.length > 0 ? (
+          <>
+            {' '}
+            <Text style={{ fontSize: 8.25, color: MUTED }}>{joinDistricts(names)}</Text>
+            {'. '}
+          </>
+        ) : ' '}
+        {body}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * "A and B" / "A, B, and C". The serial comma is punctuation BETWEEN names, so
+ * it belongs to the sentence and not to any name — which is why this joins here
+ * rather than the names arriving pre-joined and unstylable.
+ */
+function joinDistricts(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
 }

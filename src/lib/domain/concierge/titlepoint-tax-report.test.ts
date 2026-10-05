@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { melloRoosLines, melloRoosTotal, parseTitlePointTaxReport, parseTitlePointTaxResult } from './titlepoint-tax-report';
-import { melloRoosDisclosure } from './document/derive';
+import { melloRoosDisclosure, melloRoosText } from './document/derive';
 import { resolveTaxLayer, taxReportHasContent } from './document/derive';
 import type { NormalizedTax } from './normalize';
 
@@ -380,7 +380,10 @@ describe('the shapes that would fail silently', () => {
 
 describe('the Mello-Roos disclosure says what was decided', () => {
   const m = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-  const say = (r: Parameters<typeof melloRoosDisclosure>[0]) => melloRoosDisclosure(r, m) ?? '';
+  // The whole paragraph as one string. The document renders it in two styles —
+  // prose, and the county's verbatim names smaller and muted — but the WORDING
+  // is one thing and is asserted as one thing.
+  const say = (r: Parameters<typeof melloRoosDisclosure>[0]) => melloRoosText(melloRoosDisclosure(r, m)) ?? '';
 
   const THREE = { districts: ['FC CFD 2021-1 IA-2 HEMET USD', 'FC CFD 2021-02 HERITAGE POINTE', 'HEMET CFD 2005-1 PUB SAFETY SERV'], total: 3625.58 };
 
@@ -456,9 +459,13 @@ describe('the Mello-Roos disclosure says what was decided', () => {
     // Naming two of three and implying that is all of them would be worse.
     const t = say({ districts: ['ONLY ONE NAMED'], total: 500 });
     expect(t).toContain('within a Community Facilities District: ONLY ONE NAMED');
+
+    // Nothing readable: the sentence closes rather than trailing a colon into
+    // empty space, and the parcel is still reported as being in a district.
     const partial = melloRoosDisclosure({ districts: [], total: 500 }, m)!;
-    expect(partial).toContain('within a Community Facilities District.');
-    expect(partial).not.toContain(':');
+    expect(partial.names).toEqual([]);
+    expect(partial.lead).toBe('This parcel lies within a Community Facilities District.');
+    expect(melloRoosText(partial)).not.toContain(':');
   });
 
   it('says nothing at all when the parcel is in no district', () => {
@@ -475,16 +482,24 @@ describe('the parser supplies what the disclosure needs', () => {
     expect(r.report.melloRoos!.total).toBeCloseTo(3625.58, 2);
   });
 
-  it('drops the redundant MELLO ROOS marker and changes nothing else', () => {
-    // The block is already headed Mello-Roos. Everything else stays as the
-    // county wrote it, because the name has to match for a lookup to work.
+  it("keeps the county's string exactly, including the MELLO ROOS suffix", () => {
+    // RULED 2026-10-05, overriding two earlier drafts. A homeowner types this
+    // into a search box, so the characters are the county's. An earlier version
+    // stripped the trailing "MELLO ROOS" as redundant under a Mello-Roos
+    // heading — it IS redundant, and redundant is not a reason to edit an
+    // identifier. Loudness is a styling problem and is solved in the document.
     const names = parseTitlePointTaxResult(ITEMISED)!.report.melloRoos!.districts;
     expect(names).toEqual([
-      'FC CFD 2021-1 IA-2 HEMET USD',
-      'FC CFD 2021-02 HERITAGE POINTE',
-      'HEMET CFD 2005-1 PUB SAFETY SERV',
+      'FC CFD 2021-1 IA-2 HEMET USD MELLO ROOS',
+      'FC CFD 2021-02 HERITAGE POINTE MELLO ROOS',
+      'HEMET CFD 2005-1 PUB SAFETY SERV MELLO-ROOS',
     ]);
-    for (const n of names) expect(n.toLowerCase()).not.toContain('mello');
+  });
+
+  it('never title-cases, which would mangle the acronyms', () => {
+    // "FC CFD 2021-1 IA-2 HEMET USD" -> "Fc Cfd 2021-1 Ia-2 Hemet Usd".
+    const names = parseTitlePointTaxResult(ITEMISED)!.report.melloRoos!.districts;
+    for (const n of names) expect(n).toBe(n.toUpperCase());
   });
 
   it('is null on a parcel with no district', () => {

@@ -32,6 +32,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Bad query' }, { status: 400 });
   }
 
-  const results = await preparedForSuggestions(session.id, parsed.data.q, parsed.data.limit);
+  // session.EMAIL, not session.id.
+  //
+  // This was session.id — a Supabase UUID — while the generate route writes
+  // `createdBy: session.email`. The two never matched: 0 rows against the UUID,
+  // 9 against the email, so the endpoint returned an empty list for every user
+  // on every keystroke from the day it shipped. The feature looked like a
+  // scoping question and was a typing one.
+  //
+  // THE COMMENT BELOW IT WAS CONFIDENTLY ABOUT THE WRONG THING. It explained at
+  // length why one rep must not see another's client list, while the query
+  // matched nobody at all. A guard that excludes everyone is not a strict
+  // guard, it is a broken query wearing a guard's explanation.
+  const results = await preparedForSuggestions(session.email, parsed.data.q, parsed.data.limit);
   return NextResponse.json({ results });
 }

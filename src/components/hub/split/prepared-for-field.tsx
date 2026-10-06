@@ -69,7 +69,15 @@ export function PreparedForField({
           label: s.name,
           // The count is the ranking made visible — it is why this name is at
           // the top, and it tells a typo from a client at a glance.
-          detail: [s.company, s.used > 1 ? `${s.used} profiles` : null].filter(Boolean).join(' · ') || null,
+          // "Used by the team" distinguishes somebody else's client from your
+          // own, which matters now the list is pooled: the count is no longer
+          // a statement about you. Your own entries say nothing extra — they
+          // are already at the top, and labelling the common case is noise.
+          detail: [
+            s.company,
+            s.used > 1 ? `${s.used} profiles` : null,
+            s.mine ? null : 'used by the team',
+          ].filter(Boolean).join(' · ') || null,
         }))}
         onPick={(item) => {
           onName(item.key);

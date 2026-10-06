@@ -15,9 +15,11 @@ import { PreparedForField } from './prepared-for-field';
 afterEach(cleanup);
 beforeEach(() => { vi.unstubAllGlobals(); });
 
+// The list is pooled across the company and ranked own-first, so a realistic
+// response has both: one of the operator's own, and one of somebody else's.
 const RESULTS = [
-  { name: 'Dana Whitfield', company: 'Coldwell Banker', used: 4, lastUsed: '2026-09-22' },
-  { name: 'Marcus Whitfield', company: null, used: 1, lastUsed: '2026-08-02' },
+  { name: 'Dana Whitfield', company: 'Coldwell Banker', used: 4, lastUsed: '2026-09-22', mine: true },
+  { name: 'Marcus Whitfield', company: null, used: 1, lastUsed: '2026-08-02', mine: false },
 ];
 
 function stubFetch(body: unknown, ok = true) {
@@ -127,5 +129,36 @@ describe('a name the operator has used before', () => {
     expect(url.startsWith('/api/concierge/prepared-for?q=')).toBe(true);
     // A createdBy in the query string would let one rep read another's book.
     expect(url).not.toMatch(/createdBy|user|email/i);
+  });
+});
+
+describe('a pooled list says whose name it is', () => {
+  it('marks somebody else’s entry and leaves your own unlabelled', async () => {
+    // The count stopped being a statement about you when the list went
+    // company-wide, so an unfamiliar name with "4 profiles" would otherwise
+    // read as four of yours. Your own say nothing extra — they are already at
+    // the top, and labelling the common case is noise.
+    stubFetch({ results: RESULTS });
+    render(<Harness />);
+    fireEvent.focus(box());
+    await waitFor(() => expect(options().length).toBe(2));
+
+    const rows = options().map((o) => o.textContent ?? '');
+    expect(rows[0]).toContain('Dana Whitfield');
+    expect(rows[0]).not.toContain('used by the team');
+    expect(rows[1]).toContain('Marcus Whitfield');
+    expect(rows[1]).toContain('used by the team');
+  });
+
+  it('still fills the brokerage from a colleague’s entry', async () => {
+    // Pooling is pointless if the useful half is withheld.
+    stubFetch({ results: [{ name: 'Priya Raghunathan', company: 'Compass', used: 2, lastUsed: '2026-10-01', mine: false }] });
+    render(<Harness />);
+    fireEvent.focus(box());
+    await waitFor(() => expect(options().length).toBe(1));
+    fireEvent.pointerDown(options()[0]!);
+
+    expect(box().value).toBe('Priya Raghunathan');
+    expect((screen.getByLabelText('Brokerage') as HTMLInputElement).value).toBe('Compass');
   });
 });

@@ -75,6 +75,17 @@ export const s = StyleSheet.create({
   page: { fontSize: 9.75, color: INK, fontFamily: BODY, fontWeight: 500, flexDirection: 'column' },
   body: { paddingHorizontal: SIDE, paddingTop: BODY_TOP, flexGrow: 1 },
 
+  /**
+   * The body when the band above it is `fixed`, and therefore out of flow.
+   *
+   * BAND_H + BODY_TOP, not BODY_TOP: with the band in flow the padding was just
+   * the gap beneath it, and the band's own 93pt was taken by the band. Fixed, it
+   * occupies no flow space at all, so the body has to reserve it — otherwise
+   * every sheet renders its first line underneath the navy, silently and with no
+   * error.
+   */
+  bodyUnderFixedBand: { paddingHorizontal: SIDE, paddingTop: BAND_H + BODY_TOP, flexGrow: 1 },
+
   band: { height: BAND_H, backgroundColor: NAVY, paddingHorizontal: SIDE, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   bandEyebrow: { fontFamily: HEADING, fontWeight: 700, fontSize: 7.5, color: ORANGE, letterSpacing: 1.2 },
   bandAddress: { fontFamily: HEADING, fontWeight: 800, fontSize: 18, color: '#FFFFFF', marginTop: 7 },
@@ -108,9 +119,13 @@ export const s = StyleSheet.create({
 });
 
 /** The shared band on pages 2–8. The cover has its own and no footer. */
-export function Band({ address, sub, logo }: { address: string; sub: string; logo: string | null }) {
+export function Band({ address, sub, logo, fixed }: {
+  address: string; sub: string; logo: string | null;
+  /** Repeat on every sheet this Page generates — see Sheet. */
+  fixed?: boolean;
+}) {
   return (
-    <View style={s.band}>
+    <View style={s.band} fixed={fixed}>
       <View style={{ flex: 1, paddingRight: 16 }}>
         <Text style={s.bandEyebrow}>CONCIERGE PROPERTY PROFILE</Text>
         <Text style={s.bandAddress}>{address}</Text>
@@ -267,20 +282,66 @@ export function Swatch({ colour }: { colour: string }) {
 }
 
 /** White, ruled, at the foot of pages 2–8. NOT a navy bar, and no template id. */
-export function Footer({ page, total }: { page: number; total: number }) {
+/**
+ * ─── THE NUMBER IS THE SHEET, NOT THE SECTION ───────────────────────────────
+ *
+ * This took `page` and `total` computed from pagesFor()/pageNo() — a list of
+ * LOGICAL sections. A section that overflows produces two sheets, and both
+ * printed the same number, so "7 of 8" appeared twice on a document that was
+ * actually ten sheets long. 2111 Gemma Ct is ten and 9270 Amethyst Street is
+ * nine; both said "of 8".
+ *
+ * react-pdf knows the real answer and will tell you: `render` on a fixed Text
+ * is called once per generated sheet with that sheet's number and the document
+ * total. Nothing here has to predict how the content will break, which is the
+ * whole reason the old version was wrong — it was a model of the layout rather
+ * than the layout.
+ *
+ * `fixed` is required on the Text as well as the View: without it react-pdf
+ * evaluates the render once and repeats the result.
+ */
+export function Footer() {
   return (
     <View style={s.footer} fixed>
       <Text style={s.footerText}>
         Data deemed reliable, but not guaranteed. Pacific Coast Title Company. All rights reserved.
       </Text>
-      <Text style={s.footerText}>{`${page} of ${total}`}</Text>
+      <Text
+        style={s.footerText}
+        fixed
+        render={({ pageNumber, totalPages }) => `${pageNumber} of ${totalPages}`}
+      />
     </View>
   );
 }
 
-/** One line per page, and only one. Replaces every explainer box v3 used. */
+/**
+ * One line per page, and only one.
+ *
+ * ─── IT MUST NOT LAND ALONE ON THE NEXT SHEET ───────────────────────────────
+ *
+ * On 2111 Gemma Ct the tax content filled page 4 and this one sentence flowed
+ * onto a sheet of its own — a blank page carrying a footnote and a footer, and
+ * two of that document's extra sheets.
+ *
+ * `minPresenceAhead` is react-pdf's answer: it asks for that many points of
+ * room below this element, and breaks EARLIER if there is not enough. So the
+ * break lands before the block this annotates rather than between the block and
+ * its note, which is the only arrangement where the sentence still means
+ * something — a footnote separated from what it footnotes is just a sentence.
+ *
+ * `wrap={false}` on top of it, so a two-line note cannot split down the middle.
+ */
 export function Footnote({ children }: { children: string }) {
-  return <Text style={s.footnote}>{children}</Text>;
+  return <Text style={s.footnote} wrap={false} minPresenceAhead={FOOTNOTE_KEEP_PT}>{children}</Text>;
 }
+
+/**
+ * Room a footnote asks for below itself before it will sit on a sheet.
+ *
+ * Its own two lines plus the footer, so "there is space for the note" cannot be
+ * true on a sheet where only the note would fit.
+ */
+export const FOOTNOTE_KEEP_PT = 54;
 
 export const DASH_NOTE = '— means the item was not included in the county record we received.';

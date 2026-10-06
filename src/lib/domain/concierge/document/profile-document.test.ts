@@ -452,3 +452,135 @@ describe('the cover is one navy', () => {
     expect(fallback).not.toBe(navy);
   });
 });
+
+// ─── Page breaks, at the sizes that actually break ──────────────────────────
+//
+// FOUR OF EACH REPRODUCES NOTHING. These three defects only appear when a
+// section overflows its sheet, and the fixtures everywhere else in this file
+// are deliberately small. The counts below are the real ones from the two
+// reference profiles: 2111 Gemma Ct shows 12 comparables, 9270 Amethyst Street
+// carries 32 recorded documents.
+//
+// The SHAPES are the real stored ones — COMPS[0] and TRANSFERS[0] — repeated to
+// the real COUNT. What makes the page break is how many rows there are and how
+// tall each is, and a row's height does not depend on which street it names.
+
+const manyComps = (k: number) => Array.from({ length: k }, (_, i) => ({
+  ...COMPS[0]!, address: `${100 + i} OVERFLOW ST`,
+}));
+const manyTransfers = (k: number) => Array.from({ length: k }, (_, i) => ({
+  ...TRANSFERS[0]!, documentNumber: `${2020}-${String(i).padStart(6, '0')}`,
+}));
+
+/** Everything on a sheet that is not the band or the footer boilerplate. */
+const contentOf = (part: string) => part
+  .replace(/C O N C I E R G E P R O P E R T Y P R O F I L E/g, '')
+  .replace(/Data deemed reliable[\s\S]*?reserved\./g, '')
+  .replace(/\d+\s+of\s+\d+/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const big = () => input({
+  transfers: manyTransfers(32) as ProfileDocumentInput['transfers'],
+  taxReport: REPORT,
+  filter: {
+    decisions: [], selected: manyComps(12),
+    criteria: { sameUseCode: true, livingAreaPct: 30, bedDelta: 1, bathDelta: 1, radiusMiles: 1, months: 12, maxComps: 12 },
+    counts: { returned: 25, qualified: 12, shown: 12 },
+  } as unknown as ProfileDocumentInput['filter'],
+});
+
+describe('a document that overflows its sheets', () => {
+  it('puts the band on every sheet, including continuations', async () => {
+    // Comps 10-12 and the tail of a 32-row transfer table used to land on bare
+    // sheets — no navy, no address, no section title. Anyone flipping to one
+    // had no idea which property or section they were looking at.
+    const { parts } = await render(big());
+    expect(parts.length, 'fixture did not overflow — it proves nothing').toBeGreaterThan(8);
+    const bare = parts
+      .map((p, i) => ({ i: i + 1, ok: p.replace(/\s/g, '').includes('CONCIERGEPROPERTYPROFILE') }))
+      .filter((x) => !x.ok);
+    expect(bare.map((b) => b.i)).toEqual([]);
+  });
+
+  it('numbers the real sheets, with no number used twice', async () => {
+    // pagesFor()/pageNo() counted logical sections, so an overflowing section
+    // printed the same number on both its sheets and the total was the section
+    // count. Both references said "of 8" at 10 and 9 sheets.
+    const { parts } = await render(big());
+    const footers = parts
+      .map((p) => /(\d+)\s+of\s+(\d+)/.exec(p.replace(/\s+/g, ' ')))
+      .filter((m): m is RegExpExecArray => m !== null);
+
+    expect(footers.length, 'no footers found — the guard is stale').toBeGreaterThan(5);
+    // Every sheet that has a footer agrees on the total, and it is the real one.
+    for (const f of footers) expect(Number(f[2])).toBe(parts.length);
+    // And the numbers are distinct — "7 of 8" appeared twice before.
+    const nums = footers.map((f) => Number(f[1]));
+    expect(new Set(nums).size).toBe(nums.length);
+  });
+
+  it('never strands a footnote on a sheet of its own', async () => {
+    // Gemma's tax footnote sat alone on an otherwise blank sheet. A footnote
+    // separated from what it annotates is just a sentence.
+    const { parts } = await render(big());
+    const stranded = parts
+      .map((p, i) => ({ i: i + 1, c: contentOf(p) }))
+      // A sheet whose entire content is the dash note and nothing else.
+      .filter((x) => x.c.includes('means the item was not included') && x.c.length < 260);
+    expect(stranded.map((s) => `p${s.i}: ${s.c.slice(0, 80)}`)).toEqual([]);
+  });
+
+  it('asks for room below a footnote so it cannot be left behind', () => {
+    // THE RENDER-LEVEL CHECK ABOVE IS VACUOUS and this is here because of it.
+    // Removing minPresenceAhead leaves "never strands a footnote" green: the
+    // synthetic fixture does not reproduce the orphan, which depended on the
+    // exact height of Gemma's tax content. Mutation proved the test, not the
+    // code — so this asserts the mechanism directly, and dies when it is
+    // removed.
+    //
+    // The render check stays: it catches a regression that DOES strand one,
+    // which this cannot. Neither is sufficient alone and that is the point.
+    const src = readSource(
+      join(process.cwd(), 'src/lib/domain/concierge/document/parts.tsx'),
+      { mustContain: 'export function Footnote' },
+    );
+    expect(src).toMatch(/<Text[^>]*minPresenceAhead=\{FOOTNOTE_KEEP_PT\}/);
+    expect(src).toMatch(/export const FOOTNOTE_KEEP_PT = \d+/);
+  });
+
+  it('omits the comparables detail sheet when there are none', async () => {
+    // 9270 Amethyst qualified zero comparables and still produced a sheet with
+    // a section bar, a footnote, and nothing between them.
+    const none = input({
+      filter: {
+        decisions: [], selected: [],
+        criteria: { sameUseCode: true, livingAreaPct: 30, bedDelta: 1, bathDelta: 1, radiusMiles: 1, months: 12, maxComps: 12 },
+        counts: { returned: 25, qualified: 0, shown: 0 },
+      } as unknown as ProfileDocumentInput['filter'],
+    });
+    const { parts } = await render(none);
+    const detail = parts.filter((p) => {
+      const c = contentOf(p).replace(/\s/g, '');
+      return c.includes('COMPARABLESALES') && !c.includes('COMPARABLESALESSUMMARY') && !c.includes('COMPARABLESALESMAP');
+    });
+    expect(detail).toEqual([]);
+
+    // The reader is still told, on the summary page that carries the criteria.
+    const { text } = await render(none);
+    expect(text).toContain(sq('COMPARABLE SALES SUMMARY'));
+  });
+
+  it('still renders the detail sheet when there is one comparable', async () => {
+    // The guard is "none", not "few" — one comp is a real table.
+    const one = input({
+      filter: {
+        decisions: [], selected: manyComps(1),
+        criteria: { sameUseCode: true, livingAreaPct: 30, bedDelta: 1, bathDelta: 1, radiusMiles: 1, months: 12, maxComps: 12 },
+        counts: { returned: 25, qualified: 1, shown: 1 },
+      } as unknown as ProfileDocumentInput['filter'],
+    });
+    const { text } = await render(one);
+    expect(text).toContain(sq('100 OVERFLOW ST'));
+  });
+});

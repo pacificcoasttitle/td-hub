@@ -215,14 +215,33 @@ interface BandProps { address: string; sub: string; logo: string | null }
  * DECLARED AT MODULE SCOPE. A component created inside render is a new type on
  * every render, which resets state and which the linter rejects outright.
  */
-function Sheet({ band, page, total, children }: {
-  band: BandProps; page: number; total: number; children: React.ReactNode;
-}) {
+/**
+ * ─── THE BAND REPEATS ON EVERY SHEET ────────────────────────────────────────
+ *
+ * A section that overflows used to continue onto a bare sheet: no navy band, no
+ * address, no section title. Gemma's comps 10–12 were three rows alone on a
+ * page, and Amethyst's 32 transfers ran off the bottom into nothing. Anyone
+ * flipping to that sheet had no way to tell which property or which section
+ * they were looking at.
+ *
+ * Round one specified this for transfers — "let the table break to a
+ * continuation page with the band repeated" — and it was never applied. It
+ * belongs on every section that can break, which is why it lives in Sheet
+ * rather than in any one of them.
+ *
+ * `fixed` is what does it: react-pdf re-renders a fixed element on each sheet a
+ * Page generates. That also takes the band out of normal flow, so the body
+ * carries the band's height as padding instead — paddingTop on s.body was the
+ * gap under a band that was in flow, and is now the band's own height plus that
+ * gap. Getting that wrong does not error; it silently slides the first line of
+ * every sheet under the navy, which is why cover-and-band tests render.
+ */
+function Sheet({ band, children }: { band: BandProps; children: React.ReactNode }) {
   return (
     <Page size="LETTER" style={s.page}>
-      <Band address={band.address} sub={band.sub} logo={band.logo} />
-      <View style={s.body}>{children}</View>
-      <Footer page={page} total={total} />
+      <Band address={band.address} sub={band.sub} logo={band.logo} fixed />
+      <View style={s.bodyUnderFixedBand}>{children}</View>
+      <Footer />
     </Page>
   );
 }
@@ -242,8 +261,11 @@ export function ProfileDocument(input: ProfileDocumentInput) {
 
   const taxLayer = resolveTaxLayer(tax, state, input.taxReport ?? null);
   const hasTax = taxLayer !== null;
-  const TOTAL = pagesFor(hasTax).length;
-  const no = (k: PageKey) => pageNo(k, hasTax) ?? 0;
+  // pagesFor()/pageNo() no longer number the footer — react-pdf does, from the
+  // real sheets. They are kept as the statement of WHICH SECTIONS this document
+  // has, which is a different question and still a true one: hasTax decides
+  // whether page 4 exists at all. What they can no longer do is claim to know
+  // how many sheets that becomes.
 
   // Both brand assets default here rather than at a caller, because no caller
   // passes either — render.ts and generate.ts build the input and never
@@ -394,11 +416,11 @@ export function ProfileDocument(input: ProfileDocumentInput) {
               : null}
           </View>
         </View>
-        <Footer page={no('thanks')} total={TOTAL} />
+        <Footer />
       </Page>
 
       {/* ── 3 · Details ──────────────────────────────────────────────────── */}
-      <Sheet band={band} page={no('details')} total={TOTAL}>
+      <Sheet band={band}>
         <SectionBar>OWNER, ADDRESS &amp; LEGAL DESCRIPTION</SectionBar>
         <Row label="Primary owner" value={owners[0]?.display ?? null} />
         <Row label="Secondary owner" value={owners[1]?.display ?? null} />
@@ -438,13 +460,13 @@ export function ProfileDocument(input: ProfileDocumentInput) {
 
       {/* ── 4 · Property tax ─────────────────────────────────────────────── */}
       {taxLayer ? (
-        <Sheet band={band} page={no('tax')} total={TOTAL}>
+        <Sheet band={band}>
           <TaxPage layer={taxLayer} subject={subject} captured={captured} />
         </Sheet>
       ) : null}
 
       {/* ── 5 · Transfer history ─────────────────────────────────────────── */}
-      <Sheet band={band} page={no('transfers')} total={TOTAL}>
+      <Sheet band={band}>
         <SectionBar>TRANSFER HISTORY</SectionBar>
 
         {vesting ? (
@@ -572,11 +594,21 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             {`${filter.counts.returned} returned → ${filter.counts.qualified} met → ${n} shown · Criteria were not loosened to show more.`}
           </Footnote>
         </View>
-        <Footer page={no('compSummary')} total={TOTAL} />
+        <Footer />
       </Page>
 
-      {/* ── 7 · Comparable sales ─────────────────────────────────────────── */}
-      <Sheet band={band} page={no('compDetail')} total={TOTAL}>
+      {/* ── 7 · Comparable sales ───────────────────────────────────────────
+          OMITTED ENTIRELY WHEN THERE ARE NONE. 9270 Amethyst qualified zero
+          comparables and still produced this sheet: a section bar, a footnote
+          and nothing between them. The summary page above already says "0
+          sales" and carries the criteria, so the reader is told — a second
+          sheet saying it with no table is a blank page with a heading.
+
+          Not the same as the tax page's layer-3 rule, but the same principle:
+          a section with nothing in it is not a thin section, it is an absent
+          one. */}
+      {n === 0 ? null : (
+      <Sheet band={band}>
         <SectionBar>COMPARABLE SALES</SectionBar>
         {comps.map((c, i) => {
           const r = pricePerSqft(c.salePrice, c.buildingArea);
@@ -609,6 +641,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         })}
         <Footnote>{`${DASH_NOTE} Price per sq ft is the sale price divided by living area.`}</Footnote>
       </Sheet>
+      )}
 
       {/* ── 8 · Plat map ─────────────────────────────────────────────────── */}
       <Page size="LETTER" style={s.page}>
@@ -635,7 +668,7 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             </Footnote>
           ) : null}
         </View>
-        <Footer page={no('plat')} total={TOTAL} />
+        <Footer />
       </Page>
     </Document>
   );

@@ -1,0 +1,71 @@
+{
+  "asOf": "2026-10-05",
+  "bonds": [],
+  "taxRate": 1.867714,
+  "taxYear": 2026,
+  "landValue": 182499,
+  "melloRoos": {
+    "total": 3129.2599999999998,
+    "districts": [
+      "CITY OF PERRIS CFD 2001-3 N. PUBLIC SAFETY MELLO-ROOS",
+      "CFD 2022-1 (WILLOWBEND) MELLO ROOS"
+    ]
+  },
+  "taxRateArea": "008-193",
+  "annualAmount": 11361.98,
+  "installments": [
+    {
+      "amount": 5680.99,
+      "number": "1st",
+      "status": "UNPAID",
+      "dueDate": "2026-12-10"
+    },
+    {
+      "amount": 5680.99,
+      "number": "2nd",
+      "status": "UNPAID",
+      "dueDate": "2027-04-10"
+    }
+  ],
+  "assessedValue": 608336,
+  "supplementals": [],
+  "improvementValue": 425837,
+  "homeOwnerExemption": null,
+  "specialAssessments": [
+    {
+      "amount": 3.76,
+      "description": "FLOOD CONTROL STORMWATER / CLEANWATER/SANTA ANA",
+      "maturityDate": null
+    },
+    {
+      "amount": 545.84,
+      "description": "CITY OF PERRIS LANDSCAPE DISTRICT 1",
+      "maturityDate": null
+    },
+    {
+      "amount": 799.28,
+      "description": "PERRIS STORM DRAIN DISTRICT 1",
+      "maturityDate": null
+    },
+    {
+      "amount": 402.1,
+      "description": "CITY OF PERRIS CFD 2001-3 N. PUBLIC SAFETY MELLO-ROOS",
+      "maturityDate": null
+    },
+    {
+      "amount": 6.94,
+      "description": "METRO WATER DISTRICT STANDBY EAST",
+      "maturityDate": null
+    },
+    {
+      "amount": 26,
+      "description": "EASTERN MUNIIPAL WATER DISTRICT  STDBY-COMBINED CHG",
+      "maturityDate": null
+    },
+    {
+      "amount": 2727.16,
+      "description": "CFD 2022-1 (WILLOWBEND) MELLO ROOS",
+      "maturityDate": null
+    }
+  ]
+}

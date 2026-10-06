@@ -229,18 +229,27 @@ interface BandProps { address: string; sub: string; logo: string | null }
  * belongs on every section that can break, which is why it lives in Sheet
  * rather than in any one of them.
  *
- * `fixed` is what does it: react-pdf re-renders a fixed element on each sheet a
- * Page generates. That also takes the band out of normal flow, so the body
- * carries the band's height as padding instead — paddingTop on s.body was the
- * gap under a band that was in flow, and is now the band's own height plus that
- * gap. Getting that wrong does not error; it silently slides the first line of
- * every sheet under the navy, which is why cover-and-band tests render.
+ * `fixed` is the whole change: react-pdf re-renders a fixed element on each
+ * sheet a Page generates, and it still occupies its space on each — the body
+ * needs no extra padding to stay clear of it, which was checked rather than
+ * assumed (see parts.tsx).
+ *
+ * AND IT IS ALSO WHAT UNSTRANDED THE FOOTNOTE. Gemma's tax footnote sat alone
+ * on p5. The first fix attributed that to a `minPresenceAhead` on Footnote and
+ * that attribution was wrong: removing the property changes nothing, while
+ * reverting this one word brings p5 back — measured both ways, in the test and
+ * against the real profile. Changing how the band occupies the sheet changed
+ * where the break falls.
+ *
+ * So this word is load-bearing for two defects, and two tests fail without it:
+ * one finds the sheets with no band, the other finds body text drawn in the
+ * band's strip.
  */
 function Sheet({ band, children }: { band: BandProps; children: React.ReactNode }) {
   return (
     <Page size="LETTER" style={s.page}>
       <Band address={band.address} sub={band.sub} logo={band.logo} fixed />
-      <View style={s.bodyUnderFixedBand}>{children}</View>
+      <View style={s.body}>{children}</View>
       <Footer />
     </Page>
   );

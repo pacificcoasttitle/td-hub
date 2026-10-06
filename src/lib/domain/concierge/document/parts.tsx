@@ -75,16 +75,14 @@ export const s = StyleSheet.create({
   page: { fontSize: 9.75, color: INK, fontFamily: BODY, fontWeight: 500, flexDirection: 'column' },
   body: { paddingHorizontal: SIDE, paddingTop: BODY_TOP, flexGrow: 1 },
 
-  /**
-   * The body when the band above it is `fixed`, and therefore out of flow.
-   *
-   * BAND_H + BODY_TOP, not BODY_TOP: with the band in flow the padding was just
-   * the gap beneath it, and the band's own 93pt was taken by the band. Fixed, it
-   * occupies no flow space at all, so the body has to reserve it — otherwise
-   * every sheet renders its first line underneath the navy, silently and with no
-   * error.
-   */
-  bodyUnderFixedBand: { paddingHorizontal: SIDE, paddingTop: BAND_H + BODY_TOP, flexGrow: 1 },
+  // There is no separate body style for a fixed band, and the attempt to add
+  // one is worth recording. The reasoning was that `fixed` takes the band out
+  // of flow, so the body must reserve BAND_H itself or every sheet draws its
+  // first line under the navy. That is wrong about react-pdf: a fixed element
+  // still occupies its space on each sheet it repeats onto. Measured — adding
+  // BAND_H moved no text (p2 body top y=610 either way) and changed no sheet
+  // count (Gemma 10, Amethyst 8 either way). It was a no-op with a confident
+  // comment about a hazard that does not exist, which is the worse half.
 
   band: { height: BAND_H, backgroundColor: NAVY, paddingHorizontal: SIDE, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   bandEyebrow: { fontFamily: HEADING, fontWeight: 700, fontSize: 7.5, color: ORANGE, letterSpacing: 1.2 },
@@ -318,30 +316,30 @@ export function Footer() {
 /**
  * One line per page, and only one.
  *
- * ─── IT MUST NOT LAND ALONE ON THE NEXT SHEET ───────────────────────────────
+ * ─── IT USED TO LAND ALONE ON THE NEXT SHEET, AND THIS IS NOT WHAT FIXED IT ──
  *
- * On 2111 Gemma Ct the tax content filled page 4 and this one sentence flowed
- * onto a sheet of its own — a blank page carrying a footnote and a footer, and
- * two of that document's extra sheets.
+ * On 2111 Gemma Ct the tax content filled page 4 and this sentence flowed onto
+ * a sheet of its own. The first fix added `minPresenceAhead` here — react-pdf's
+ * "break earlier unless there is this much room below me" — and the orphan went
+ * away, so it was written up as the cause.
  *
- * `minPresenceAhead` is react-pdf's answer: it asks for that many points of
- * room below this element, and breaks EARLIER if there is not enough. So the
- * break lands before the block this annotates rather than between the block and
- * its note, which is the only arrangement where the sentence still means
- * something — a footnote separated from what it footnotes is just a sentence.
+ * IT WAS NOT. Measured three ways on the real profile:
  *
- * `wrap={false}` on top of it, so a two-line note cannot split down the middle.
+ *   band in flow,  minPresenceAhead present  ->  p5 stranded
+ *   band fixed,    minPresenceAhead present  ->  no orphan
+ *   band fixed,    minPresenceAhead ABSENT   ->  no orphan
+ *
+ * Making the band `fixed` is what moved the break; this element changed
+ * nothing. It was removed rather than kept as insurance, because an unproven
+ * mechanism with a confident comment above it is how the next person concludes
+ * the problem is handled.
+ *
+ * What guards the orphan now is a render-level test on Gemma's real payload,
+ * which reproduces the stranded sheet the moment the band goes back into flow.
+ * See profile-document.test.ts and fixtures/README.md.
  */
 export function Footnote({ children }: { children: string }) {
-  return <Text style={s.footnote} wrap={false} minPresenceAhead={FOOTNOTE_KEEP_PT}>{children}</Text>;
+  return <Text style={s.footnote}>{children}</Text>;
 }
-
-/**
- * Room a footnote asks for below itself before it will sit on a sheet.
- *
- * Its own two lines plus the footer, so "there is space for the note" cannot be
- * true on a sheet where only the note would fit.
- */
-export const FOOTNOTE_KEEP_PT = 54;
 
 export const DASH_NOTE = '— means the item was not included in the county record we received.';

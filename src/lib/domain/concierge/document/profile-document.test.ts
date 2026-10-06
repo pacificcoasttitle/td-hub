@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { normalizeSubject, normalizeTax } from '../normalize';
 import { join } from 'node:path';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { renderToBuffer } from '@react-pdf/renderer';
@@ -480,9 +482,41 @@ const contentOf = (part: string) => part
   .replace(/\s+/g, ' ')
   .trim();
 
+/**
+ * 2111 Gemma Ct's REAL stored tax report — the one whose page 4 stranded its
+ * footnote. Seven direct assessments, two of them Mello-Roos districts.
+ *
+ * REPORT, the hand-built fixture used elsewhere in this file, has one
+ * assessment and one bond. It does not fill the sheet, so nothing can be
+ * stranded off it, and the guard below passed with the protection removed. The
+ * height of this content IS the defect. See fixtures/README.md.
+ */
+const GEMMA_TAX = JSON.parse(
+  readFileSync(join(process.cwd(), 'src/lib/domain/concierge/document/fixtures/gemma-tax-report.json'), 'utf8'),
+) as NormalizedTaxReport;
+
+/**
+ * Gemma's real subject and SiteX tax, normalised by the production functions.
+ *
+ * THE TAX REPORT ALONE WAS NOT ENOUGH. With GEMMA_TAX but this file's hand-built
+ * SUBJECT/TAX, page 4 still did not fill its sheet and the mutation stayed
+ * green. Page 4's height is the tax report AND the subject it is rendered
+ * against; swapping only one of them tests a page that never existed.
+ *
+ * The fixture is PropertyProfile only — 2 KB rather than the 139 KB whole feed.
+ * That slice is not a guess: a script compared normalizeSubject/normalizeTax
+ * over the full payload and over this slice and required byte-identical output
+ * before writing it. See fixtures/README.md.
+ */
+const GEMMA_FEED = JSON.parse(
+  readFileSync(join(process.cwd(), 'src/lib/domain/concierge/document/fixtures/gemma-feed.json'), 'utf8'),
+) as Record<string, unknown>;
+
 const big = () => input({
+  subject: normalizeSubject(GEMMA_FEED) as ProfileDocumentInput['subject'],
+  tax: normalizeTax(GEMMA_FEED) as ProfileDocumentInput['tax'],
   transfers: manyTransfers(32) as ProfileDocumentInput['transfers'],
-  taxReport: REPORT,
+  taxReport: GEMMA_TAX,
   filter: {
     decisions: [], selected: manyComps(12),
     criteria: { sameUseCode: true, livingAreaPct: 30, bedDelta: 1, bathDelta: 1, radiusMiles: 1, months: 12, maxComps: 12 },
@@ -523,30 +557,19 @@ describe('a document that overflows its sheets', () => {
   it('never strands a footnote on a sheet of its own', async () => {
     // Gemma's tax footnote sat alone on an otherwise blank sheet. A footnote
     // separated from what it annotates is just a sentence.
+    //
+    // THIS ONLY BECAME A GUARD WHEN THE FIXTURE BECAME REAL. Against the
+    // hand-built SUBJECT/TAX it passed with every candidate fix removed —
+    // page 4 never filled, so nothing could be stranded off it. With Gemma's
+    // own subject, tax and tax report it reproduces the exact sheet, down to
+    // the sentence: putting the band back in flow fails it with
+    // "p5: Tax figures are the county's own, as reported on Oct 5, 2026".
     const { parts } = await render(big());
     const stranded = parts
       .map((p, i) => ({ i: i + 1, c: contentOf(p) }))
       // A sheet whose entire content is the dash note and nothing else.
       .filter((x) => x.c.includes('means the item was not included') && x.c.length < 260);
     expect(stranded.map((s) => `p${s.i}: ${s.c.slice(0, 80)}`)).toEqual([]);
-  });
-
-  it('asks for room below a footnote so it cannot be left behind', () => {
-    // THE RENDER-LEVEL CHECK ABOVE IS VACUOUS and this is here because of it.
-    // Removing minPresenceAhead leaves "never strands a footnote" green: the
-    // synthetic fixture does not reproduce the orphan, which depended on the
-    // exact height of Gemma's tax content. Mutation proved the test, not the
-    // code — so this asserts the mechanism directly, and dies when it is
-    // removed.
-    //
-    // The render check stays: it catches a regression that DOES strand one,
-    // which this cannot. Neither is sufficient alone and that is the point.
-    const src = readSource(
-      join(process.cwd(), 'src/lib/domain/concierge/document/parts.tsx'),
-      { mustContain: 'export function Footnote' },
-    );
-    expect(src).toMatch(/<Text[^>]*minPresenceAhead=\{FOOTNOTE_KEEP_PT\}/);
-    expect(src).toMatch(/export const FOOTNOTE_KEEP_PT = \d+/);
   });
 
   it('omits the comparables detail sheet when there are none', async () => {
@@ -582,5 +605,74 @@ describe('a document that overflows its sheets', () => {
     });
     const { text } = await render(one);
     expect(text).toContain(sq('100 OVERFLOW ST'));
+  });
+});
+
+// ─── Nothing hides under the navy ───────────────────────────────────────────
+//
+// Making the band `fixed` took it out of flow, so the body reserves its height
+// by hand (BAND_H + BODY_TOP). Get that wrong and the first line of EVERY sheet
+// is drawn underneath the band — no error, no missing text, just white-on-navy
+// or body type swallowed by a dark block. It is the silent half of the change
+// that fixed two visible defects.
+//
+// MEASURED FROM COORDINATES, NOT PIXELS. pdfjs gives every text item its y on
+// the page, so "is anything inside the band's strip that is not the band" is an
+// exact question. Rasterising and sampling for ink would answer the same
+// question with a threshold, and would have to tell the band's own white
+// address apart from body text that slid under it — which is the case that
+// matters and the one a pixel count is worst at.
+
+describe('the band does not cover the body', () => {
+  it('starts the body below the band on every sheet', async () => {
+    // ONE ASSERTION, NOT TWO. The first draft also tried to list "body text
+    // found inside the band strip", which needed a rule for telling the band's
+    // own address apart from body text that had slid under it — and the rule it
+    // used, "looks like capitals and punctuation", matches half the document.
+    // A guard that cannot tell the two cases apart is not guarding the one that
+    // matters.
+    //
+    // IDENTIFIED BY CONTENT, NOT BY COUNT. The second draft asserted "exactly
+    // three runs in the strip" — the eyebrow, the address, the sub-line — and
+    // found six, because the letter-spaced eyebrow is emitted as three runs and
+    // the address as two. Picking 6 instead would have been a magic number that
+    // breaks the next time a street name wraps differently.
+    //
+    // The band's text is known: it is the address and sub-line this very test
+    // passed in, plus the fixed eyebrow. Anything else in the strip is body
+    // that has slid underneath.
+    const doc = await getDocument({
+      data: new Uint8Array(await renderToBuffer(ProfileDocument(big()))),
+      verbosity: 0,
+    }).promise;
+
+    const subject = normalizeSubject(GEMMA_FEED);
+    // The sub-line as the document composes it — city/state, then "· APN n".
+    // Omitting that separator made every sheet's own sub-line read as a stray,
+    // which is the failure mode of allow-listing by reconstruction: get the
+    // reconstruction wrong and the guard screams about correct output.
+    const bandInk = [
+      'CONCIERGEPROPERTYPROFILE',
+      subject.siteAddress ?? '',
+      subject.siteCityState ?? '',
+      '·APN',
+      subject.apn ?? '',
+    ].join('').replace(/\s/g, '').toUpperCase();
+
+    // Letter is 792pt and y counts up from the bottom, so the strip is the top
+    // BAND_H points.
+    const BAND_TOP_Y = 792 - 93;
+    const strays: string[] = [];
+
+    for (let p = 2; p <= doc.numPages; p++) {
+      const items = (await (await doc.getPage(p)).getTextContent()).items
+        .filter((i): i is typeof i & { str: string; transform: number[] } => 'str' in i && !!i.str.trim());
+      for (const i of items) {
+        if (i.transform[5]! < BAND_TOP_Y) continue;
+        const run = i.str.replace(/\s/g, '').toUpperCase();
+        if (run !== '' && !bandInk.includes(run)) strays.push(`p${p} y=${i.transform[5]!.toFixed(0)} "${i.str.trim().slice(0, 40)}"`);
+      }
+    }
+    expect(strays, 'body text is drawn inside the band strip').toEqual([]);
   });
 });

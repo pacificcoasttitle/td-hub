@@ -32,7 +32,14 @@ export const BOX_BG = '#F6F7F9';
 export const MEDIAN_FILL = '#EEF2F8';
 export const FORECLOSURE_BG = '#FEF3EC';
 export const PLAT_BG = '#F3F5F8';
-export const COVER_PANEL = '#222A48';
+// COVER_PANEL IS GONE (2026-10-06). It was #222A48 for the prepared-for panel
+// while the address block above it used NAVY #1B2A4A — slightly lighter and a
+// touch more purple, which reads on the proof as two blocks that do not match.
+//
+// Both are NAVY now, and the constant is DELETED rather than redefined to the
+// same value: two names for one colour is how they drift apart again, and the
+// next spec round would have had something to re-split. cover-is-one-navy in
+// profile-document.test.ts holds it.
 export const COVER_FALLBACK = '#2A3A5C';
 /**
  * PREPARED FOR / PRESENTED BY. ORANGE, like the eyebrow above them.

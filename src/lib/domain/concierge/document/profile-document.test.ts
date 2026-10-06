@@ -393,3 +393,62 @@ describe('the Mello-Roos disclosure', () => {
     expect(text.toUpperCase()).not.toContain('MELLO');
   });
 });
+
+// ─── cover-is-one-navy ──────────────────────────────────────────────────────
+//
+// The cover is two stacked blocks: the address block and the prepared-for /
+// presented-by panel under it. They were #1B2A4A and #222A48 — close enough to
+// look like a printing fault rather than a decision, and far enough apart to
+// show a seam on the proof.
+//
+// This reads the SOURCE rather than the rendered page because react-pdf gives
+// no way to ask a rendered View for its computed fill, and rasterising to
+// sample a pixel would make a colour assertion depend on JPEG quantisation.
+// The invariant is about which token the two blocks name, and that is in the
+// source exactly.
+
+describe('the cover is one navy', () => {
+  const src = () => readSource(join(process.cwd(), 'src/lib/domain/concierge/document/profile-document.tsx'), {
+    mustContain: 'backgroundColor: NAVY',
+  });
+
+  it('gives both cover blocks the same fill', () => {
+    // THE COVER IS NOT THE FIRST <Page> IN THE FILE. Slicing to the first
+    // </Page> found a different, earlier page and zero fills — the guard said
+    // "stale" rather than passing on nothing, which is the only reason that
+    // draft was caught.
+    //
+    // Anchored on the eyebrow instead, which only the cover has, and bounded by
+    // the Page tags either side of it.
+    const s = src();
+    const eyebrow = s.indexOf('CONCIERGE PROPERTY PROFILE');
+    expect(eyebrow, 'cover eyebrow not found — the guard is stale').toBeGreaterThan(0);
+    const cover = s.slice(s.lastIndexOf('<Page', eyebrow), s.indexOf('</Page>', eyebrow));
+    const fills = [...cover.matchAll(/backgroundColor:\s*([A-Za-z_][\w]*)/g)].map((m) => m[1]);
+
+    expect(fills.length, 'no cover fills found — the guard is stale').toBeGreaterThanOrEqual(2);
+    // COVER_FALLBACK is the photograph's stand-in and is deliberately its own
+    // colour: it only shows when the image is missing, where matching the navy
+    // would make an absent photo invisible rather than obvious.
+    const blocks = fills.filter((f) => f !== 'COVER_FALLBACK');
+    expect(new Set(blocks).size, `cover blocks use ${[...new Set(blocks)].join(' and ')}`).toBe(1);
+    expect(blocks[0]).toBe('NAVY');
+  });
+
+  it('has no second name for the cover navy', () => {
+    // Deleted rather than redefined to the same value: two names for one colour
+    // is how they drift apart again.
+    const parts = readSource(join(process.cwd(), 'src/lib/domain/concierge/document/parts.tsx'), { mustContain: 'export const NAVY' });
+    expect(parts).not.toContain('COVER_PANEL');
+    expect(src()).not.toContain('COVER_PANEL');
+  });
+
+  it('still keeps the photo fallback distinct, which is not the same mistake', () => {
+    const parts = readSource(join(process.cwd(), 'src/lib/domain/concierge/document/parts.tsx'), { mustContain: 'export const COVER_FALLBACK' });
+    const navy = /export const NAVY = '([^']+)'/.exec(parts)?.[1];
+    const fallback = /export const COVER_FALLBACK = '([^']+)'/.exec(parts)?.[1];
+    expect(navy).toBeTruthy();
+    expect(fallback).toBeTruthy();
+    expect(fallback).not.toBe(navy);
+  });
+});

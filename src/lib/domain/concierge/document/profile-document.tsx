@@ -11,7 +11,7 @@ import { PCT_COVER_PHOTO, PCT_LOGO_WHITE } from './brand-assets';
 import { BODY, HEADING, registerDocumentFonts } from './fonts';
 import {
   Band, DASH_NOTE, Footer, Footnote, InstallmentBox, NavyStrip, Row, Row4, SectionBar, StatBox, Swatch,
-  BORDER, BOX_BG, COVER_FALLBACK, COVER_PANEL, FORECLOSURE_BG, GAP, INK, MEDIAN_FILL,
+  BORDER, BOX_BG, COVER_FALLBACK, FORECLOSURE_BG, GAP, INK, MEDIAN_FILL,
   LABEL_W, MUTED, NAVY, ORANGE, PLAT_BG, PREPARED_LABEL, SIDE, TYPE_COLOUR, s, type TypeKey,
 } from './parts';
 
@@ -335,7 +335,10 @@ export function ProfileDocument(input: ProfileDocumentInput) {
             and phone as separate lines at 75% opacity; v6 joins them with
             " · " and keeps them white. Columns centre vertically in whatever
             height is left, with a 30 pt gap — marginRight, never flex gap. */}
-        <View style={{ width: '100%', flexGrow: 1, backgroundColor: COVER_PANEL, paddingHorizontal: SIDE, flexDirection: 'row', alignItems: 'center' }}>
+        {/* NAVY, the same fill as the address block above — one cover, one
+            colour. This was COVER_PANEL (#222A48), lighter and slightly more
+            purple, and the seam showed. */}
+        <View style={{ width: '100%', flexGrow: 1, backgroundColor: NAVY, paddingHorizontal: SIDE, flexDirection: 'row', alignItems: 'center' }}>
           <View style={{ flex: 1, marginRight: 30 }}>
             <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 8.25, color: PREPARED_LABEL, letterSpacing: 1 }}>PREPARED FOR</Text>
             <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 14.25, color: '#FFFFFF', marginTop: 7 }}>

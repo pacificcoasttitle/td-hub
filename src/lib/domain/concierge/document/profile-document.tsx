@@ -229,18 +229,28 @@ interface BandProps { address: string; sub: string; logo: string | null }
  * belongs on every section that can break, which is why it lives in Sheet
  * rather than in any one of them.
  *
- * `fixed` is what does it: react-pdf re-renders a fixed element on each sheet a
- * Page generates. That also takes the band out of normal flow, so the body
- * carries the band's height as padding instead — paddingTop on s.body was the
- * gap under a band that was in flow, and is now the band's own height plus that
- * gap. Getting that wrong does not error; it silently slides the first line of
- * every sheet under the navy, which is why cover-and-band tests render.
+ * `fixed` is the whole change: react-pdf re-renders a fixed element on each
+ * sheet a Page generates, and it still occupies its space on each — so the body
+ * needs no extra padding to stay clear of it, and adding some put 93pt of air
+ * under every header. Measured at both commits on profile 15; see parts.tsx for
+ * the arithmetic and for how the first measurement managed to miss it.
+ *
+ * AND IT IS ALSO WHAT UNSTRANDED THE FOOTNOTE. Gemma's tax footnote sat alone
+ * on p5. The first fix attributed that to a `minPresenceAhead` on Footnote and
+ * that attribution was wrong: removing the property changes nothing, while
+ * reverting this one word brings p5 back — measured both ways, in the test and
+ * against the real profile. Changing how the band occupies the sheet changed
+ * where the break falls.
+ *
+ * So this word is load-bearing for two defects, and two tests fail without it:
+ * one finds the sheets with no band, the other finds body text drawn in the
+ * band's strip.
  */
 function Sheet({ band, children }: { band: BandProps; children: React.ReactNode }) {
   return (
     <Page size="LETTER" style={s.page}>
       <Band address={band.address} sub={band.sub} logo={band.logo} fixed />
-      <View style={s.bodyUnderFixedBand}>{children}</View>
+      <View style={s.body}>{children}</View>
       <Footer />
     </Page>
   );
@@ -613,7 +623,21 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         {comps.map((c, i) => {
           const r = pricePerSqft(c.salePrice, c.buildingArea);
           return (
-            <View key={i} style={{ borderWidth: 0.75, borderColor: BORDER, marginTop: 10.5 }}>
+            // ─── A CARD NEVER SPLITS ACROSS SHEETS ──────────────────────
+            //
+            // Without this a card breaks wherever the sheet runs out: its
+            // header row on one page and the figures on the next, or the
+            // address line orphaned under a border that started above it.
+            // A comparable read across a fold is not a comparable.
+            //
+            // AND IT IS WHY NO ARITHMETIC IS NEEDED HERE. The intended fix was
+            // to measure a card, divide into the page and lay out that many —
+            // but `wrap={false}` already makes react-pdf do exactly that sum,
+            // per card, against the space actually left. Computing a count
+            // ourselves would fix one card height as a constant, and these are
+            // not constant: an address that wraps to two lines makes its card
+            // taller than its neighbours.
+            <View key={i} wrap={false} style={{ borderWidth: 0.75, borderColor: BORDER, marginTop: 10.5 }}>
               <View style={{ flexDirection: 'row', backgroundColor: BOX_BG, paddingVertical: 4.5, paddingHorizontal: 7.5 }}>
                 {['No.', 'Date sold', 'Sale price', 'Sq ft', '$/sq ft', 'Beds', 'Baths', 'Yr built', 'Distance'].map((h, j) => (
                   <Text key={h} style={{ flex: j === 0 ? 0.5 : 1, fontFamily: BODY, fontWeight: 700, fontSize: 8.6, color: ORANGE }}>{h}</Text>

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import '@/test-support/interactive-timeout';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NewReportModal } from './new-report-modal';

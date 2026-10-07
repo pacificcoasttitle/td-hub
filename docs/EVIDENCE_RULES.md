@@ -361,6 +361,58 @@ So:
   guard's explanation. Rule 4 says prove a guard can fail — this says check it
   can *pass*.
 
+## 11 · Check that your filter does not sit where the effect would be
+
+A style named `bodyUnderFixedBand` reserved the header's height a second time,
+putting 93 points of blank page under every band and costing a whole sheet. It
+was measured, twice, and pronounced a no-op.
+
+The measurement classified every text run at `y >= 699` as part of the band and
+everything below it as body, then compared "the topmost body run" across the
+two versions. 699 is the band's bottom edge — and **it is also exactly where the
+first body line moves to when the padding is removed.** So in the version
+without the padding, the line that had moved was relabelled as band text and
+dropped from the comparison. Both versions reported the same topmost body run.
+No change, twice, reproducibly.
+
+**The constant 699 appeared in both the hypothesis and the classifier.** That is
+the whole rule, and it is the thing to look for: when the same number is in what
+you are testing and in how you are looking, you are not measuring, you are
+defining the answer.
+
+**This is not a vacuous test or a circular guard.** The measurement ran, the
+code it measured was real, the numbers were correct, and it reproduced. Rule 4
+is a guard that cannot fail; rule 10 is a defect whose output is a legitimate
+value. This is a *sampling* fault: the boundary of the sample was drawn through
+the signal.
+
+It is the hardest of the family to catch in review, because reproducibility is
+normally what earns a result trust. Running it again gives the same wrong
+answer with more confidence.
+
+So:
+
+- **Ask where the effect would appear, then look at your filter.** Any
+  threshold, `WHERE` clause, slice or type guard sitting at that coordinate is
+  a candidate for hiding exactly what you are measuring.
+- **Prefer a measurement with no classifier.** The check that settled it printed
+  *every* text run above y=560 with its position and let the structure speak —
+  band runs at 764/738/722, then a gap, then the first body run at 568 or 661.
+  Nothing had to be labelled, so nothing could be mislabelled.
+- **Make the units of the assertion the units of the defect.** The defect was
+  93 points of space. Every check phrased in text — "is the content present",
+  "is the band there" — passed throughout, because every word was present and
+  correct and simply 93 points lower.
+- **A measurement that says "no change" deserves the same suspicion as one that
+  says "fixed".** Both are conclusions. The null result here was taken as the
+  cheap, safe reading and shipped in a commit message as fact.
+
+And the corollary, from what happened next: the coordinate guard written to
+replace the bad measurement found a *second* defect within minutes — content
+sitting 8 points off the navy on every continuation sheet, in production, on
+both reference documents. A check expressed in the right units does not only
+confirm the fix you had in mind.
+
 ## The shape they share
 
 In every case the reassuring reading was available and cheap, and the
@@ -370,3 +422,6 @@ deciding it is not.
 
 Rule 10 is that question with the uncomfortable answer: sometimes you would see
 exactly what you are seeing now.
+
+Rule 11 is worse again: sometimes you would see it, and the way you are looking
+is what removes it.

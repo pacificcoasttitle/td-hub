@@ -375,6 +375,11 @@ without the padding, the line that had moved was relabelled as band text and
 dropped from the comparison. Both versions reported the same topmost body run.
 No change, twice, reproducibly.
 
+**The constant 699 appeared in both the hypothesis and the classifier.** That is
+the whole rule, and it is the thing to look for: when the same number is in what
+you are testing and in how you are looking, you are not measuring, you are
+defining the answer.
+
 **This is not a vacuous test or a circular guard.** The measurement ran, the
 code it measured was real, the numbers were correct, and it reproduced. Rule 4
 is a guard that cannot fail; rule 10 is a defect whose output is a legitimate
@@ -389,9 +394,7 @@ So:
 
 - **Ask where the effect would appear, then look at your filter.** Any
   threshold, `WHERE` clause, slice or type guard sitting at that coordinate is
-  a candidate for hiding exactly what you are measuring. Here the constant
-  appeared in both the hypothesis and the classifier, which should have been
-  the tell on its own.
+  a candidate for hiding exactly what you are measuring.
 - **Prefer a measurement with no classifier.** The check that settled it printed
   *every* text run above y=560 with its position and let the structure speak —
   band runs at 764/738/722, then a gap, then the first body run at 568 or 661.

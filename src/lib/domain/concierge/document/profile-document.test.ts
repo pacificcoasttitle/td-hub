@@ -676,3 +676,73 @@ describe('the band does not cover the body', () => {
     expect(strays, 'body text is drawn inside the band strip').toEqual([]);
   });
 });
+
+// ─── No blank band under the header ─────────────────────────────────────────
+//
+// 93pt of air sat under every band on production (04c54f6), because the band is
+// `fixed` AND the body reserved its height again. Gerard saw it as a blank
+// strip between the header and the first section, and it cost a sheet: 1358 5th
+// Street rendered 9 pages instead of 8 because the tax section split.
+//
+// ASSERTED IN POINTS, because that is the unit of the defect. A text check
+// cannot see it — every word is present and correct, just 93pt lower.
+
+describe('the body starts just under the band, not a band-height below it', () => {
+  it('leaves the designed gap and not a second band of air', async () => {
+    const doc = await getDocument({
+      data: new Uint8Array(await renderToBuffer(ProfileDocument(big()))),
+      verbosity: 0,
+    }).promise;
+
+    const BAND_BOTTOM = 792 - 93;
+
+    // FROM PAGE 3. Page 1 is the cover and page 2 is the "Thank you" letter,
+    // which is not a Sheet — it builds its own Page and sets its own spacing,
+    // putting its heading 89pt under the band on purpose. Including it would
+    // have forced the bound up past the defect this is here to catch.
+    for (let p = 3; p <= doc.numPages; p++) {
+      const ys = (await (await doc.getPage(p)).getTextContent()).items
+        .filter((i): i is typeof i & { str: string; transform: number[] } => 'str' in i && !!i.str.trim())
+        .map((i) => i.transform[5]!)
+        .filter((y) => y < BAND_BOTTOM);
+      if (ys.length === 0) continue; // a sheet carrying only an image
+
+      const gap = BAND_BOTTOM - Math.max(...ys);
+      // BODY_TOP is 19.5 and a baseline sits a line-height below the text top,
+      // so the real gap is around 38. The bound that matters is the upper one:
+      // anything past ~70 means a whole band's height has crept back in.
+      expect(gap, `p${p} starts ${gap.toFixed(1)}pt below the band`).toBeLessThan(70);
+      // And the lower bound, so nothing tucks up against the navy either.
+      expect(gap, `p${p} starts only ${gap.toFixed(1)}pt below the band`).toBeGreaterThan(10);
+    }
+  });
+});
+
+// ─── A comparable is not read across a fold ─────────────────────────────────
+
+describe('comparable cards never split across sheets', () => {
+  it('keeps every card header with its own address row', async () => {
+    // Each card renders one "Date sold" header and one address. If a card
+    // straddles a break those two land on different sheets, so per sheet the
+    // two counts must agree — and across the document they must add up to the
+    // number of comparables, so a card cannot be lost either.
+    const doc = await getDocument({
+      data: new Uint8Array(await renderToBuffer(ProfileDocument(big()))),
+      verbosity: 0,
+    }).promise;
+
+    let headers = 0;
+    let addresses = 0;
+    for (let p = 1; p <= doc.numPages; p++) {
+      const t = (await (await doc.getPage(p)).getTextContent()).items
+        .map((i) => ('str' in i ? i.str : '')).join(' ');
+      const h = (t.match(/Date sold/g) ?? []).length;
+      const a = (t.match(/OVERFLOW ST/g) ?? []).length;
+      expect(h, `p${p}: ${h} card headers but ${a} addresses — a card is split`).toBe(a);
+      headers += h;
+      addresses += a;
+    }
+    expect(headers, 'not every comparable rendered').toBe(12);
+    expect(addresses).toBe(12);
+  });
+});

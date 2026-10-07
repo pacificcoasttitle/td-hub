@@ -73,16 +73,34 @@ export const LABEL_W = 112.5;
 
 export const s = StyleSheet.create({
   page: { fontSize: 9.75, color: INK, fontFamily: BODY, fontWeight: 500, flexDirection: 'column' },
-  body: { paddingHorizontal: SIDE, paddingTop: BODY_TOP, flexGrow: 1 },
+  // No paddingTop: the gap under a repeating band lives on the band, so it
+  // repeats with it. See Band.
+  body: { paddingHorizontal: SIDE, flexGrow: 1 },
+  bandGap: { marginBottom: BODY_TOP },
 
-  // There is no separate body style for a fixed band, and the attempt to add
-  // one is worth recording. The reasoning was that `fixed` takes the band out
-  // of flow, so the body must reserve BAND_H itself or every sheet draws its
-  // first line under the navy. That is wrong about react-pdf: a fixed element
-  // still occupies its space on each sheet it repeats onto. Measured — adding
-  // BAND_H moved no text (p2 body top y=610 either way) and changed no sheet
-  // count (Gemma 10, Amethyst 8 either way). It was a no-op with a confident
-  // comment about a hazard that does not exist, which is the worse half.
+  // ─── There is no separate body style for a fixed band ────────────────────
+  //
+  // One was added on the reasoning that `fixed` takes the band out of flow, so
+  // the body must reserve BAND_H itself or every sheet draws its first line
+  // under the navy. That is wrong about react-pdf: A FIXED ELEMENT STILL
+  // OCCUPIES ITS SPACE on each sheet it repeats onto. Reserving it again is a
+  // double count, and the arithmetic closes exactly:
+  //
+  //   band 93 + BODY_TOP 19.5 = 112.5   -> first baseline 661  (correct)
+  //   band 93 + (93 + 19.5)   = 205.5   -> first baseline 568  (93pt of air)
+  //
+  // Measured on profile 15, 1358 5th Street, at both commits. The surplus is
+  // what Gerard saw as a blank band under every header, and it cost a sheet:
+  // that profile is 9 pages with the extra padding and 8 without, because the
+  // tax section no longer splits.
+  //
+  // AN EARLIER NOTE HERE CALLED IT A NO-OP, which was wrong and wrong in a way
+  // worth keeping. The measurement behind that claim classified every run at
+  // y >= 699 as band text — and 699 is precisely where the first body line
+  // moves to when the padding is removed, so the thing being looked for was
+  // excluded from the sample by the definition of the sample. It reported "no
+  // change" for the same reason a net with the right-sized holes catches
+  // nothing.
 
   band: { height: BAND_H, backgroundColor: NAVY, paddingHorizontal: SIDE, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   bandEyebrow: { fontFamily: HEADING, fontWeight: 700, fontSize: 7.5, color: ORANGE, letterSpacing: 1.2 },
@@ -122,8 +140,18 @@ export function Band({ address, sub, logo, fixed }: {
   /** Repeat on every sheet this Page generates — see Sheet. */
   fixed?: boolean;
 }) {
+  // ─── THE GAP BELONGS TO THE BAND, NOT THE BODY ──────────────────────────
+  //
+  // When the band repeats, the gap under it has to repeat too. Body paddingTop
+  // is applied once per Page, at the start of the flow, so a continuation sheet
+  // got the band and then content immediately — measured at 8.4pt of clearance
+  // on p7, text all but touching the navy.
+  //
+  // A margin on the band travels with it onto every sheet. Only for the fixed
+  // case: the three bespoke pages place their own Band and set their own
+  // spacing, and giving them this as well would double it.
   return (
-    <View style={s.band} fixed={fixed}>
+    <View style={fixed ? [s.band, s.bandGap] : s.band} fixed={fixed}>
       <View style={{ flex: 1, paddingRight: 16 }}>
         <Text style={s.bandEyebrow}>CONCIERGE PROPERTY PROFILE</Text>
         <Text style={s.bandAddress}>{address}</Text>

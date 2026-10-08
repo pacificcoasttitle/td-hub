@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { normalizeSubject, normalizeTax } from '../normalize';
+import { normalizeSubject, normalizeTax, normalizeTransfers } from '../normalize';
 import { join } from 'node:path';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { renderToBuffer } from '@react-pdf/renderer';
@@ -744,5 +744,177 @@ describe('comparable cards never split across sheets', () => {
     }
     expect(headers, 'not every comparable rendered').toBe(12);
     expect(addresses).toBe(12);
+  });
+});
+
+// ─── The transfer history carries what a rep asked for ──────────────────────
+
+describe('transfer rows show the amount and the parties', () => {
+  const withDetail = () => input({
+    taxReport: GEMMA_TAX,
+    subject: normalizeSubject(GEMMA_FEED) as ProfileDocumentInput['subject'],
+    tax: normalizeTax(GEMMA_FEED) as ProfileDocumentInput['tax'],
+    transfers: normalizeTransfers({
+      TransferHistory: [
+        { DocumentType: 'Deed', RecordingDate: '20240101', RecorderDocumentNumber: '2024-0000001', CurrentOwnerFlag: 'True',
+          Deed: { SalesPrice: '595000', BuyerInfo: { BuyerNames: 'ACHESON, PRIYA' }, SellerInfo: { SellerNames: 'OKONKWO, DAPO' } } },
+        { DocumentType: 'Mortgage', RecordingDate: '20240102', RecorderDocumentNumber: '2024-0000002',
+          Mortgage: { LoanAmount: '583942', LenderName: 'DHI MORTGAGE COMPANY LTD', BorrowerInfo: { BorrowerNames: 'ACHESON, PRIYA' } } },
+        { DocumentType: 'Pre-Foreclosure', RecordingDate: '20240103', RecorderDocumentNumber: '2024-0000003' },
+      ],
+    } as never) as ProfileDocumentInput['transfers'],
+  });
+
+  it('prints a sale price and a loan, each saying which it is', async () => {
+    // The column is headed AMOUNT, not PRICE: a $583,942 loan under a heading
+    // that said "price" would read as a sale of the house.
+    const { text } = await render(withDetail());
+    expect(text).toContain(sq('$595,000'));
+    expect(text).toContain(sq('$583,942'));
+    expect(text).toContain(sq('Sale · Buyer: ACHESON, PRIYA'));
+    expect(text).toContain(sq('Loan · Borrower: ACHESON, PRIYA'));
+    expect(text).toContain(sq('Seller: OKONKWO, DAPO'));
+    expect(text).toContain(sq('Lender: DHI MORTGAGE COMPANY LTD'));
+  });
+
+  it('heads the column AMOUNT, never PRICE', async () => {
+    const { text } = await render(withDetail());
+    expect(text).toContain(sq('AMOUNT'));
+    // A deed's price and a mortgage's loan share this column and are not the
+    // same quantity.
+    expect(text).not.toContain(sq('SALE PRICE'));
+  });
+
+  it('adds no second line to a record that names nobody', async () => {
+    // A blank line under every pre-foreclosure would cost a sheet to say
+    // nothing. The row stays one line.
+    const { parts } = await render(withDetail());
+    const page = parts.find((p) => p.replace(/\s/g, '').includes('2024-0000003')) ?? '';
+    expect(page).toContain('2024-0000003');
+    expect(page.replace(/\s/g, '')).not.toContain('Buyer:undefined');
+    expect(page.replace(/\s/g, '')).not.toContain('Borrower:null');
+  });
+
+  it('never splits a transfer across sheets', async () => {
+    // Every row here carries parties, so each renders exactly one document
+    // number and one party line. If a row straddles a break the two land on
+    // different sheets and the per-sheet counts stop matching — the same shape
+    // as the comparable-card check.
+    //
+    // 40 deeds, enough to overflow onto a continuation sheet.
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      DocumentType: 'Deed',
+      RecordingDate: '20240101',
+      RecorderDocumentNumber: `2024-${String(1000000 + i)}`,
+      Deed: {
+        SalesPrice: '595000',
+        BuyerInfo: { BuyerNames: `BUYER NUMBER ${i}` },
+        SellerInfo: { SellerNames: `SELLER NUMBER ${i}` },
+      },
+    }));
+    const doc = await getDocument({
+      data: new Uint8Array(await renderToBuffer(ProfileDocument(input({
+        transfers: normalizeTransfers({ TransferHistory: many } as never) as ProfileDocumentInput['transfers'],
+      })))),
+      verbosity: 0,
+    }).promise;
+
+    // Pages that hold the transfer TABLE. The details page prints the current
+    // vesting deed's document number in its own box, outside any row, so
+    // counting it here would report a split that is not one — it was the first
+    // thing this check found, and it was wrong about it.
+    const tablePages: number[] = [];
+    let docNos = 0;
+    let partyLines = 0;
+    for (let p = 1; p <= doc.numPages; p++) {
+      const items = (await (await doc.getPage(p)).getTextContent()).items
+        .filter((i): i is typeof i & { str: string } => 'str' in i && !!i.str.trim());
+      const n = items.filter((i) => /^2024-10\d{5}$/.test(i.str.trim())).length;
+      const parties = items.filter((i) => i.str.includes('Buyer: BUYER NUMBER')).length;
+      if (n <= 1 && parties === 0) continue; // the vesting box, or no transfers
+      tablePages.push(p);
+      expect(n, `p${p}: ${n} document numbers but ${parties} party lines — a transfer is split`).toBe(parties);
+      docNos += n;
+      partyLines += parties;
+    }
+
+    expect(tablePages.length, 'the fixture did not overflow onto a second sheet').toBeGreaterThan(1);
+    expect(docNos, 'not every transfer rendered').toBe(40);
+    expect(partyLines).toBe(40);
+  });
+});
+
+// ─── Vesting is a legal description ─────────────────────────────────────────
+
+describe('the current vesting box prints the recorded name verbatim', () => {
+  const owned = (primaryOwner: string) => input({
+    subject: { ...(SUBJECT as Record<string, unknown>), primaryOwner } as ProfileDocumentInput['subject'],
+    transfers: normalizeTransfers({
+      TransferHistory: [{
+        DocumentType: 'Deed', RecordingDate: '20240101',
+        RecorderDocumentNumber: '2024-0000001', CurrentOwnerFlag: 'True',
+        Deed: { SalesPrice: '1', BuyerInfo: { BuyerNames: primaryOwner }, SellerInfo: { SellerNames: 'X' } },
+      }],
+    } as never) as ProfileDocumentInput['transfers'],
+  });
+
+  /**
+   * The ONE sheet carrying the vesting box, by its own heading.
+   *
+   * These assertions have to be per-sheet, not document-wide. "Not anywhere in
+   * the PDF" is the wrong claim and would fail for the right reason: the
+   * reading-order form legitimately appears on the owner sheet. Scoping it to
+   * the band's own page is what makes the negative mean "the box does not do
+   * this" rather than "the document never does this".
+   */
+  const sheet = (parts: string[], heading: string) => {
+    const found = parts.map(sq).filter((t) => t.includes(sq(heading)));
+    expect(found, `expected exactly one sheet containing "${heading}"`).toHaveLength(1);
+    return found[0];
+  };
+
+  it('does not reorder a company the word list fails to recognise', async () => {
+    // The live case. ENTITY_WORDS carries `holdings`, `properties` and `group`
+    // but not `enterprises`, so readingOrder() took GOLDEN for a surname and
+    // produced "Heights Enterprises Golden" — in the navy box, directly above a
+    // transfer row printing the same company correctly.
+    const { parts } = await render(owned('GOLDEN HEIGHTS ENTERPRISES'));
+    const box = sheet(parts, 'CURRENT VESTING');
+    expect(box).toContain(sq('GOLDEN HEIGHTS ENTERPRISES'));
+    expect(box).not.toContain(sq('Heights Enterprises Golden'));
+  });
+
+  it('does not reorder a person either — the deed is the deed', async () => {
+    // Not an entity-detection fix. NOTHING is reordered in this box, so there
+    // is no classifier left to be wrong about anything, person or company.
+    const { parts } = await render(owned('HANSON, ELIZABETH A'));
+    const box = sheet(parts, 'CURRENT VESTING');
+    expect(box).toContain(sq('HANSON, ELIZABETH A'));
+    expect(box).not.toContain(sq('Elizabeth A Hanson'));
+  });
+
+  it('keeps reading order on the owner sheet, with the deed underneath it', async () => {
+    // Where it is a courtesy rather than a legal description. The second half
+    // is the half that makes keeping the guess defensible: a reader who sees
+    // "Heights Enterprises Golden" can see what the deed said and correct it.
+    // That line did NOT exist before this change — the justification for
+    // keeping reading order here was describing something unbuilt.
+    const { parts } = await render(owned('GOLDEN HEIGHTS ENTERPRISES'));
+    const page = sheet(parts, 'OWNER, ADDRESS & LEGAL DESCRIPTION');
+    expect(page).toContain(sq('Heights Enterprises Golden'));
+    expect(page).toContain(sq('Recorded as GOLDEN HEIGHTS ENTERPRISES'));
+  });
+
+  it('does not print "Recorded as" when reading order changed nothing', async () => {
+    // A company that needs no reordering, so the line would restate the value
+    // directly above it. If this goes green with the guard removed, every
+    // owner row carries a redundant second line and the ones that matter stop
+    // standing out.
+    // `llc` IS in ENTITY_WORDS, so this one is only title-cased: "Brpld Llc".
+    // A change of presentation, not of the name.
+    const { parts } = await render(owned('BRPLD LLC'));
+    const page = sheet(parts, 'OWNER, ADDRESS & LEGAL DESCRIPTION');
+    expect(page).toContain(sq('Brpld Llc'));
+    expect(page).not.toContain(sq('Recorded as'));
   });
 });

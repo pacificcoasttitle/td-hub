@@ -116,6 +116,39 @@ export interface NormalizedTransfer {
   pageNumber: string | null;
   currentOwnerFlag: boolean | null;
   isForeclosure: boolean | null;
+  /**
+   * ─── What the transfer was for, and between whom ──────────────────────────
+   *
+   * Legacy's profile carried these and v6 dropped them; a rep asked for them
+   * back (Gerard, 2026-10-07). Privacy is settled: these are recorded
+   * documents, public by definition.
+   *
+   * THE FIELD NAMES ARE MEASURED, NOT ASSUMED, across the 44 transfers on
+   * profiles 12 and 13 — because reading keys SiteX never sends is how
+   * normalizeSubject went wrong once already. None of them are top-level:
+   *
+   *   Deed.SalesPrice                        7/11 deeds
+   *   Deed.BuyerInfo.BuyerNames             10/11
+   *   Deed.SellerInfo.SellerNames           10/11
+   *   Mortgage.LoanAmount                   17/18 mortgages
+   *   Mortgage.BorrowerInfo.BorrowerNames   18/18
+   *   Mortgage.LenderName                   18/18
+   *
+   * WHICH ONE APPLIES DEPENDS ON THE DOCUMENT. A deed has a price and a buyer
+   * and seller; a mortgage has a loan and a borrower and lender. They are not
+   * the same quantity and must not share a column heading that implies they
+   * are — see the document.
+   *
+   * The mailing addresses sitting beside the names in the same objects are
+   * deliberately not read. The ask was names and amounts.
+   */
+  amount: number | null;
+  /** 'sale' for a deed's price, 'loan' for a mortgage's. Null when neither. */
+  amountKind: 'sale' | 'loan' | null;
+  /** Buyer on a deed, borrower on a mortgage or release. */
+  partyTo: string | null;
+  /** Seller on a deed, lender on a mortgage. */
+  partyFrom: string | null;
   raw: Raw;
 }
 
@@ -301,9 +334,70 @@ const foreclosureFlag = (v: unknown): boolean | null => {
   return boolFlag(v);
 };
 
+/** A nested block on a transfer — Deed, Mortgage, Release, Foreclosure. */
+const sub = (t: Raw, key: string): Raw =>
+  (t[key] && typeof t[key] === 'object' && !Array.isArray(t[key]) ? t[key] as Raw : {});
+
+/**
+ * The money and the parties, chosen by what kind of document it is.
+ *
+ * A DEED IS CHECKED BEFORE A MORTGAGE because a single record can carry both
+ * blocks — a purchase with financing — and in that case the sale price is the
+ * figure a reader is looking for. The loan is still on its own row, since
+ * SiteX records the mortgage as its own transfer.
+ */
+function transferDetail(t: Raw): Pick<NormalizedTransfer, 'amount' | 'amountKind' | 'partyTo' | 'partyFrom'> {
+  const deed = sub(t, 'Deed');
+  const mortgage = sub(t, 'Mortgage');
+  const release = sub(t, 'Release');
+
+  const salePrice = money(deed.SalesPrice);
+  if (salePrice !== null || deed.BuyerInfo || deed.SellerInfo) {
+    return {
+      amount: salePrice,
+      amountKind: salePrice === null ? null : 'sale',
+      partyTo: str(sub(deed, 'BuyerInfo').BuyerNames),
+      partyFrom: str(sub(deed, 'SellerInfo').SellerNames),
+    };
+  }
+
+  const loan = money(mortgage.LoanAmount);
+  if (loan !== null || mortgage.BorrowerInfo || mortgage.LenderName) {
+    return {
+      amount: loan,
+      amountKind: loan === null ? null : 'loan',
+      partyTo: str(sub(mortgage, 'BorrowerInfo').BorrowerNames),
+      partyFrom: str(mortgage.LenderName),
+    };
+  }
+
+  // A release names the borrower whose loan is being released, and carries the
+  // original loan's amount rather than one of its own.
+  if (release.BuyerorBorrower1LastOrCorporateName || release.OriginalLoan) {
+    const original = money(sub(release, 'OriginalLoan').LoanAmount);
+    return {
+      amount: original,
+      amountKind: original === null ? null : 'loan',
+      partyTo: str(release.BuyerorBorrower1LastOrCorporateName),
+      partyFrom: str(release.CurrentBeneficiaryLender ?? release.OriginalBeneficiaryLender),
+    };
+  }
+
+  return { amount: null, amountKind: null, partyTo: null, partyFrom: null };
+}
+
+/** "833500" -> 833500. Blank, zero and unparseable all become null. */
+function money(v: unknown): number | null {
+  const s = String(v ?? '').replace(/[$,\s]/g, '').trim();
+  if (s === '') return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export function normalizeTransfers(feed: Raw): NormalizedTransfer[] {
   return arr(feed.TransferHistory).map((t, i) => ({
     sourcePosition: i,
+    ...transferDetail(t),
     transactionType: str(t.TransactionType),
     documentType: str(t.DocumentType),
     recordingDate: toIsoDate(t.RecordingDate),

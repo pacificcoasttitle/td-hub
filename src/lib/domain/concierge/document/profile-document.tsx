@@ -432,8 +432,12 @@ export function ProfileDocument(input: ProfileDocumentInput) {
       {/* ── 3 · Details ──────────────────────────────────────────────────── */}
       <Sheet band={band}>
         <SectionBar>OWNER, ADDRESS &amp; LEGAL DESCRIPTION</SectionBar>
-        <Row label="Primary owner" value={owners[0]?.display ?? null} />
-        <Row label="Secondary owner" value={owners[1]?.display ?? null} />
+        {/* The reading-order guess, with what the deed actually says beneath
+            it when the two differ. Reading order is a COURTESY here and the
+            recorded form is the check on it; in the vesting box it is not used
+            at all, because there it would be a legal description. */}
+        <Row label="Primary owner" value={owners[0]?.display ?? null} sub={recordedIfDifferent(owners[0])} />
+        <Row label="Secondary owner" value={owners[1]?.display ?? null} sub={recordedIfDifferent(owners[1])} />
         <Row label="Site address" value={[subject.siteAddress, subject.siteCityState].filter(Boolean).join(', ')} />
         <Row label="Mailing address" value={subject.mailAddressFull} />
         <Row4 label="APN" value={subject.apn} label2="County" value2={subject.county} />
@@ -483,8 +487,26 @@ export function ProfileDocument(input: ProfileDocumentInput) {
           <View style={{ backgroundColor: NAVY, padding: 13.5, marginTop: 9, flexDirection: 'row', justifyContent: 'space-between' }}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 8.25, color: ORANGE, letterSpacing: 1 }}>CURRENT VESTING</Text>
+              {/* ─── RECORDED, VERBATIM. Never reading-order. ──────────────
+                  Vesting is a legal description and must match the deed. This
+                  printed `o.display`, which runs readingOrder() — a classifier
+                  that assumes a person unless it recognises a company word, and
+                  whose word list has `holdings`, `properties` and `group` but
+                  not `enterprises`. So Amethyst's GOLDEN HEIGHTS ENTERPRISES
+                  came out as "Heights Enterprises Golden", on the one surface
+                  where a mangled legal name is least acceptable — directly
+                  above a transfer row printing the same company correctly.
+
+                  THE FIX IS NOT ANOTHER WORD. Adding `enterprises` leaves
+                  Ventures, Partners, Associates and whatever is next. This
+                  removes the guess from the box entirely: no classifier can be
+                  wrong here because none runs.
+
+                  Reading order stays on the page-3 owner rows, where it is a
+                  courtesy, a bad guess is visibly odd, and nothing legal rests
+                  on it. */}
               <Text style={{ fontFamily: HEADING, fontWeight: 700, fontSize: 12.75, color: '#FFFFFF', marginTop: 6 }}>
-                {owners.map((o) => o.display).join(' & ') || GAP}
+                {owners.map((o) => o.recorded).join(' & ') || GAP}
               </Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
@@ -509,29 +531,62 @@ export function ProfileDocument(input: ProfileDocumentInput) {
           <Text style={[s.th, { flex: 1.4 }]}>RECORDED</Text>
           <Text style={[s.th, { flex: 1.5 }]}>DOCUMENT #</Text>
           <Text style={[s.th, { flex: 2.2 }]}>TYPE</Text>
+          {/* NOT "PRICE". The column holds a sale price on a deed and a loan on
+              a mortgage, and they are not the same quantity — a heading that
+              implied they were would make a $583,942 loan read as a sale. Each
+              figure says which it is on the row itself. */}
+          <Text style={[s.th, { flex: 1.3, textAlign: 'right' }]}>AMOUNT</Text>
           <Text style={[s.th, { flex: 1.1 }]}> </Text>
         </View>
         {sorted.map((t) => {
           const kind = typeOf(t);
           const isVesting = vesting !== null && t.sourcePosition === vesting.sourcePosition;
           const bg = kind === 'foreclosure' ? FORECLOSURE_BG : isVesting ? MEDIAN_FILL : undefined;
+          // The parties, when the record names any. A deed's buyer and seller,
+          // a mortgage's borrower and lender — labelled per row rather than in
+          // the header, because the header cannot be right for both.
+          const toLabel = kind === 'deed' ? 'Buyer' : 'Borrower';
+          const fromLabel = kind === 'deed' ? 'Seller' : 'Lender';
+          const parties = [
+            t.partyTo ? `${toLabel}: ${t.partyTo}` : null,
+            t.partyFrom ? `${fromLabel}: ${t.partyFrom}` : null,
+          ].filter(Boolean).join('   ');
+
           return (
-            <View key={t.sourcePosition} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 3.75, backgroundColor: bg, borderBottomWidth: 0.75, borderBottomColor: '#E6E9EE' }}>
-              <Text style={{ flex: 1.4, fontFamily: BODY, fontWeight: 700, fontSize: 9, color: INK }}>{dt(t.recordingDate)}</Text>
-              <Text style={{ flex: 1.5, fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK }}>{t.documentNumber ?? GAP}</Text>
-              <View style={{ flex: 2.2, flexDirection: 'row', alignItems: 'center' }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: TYPE_COLOUR[kind], marginRight: 6 }} />
-                <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK }}>
-                  {txt(t.documentType ?? t.transactionType)}
+            // wrap={false} so a transfer is never read across a fold: its date
+            // and document number on one sheet and its parties on the next
+            // would be two half-records rather than one.
+            <View key={t.sourcePosition} wrap={false} style={{ paddingVertical: 3.75, backgroundColor: bg, borderBottomWidth: 0.75, borderBottomColor: '#E6E9EE' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ flex: 1.4, fontFamily: BODY, fontWeight: 700, fontSize: 9, color: INK }}>{dt(t.recordingDate)}</Text>
+                <Text style={{ flex: 1.5, fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK }}>{t.documentNumber ?? GAP}</Text>
+                <View style={{ flex: 2.2, flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: TYPE_COLOUR[kind], marginRight: 6 }} />
+                  <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK }}>
+                    {txt(t.documentType ?? t.transactionType)}
+                  </Text>
+                </View>
+                {/* The figure carries its own word, so a loan cannot be read as
+                    a sale. An em dash where the record holds neither. */}
+                <Text style={{ flex: 1.3, textAlign: 'right', fontFamily: BODY, fontWeight: 700, fontSize: 9, color: INK }}>
+                  {t.amount === null ? GAP : money(t.amount)}
                 </Text>
+                <View style={{ flex: 1.1, alignItems: 'flex-end' }}>
+                  {kind === 'foreclosure'
+                    ? <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 7.5, color: ORANGE }}>SEE NOTE</Text>
+                    : isVesting
+                      ? <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 7.5, color: '#FFFFFF', backgroundColor: NAVY, paddingVertical: 1.5, paddingHorizontal: 4.5 }}>CURRENT OWNERS</Text>
+                      : null}
+                </View>
               </View>
-              <View style={{ flex: 1.1, alignItems: 'flex-end' }}>
-                {kind === 'foreclosure'
-                  ? <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 7.5, color: ORANGE }}>SEE NOTE</Text>
-                  : isVesting
-                    ? <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 7.5, color: '#FFFFFF', backgroundColor: NAVY, paddingVertical: 1.5, paddingHorizontal: 4.5 }}>CURRENT OWNERS</Text>
-                    : null}
-              </View>
+              {/* Second line, muted, and ABSENT rather than blank when the
+                  record names nobody — an empty line under every release would
+                  cost a sheet to say nothing. */}
+              {parties ? (
+                <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 7.9, color: MUTED, marginTop: 2.25 }}>
+                  {t.amountKind === 'sale' ? `Sale · ${parties}` : t.amountKind === 'loan' ? `Loan · ${parties}` : parties}
+                </Text>
+              ) : null}
             </View>
           );
         })}
@@ -1015,4 +1070,22 @@ function joinDistricts(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? '';
   if (names.length === 2) return `${names[0]} and ${names[1]}`;
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+}
+
+/**
+ * What the deed says, when it differs from the reading-order guess.
+ *
+ * Null when they match, so the common case — "HANSON, ELIZABETH A" shown as
+ * "Elizabeth A Hanson" — does not print a line restating something the reader
+ * can already see, and a name that needs no reordering prints nothing at all.
+ *
+ * Case is ignored in the comparison: "BRPLD LLC" becoming "Brpld Llc" is a
+ * change of presentation, not of the name, and flagging it would bury the
+ * cases that matter under one on every row.
+ */
+function recordedIfDifferent(owner: { recorded: string; display: string } | undefined): string | null {
+  if (!owner) return null;
+  const same = owner.recorded.replace(/\s+/g, ' ').trim().toLowerCase()
+    === owner.display.replace(/\s+/g, ' ').trim().toLowerCase();
+  return same ? null : owner.recorded;
 }

@@ -124,3 +124,104 @@ describe('Foreclosure is an object or null — never a flag', () => {
     expect(t.documentType).toBeNull();
   });
 });
+
+// ─── What a transfer was for, and between whom ──────────────────────────────
+//
+// Legacy carried the amount and the parties; v6 dropped them and a rep asked
+// for them back. NONE OF THESE ARE TOP-LEVEL FIELDS, which is the whole reason
+// this describe exists — reading keys SiteX never sends is how normalizeSubject
+// went wrong once already. The shapes below are taken from the 44 stored
+// transfers on profiles 12 and 13, with the fill rates measured there.
+
+describe('transfer amount and parties, from the fields SiteX actually sends', () => {
+  const one = (t: Record<string, unknown>) => normalizeTransfers({ TransferHistory: [t] } as never)[0]!;
+
+  it('reads a deed as a sale, with buyer and seller', () => {
+    const r = one({
+      DocumentType: 'Deed',
+      Deed: {
+        SalesPrice: '595000',
+        BuyerInfo: { BuyerNames: 'VADILLO, ANGEL DAVID LOPEZ; AGUILAR, ERIKA SALAS' },
+        SellerInfo: { SellerNames: 'D R HORTON LOS ANGELES HOLDING CO INC' },
+      },
+    });
+    expect(r.amount).toBe(595_000);
+    expect(r.amountKind).toBe('sale');
+    expect(r.partyTo).toContain('VADILLO');
+    expect(r.partyFrom).toContain('D R HORTON');
+  });
+
+  it('reads a mortgage as a loan, with borrower and lender', () => {
+    const r = one({
+      DocumentType: 'Mortgage',
+      Mortgage: {
+        LoanAmount: '583942',
+        LenderName: 'DHI MORTGAGE COMPANY LTD',
+        BorrowerInfo: { BorrowerNames: 'VADILLO, ANGEL DAVID LOPEZ' },
+      },
+    });
+    expect(r.amount).toBe(583_942);
+    expect(r.amountKind).toBe('loan');
+    expect(r.partyTo).toContain('VADILLO');
+    expect(r.partyFrom).toBe('DHI MORTGAGE COMPANY LTD');
+  });
+
+  it('prefers the deed when a record carries both blocks', () => {
+    // A purchase with financing has both. The sale price is the figure a reader
+    // is looking for; the loan appears on its own row, because SiteX records
+    // the mortgage as a separate transfer.
+    const r = one({
+      Deed: { SalesPrice: '595000', BuyerInfo: { BuyerNames: 'BUYER' }, SellerInfo: { SellerNames: 'SELLER' } },
+      Mortgage: { LoanAmount: '583942', LenderName: 'LENDER' },
+    });
+    expect(r.amountKind).toBe('sale');
+    expect(r.amount).toBe(595_000);
+  });
+
+  it('takes a release from its original loan and names the borrower', () => {
+    const r = one({
+      DocumentType: 'Release',
+      Release: {
+        BuyerorBorrower1LastOrCorporateName: 'ELIZABETH A HANSON A WIDOW',
+        CurrentBeneficiaryLender: 'KEVIN BUSH',
+        OriginalLoan: { LoanAmount: '319800' },
+      },
+    });
+    expect(r.amount).toBe(319_800);
+    expect(r.partyTo).toContain('HANSON');
+    expect(r.partyFrom).toBe('KEVIN BUSH');
+  });
+
+  it('leaves everything null when the record carries none of it', () => {
+    // Measured: Deed.SalesPrice is filled on 7 of 11 deeds and
+    // Foreclosure.LoanAmount on 0 of 4. An absent amount is the normal case,
+    // not a parse failure, and must read as absent rather than as zero.
+    const r = one({ DocumentType: 'Pre-Foreclosure', Foreclosure: { LoanAmount: '' } });
+    expect(r.amount).toBeNull();
+    expect(r.amountKind).toBeNull();
+    expect(r.partyTo).toBeNull();
+    expect(r.partyFrom).toBeNull();
+  });
+
+  it('treats an empty or zero amount as absent, with the parties still read', () => {
+    const r = one({ Deed: { SalesPrice: '0', BuyerInfo: { BuyerNames: 'BUYER' }, SellerInfo: { SellerNames: 'SELLER' } } });
+    expect(r.amount).toBeNull();
+    expect(r.amountKind).toBeNull();
+    expect(r.partyTo).toBe('BUYER');
+  });
+
+  it('does not read the mailing addresses sitting beside the names', () => {
+    // BuyerInfo also carries MailFullStreetAddress, MailCityName and the rest.
+    // The ask was names and amounts; a prior owner's postal address is neither.
+    const r = one({
+      Deed: {
+        SalesPrice: '100',
+        BuyerInfo: { BuyerNames: 'BUYER', MailFullStreetAddress: '9270 AMETHYST AVE', MailCityName: 'MENTONE', MailZipCode: '92359' },
+        SellerInfo: { SellerNames: 'SELLER' },
+      },
+    });
+    const serialised = JSON.stringify({ ...r, raw: undefined });
+    expect(serialised).not.toContain('AMETHYST');
+    expect(serialised).not.toContain('92359');
+  });
+});

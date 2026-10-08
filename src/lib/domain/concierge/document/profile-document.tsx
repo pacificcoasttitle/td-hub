@@ -509,29 +509,62 @@ export function ProfileDocument(input: ProfileDocumentInput) {
           <Text style={[s.th, { flex: 1.4 }]}>RECORDED</Text>
           <Text style={[s.th, { flex: 1.5 }]}>DOCUMENT #</Text>
           <Text style={[s.th, { flex: 2.2 }]}>TYPE</Text>
+          {/* NOT "PRICE". The column holds a sale price on a deed and a loan on
+              a mortgage, and they are not the same quantity — a heading that
+              implied they were would make a $583,942 loan read as a sale. Each
+              figure says which it is on the row itself. */}
+          <Text style={[s.th, { flex: 1.3, textAlign: 'right' }]}>AMOUNT</Text>
           <Text style={[s.th, { flex: 1.1 }]}> </Text>
         </View>
         {sorted.map((t) => {
           const kind = typeOf(t);
           const isVesting = vesting !== null && t.sourcePosition === vesting.sourcePosition;
           const bg = kind === 'foreclosure' ? FORECLOSURE_BG : isVesting ? MEDIAN_FILL : undefined;
+          // The parties, when the record names any. A deed's buyer and seller,
+          // a mortgage's borrower and lender — labelled per row rather than in
+          // the header, because the header cannot be right for both.
+          const toLabel = kind === 'deed' ? 'Buyer' : 'Borrower';
+          const fromLabel = kind === 'deed' ? 'Seller' : 'Lender';
+          const parties = [
+            t.partyTo ? `${toLabel}: ${t.partyTo}` : null,
+            t.partyFrom ? `${fromLabel}: ${t.partyFrom}` : null,
+          ].filter(Boolean).join('   ');
+
           return (
-            <View key={t.sourcePosition} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 3.75, backgroundColor: bg, borderBottomWidth: 0.75, borderBottomColor: '#E6E9EE' }}>
-              <Text style={{ flex: 1.4, fontFamily: BODY, fontWeight: 700, fontSize: 9, color: INK }}>{dt(t.recordingDate)}</Text>
-              <Text style={{ flex: 1.5, fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK }}>{t.documentNumber ?? GAP}</Text>
-              <View style={{ flex: 2.2, flexDirection: 'row', alignItems: 'center' }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: TYPE_COLOUR[kind], marginRight: 6 }} />
-                <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK }}>
-                  {txt(t.documentType ?? t.transactionType)}
+            // wrap={false} so a transfer is never read across a fold: its date
+            // and document number on one sheet and its parties on the next
+            // would be two half-records rather than one.
+            <View key={t.sourcePosition} wrap={false} style={{ paddingVertical: 3.75, backgroundColor: bg, borderBottomWidth: 0.75, borderBottomColor: '#E6E9EE' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ flex: 1.4, fontFamily: BODY, fontWeight: 700, fontSize: 9, color: INK }}>{dt(t.recordingDate)}</Text>
+                <Text style={{ flex: 1.5, fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK }}>{t.documentNumber ?? GAP}</Text>
+                <View style={{ flex: 2.2, flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: TYPE_COLOUR[kind], marginRight: 6 }} />
+                  <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 9, color: INK }}>
+                    {txt(t.documentType ?? t.transactionType)}
+                  </Text>
+                </View>
+                {/* The figure carries its own word, so a loan cannot be read as
+                    a sale. An em dash where the record holds neither. */}
+                <Text style={{ flex: 1.3, textAlign: 'right', fontFamily: BODY, fontWeight: 700, fontSize: 9, color: INK }}>
+                  {t.amount === null ? GAP : money(t.amount)}
                 </Text>
+                <View style={{ flex: 1.1, alignItems: 'flex-end' }}>
+                  {kind === 'foreclosure'
+                    ? <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 7.5, color: ORANGE }}>SEE NOTE</Text>
+                    : isVesting
+                      ? <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 7.5, color: '#FFFFFF', backgroundColor: NAVY, paddingVertical: 1.5, paddingHorizontal: 4.5 }}>CURRENT OWNERS</Text>
+                      : null}
+                </View>
               </View>
-              <View style={{ flex: 1.1, alignItems: 'flex-end' }}>
-                {kind === 'foreclosure'
-                  ? <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 7.5, color: ORANGE }}>SEE NOTE</Text>
-                  : isVesting
-                    ? <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 7.5, color: '#FFFFFF', backgroundColor: NAVY, paddingVertical: 1.5, paddingHorizontal: 4.5 }}>CURRENT OWNERS</Text>
-                    : null}
-              </View>
+              {/* Second line, muted, and ABSENT rather than blank when the
+                  record names nobody — an empty line under every release would
+                  cost a sheet to say nothing. */}
+              {parties ? (
+                <Text style={{ fontFamily: BODY, fontWeight: 500, fontSize: 7.9, color: MUTED, marginTop: 2.25 }}>
+                  {t.amountKind === 'sale' ? `Sale · ${parties}` : t.amountKind === 'loan' ? `Loan · ${parties}` : parties}
+                </Text>
+              ) : null}
             </View>
           );
         })}

@@ -232,7 +232,9 @@ describe('the two California installments', () => {
 const tr = (over: Partial<NormalizedTransfer>): NormalizedTransfer => ({
   sourcePosition: 0, transactionType: null, documentType: null, recordingDate: null,
   contractDate: null, documentNumber: null, bookNumber: null, pageNumber: null,
-  currentOwnerFlag: true, isForeclosure: false, raw: {} as never, ...over,
+  currentOwnerFlag: true, isForeclosure: false,
+  amount: null, amountKind: null, partyTo: null, partyFrom: null,
+  raw: {} as never, ...over,
 });
 
 describe('counting the recorded documents', () => {

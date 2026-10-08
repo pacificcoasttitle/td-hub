@@ -115,6 +115,9 @@ export const s = StyleSheet.create({
   rowLabel2: { fontFamily: BODY, fontWeight: 500, fontSize: 9.75, color: MUTED, width: LABEL_W },
   rowValue: { fontFamily: BODY, fontWeight: 500, fontSize: 9.75, color: INK, flex: 1 },
   rowGap: { fontFamily: BODY, fontWeight: 500, fontSize: 9.75, color: GAP_INK, flex: 1 },
+  // "Recorded as …" under an owner row. Muted and smaller: it is the check on
+  // a guess, not a competing answer.
+  rowSub: { fontFamily: BODY, fontWeight: 500, fontSize: 7.9, color: MUTED, marginTop: 1.5 },
 
   strip: { backgroundColor: NAVY, flexDirection: 'row', paddingVertical: 9 },
   stripCell: { flex: 1, paddingHorizontal: 12, borderLeftWidth: 0.75, borderLeftColor: 'rgba(255,255,255,0.18)' },
@@ -175,12 +178,28 @@ export function SectionBar({ children, marginTop }: { children: string; marginTo
 }
 
 /** A two-column row. White, ruled, no fill. */
-export function Row({ label, value }: { label: string; value: string | null | undefined }) {
+export function Row({ label, value, sub }: {
+  label: string;
+  value: string | null | undefined;
+  /**
+   * A muted second line under the value.
+   *
+   * Exists for "Recorded as". The owner rows print a reading-order guess —
+   * "Elizabeth A Hanson" from "HANSON, ELIZABETH A" — which is a courtesy and
+   * is sometimes wrong: a company the word list does not recognise gets taken
+   * apart as a person. Showing what the deed actually says underneath is what
+   * makes that guess correctable by the reader instead of simply wrong.
+   */
+  sub?: string | null;
+}) {
   const missing = !value || value === GAP;
   return (
     <View style={s.row}>
       <Text style={s.rowLabel}>{label}</Text>
-      <Text style={missing ? s.rowGap : s.rowValue}>{missing ? GAP : value}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={missing ? s.rowGap : s.rowValue}>{missing ? GAP : value}</Text>
+        {sub ? <Text style={s.rowSub}>{`Recorded as ${sub}`}</Text> : null}
+      </View>
     </View>
   );
 }

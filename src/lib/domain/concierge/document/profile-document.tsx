@@ -432,8 +432,12 @@ export function ProfileDocument(input: ProfileDocumentInput) {
       {/* ── 3 · Details ──────────────────────────────────────────────────── */}
       <Sheet band={band}>
         <SectionBar>OWNER, ADDRESS &amp; LEGAL DESCRIPTION</SectionBar>
-        <Row label="Primary owner" value={owners[0]?.display ?? null} />
-        <Row label="Secondary owner" value={owners[1]?.display ?? null} />
+        {/* The reading-order guess, with what the deed actually says beneath
+            it when the two differ. Reading order is a COURTESY here and the
+            recorded form is the check on it; in the vesting box it is not used
+            at all, because there it would be a legal description. */}
+        <Row label="Primary owner" value={owners[0]?.display ?? null} sub={recordedIfDifferent(owners[0])} />
+        <Row label="Secondary owner" value={owners[1]?.display ?? null} sub={recordedIfDifferent(owners[1])} />
         <Row label="Site address" value={[subject.siteAddress, subject.siteCityState].filter(Boolean).join(', ')} />
         <Row label="Mailing address" value={subject.mailAddressFull} />
         <Row4 label="APN" value={subject.apn} label2="County" value2={subject.county} />
@@ -483,8 +487,26 @@ export function ProfileDocument(input: ProfileDocumentInput) {
           <View style={{ backgroundColor: NAVY, padding: 13.5, marginTop: 9, flexDirection: 'row', justifyContent: 'space-between' }}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={{ fontFamily: BODY, fontWeight: 700, fontSize: 8.25, color: ORANGE, letterSpacing: 1 }}>CURRENT VESTING</Text>
+              {/* ─── RECORDED, VERBATIM. Never reading-order. ──────────────
+                  Vesting is a legal description and must match the deed. This
+                  printed `o.display`, which runs readingOrder() — a classifier
+                  that assumes a person unless it recognises a company word, and
+                  whose word list has `holdings`, `properties` and `group` but
+                  not `enterprises`. So Amethyst's GOLDEN HEIGHTS ENTERPRISES
+                  came out as "Heights Enterprises Golden", on the one surface
+                  where a mangled legal name is least acceptable — directly
+                  above a transfer row printing the same company correctly.
+
+                  THE FIX IS NOT ANOTHER WORD. Adding `enterprises` leaves
+                  Ventures, Partners, Associates and whatever is next. This
+                  removes the guess from the box entirely: no classifier can be
+                  wrong here because none runs.
+
+                  Reading order stays on the page-3 owner rows, where it is a
+                  courtesy, a bad guess is visibly odd, and nothing legal rests
+                  on it. */}
               <Text style={{ fontFamily: HEADING, fontWeight: 700, fontSize: 12.75, color: '#FFFFFF', marginTop: 6 }}>
-                {owners.map((o) => o.display).join(' & ') || GAP}
+                {owners.map((o) => o.recorded).join(' & ') || GAP}
               </Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
@@ -1048,4 +1070,22 @@ function joinDistricts(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? '';
   if (names.length === 2) return `${names[0]} and ${names[1]}`;
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+}
+
+/**
+ * What the deed says, when it differs from the reading-order guess.
+ *
+ * Null when they match, so the common case — "HANSON, ELIZABETH A" shown as
+ * "Elizabeth A Hanson" — does not print a line restating something the reader
+ * can already see, and a name that needs no reordering prints nothing at all.
+ *
+ * Case is ignored in the comparison: "BRPLD LLC" becoming "Brpld Llc" is a
+ * change of presentation, not of the name, and flagging it would bury the
+ * cases that matter under one on every row.
+ */
+function recordedIfDifferent(owner: { recorded: string; display: string } | undefined): string | null {
+  if (!owner) return null;
+  const same = owner.recorded.replace(/\s+/g, ' ').trim().toLowerCase()
+    === owner.display.replace(/\s+/g, ' ').trim().toLowerCase();
+  return same ? null : owner.recorded;
 }

@@ -843,3 +843,78 @@ describe('transfer rows show the amount and the parties', () => {
     expect(partyLines).toBe(40);
   });
 });
+
+// ─── Vesting is a legal description ─────────────────────────────────────────
+
+describe('the current vesting box prints the recorded name verbatim', () => {
+  const owned = (primaryOwner: string) => input({
+    subject: { ...(SUBJECT as Record<string, unknown>), primaryOwner } as ProfileDocumentInput['subject'],
+    transfers: normalizeTransfers({
+      TransferHistory: [{
+        DocumentType: 'Deed', RecordingDate: '20240101',
+        RecorderDocumentNumber: '2024-0000001', CurrentOwnerFlag: 'True',
+        Deed: { SalesPrice: '1', BuyerInfo: { BuyerNames: primaryOwner }, SellerInfo: { SellerNames: 'X' } },
+      }],
+    } as never) as ProfileDocumentInput['transfers'],
+  });
+
+  /**
+   * The ONE sheet carrying the vesting box, by its own heading.
+   *
+   * These assertions have to be per-sheet, not document-wide. "Not anywhere in
+   * the PDF" is the wrong claim and would fail for the right reason: the
+   * reading-order form legitimately appears on the owner sheet. Scoping it to
+   * the band's own page is what makes the negative mean "the box does not do
+   * this" rather than "the document never does this".
+   */
+  const sheet = (parts: string[], heading: string) => {
+    const found = parts.map(sq).filter((t) => t.includes(sq(heading)));
+    expect(found, `expected exactly one sheet containing "${heading}"`).toHaveLength(1);
+    return found[0];
+  };
+
+  it('does not reorder a company the word list fails to recognise', async () => {
+    // The live case. ENTITY_WORDS carries `holdings`, `properties` and `group`
+    // but not `enterprises`, so readingOrder() took GOLDEN for a surname and
+    // produced "Heights Enterprises Golden" — in the navy box, directly above a
+    // transfer row printing the same company correctly.
+    const { parts } = await render(owned('GOLDEN HEIGHTS ENTERPRISES'));
+    const box = sheet(parts, 'CURRENT VESTING');
+    expect(box).toContain(sq('GOLDEN HEIGHTS ENTERPRISES'));
+    expect(box).not.toContain(sq('Heights Enterprises Golden'));
+  });
+
+  it('does not reorder a person either — the deed is the deed', async () => {
+    // Not an entity-detection fix. NOTHING is reordered in this box, so there
+    // is no classifier left to be wrong about anything, person or company.
+    const { parts } = await render(owned('HANSON, ELIZABETH A'));
+    const box = sheet(parts, 'CURRENT VESTING');
+    expect(box).toContain(sq('HANSON, ELIZABETH A'));
+    expect(box).not.toContain(sq('Elizabeth A Hanson'));
+  });
+
+  it('keeps reading order on the owner sheet, with the deed underneath it', async () => {
+    // Where it is a courtesy rather than a legal description. The second half
+    // is the half that makes keeping the guess defensible: a reader who sees
+    // "Heights Enterprises Golden" can see what the deed said and correct it.
+    // That line did NOT exist before this change — the justification for
+    // keeping reading order here was describing something unbuilt.
+    const { parts } = await render(owned('GOLDEN HEIGHTS ENTERPRISES'));
+    const page = sheet(parts, 'OWNER, ADDRESS & LEGAL DESCRIPTION');
+    expect(page).toContain(sq('Heights Enterprises Golden'));
+    expect(page).toContain(sq('Recorded as GOLDEN HEIGHTS ENTERPRISES'));
+  });
+
+  it('does not print "Recorded as" when reading order changed nothing', async () => {
+    // A company that needs no reordering, so the line would restate the value
+    // directly above it. If this goes green with the guard removed, every
+    // owner row carries a redundant second line and the ones that matter stop
+    // standing out.
+    // `llc` IS in ENTITY_WORDS, so this one is only title-cased: "Brpld Llc".
+    // A change of presentation, not of the name.
+    const { parts } = await render(owned('BRPLD LLC'));
+    const page = sheet(parts, 'OWNER, ADDRESS & LEGAL DESCRIPTION');
+    expect(page).toContain(sq('Brpld Llc'));
+    expect(page).not.toContain(sq('Recorded as'));
+  });
+});

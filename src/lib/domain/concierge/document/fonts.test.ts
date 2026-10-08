@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import React from 'react';
-import { Document, Page, Text, renderToBuffer } from '@react-pdf/renderer';
+import { Document, Font, Page, Text, renderToBuffer } from '@react-pdf/renderer';
 import { describe, expect, it } from 'vitest';
 import { BODY, FONT_FILES, HEADING, missingFonts, registerDocumentFonts } from './fonts';
 
@@ -83,5 +83,49 @@ describe('the registered weights actually differ', () => {
   it('the two families are not the same font', async () => {
     const [heading, body] = await Promise.all([widthOf(HEADING, 700), widthOf(BODY, 700)]);
     expect(heading).not.toBeCloseTo(body, 1);
+  });
+});
+
+// ─── No word is broken across a line ────────────────────────────────────────
+
+/**
+ * WHY THIS IS HERE, SINCE IT CHANGES NOTHING TODAY.
+ *
+ * In every environment that renders a real document — the deployed function,
+ * vitest, and a plain `tsx` preview — @react-pdf does not hyphenate, because
+ * @react-pdf/textkit's import of `@react-pdf/hyphenate/en-us` is not satisfied
+ * on any of those paths. Ten of the twelve v4 profiles on file have no word
+ * broken across a line, and the two that did were rendered by a script run
+ * whose module resolution had been patched to satisfy that import. That patch
+ * is gone; the breaks it produced are not evidence about production.
+ *
+ * What it IS evidence about is what these documents look like when the
+ * hyphenator IS available, and the answer was names:
+ *
+ *   AGUILAR ERI- / KA SALAS              a vested owner, p6
+ *   CURRENT OWN- / ERS                   a column heading
+ *   PUBLIC SAFETY MEL- / LO-ROOS         a tax district
+ *   STDBY-COM- / BINED CHG               a tax district
+ *   California Insurance Commis- / sioner the statutory disclaimer
+ *
+ * "ERI-KA SALAS" is not what the county recorded, and a reader comparing the
+ * box against a deed has to know to ignore the hyphen. So the document now
+ * says so itself instead of depending on an unresolved import: one bundler
+ * change away, that default comes back and nothing fails.
+ *
+ * The guard is on the callback's behaviour, not on a rendered page. A rendered
+ * assertion here passes whether or not the registration exists — it was
+ * written, mutation-tested, found vacuous, and removed.
+ */
+describe('hyphenation is off', () => {
+  const WORDS = ['ERIKA', 'OWNERS', 'MELLO-ROOS', 'COMBINED', 'Commissioner'];
+
+  it('returns every word whole, so there is nowhere to break it', () => {
+    registerDocumentFonts();
+    const split = Font.getHyphenationCallback();
+    expect(split, 'no callback registered — @react-pdf decides for itself').not.toBeNull();
+    for (const word of WORDS) {
+      expect(split!(word), `"${word}" is splittable`).toEqual([word]);
+    }
   });
 });

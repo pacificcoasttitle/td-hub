@@ -55,5 +55,31 @@ export function registerDocumentFonts(): void {
         .map((f) => ({ src: join(FONT_DIR, f.file), fontWeight: f.weight })),
     });
   }
+
+  // ─── NO WORD IS EVER BROKEN ACROSS A LINE ──────────────────────────────
+  //
+  // DELIBERATELY INERT TODAY. @react-pdf hyphenates with Liang patterns when
+  // @react-pdf/textkit's import of `@react-pdf/hyphenate/en-us` is satisfied.
+  // On the deployed function, under vitest, and in a plain `tsx` render it is
+  // not, so nothing hyphenates and this line changes no output. It is here so
+  // that stays true on purpose rather than by accident — a bundler or
+  // dependency change that satisfies that import would otherwise start
+  // breaking words on a client document with nothing failing.
+  //
+  // It is not a hypothetical. A script run with patched resolution produced,
+  // on two real profiles: "AGUILAR ERI- / KA SALAS" in the vesting box,
+  // "CURRENT OWN- / ERS" as a column heading, "PUBLIC SAFETY MEL- / LO-ROOS"
+  // and "STDBY-COM- / BINED CHG" as tax districts. A hyphenated name is a
+  // different string, not a typographic preference: a reader comparing the
+  // vesting box against a deed has to know to ignore it.
+  //
+  // The callback returns the pieces a word MAY be split into, so one element
+  // means "never here". The cost is that a word too long for its box overflows
+  // instead of breaking — accepted knowingly, because every long string on
+  // this document is a name, an APN, a document number or a legal
+  // description, and a visible overflow beats a silent mid-word break that
+  // still reads like prose.
+  Font.registerHyphenationCallback((word) => [word]);
+
   registered = true;
 }

@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="MyNHD Preview API integration guide with PHP and cURL examples, authentication, base64 PDF and image responses, and a Postman collection.">
+<title>Preview API integration guide | myNHD</title>
+<style>
+:root{--ink:#18343d;--muted:#61737b;--green:#087665;--line:#dce5e8;--paper:#fff;--bg:#f4f7f8;--nav:#122d37;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;color:var(--ink);background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:15px;line-height:1.75}a{color:var(--green);text-underline-offset:3px}button{font:inherit;cursor:pointer}button:focus-visible,a:focus-visible,pre:focus-visible,.table-scroll:focus-visible{outline:3px solid #54c9ad;outline-offset:4px}.skip-link{position:fixed;top:10px;left:10px;padding:10px 16px;background:white;z-index:5;transform:translateY(-160%)}.skip-link:focus{transform:none}.layout{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--nav);padding:32px 22px;color:white}.wordmark{font-size:29px;font-weight:780;letter-spacing:-1px;color:white;text-decoration:none}.wordmark span{color:#75d9be}.sidebar-subtitle{margin:3px 0 32px;color:#a3b8bf;font-size:12px;letter-spacing:.12em;text-transform:uppercase}.nav-heading{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#93acb5;margin:0 10px 10px}.sidebar nav a{display:flex;gap:12px;padding:10px 12px;margin:3px 0;color:#c9d8dd;border-radius:7px;text-decoration:none;font-size:13px;line-height:1.5}.sidebar nav a span{color:#85a6b0;font:11px var(--mono);padding-top:4px}.sidebar nav a:hover,.sidebar nav a.active{background:#23444d;color:#fff}.sidebar-footer{border-top:1px solid #34515a;margin-top:30px;padding:20px 10px;color:#b5c9cf;font-size:12px}.sidebar-footer a{color:#7bdabd}.main{min-width:0;padding:42px clamp(22px,5vw,70px) 60px}.document{max-width:1050px;margin:auto}.eyebrow{color:var(--green);font-size:11px;font-weight:750;letter-spacing:.16em;text-transform:uppercase;margin:0 0 12px}.hero{background:linear-gradient(115deg,#fff 55%,#edf8f4);border:1px solid var(--line);border-radius:16px;padding:36px;overflow:hidden}.hero h1{font-size:clamp(34px,4vw,50px);line-height:1.1;letter-spacing:-1.7px;margin:0 0 18px;font-weight:750}.hero .intro{max-width:640px;color:var(--muted);font-size:17px;line-height:1.7;margin:0 0 23px}.badges{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px}.badge{border:1px solid #c8ded7;color:#346358;background:#f3faf7;border-radius:5px;padding:3px 9px;font-size:11px;font-weight:650}.base-url{display:flex;gap:12px;flex-wrap:wrap;align-items:center;border-top:1px solid #dce9e4;padding-top:20px;margin-bottom:24px;font-size:12px;color:var(--muted)}.base-url code{font-size:13px;color:var(--ink);overflow-wrap:anywhere}.actions{display:flex;gap:10px;flex-wrap:wrap}.button{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--green);padding:9px 15px;border-radius:6px;font-size:13px;font-weight:650;text-decoration:none;background:var(--green);color:white}.button.secondary{background:transparent;color:var(--green)}.endpoint-overview{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:20px 0 38px}.endpoint-card{background:white;border:1px solid var(--line);border-radius:10px;padding:20px;text-decoration:none;color:var(--ink);transition:border-color .15s}.endpoint-card:hover{border-color:var(--green)}.endpoint-card .card-title{display:flex;gap:10px;align-items:center;font-weight:700;margin-bottom:9px}.method{font:10px var(--mono);font-weight:750;color:var(--green);background:#e5f4ee;padding:3px 6px;border-radius:4px}.endpoint-card code{display:block;font:11px/1.7 var(--mono);overflow-wrap:anywhere}.endpoint-card p{font-size:12px;color:var(--muted);margin:8px 0 0}.doc-section{background:white;border:1px solid var(--line);border-radius:12px;padding:28px 32px;margin:22px 0;scroll-margin-top:28px}.section-number{font:11px var(--mono);color:var(--green);font-weight:650;letter-spacing:.1em;margin-bottom:5px}.doc-section h2{font-size:26px;letter-spacing:-.6px;line-height:1.25;margin:0 0 22px}.doc-section h3{font-size:18px;margin:30px 0 12px;letter-spacing:-.2px;scroll-margin-top:28px}.doc-section p{margin:14px 0;color:#3d555e}.doc-section p code,.steps code,td code{background:#eef4f5;color:#214a56;border:1px solid #e3ebed;border-radius:4px;padding:2px 4px;font-family:var(--mono);font-size:.84em;overflow-wrap:anywhere}.steps{padding-left:24px;margin:10px 0 18px}.steps li{padding-left:7px;margin:11px 0;color:#3d555e}.steps li::marker{color:var(--green);font-weight:750}.callout{background:#eef8f4;border:1px solid #d2e9df;border-left:3px solid #2b967d;padding:15px 18px;border-radius:6px;font-size:14px}.table-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin:18px 0 24px}table{border-collapse:collapse;width:100%;font-size:13px;text-align:left}th{background:#f3f7f8;color:#506a74;font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:750;padding:12px 14px;white-space:nowrap}td{padding:13px 14px;border-top:1px solid #e4ebed;vertical-align:top;min-width:90px}tbody tr:hover{background:#fafcfc}.code-example{margin:18px 0 24px;border-radius:9px;overflow:hidden;background:#142b36;border:1px solid #1d3c48;max-width:100%}.code-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 14px;background:#1e3944;color:#b4ccd5;font-size:11px;font-weight:650;letter-spacing:.03em;border-bottom:1px solid #31515e}.copy-button{background:#2e4c57;border:1px solid #47646f;color:#e4f0f3;border-radius:4px;font-size:11px;padding:3px 10px;line-height:1.7}.copy-button:hover{background:#40626e}pre{margin:0;padding:20px;overflow:auto;tab-size:4;font:12px/1.8 var(--mono);color:#dcebf0}pre code{font:inherit;color:inherit;white-space:pre}.page-footer{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;padding:14px 4px;color:var(--muted);font-size:12px}.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:1100px){.layout{grid-template-columns:218px minmax(0,1fr)}.sidebar{padding:28px 15px}.main{padding:28px 26px}.doc-section{padding:24px}.hero{padding:28px}.endpoint-overview{grid-template-columns:1fr}}
+@media(max-width:760px){html{scroll-padding-top:130px}.layout{display:block}.sidebar{height:auto;position:sticky;z-index:3;padding:12px 16px;overflow:visible}.wordmark{font-size:22px}.sidebar-subtitle,.nav-heading,.sidebar-footer{display:none}.sidebar nav{display:flex;overflow-x:auto;gap:5px;margin-top:8px;padding-bottom:3px}.sidebar nav a{white-space:nowrap;margin:0;padding:7px 10px;font-size:11px}.sidebar nav a span{display:none}.main{padding:20px 14px 36px}.hero{padding:25px 20px}.hero h1{font-size:38px}.hero .intro{font-size:15px}.doc-section{padding:24px 18px;margin:16px 0;scroll-margin-top:128px}.doc-section h2{font-size:24px}.doc-section h3{scroll-margin-top:128px}.doc-section p,.steps{font-size:14px}.endpoint-overview{margin:16px 0 24px;gap:10px}.endpoint-card{padding:17px}pre{font-size:11px;padding:16px}td,th{padding:11px 12px}.base-url{gap:6px}.page-footer{padding:10px 4px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.endpoint-card{transition:none}}
+@media print{body{background:#fff;font-size:10pt;color:#000}.layout{display:block}.sidebar,.actions,.copy-button,.endpoint-overview,.skip-link,.page-footer{display:none}.main{padding:0}.document{max-width:none}.hero,.doc-section{border:0;border-radius:0;padding:0;margin:0 0 22px;background:white}.hero h1{font-size:30pt}.hero .intro{font-size:11pt}.hero .badges{margin-bottom:12px}.doc-section h2{font-size:19pt}.doc-section h3{font-size:13pt}h2,h3,.code-toolbar{break-after:avoid}.code-example{background:#f5f5f5;border:1px solid #ccc}.code-toolbar{background:#eee;color:#333;border:0}pre{color:#111;overflow:visible;font-size:8pt;white-space:pre-wrap}pre code{white-space:pre-wrap;overflow-wrap:anywhere}.table-scroll{overflow:visible}tr{break-inside:avoid}.callout{background:#f4f4f4;border-color:#ccc}a{color:#000}}
+</style>
+</head>
+<body id="top">
+<a class="skip-link" href="#main-content">Skip to documentation</a>
+<div class="layout">
+<aside class="sidebar" aria-label="Documentation navigation">
+<a class="wordmark" href="#top">my<span>NHD</span></a>
+<p class="sidebar-subtitle">Developer documentation</p>
+<p class="nav-heading">Preview API</p>
+<nav aria-label="On this page"><a href="#integration-flow"><span>01</span>Quick start</a><a href="#postman-collection"><span>02</span>Postman collection</a><a href="#authentication"><span>03</span>Authentication</a><a href="#preview-endpoints"><span>04</span>Requests &amp; fields</a><a href="#successful-responses"><span>05</span>Responses</a><a href="#complete-php-example"><span>06</span>PHP examples</a><a href="#multiple-property-results"><span>07</span>Multiple matches</a><a href="#other-errors"><span>08</span>Error reference</a><a href="#existing-url-based-preview-endpoint"><span>09</span>URL-based endpoint</a></nav>
+<div class="sidebar-footer">Ready to try it?<br><a href="preview-api.postman_collection.json" download>Download Postman collection &darr;</a></div>
+</aside>
+<main class="main" id="main-content">
+<div class="document">
+<header class="hero">
+<p class="eyebrow">API integration guide</p>
+<h1>Property previews.<br>Ready for your app.</h1>
+<p class="intro">Generate a property hazard preview as a PDF or PNG image, together with a link where your customer can order the report.</p>
+<div class="badges"><span class="badge">JSON responses</span><span class="badge">Bearer authentication</span><span class="badge">PHP &amp; cURL examples</span></div>
+<div class="base-url"><span>Production base URL</span><code>https://api.mynhd.com</code></div>
+<div class="actions"><a class="button" href="preview-api.postman_collection.json" download>Download Postman collection &darr;</a><button type="button" class="button secondary" id="print-guide">Print / save as PDF</button></div>
+</header>
+<div class="endpoint-overview" aria-label="Preview formats">
+<a class="endpoint-card" href="#preview-endpoints"><div class="card-title"><span class="method">POST</span>PDF preview</div><code>/report/getMultiFloodFirePreview/pdf</code><p>Base64 PDF data + customer order link</p></a>
+<a class="endpoint-card" href="#preview-endpoints"><div class="card-title"><span class="method">POST</span>PNG image preview</div><code>/report/getMultiFloodFirePreview/image</code><p>Base64 PNG data + customer order link</p></a>
+</div>
+<section class="doc-section" id="integration-flow"><div class="section-number">01</div><h2>Integration flow</h2>
+<ol class="steps"><li>Obtain an API secret key and preview access from MyNHD.</li><li>Exchange your secret key for an access token.</li><li>Request a PDF or image using the property&#x27;s address or APN.</li><li>Check both the HTTP status and the JSON <code>success</code> field.</li><li>Decode the returned base64 data and use the returned <code>order_link</code> for the customer&#x27;s order button.</li></ol>
+<p>Examples use illustrative property details. Replace them with a valid property before sending a request.</p>
+</section>
+<section class="doc-section" id="postman-collection"><div class="section-number">02</div><h2>Postman collection</h2>
+<ol class="steps"><li>Import <a href="preview-api.postman_collection.json" download>preview-api.postman_collection.json</a> into Postman.</li><li>Set the collection variable <code>secretKey</code> to your API secret. Leave <code>baseUrl</code> as <code>https://api.mynhd.com</code> unless MyNHD supplies a different server URL.</li><li>Set <code>address</code>, <code>city</code>, <code>state</code>, <code>zip</code>, <code>apn</code>, and <code>county</code> for the property you want to look up. <code>county</code> is the five-digit FIPS code.</li><li>Send <strong>Get access token</strong>. Its response script saves the returned token in <code>accessToken</code> for subsequent requests.</li><li>Send a PDF or image request by address or APN.</li><li>Read <code>pdf_data</code> or <code>image_data</code> and <code>order_link</code> in the JSON response. A successful preview also saves the link in the <code>orderLink</code> collection variable. A multiple-result or failed request clears that variable.</li></ol>
+<p>The collection sends the access token as a Bearer token automatically. No separate environment file is needed. Keep variables with these names in the collection so an active environment does not override them. Obtain a fresh token after it expires; automatic reauthentication is not included.</p>
+<p>Response checks accept either a successful preview or the HTTP 200 <code>multi_result</code> JSON error. HTTP errors fail the checks. The collection contains no real credentials.</p>
+</section>
+<section class="doc-section" id="authentication"><div class="section-number">03</div><h2>Authentication</h2>
+<p>Send <code>POST /getAuthorizationHeader</code> with the <strong>form field</strong> <code>secretkey</code>. Authentication does not accept a JSON request body.</p>
+<div class="code-example"><div class="code-toolbar"><span>cURL / Shell</span><button type="button" class="copy-button" aria-label="Copy cURL / Shell example">Copy</button></div><pre tabindex="0"><code class="language-bash">export MYNHD_SECRET_KEY=&#x27;YOUR_API_SECRET&#x27;
+
+curl --request POST &#x27;https://api.mynhd.com/getAuthorizationHeader&#x27; \
+  --header &#x27;Accept: application/json&#x27; \
+  --data-urlencode &quot;secretkey=$MYNHD_SECRET_KEY&quot;</code></pre></div>
+<p>Successful response, HTTP 200:</p>
+<div class="code-example"><div class="code-toolbar"><span>JSON</span><button type="button" class="copy-button" aria-label="Copy JSON example">Copy</button></div><pre tabindex="0"><code class="language-json">{
+  &quot;token&quot;: &quot;YOUR_ACCESS_TOKEN&quot;
+}</code></pre></div>
+<p>The access token expires 24 hours after issue. Include it in every preview request:</p>
+<div class="code-example"><div class="code-toolbar"><span>HTTP</span><button type="button" class="copy-button" aria-label="Copy HTTP example">Copy</button></div><pre tabindex="0"><code class="language-http">Authorization: Bearer YOUR_ACCESS_TOKEN</code></pre></div>
+<p>Reuse the token until it expires. If a request returns HTTP 401 with <code>tryReAuth: true</code>, obtain a new token and retry the request. A valid token also requires permission to use the preview endpoints; an account without permission receives HTTP 403.</p>
+<p class="callout">Keep the secret key on your backend. Direct browser requests from external website origins are currently not allowed by the API&#x27;s CORS configuration. Call MyNHD from your server, then return the preview result to your frontend.</p>
+</section>
+<section class="doc-section" id="preview-endpoints"><div class="section-number">04</div><h2>Preview endpoints</h2>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Preview endpoints reference table"><table><thead><tr><th scope="col">Method</th><th scope="col">Path</th><th scope="col">Preview data field</th><th scope="col">Decoded file type</th></tr></thead><tbody><tr><td>POST</td><td><code>/report/getMultiFloodFirePreview/pdf</code></td><td><code>pdf_data</code></td><td>PDF (<code>application/pdf</code>)</td></tr><tr><td>POST</td><td><code>/report/getMultiFloodFirePreview/image</code></td><td><code>image_data</code></td><td>PNG (<code>image/png</code>)</td></tr></tbody></table></div>
+<p>Both endpoints return <code>application/json</code>. Each request generates one preview format. If you need both formats, send one request to each endpoint and keep each response paired with its own <code>order_link</code>.</p>
+<p>Preview requests accept <code>application/json</code>, <code>application/x-www-form-urlencoded</code>, or <code>multipart/form-data</code>. JSON requests should include:</p>
+<div class="code-example"><div class="code-toolbar"><span>HTTP</span><button type="button" class="copy-button" aria-label="Copy HTTP example">Copy</button></div><pre tabindex="0"><code class="language-http">Content-Type: application/json
+Accept: application/json
+Authorization: Bearer YOUR_ACCESS_TOKEN</code></pre></div>
+<h3 id="search-by-address">Search by address</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Preview endpoints reference table"><table><thead><tr><th scope="col">Field</th><th scope="col">Type</th><th scope="col">Required</th><th scope="col">Description</th></tr></thead><tbody><tr><td><code>search</code></td><td>string</td><td>Yes</td><td>Exactly <code>address</code>.</td></tr><tr><td><code>address</code></td><td>string</td><td>Yes</td><td>Street address.</td></tr><tr><td><code>city</code></td><td>string</td><td>Yes</td><td>City.</td></tr><tr><td><code>state</code></td><td>string</td><td>Yes</td><td>Uppercase two-letter state abbreviation, for example <code>CA</code>.</td></tr><tr><td><code>zip</code></td><td>string</td><td>Yes</td><td>ZIP code; send it as a string to preserve leading zeros.</td></tr></tbody></table></div>
+<p>Request a PDF and save the JSON response:</p>
+<div class="code-example"><div class="code-toolbar"><span>cURL / Shell</span><button type="button" class="copy-button" aria-label="Copy cURL / Shell example">Copy</button></div><pre tabindex="0"><code class="language-bash">export MYNHD_TOKEN=&#x27;YOUR_ACCESS_TOKEN&#x27;
+
+curl --request POST &#x27;https://api.mynhd.com/report/getMultiFloodFirePreview/pdf&#x27; \
+  --header &quot;Authorization: Bearer $MYNHD_TOKEN&quot; \
+  --header &#x27;Content-Type: application/json&#x27; \
+  --header &#x27;Accept: application/json&#x27; \
+  --data &#x27;{
+    &quot;search&quot;: &quot;address&quot;,
+    &quot;address&quot;: &quot;123 Main St&quot;,
+    &quot;city&quot;: &quot;Los Angeles&quot;,
+    &quot;state&quot;: &quot;CA&quot;,
+    &quot;zip&quot;: &quot;90012&quot;
+  }&#x27; \
+  --output preview.json \
+  --write-out &#x27;HTTP %{http_code}\n&#x27;</code></pre></div>
+<p>The saved file contains JSON. Decode <code>pdf_data</code> to obtain the actual PDF.</p>
+<h3 id="search-by-apn">Search by APN</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Preview endpoints reference table"><table><thead><tr><th scope="col">Field</th><th scope="col">Type</th><th scope="col">Required</th><th scope="col">Description</th></tr></thead><tbody><tr><td><code>search</code></td><td>string</td><td>Yes</td><td>Exactly <code>apn</code>.</td></tr><tr><td><code>apn</code></td><td>string</td><td>Yes</td><td>Assessor&#x27;s parcel number.</td></tr><tr><td><code>county</code></td><td>string</td><td>Yes</td><td>Five-digit county FIPS code, for example <code>06037</code> for Los Angeles County; send it as a string.</td></tr><tr><td><code>state</code></td><td>string</td><td>Yes</td><td>Uppercase two-letter state abbreviation.</td></tr></tbody></table></div>
+<p>Request a PNG image:</p>
+<div class="code-example"><div class="code-toolbar"><span>cURL / Shell</span><button type="button" class="copy-button" aria-label="Copy cURL / Shell example">Copy</button></div><pre tabindex="0"><code class="language-bash">curl --request POST &#x27;https://api.mynhd.com/report/getMultiFloodFirePreview/image&#x27; \
+  --header &quot;Authorization: Bearer $MYNHD_TOKEN&quot; \
+  --header &#x27;Content-Type: application/json&#x27; \
+  --header &#x27;Accept: application/json&#x27; \
+  --data &#x27;{
+    &quot;search&quot;: &quot;apn&quot;,
+    &quot;apn&quot;: &quot;123-456-789&quot;,
+    &quot;county&quot;: &quot;06037&quot;,
+    &quot;state&quot;: &quot;CA&quot;
+  }&#x27; \
+  --output preview.json \
+  --write-out &#x27;HTTP %{http_code}\n&#x27;</code></pre></div>
+</section>
+<section class="doc-section" id="successful-responses"><div class="section-number">05</div><h2>Successful responses</h2>
+<p>PDF, HTTP 200:</p>
+<div class="code-example"><div class="code-toolbar"><span>JSON</span><button type="button" class="copy-button" aria-label="Copy JSON example">Copy</button></div><pre tabindex="0"><code class="language-json">{
+  &quot;success&quot;: true,
+  &quot;pdf_data&quot;: &quot;&lt;base64-encoded PDF bytes&gt;&quot;,
+  &quot;order_link&quot;: &quot;https://www.mynhd.com/ffprevorder/123/&lt;token&gt;&quot;
+}</code></pre></div>
+<p>Image, HTTP 200:</p>
+<div class="code-example"><div class="code-toolbar"><span>JSON</span><button type="button" class="copy-button" aria-label="Copy JSON example">Copy</button></div><pre tabindex="0"><code class="language-json">{
+  &quot;success&quot;: true,
+  &quot;image_data&quot;: &quot;&lt;base64-encoded PNG bytes&gt;&quot;,
+  &quot;order_link&quot;: &quot;https://www.mynhd.com/ffprevorder/123/&lt;token&gt;&quot;
+}</code></pre></div>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Successful responses reference table"><table><thead><tr><th scope="col">Field</th><th scope="col">Meaning</th></tr></thead><tbody><tr><td><code>success</code></td><td><code>true</code> when a preview was generated.</td></tr><tr><td><code>pdf_data</code></td><td>Base64-encoded PDF bytes; present only for the PDF endpoint.</td></tr><tr><td><code>image_data</code></td><td>Base64-encoded PNG bytes; present only for the image endpoint.</td></tr><tr><td><code>order_link</code></td><td>Full customer order URL associated with this preview.</td></tr></tbody></table></div>
+<p class="callout">The data fields contain plain base64, without a <code>data:</code> URL prefix. Decode them once to get the file bytes. The JSON examples above contain placeholders rather than complete files.</p>
+</section>
+<section class="doc-section" id="complete-php-example"><div class="section-number">06</div><h2>Complete PHP example</h2>
+<p>This command-line example works with PHP 5.6 or newer and the cURL extension. Save it as <code>preview-example.php</code>, set <code>MYNHD_SECRET_KEY</code> in your environment, then run <code>php preview-example.php</code>. It authenticates, requests a preview, checks for errors including multiple matches, and saves the decoded file.</p>
+<div class="code-example"><div class="code-toolbar"><span>PHP</span><button type="button" class="copy-button" aria-label="Copy PHP example">Copy</button></div><pre tabindex="0"><code class="language-php">&lt;?php
+
+function postPreviewApi($url, array $fields, $accessToken = null) {
+    $headers = array(&#x27;Accept: application/json&#x27;);
+    if ($accessToken === null) {
+        $headers[] = &#x27;Content-Type: application/x-www-form-urlencoded&#x27;;
+        $requestBody = http_build_query($fields);
+    } else {
+        $headers[] = &#x27;Content-Type: application/json&#x27;;
+        $headers[] = &#x27;Authorization: Bearer &#x27; . $accessToken;
+        $requestBody = json_encode($fields);
+    }
+
+    $curlHandle = curl_init($url);
+    curl_setopt_array($curlHandle, array(
+        CURLOPT_POST =&gt; true,
+        CURLOPT_RETURNTRANSFER =&gt; true,
+        CURLOPT_HTTPHEADER =&gt; $headers,
+        CURLOPT_POSTFIELDS =&gt; $requestBody,
+        CURLOPT_CONNECTTIMEOUT =&gt; 15,
+        CURLOPT_TIMEOUT =&gt; 120
+    ));
+    $responseBody = curl_exec($curlHandle);
+    $httpStatus = curl_getinfo($curlHandle, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($curlHandle);
+    curl_close($curlHandle);
+
+    if ($responseBody === false) {
+        throw new Exception(&#x27;API connection failed: &#x27; . $curlError);
+    }
+    $response = json_decode($responseBody, true);
+    if (!is_array($response)) {
+        throw new Exception(&#x27;API returned invalid JSON (HTTP &#x27; . $httpStatus . &#x27;)&#x27;);
+    }
+    if ($httpStatus &lt; 200 || $httpStatus &gt;= 300) {
+        $message = isset($response[&#x27;error&#x27;]) ? $response[&#x27;error&#x27;] : &#x27;API request failed&#x27;;
+        throw new Exception(&#x27;HTTP &#x27; . $httpStatus . &#x27;: &#x27; . $message);
+    }
+
+    return $response;
+}
+
+$baseUrl = &#x27;https://api.mynhd.com&#x27;;
+$secretKey = getenv(&#x27;MYNHD_SECRET_KEY&#x27;);
+if (!$secretKey) {
+    throw new Exception(&#x27;Set the MYNHD_SECRET_KEY environment variable first.&#x27;);
+}
+
+$auth = postPreviewApi($baseUrl . &#x27;/getAuthorizationHeader&#x27;, array(
+    &#x27;secretkey&#x27; =&gt; $secretKey
+));
+if (empty($auth[&#x27;token&#x27;])) {
+    throw new Exception(&#x27;Authentication did not return an access token.&#x27;);
+}
+
+$format = &#x27;pdf&#x27;; // Change to &#x27;image&#x27; for a PNG preview.
+$property = array(
+    &#x27;search&#x27; =&gt; &#x27;address&#x27;,
+    &#x27;address&#x27; =&gt; &#x27;123 Main St&#x27;,
+    &#x27;city&#x27; =&gt; &#x27;Los Angeles&#x27;,
+    &#x27;state&#x27; =&gt; &#x27;CA&#x27;,
+    &#x27;zip&#x27; =&gt; &#x27;90012&#x27;
+);
+$preview = postPreviewApi(
+    $baseUrl . &#x27;/report/getMultiFloodFirePreview/&#x27; . $format,
+    $property,
+    $auth[&#x27;token&#x27;]
+);
+
+// HTTP 200 can still mean multiple properties were found.
+if (!isset($preview[&#x27;success&#x27;]) || $preview[&#x27;success&#x27;] !== true) {
+    $message = isset($preview[&#x27;error&#x27;]) ? $preview[&#x27;error&#x27;] : &#x27;Preview request failed&#x27;;
+    fwrite(STDERR, $message . PHP_EOL);
+    exit(1);
+}
+
+$dataField = $format === &#x27;pdf&#x27; ? &#x27;pdf_data&#x27; : &#x27;image_data&#x27;;
+$fileName = $format === &#x27;pdf&#x27; ? &#x27;preview.pdf&#x27; : &#x27;preview.png&#x27;;
+$fileData = base64_decode($preview[$dataField], true);
+if ($fileData === false) {
+    throw new Exception(&#x27;Invalid base64 preview data.&#x27;);
+}
+if (file_put_contents($fileName, $fileData) === false) {
+    throw new Exception(&#x27;Could not save the preview file.&#x27;);
+}
+echo &#x27;Saved: &#x27; . $fileName . PHP_EOL;
+echo &#x27;Order link: &#x27; . $preview[&#x27;order_link&#x27;] . PHP_EOL;</code></pre></div>
+<p>For APN searches, replace the <code>$property</code> block with:</p>
+<div class="code-example"><div class="code-toolbar"><span>PHP</span><button type="button" class="copy-button" aria-label="Copy PHP example">Copy</button></div><pre tabindex="0"><code class="language-php">&lt;?php
+$property = array(
+    &#x27;search&#x27; =&gt; &#x27;apn&#x27;,
+    &#x27;apn&#x27; =&gt; &#x27;123-456-789&#x27;,
+    &#x27;county&#x27; =&gt; &#x27;06037&#x27;,
+    &#x27;state&#x27; =&gt; &#x27;CA&#x27;
+);</code></pre></div>
+<p>The timeout values are client settings for this example, rather than guaranteed API response times. In a production integration, reuse the access token until it expires instead of authenticating before every preview request.</p>
+<h3 id="decode-a-curl-response-in-php">Decode a cURL response in PHP</h3>
+<p>If you saved <code>preview.json</code> using one of the cURL examples, this PHP script decodes either format:</p>
+<div class="code-example"><div class="code-toolbar"><span>PHP</span><button type="button" class="copy-button" aria-label="Copy PHP example">Copy</button></div><pre tabindex="0"><code class="language-php">&lt;?php
+$preview = json_decode(file_get_contents(&#x27;preview.json&#x27;), true);
+if (!is_array($preview) || !isset($preview[&#x27;success&#x27;]) || $preview[&#x27;success&#x27;] !== true) {
+    $message = isset($preview[&#x27;error&#x27;]) ? $preview[&#x27;error&#x27;] : &#x27;Preview request failed&#x27;;
+    fwrite(STDERR, $message . PHP_EOL);
+    exit(1);
+}
+$dataField = isset($preview[&#x27;pdf_data&#x27;]) ? &#x27;pdf_data&#x27; : &#x27;image_data&#x27;;
+$fileName = $dataField === &#x27;pdf_data&#x27; ? &#x27;preview.pdf&#x27; : &#x27;preview.png&#x27;;
+$fileData = base64_decode($preview[$dataField], true);
+if ($fileData === false || file_put_contents($fileName, $fileData) === false) {
+    throw new Exception(&#x27;Could not decode or save the preview.&#x27;);
+}
+echo &#x27;Saved: &#x27; . $fileName . PHP_EOL;
+echo &#x27;Order link: &#x27; . $preview[&#x27;order_link&#x27;] . PHP_EOL;</code></pre></div>
+<h3 id="display-an-image-and-order-button-in-php">Display an image and order button in PHP</h3>
+<p>After obtaining a successful image response in <code>$preview</code>, render it in your page:</p>
+<div class="code-example"><div class="code-toolbar"><span>PHP</span><button type="button" class="copy-button" aria-label="Copy PHP example">Copy</button></div><pre tabindex="0"><code class="language-php">&lt;?php if (isset($preview[&#x27;success&#x27;]) &amp;&amp; $preview[&#x27;success&#x27;] === true &amp;&amp; isset($preview[&#x27;image_data&#x27;])): ?&gt;
+    &lt;img src=&quot;data:image/png;base64,&lt;?php echo htmlspecialchars($preview[&#x27;image_data&#x27;], ENT_QUOTES, &#x27;UTF-8&#x27;); ?&gt;&quot;
+         alt=&quot;Property hazard preview&quot;&gt;
+    &lt;a href=&quot;&lt;?php echo htmlspecialchars($preview[&#x27;order_link&#x27;], ENT_QUOTES, &#x27;UTF-8&#x27;); ?&gt;&quot;
+       target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;Order report&lt;/a&gt;
+&lt;?php endif; ?&gt;</code></pre></div>
+<p>For a PDF, decode and serve the bytes with <code>Content-Type: application/pdf</code>. Use the separate <code>order_link</code> for the customer&#x27;s order button.</p>
+</section>
+<section class="doc-section" id="multiple-property-results"><div class="section-number">07</div><h2>Multiple-property results</h2>
+<p class="callout">If a lookup finds multiple properties, the API returns <strong>HTTP 200</strong> with this JSON error:</p>
+<div class="code-example"><div class="code-toolbar"><span>JSON</span><button type="button" class="copy-button" aria-label="Copy JSON example">Copy</button></div><pre tabindex="0"><code class="language-json">{
+  &quot;success&quot;: false,
+  &quot;code&quot;: &quot;multi_result&quot;,
+  &quot;error&quot;: &quot;Preview skipped: multiple properties found for this address.&quot;
+}</code></pre></div>
+<p class="callout">No preview is generated. The response contains no <code>pdf_data</code>, <code>image_data</code>, or <code>order_link</code>. Ask the customer to refine the address or provide a unique APN and county. Do not treat HTTP 200 alone as a successful preview.</p>
+</section>
+<section class="doc-section" id="other-errors"><div class="section-number">08</div><h2>Other errors</h2>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Other errors reference table"><table><thead><tr><th scope="col">HTTP status</th><th scope="col">Meaning</th><th scope="col">Client action</th></tr></thead><tbody><tr><td><code>400</code></td><td>Malformed JSON, missing fields, invalid <code>search</code>, or property/location unavailable.</td><td>Read <code>error</code>, correct the request or property details, then retry.</td></tr><tr><td><code>401</code></td><td>Missing, invalid, or expired credentials/access token.</td><td>Supply valid credentials or obtain a new token.</td></tr><tr><td><code>403</code></td><td>Account lacks endpoint permission.</td><td>Request preview access from MyNHD.</td></tr><tr><td><code>404</code></td><td>Unsupported or unknown endpoint.</td><td>Check the endpoint path.</td></tr><tr><td><code>500</code></td><td>Preview generation or processing failed.</td><td>Show the error; retry later or contact MyNHD if it persists.</td></tr></tbody></table></div>
+<p>Example HTTP 400 response:</p>
+<div class="code-example"><div class="code-toolbar"><span>JSON</span><button type="button" class="copy-button" aria-label="Copy JSON example">Copy</button></div><pre tabindex="0"><code class="language-json">{
+  &quot;error&quot;: &quot;Missing required property fields&quot;
+}</code></pre></div>
+<p>Example expired/invalid-token response, HTTP 401:</p>
+<div class="code-example"><div class="code-toolbar"><span>JSON</span><button type="button" class="copy-button" aria-label="Copy JSON example">Copy</button></div><pre tabindex="0"><code class="language-json">{
+  &quot;error&quot;: &quot;JWT Token is wrong.&quot;,
+  &quot;tryReAuth&quot;: true
+}</code></pre></div>
+<p>Error responses do not always include <code>success</code> or <code>code</code>. Read <code>error</code> for the message, and consider a preview successful only when the HTTP status is successful and <code>success</code> is exactly <code>true</code>.</p>
+</section>
+<section class="doc-section" id="existing-url-based-preview-endpoint"><div class="section-number">09</div><h2>Existing URL-based preview endpoint</h2>
+<p><code>POST /report/getMultiFloodFirePreview</code> is a separate endpoint that accepts form data and returns preview URLs in <code>pdf_url</code> and <code>img_url</code>, with the order link named <code>ffprevorderlink</code>. It does not return <code>pdf_data</code>, <code>image_data</code>, or <code>order_link</code>. Use the <code>/pdf</code> or <code>/image</code> endpoints documented above when you want preview data and its order link together in JSON.</p>
+</section>
+<footer class="page-footer"><span>myNHD &middot; Preview API integration guide</span><a href="#top">Back to top &uarr;</a></footer>
+</div>
+</main>
+</div>
+<p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>
+<script>
+const liveStatus = document.getElementById('copy-status');
+for (const button of document.querySelectorAll('.copy-button')) {
+  button.addEventListener('click', async () => {
+    const code = button.closest('.code-example').querySelector('code');
+    let copied = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(code.textContent);
+        copied = true;
+      }
+    } catch (error) { /* Use the local-file fallback below. */ }
+    if (!copied) {
+      const textarea = document.createElement('textarea');
+      textarea.value = code.textContent;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try { copied = document.execCommand('copy'); } catch (error) { copied = false; }
+      textarea.remove();
+      button.focus({preventScroll: true});
+    }
+    if (copied) {
+      button.textContent = 'Copied';
+      liveStatus.textContent = 'Example copied to clipboard.';
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(code);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      button.textContent = 'Selected';
+      liveStatus.textContent = 'Copy the selected example manually.';
+    }
+    setTimeout(() => { button.textContent = 'Copy'; }, 2000);
+  });
+}
+document.getElementById('print-guide').addEventListener('click', () => window.print());
+if ('IntersectionObserver' in window) {
+  const links = Array.from(document.querySelectorAll('.sidebar nav a'));
+  const observer = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) {
+        for (const link of links) {
+          const active = link.getAttribute('href') === '#' + entry.target.id;
+          link.classList.toggle('active', active);
+          if (active) link.setAttribute('aria-current', 'location');
+          else link.removeAttribute('aria-current');
+        }
+      }
+    }
+  }, {rootMargin: '-12% 0px -70% 0px', threshold: 0});
+  document.querySelectorAll('.doc-section').forEach(section => observer.observe(section));
+}
+</script>
+</body>
+</html>

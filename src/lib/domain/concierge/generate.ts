@@ -4,7 +4,7 @@ import { db } from '@/lib/db/client';
 import { conciergeProfiles, conciergeProfileComps, conciergeProfileTransfers } from '@/lib/db/schema';
 import { uploadFile } from '@/lib/integrations/s3/client';
 import {
-  fetchConciergeProfile, getConciergeFeedId, guardMessage,
+  fetchConciergeProfile, getConciergeFeedId, guardMessage, type MatchCandidate,
 } from '@/lib/integrations/sitex/concierge-feed';
 import {
   normalizeComps, normalizePlatMap, normalizeSubject, normalizeTax, normalizeTransfers,
@@ -40,6 +40,17 @@ export interface GenerateInput {
   city: string;
   state: string;
   zip: string;
+  /**
+   * The parcel the operator picked out of a multi-match. Searched by in
+   * preference to the address.
+   *
+   * Absent on a first attempt and that is not a gap: there is no free
+   * resolution step, so no APN exists before a call has been made (claim.ts
+   * explains why the duplicate guard cannot key on it either). These arrive
+   * only from a 300, which charges nothing.
+   */
+  apn?: string | null;
+  fips?: string | null;
   preparedForName: string;
   preparedForCompany?: string | null;
   preparedForEmail?: string | null;
@@ -60,7 +71,15 @@ export interface GenerateInput {
 
 export type GenerateOutcome =
   | { ok: true; profileId: number; creditsCharged: number; compsShown: number }
-  | { ok: false; profileId: number | null; creditsCharged: number; message: string }
+  | {
+    ok: false; profileId: number | null; creditsCharged: number; message: string;
+    /**
+     * The parcels to choose between, when the address matched more than one.
+     * The caller shows these and resends with `apn`/`fips`; without them the
+     * refusal names a problem the operator cannot act on.
+     */
+    candidates?: MatchCandidate[];
+  }
   /**
    * A request within the claim window already generated (or is generating) this
    * property. Nothing was spent; the caller shows that profile instead.
@@ -149,7 +168,10 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
   // 2. THE CALL. One, and only here.
   const result = await fetchConciergeProfile({
     street: input.street, city: input.city, state: input.state, zip: input.zip,
+    apn: input.apn ?? null, fips: input.fips ?? null,
   });
+
+  const candidates = !result.ok ? result.candidates : undefined;
 
   const guardCols = {
     sitexRequestedAt: requestedAt,
@@ -160,6 +182,12 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
     locationCount: result.guard?.locationCount ?? null,
     matchMethodCode: result.guard?.matchMethodCode ?? null,
     sitexSearchId: result.guard?.searchId ?? null,
+    // What we SEARCHED BY, which is not the same question as what came back.
+    requestedApn: input.apn?.trim() || null,
+    requestedFips: input.fips?.trim() || null,
+    // Written on the row, not only returned, so closing the modal does not
+    // throw away the only answer to the question SiteX asked.
+    matchCandidates: candidates && candidates.length > 0 ? candidates : null,
   };
 
   // 3. A guard failure is recorded WITH its evidence and produces no document.
@@ -177,7 +205,7 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
     // is gone and a second click must not spend another.
     if (result.creditsCharged === 0) await releaseClaim(requestKey);
     else await recordClaimOutcome(requestKey, profileId, null);
-    return { ok: false, profileId, creditsCharged: result.creditsCharged, message };
+    return { ok: false, profileId, creditsCharged: result.creditsCharged, message, candidates };
   }
 
   // The call charged, so the claim is now permanent for its window whatever

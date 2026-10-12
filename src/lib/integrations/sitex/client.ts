@@ -88,7 +88,7 @@ async function classifyNonOk(response: Response): Promise<NonOkOutcome> {
  * `FIPS` is the parcel's own county code. It is better than anything we can
  * derive from a county name, and it is what makes picking a candidate work.
  */
-function mapLocations(raw: SiteXSearchResponse) {
+export function mapLocations(raw: { Locations?: SiteXSearchResponse['Locations'] }) {
   return (raw.Locations ?? []).map((loc) => ({
     address: loc.Address ?? '',
     city: loc.City ?? '',
@@ -98,6 +98,21 @@ function mapLocations(raw: SiteXSearchResponse) {
     unitNumber: loc.UnitNumber?.trim() || null,
     unitType: loc.UnitType?.trim() || null,
     fips: loc.FIPS?.trim() || null,
+    // ─── The two fields that make a condo list choosable ──────────────────
+    //
+    // From the real 300 for 4572 W 5th St, Santa Ana — a condominium, where
+    // every candidate shares the street line and differs only by unit:
+    //
+    //   { "FIPS": "06059", "APN": "936-640-31", "Address": "4572 W 5TH ST",
+    //     "UnitType": "#", "UnitNumber": "31",
+    //     "UseCodeDescription": "Condominium Unit (Residential)",
+    //     "Owner": "DIAZ, OMAR" }
+    //
+    // The owner is what an operator actually recognises. A unit number alone
+    // asks them to know which number they want; a name lets them confirm they
+    // have the right one, and it was being thrown away.
+    useCodeDescription: loc.UseCodeDescription?.trim() || null,
+    owner: loc.Owner?.trim() || null,
   }));
 }
 

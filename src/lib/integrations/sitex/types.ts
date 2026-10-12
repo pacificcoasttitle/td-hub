@@ -127,6 +127,18 @@ export interface SiteXRawLocation {
   FIPS?: string;
   UnitType?: string;
   UnitNumber?: string;
+  UseCode?: string;
+  UseCodeDescription?: string;
+  /**
+   * NOT in the schema list above, but present on every candidate of the real
+   * 300 for 4572 W 5th St, Santa Ana: `"Owner": "DIAZ, OMAR"`. Declared
+   * because it is the field that makes a condominium's candidate list
+   * choosable — a unit number asks the operator to already know which unit
+   * they want, a name lets them recognise it.
+   *
+   * Typed as possibly absent, since the schema does not promise it.
+   */
+  Owner?: string;
   [key: string]: unknown;
 }
 

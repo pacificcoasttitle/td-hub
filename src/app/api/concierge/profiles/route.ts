@@ -19,6 +19,22 @@ const bodySchema = z.object({
   city: z.string().min(1),
   state: z.string().min(1).default('CA'),
   zip: z.string().min(3),
+  /**
+   * The parcel the operator picked out of a multi-match.
+   *
+   * Accepted from the browser, unlike the rep's details, because unlike those
+   * it is not printed on the document as fact — it selects which property to
+   * ask SiteX about, and SiteX's answer is still put through the full guard.
+   * An APN that matches nothing comes back no_match; one that matches a
+   * different parcel produces a profile whose own subject fields are whatever
+   * SiteX returned, and `requested_apn` records what we sent so the two can be
+   * compared.
+   *
+   * Both or neither: `apn` without a FIPS is the request shape that failed
+   * every time in the orders flow, so the feed client declines to send it.
+   */
+  apn: z.string().trim().min(1).max(50).optional().nullable(),
+  fips: z.string().trim().regex(/^\d{5}$/, 'FIPS must be five digits.').optional().nullable(),
   preparedForName: z.string().min(1, 'A prepared-for name is required.'),
   preparedForCompany: z.string().optional().nullable(),
   preparedForEmail: z.string().email().optional().nullable(),
@@ -76,6 +92,16 @@ export async function POST(req: NextRequest) {
   const spend = await getSpendSnapshot();
 
   if (!result.ok) {
+    // THE CANDIDATES TRAVEL WITH THE REFUSAL. A multi-match is a question, and
+    // 409 says so — the operator has a choice to make and nothing was charged,
+    // which is the same shape as `already_have` above and nothing like a 502.
+    const candidates = 'candidates' in result ? result.candidates : undefined;
+    if (candidates && candidates.length > 0) {
+      return NextResponse.json({
+        error: result.message, reason: 'ambiguous_match', candidates,
+        profileId: result.profileId, creditsCharged: result.creditsCharged, spend,
+      }, { status: 409 });
+    }
     return NextResponse.json({
       error: result.message, profileId: result.profileId,
       creditsCharged: result.creditsCharged, spend,

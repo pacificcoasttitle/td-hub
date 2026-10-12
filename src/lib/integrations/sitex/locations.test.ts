@@ -1,20 +1,18 @@
 import { describe, expect, it } from 'vitest';
+import { mapLocations } from './client';
 import type { SiteXRawLocation } from './types';
 
-// mapLocations is module-private; this asserts the shape it must produce, using
-// the real Castello Lane payload. If the mapping narrows again, this fails.
-function mapLocations(raw: { Locations?: SiteXRawLocation[] }) {
-  return (raw.Locations ?? []).map((loc) => ({
-    address: loc.Address ?? '',
-    city: loc.City ?? '',
-    state: loc.State ?? '',
-    zip: loc.ZIP ?? loc.Zip ?? '',
-    apn: loc.APN ?? '',
-    unitNumber: loc.UnitNumber?.trim() || null,
-    unitType: loc.UnitType?.trim() || null,
-    fips: loc.FIPS?.trim() || null,
-  }));
-}
+// ─── The real function, not a copy of it ────────────────────────────────────
+//
+// This file used to declare its own mapLocations, because the real one was
+// module-private, with a comment saying "if the mapping narrows again, this
+// fails". It would not have. The copy drifted the moment the real mapping
+// gained a field, and a guard over a reimplementation of the thing it guards
+// passes for the wrong reason by construction — EVIDENCE_RULES rule 1, which
+// this repo learned on 262 assertions against the source text of a file that
+// was not the one rendering.
+//
+// mapLocations is exported now, so the copy is gone.
 
 // Field names from SiteXPro's published schema, GET /realestatedata/search/schema.
 const CASTELLO: SiteXRawLocation[] = [
@@ -49,5 +47,27 @@ describe('multi-match candidates', () => {
     const [only] = mapLocations({ Locations: [{ Address: '1 Main St', UnitNumber: '  ' }] });
     expect(only!.unitNumber).toBeNull();
     expect(only!.unitType).toBeNull();
+  });
+
+  it('keeps the owner and the use description, which is what makes a condo list choosable', () => {
+    // From the real 300 for 4572 W 5th St, Santa Ana. Every candidate at a
+    // condominium shares the street line; the owner is the field an operator
+    // recognises, and both of these were being dropped.
+    const [only] = mapLocations({
+      Locations: [{
+        Address: '4572 W 5TH ST', City: 'SANTA ANA', State: 'CA', ZIP: '92703',
+        APN: '936-640-31', FIPS: '06059', UnitType: '#', UnitNumber: '31',
+        UseCode: '1004', UseCodeDescription: 'Condominium Unit (Residential)',
+        Owner: 'DIAZ, OMAR',
+      }],
+    });
+    expect(only!.owner).toBe('DIAZ, OMAR');
+    expect(only!.useCodeDescription).toBe('Condominium Unit (Residential)');
+  });
+
+  it('is null for both when SiteX sends neither — the schema does not promise Owner', () => {
+    const [only] = mapLocations({ Locations: [{ Address: '1 Main St' }] });
+    expect(only!.owner).toBeNull();
+    expect(only!.useCodeDescription).toBeNull();
   });
 });

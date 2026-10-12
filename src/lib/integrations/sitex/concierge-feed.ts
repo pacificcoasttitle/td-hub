@@ -1,5 +1,11 @@
 import crypto from 'node:crypto';
 import { getAccessToken, getConfig, logRequest, TIMEOUT_MS, VENDOR } from './auth';
+// ONE CLASSIFIER, NOT TWO. client.ts already knows that SiteX answers two
+// ordinary questions with non-2xx codes — 404 + NotFound means no property,
+// 300 + Locations[] means several — and this file spent its whole life calling
+// both of them `api_error`. Importing the classifier rather than restating it
+// is the point: a third reading of a status code is how they drift.
+import { classifyNonOkBody, mapLocations } from './client';
 
 // ─── Concierge feed pull ─────────────────────────────────────────────────────
 //
@@ -35,7 +41,25 @@ export interface ConciergeLookupParams {
   city: string;
   state: string;
   zip: string;
+  /**
+   * The parcel, when one is known. SEARCHED BY IN PREFERENCE TO THE ADDRESS.
+   *
+   * Nothing supplies these on a first attempt: there is no free resolution
+   * step, so the APN arrives FROM the spend (see claim.ts). They exist for the
+   * SECOND attempt — after a 300 multi-match, which costs nothing, hands back
+   * a candidate per parcel and the operator picks one. Searching the same
+   * ambiguous address again gets the same question back.
+   *
+   * Both or neither. `apn` alone is the request shape that failed all 13 times
+   * in the orders flow ("Missing required fields"), so it is not sent without
+   * a FIPS — see client.ts's apnLookup.
+   */
+  apn?: string | null;
+  fips?: string | null;
 }
+
+/** One parcel SiteX offered when the address matched more than one. */
+export type MatchCandidate = ReturnType<typeof mapLocations>[number];
 
 export interface SiteXOrderInfo {
   IsValidAddress?: boolean;
@@ -69,7 +93,22 @@ export interface GuardEvidence {
 
 export type ConciergeFetchResult =
   | { ok: true; payload: ConciergeFeedPayload; raw: string; guard: GuardEvidence; durationMs: number; creditsCharged: number }
-  | { ok: false; reason: ConciergeGuardFailure | 'not_configured' | 'api_error' | 'network'; message: string; guard: GuardEvidence | null; durationMs: number; creditsCharged: number };
+  | {
+    ok: false;
+    reason: ConciergeGuardFailure | 'not_configured' | 'api_error' | 'network';
+    message: string;
+    guard: GuardEvidence | null;
+    durationMs: number;
+    creditsCharged: number;
+    /**
+     * The parcels to choose between, on `ambiguous_match` only.
+     *
+     * This is the answer to the question SiteX asked, and it has to travel
+     * with the refusal or the refusal is unanswerable. Empty on every other
+     * reason.
+     */
+    candidates?: MatchCandidate[];
+  };
 
 function readGuard(payload: ConciergeFeedPayload): GuardEvidence {
   const oi = payload.OrderInfo ?? {};
@@ -118,10 +157,38 @@ export async function fetchConciergeProfile(
 
   const feedId = getConciergeFeedId();
   const zip5 = params.zip.trim().slice(0, 5);
+  const lastLine = `${params.city}, ${params.state}, ${zip5}`;
   const url = new URL(`${config.baseUrl}/realestatedata/search`);
-  url.searchParams.set('addr', params.street);
-  url.searchParams.set('lastLine', `${params.city}, ${params.state}, ${zip5}`);
+
+  // BY PARCEL WHEN WE HAVE ONE, BY ADDRESS OTHERWISE.
+  //
+  // The address is not a fallback in the sense of "worse" — it is all we have
+  // on a first attempt, because the APN only arrives from a call. It becomes
+  // the wrong thing to send on a RETRY after a multi-match: the operator has
+  // picked a parcel by then, and re-sending the address asks SiteX the same
+  // ambiguous question it already declined to answer.
+  //
+  // Requires both. See ConciergeLookupParams.
+  const apn = params.apn?.trim() || null;
+  const fips = params.fips?.trim() || null;
+  const byParcel = apn !== null && fips !== null;
+  if (byParcel) {
+    url.searchParams.set('apn', apn);
+    url.searchParams.set('fips', fips);
+  } else {
+    url.searchParams.set('addr', params.street);
+    url.searchParams.set('lastLine', lastLine);
+  }
   url.searchParams.set('feedId', feedId);
+
+  // What went on the wire, not what we were asked for. The orders flow learned
+  // this the hard way on 2026-09-09: the log recorded the caller's arguments,
+  // so it could show that a call succeeded but not that the parameter the fix
+  // introduced had been sent. A request log that omits the field under test
+  // cannot verify the change.
+  const requestMeta = byParcel
+    ? { feedId, searchedBy: 'parcel', apn, fips }
+    : { feedId, searchedBy: 'address', lastLine };
 
   try {
     const token = await getAccessToken(config.baseUrl, config.clientId, config.clientSecret);
@@ -140,10 +207,53 @@ export async function fetchConciergeProfile(
     const guard = payload ? readGuard(payload) : null;
 
     if (!response.ok) {
+      // Not every non-2xx is a failure. 300 + Locations[] is SiteX saying "that
+      // address matches more than one property, here they are", and 404 +
+      // NotFound is "there is no property there" — both ordinary answers. This
+      // branch used to print the status code into a red box, which is how the
+      // same address was attempted 14 times in 53 minutes with nothing to act
+      // on and nothing charged.
+      const outcome = classifyNonOkBody(response.status, raw);
+
+      if (outcome.kind === 'multi_match') {
+        const candidates = mapLocations(outcome.raw);
+        await logRequest({
+          operation: 'concierge_profile', requestId, startedAt, success: false,
+          errorCategory: 'ambiguous_match',
+          requestMeta,
+          responseMeta: {
+            httpStatus: response.status, searchId: guard?.searchId ?? null, creditsCharged,
+            locationCount: candidates.length,
+            // The candidates themselves, not a truncated body. The 14 logged
+            // 300s recorded `body` clipped at 400 characters, so how many
+            // parcels SiteX had offered is not recoverable from any of them.
+            candidates: candidates.slice(0, 10),
+          },
+        });
+        return {
+          ok: false, reason: 'ambiguous_match', candidates, durationMs, creditsCharged,
+          // locationCount from the candidates, since OrderInfo is absent on a 300.
+          guard: guard ? { ...guard, locationCount: candidates.length } : null,
+          message: ambiguousMessage(candidates.length),
+        };
+      }
+
+      if (outcome.kind === 'no_match') {
+        await logRequest({
+          operation: 'concierge_profile', requestId, startedAt, success: false,
+          errorCategory: 'no_match', requestMeta,
+          responseMeta: { httpStatus: response.status, searchId: guard?.searchId ?? null, creditsCharged },
+        });
+        return {
+          ok: false, reason: 'no_match', guard, durationMs, creditsCharged,
+          message: guardMessage('no_match'),
+        };
+      }
+
       await logRequest({
         operation: 'concierge_profile', requestId, startedAt, success: false,
         errorCategory: 'API_ERROR',
-        requestMeta: { feedId, lastLine: `${params.city}, ${params.state}, ${zip5}` },
+        requestMeta,
         responseMeta: { httpStatus: response.status, searchId: guard?.searchId ?? null, creditsCharged, body: raw.slice(0, 400) },
       });
       return {
@@ -175,7 +285,20 @@ export async function fetchConciergeProfile(
     });
 
     if (failure) {
-      return { ok: false, reason: failure, guard, durationMs, creditsCharged, message: guardMessage(failure) };
+      // A 200 can also be a multi-match — SiteX sometimes answers with Locations[]
+      // and a 2xx, which is why evaluateGuard has this case at all. That one DID
+      // charge, so picking a candidate costs a second credit; the candidates
+      // still travel, because the alternative is the same dead end at a higher
+      // price.
+      const candidates = failure === 'ambiguous_match' && Array.isArray(payload.Locations)
+        ? mapLocations(payload as Parameters<typeof mapLocations>[0])
+        : undefined;
+      return {
+        ok: false, reason: failure, guard, durationMs, creditsCharged, candidates,
+        message: failure === 'ambiguous_match'
+          ? ambiguousMessage(guard!.locationCount ?? 0)
+          : guardMessage(failure),
+      };
     }
 
     return { ok: true, payload, raw, guard: guard!, durationMs, creditsCharged };
@@ -190,12 +313,25 @@ export async function fetchConciergeProfile(
   }
 }
 
+/**
+ * What a multi-match says to the operator.
+ *
+ * It says the COUNT, and it says nothing was charged. The old wording —
+ * "Resolve it before generating a profile" — told somebody to go and do a thing
+ * with no way to do it, and the 300 path never even reached it: that attempt
+ * got "SiteX returned HTTP 300". A status code is not an instruction.
+ */
+export function ambiguousMessage(count: number): string {
+  const n = count > 0 ? `${count} properties` : 'more than one property';
+  return `This address matches ${n}. Pick the one you want — nothing has been charged.`;
+}
+
 export function guardMessage(f: ConciergeGuardFailure): string {
   switch (f) {
     case 'invalid_address': return 'SiteX did not recognise this address. No profile was generated.';
     case 'outside_coverage': return 'This property is outside SiteX coverage. No profile was generated.';
     case 'no_match': return 'No property matched this address. No profile was generated.';
-    case 'ambiguous_match': return 'This address matched more than one property. Resolve it before generating a profile.';
+    case 'ambiguous_match': return ambiguousMessage(0);
     case 'empty_feed': return 'SiteX returned no data for this property.';
   }
 }

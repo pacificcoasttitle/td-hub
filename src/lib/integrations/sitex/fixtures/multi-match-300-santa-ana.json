@@ -1,0 +1,25 @@
+{
+  "Locations": [
+    {
+      "FIPS": "06059",
+      "APN": "936-640-31",
+      "Address": "4572 W 5TH ST",
+      "City": "SANTA ANA",
+      "State": "CA",
+      "ZIP": "92703",
+      "ZIP4": "3162",
+      "UnitType": "#",
+      "UnitNumber": "31",
+      "UseCode": "1004",
+      "UseCodeDescription": "Condominium Unit (Residential)",
+      "Owner": "DIAZ, OMAR"
+    }
+  ],
+  "Feed": null,
+  "Report": null,
+  "OrderInfo": {
+    "IsValidAddress": true,
+    "OutsideCoverage": false,
+    "SearchId": 1421335387
+  }
+}

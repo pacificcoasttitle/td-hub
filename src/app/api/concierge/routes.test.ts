@@ -182,6 +182,52 @@ describe('exactly two routes can spend, and they spend on different vendors', ()
     expect(generate).toMatch(/orderId:\s*z\.number\(\)\.int\(\)\.positive\(\)\.nullable\(\)\.optional\(\)/);
   });
 
+  it('a multi-match comes back as a choice, not a 502', () => {
+    // "SiteX returned HTTP 300" in a red box is what the operator saw 14 times
+    // in 53 minutes on 2026-10-08, charging nothing each time. A 300 is SiteX
+    // asking which property; the answer has to travel with the question or the
+    // question cannot be answered.
+    const src = stripComments(generate);
+    expect(src).toContain("reason: 'ambiguous_match'");
+    expect(src).toContain('candidates');
+    // 409, the same code `already_have` uses, because both are choices with
+    // nothing spent — and NOT the 502 that still covers real failures.
+    const choice = src.indexOf("reason: 'ambiguous_match'");
+    const fiveOhTwo = src.indexOf('status: 502');
+    expect(choice).toBeGreaterThan(-1);
+    expect(fiveOhTwo).toBeGreaterThan(-1);
+    expect(choice).toBeLessThan(fiveOhTwo);
+  });
+
+  it('accepts a picked parcel, and requires a five-digit FIPS with it', () => {
+    // The parcel selects which property to ask about; SiteX's answer still
+    // goes through the full guard. A FIPS that is not five digits cannot be a
+    // county code, and `apn` without one is the shape that failed every time
+    // in the orders flow.
+    const src = stripComments(generate);
+    expect(src).toMatch(/apn:\s*z\.string\(\)/);
+    expect(src).toMatch(/fips:\s*z\.string\(\)[\s\S]{0,80}\\d\{5\}/);
+  });
+
+  it('the parcel reaches the vendor call rather than being parsed and dropped', () => {
+    const gen = stripComments(read('../../../lib/domain/concierge/generate.ts'));
+    // Passed INTO the one call that spends, not merely accepted by the route.
+    const call = gen.indexOf('fetchConciergeProfile({');
+    expect(call).toBeGreaterThan(-1);
+    expect(gen.slice(call, call + 320)).toMatch(/apn:\s*input\.apn/);
+    expect(gen.slice(call, call + 320)).toMatch(/fips:\s*input\.fips/);
+    // And what we SEARCHED BY is recorded, which is a different question from
+    // what came back — the orders flow learned that on 2026-09-09.
+    expect(gen).toContain('requestedApn');
+    expect(gen).toContain('requestedFips');
+  });
+
+  it('the candidates are written to the row, not only returned to the browser', () => {
+    // Closing the modal must not throw away the only answer to the question.
+    const gen = stripComments(read('../../../lib/domain/concierge/generate.ts'));
+    expect(gen).toContain('matchCandidates');
+  });
+
   it('the PDF route never accepts a storage key from the browser', () => {
     const pdf = read('profiles/[id]/pdf/route.ts');
     expect(pdf).toContain('getProfilePdfKey(id)');

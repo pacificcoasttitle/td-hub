@@ -6,9 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { CONCIERGE_GENERATE_ROLES } from '@/lib/domain/concierge/access';
 import { CONTACT_BOOK_READ_ROLES } from '@/lib/security/contact-book-access';
 import {
-  AlreadyHavePanel, ConciergeStep, TypeCard,
-  applyPickedAddress, draftProblem, fullAddress, generationBody, typeOptions,
-  type ConciergeDraft,
+  AlreadyHavePanel, ConciergeStep, MatchCandidatesPanel, TypeCard,
+  applyPickedAddress, candidateUnit, draftProblem, fullAddress, generationBody, typeOptions,
+  type ConciergeDraft, type MatchCandidate,
 } from './new-report-modal';
 
 // Rendered and read as text. Grepping source for UI strings has failed silently
@@ -281,6 +281,148 @@ describe('the flag that allows a second credit', () => {
 
   it('still carries no order id', () => {
     expect('orderId' in body(false)).toBe(false);
+  });
+});
+
+// ─── The multi-match: SiteX asked which property ────────────────────────────
+
+describe('the parcel picked out of a multi-match', () => {
+  /** The real candidate from the 300 for 4572 W 5th St, Santa Ana. */
+  const SANTA_ANA: MatchCandidate = {
+    address: '4572 W 5TH ST', city: 'SANTA ANA', state: 'CA', zip: '92703',
+    apn: '936-640-31', unitType: '#', unitNumber: '31', fips: '06059',
+    useCodeDescription: 'Condominium Unit (Residential)', owner: 'DIAZ, OMAR',
+  };
+
+  const body = (parcel: MatchCandidate | null) => generationBody({
+    draft: draft(), preparedForName: 'Maria Lopez', preparedForCompany: '',
+    allowDuplicate: false, parcel,
+  });
+
+  it('is absent on a first attempt, when no parcel exists yet', () => {
+    // There is no free resolution step, so nothing can supply an APN before a
+    // call has been made. The address is not a degraded choice here, it is the
+    // only one.
+    const b = body(null);
+    expect('apn' in b).toBe(false);
+    expect('fips' in b).toBe(false);
+  });
+
+  it('sends both halves when the operator picked one', () => {
+    expect(body(SANTA_ANA)).toMatchObject({ apn: '936-640-31', fips: '06059' });
+  });
+
+  it('sends NEITHER when SiteX gave no county code for that candidate', () => {
+    // `apn` alone is the request shape that failed every time in the orders
+    // flow. Sending half a parcel buys a round trip to be told so.
+    const b = body({ ...SANTA_ANA, fips: null });
+    expect('apn' in b).toBe(false);
+    expect('fips' in b).toBe(false);
+  });
+
+  it('cannot be set by a stray click event either', () => {
+    // confirm() takes this parameter now, and the gate calls confirm from an
+    // onClick. A MouseEvent arriving here must not become a parcel.
+    const asEvent = generationBody({
+      draft: draft(), preparedForName: 'x', preparedForCompany: '', allowDuplicate: false,
+      parcel: { type: 'click', bubbles: true } as unknown as MatchCandidate,
+    });
+    expect('apn' in asEvent).toBe(false);
+  });
+
+  it('still carries the address, so the row is legible either way', () => {
+    // The row's requested_address is what the Reports list prints, and a
+    // profile fetched by parcel still has to say which address was asked for.
+    expect(body(SANTA_ANA)).toMatchObject({ street: '1358 5th St', city: 'La Verne' });
+  });
+});
+
+describe('the unit, written the way the vendor writes it', () => {
+  const c = (over: Partial<MatchCandidate>): MatchCandidate => ({
+    address: 'X', city: 'Y', state: 'CA', zip: '1', apn: 'a', fips: '06059',
+    unitType: null, unitNumber: null, useCodeDescription: null, owner: null, ...over,
+  });
+
+  it('prints #31, not "# 31" — UnitType is punctuation on the real payload', () => {
+    expect(candidateUnit(c({ unitType: '#', unitNumber: '31' }))).toBe('#31');
+  });
+
+  it('keeps the space when the type is a word', () => {
+    expect(candidateUnit(c({ unitType: 'APT', unitNumber: '4' }))).toBe('APT 4');
+    expect(candidateUnit(c({ unitType: 'UNIT', unitNumber: '2' }))).toBe('UNIT 2');
+  });
+
+  it('is the number alone when there is no type, and null when there is no number', () => {
+    expect(candidateUnit(c({ unitNumber: '7' }))).toBe('7');
+    expect(candidateUnit(c({ unitType: 'APT' }))).toBeNull();
+  });
+});
+
+describe('the panel that asks which property', () => {
+  const CANDIDATES: MatchCandidate[] = [
+    {
+      address: '4572 W 5TH ST', city: 'SANTA ANA', state: 'CA', zip: '92703',
+      apn: '936-640-31', unitType: '#', unitNumber: '31', fips: '06059',
+      useCodeDescription: 'Condominium Unit (Residential)', owner: 'DIAZ, OMAR',
+    },
+    {
+      address: '4572 W 5TH ST', city: 'SANTA ANA', state: 'CA', zip: '92703',
+      apn: '936-640-32', unitType: '#', unitNumber: '32', fips: null,
+      useCodeDescription: 'Condominium Unit (Residential)', owner: 'NGUYEN, LAN',
+    },
+  ];
+
+  const panel = () => visible(
+    <MatchCandidatesPanel
+      message="This address matches 2 properties. Pick the one you want — nothing has been charged."
+      candidates={CANDIDATES}
+      busy={false}
+      onPick={() => {}}
+      onCancel={() => {}}
+    />,
+  );
+
+  it('shows the unit and the owner, because the street line is identical', () => {
+    // 16281 Castello Ln came back as six rows reading "16281 CASTELLO LN" with
+    // nothing to choose between them, and an operator searched it four times in
+    // six minutes. The distinguishing fields have to be on screen.
+    const t = panel();
+    expect(t).toContain('#31');
+    expect(t).toContain('#32');
+    expect(t).toContain('DIAZ, OMAR');
+    expect(t).toContain('NGUYEN, LAN');
+  });
+
+  it('says nothing was charged, and that picking spends one', () => {
+    const t = panel();
+    expect(t).toContain('nothing has been charged');
+    expect(t).toContain('single lookup');
+  });
+
+  it('never shows a status code', () => {
+    expect(panel()).not.toMatch(/HTTP|\b300\b/);
+  });
+
+  it('marks a candidate with no county code as not selectable, and says why', () => {
+    const t = panel();
+    expect(t).toContain('no county code');
+    // Rendered, not just styled: the button for the unusable one is disabled.
+    const html = renderToStaticMarkup(
+      <MatchCandidatesPanel message="m" candidates={CANDIDATES} busy={false} onPick={() => {}} onCancel={() => {}} />,
+    );
+    expect((html.match(/disabled=""/g) ?? []).length).toBe(1);
+  });
+
+  it('disables every pick while a generation is in flight', () => {
+    const html = renderToStaticMarkup(
+      <MatchCandidatesPanel message="m" candidates={CANDIDATES} busy onPick={() => {}} onCancel={() => {}} />,
+    );
+    // Two candidates plus the "back" link.
+    expect((html.match(/disabled=""/g) ?? []).length).toBe(3);
+  });
+
+  it('offers a way back to the address', () => {
+    expect(panel()).toContain('Back to the address');
   });
 });
 

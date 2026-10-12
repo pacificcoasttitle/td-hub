@@ -175,8 +175,19 @@ export function generationBody(input: {
   preparedForName: string;
   preparedForCompany: string;
   allowDuplicate: boolean;
+  /**
+   * The parcel picked out of a multi-match, on a retry.
+   *
+   * Sent only as a PAIR, and only when both halves are present — an `apn`
+   * without a `fips` is the request shape the orders flow proved SiteX rejects,
+   * and the feed client will not put it on the wire either. A candidate SiteX
+   * returned without a FIPS is therefore not selectable, which the panel says
+   * out loud rather than sending a request that cannot work.
+   */
+  parcel?: MatchCandidate | null;
 }): Record<string, unknown> {
-  const { draft: d } = input;
+  const { draft: d, parcel } = input;
+  const usable = parcel?.apn?.trim() && parcel.fips?.trim() ? parcel : null;
   return {
     // No order here. The double-charge guard is keyed on the property.
     street: d.street.trim(),
@@ -188,7 +199,117 @@ export function generationBody(input: {
     // Which contact, never their name, email or phone.
     presentingRepContactId: d.repContactId,
     ...(input.allowDuplicate ? { allowDuplicate: true } : {}),
+    ...(usable ? { apn: usable.apn.trim(), fips: usable.fips!.trim() } : {}),
   };
+}
+
+// ─── A multi-match is a question, not an error ───────────────────────────────
+
+/** One parcel SiteX offered. Mirrors the candidate shape the feed returns. */
+export interface MatchCandidate {
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  apn: string;
+  unitNumber: string | null;
+  unitType: string | null;
+  fips: string | null;
+  useCodeDescription: string | null;
+  owner: string | null;
+}
+
+/**
+ * The unit, written the way the vendor's own fields read.
+ *
+ * `UnitType` is not always a word. The real 300 for 4572 W 5th St sends
+ * `"UnitType": "#"` with `"UnitNumber": "31"`, and joining those with a space
+ * gives "# 31". So a punctuation type is prefixed tight and a word type gets
+ * its space: "#31", but "APT 4".
+ */
+export function candidateUnit(c: MatchCandidate): string | null {
+  const n = c.unitNumber?.trim();
+  if (!n) return null;
+  const t = c.unitType?.trim();
+  if (!t) return n;
+  return /^[A-Za-z]/.test(t) ? `${t} ${n}` : `${t}${n}`;
+}
+
+/**
+ * Pick one of the parcels at this address.
+ *
+ * NOTHING HAS BEEN CHARGED when this appears. A 300 from SiteX is not billed,
+ * so the panel is a choice taken before any spend — the same shape as
+ * AlreadyHavePanel, deliberately, and nothing like the red box that used to
+ * read "SiteX returned HTTP 300".
+ *
+ * THE UNIT IS THE POINT. Candidates at one address differ by unit and often by
+ * nothing else; a list of six identical street lines is unusable, which the
+ * orders flow found out when an operator searched 16281 Castello Ln four times
+ * in six minutes. So the unit leads, and the APN is shown as the tiebreaker it
+ * is when there is no unit at all.
+ */
+export function MatchCandidatesPanel({ message, candidates, busy, onPick, onCancel }: {
+  message: string;
+  candidates: MatchCandidate[];
+  busy: boolean;
+  onPick: (c: MatchCandidate) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-[13px] text-[#333]">{message}</p>
+      <ul className="space-y-2">
+        {candidates.map((c, i) => {
+          const unit = candidateUnit(c);
+          // No FIPS means no searchable parcel. Saying so beats a button that
+          // sends a request the feed client is documented to refuse.
+          const selectable = Boolean(c.apn?.trim() && c.fips?.trim());
+          return (
+            <li key={`${c.apn}-${i}`}>
+              <button
+                type="button"
+                disabled={busy || !selectable}
+                onClick={() => onPick(c)}
+                className="w-full text-left rounded-lg border border-[#E5E5E5] px-4 py-3 transition-colors hover:border-brand-orange disabled:opacity-50 disabled:hover:border-[#E5E5E5]"
+              >
+                <div className="text-[13px] font-semibold text-[#111]">
+                  {unit ? `${unit} — ${c.address}` : c.address}
+                </div>
+                {/* The owner leads the second line, because it is the thing an
+                    operator recognises. Absent when SiteX sent none. */}
+                {c.owner ? (
+                  <div className="text-[12px] text-[#333]">{c.owner}</div>
+                ) : null}
+                <div className="text-[11px] text-[#666]">
+                  {[c.city, c.state, c.zip].filter(Boolean).join(', ')}
+                  {c.apn ? ` · APN ${c.apn}` : ''}
+                  {c.useCodeDescription ? ` · ${c.useCodeDescription}` : ''}
+                </div>
+                {!selectable ? (
+                  <div className="text-[11px] text-[#A33]">
+                    SiteX sent no county code for this one — it cannot be looked up by parcel.
+                  </div>
+                ) : null}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-[11px] text-[#666]">
+        Picking one spends a single lookup, the same as generating normally. The
+        attempt that produced this list was not charged.
+      </p>
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={busy}
+        className="text-[12px] text-[#666] underline disabled:opacity-50"
+      >
+        Back to the address
+      </button>
+    </div>
+  );
 }
 
 // ─── The type cards ─────────────────────────────────────────────────────────
@@ -438,6 +559,11 @@ export function NewReportModal({ onClose, onCreated }: {
   const [repWarning, setRepWarning] = useState<string | null>(null);
   const [showProblem, setShowProblem] = useState(false);
   const [existing, setExisting] = useState<{ existing: ExistingProfileNotice; message: string } | null>(null);
+  /**
+   * SiteX asked which property. Held, not flashed, and not an error — nothing
+   * was charged for the attempt that produced it.
+   */
+  const [ambiguous, setAmbiguous] = useState<{ message: string; candidates: MatchCandidate[] } | null>(null);
   const [checking, setChecking] = useState(false);
   const [freshRequested, setFreshRequested] = useState(false);
   const [farming, setFarming] = useState<boolean | null>(null);
@@ -542,10 +668,20 @@ export function NewReportModal({ onClose, onCreated }: {
   /**
    * THE ONLY CALL IN THIS FILE THAT SPENDS.
    *
-   * Takes no arguments on purpose: the gate calls it from an onClick, which
-   * would hand a MouseEvent to any parameter it had.
+   * IT NOW TAKES AN ARGUMENT, AND EVERY CALLER PASSES ONE EXPLICITLY. This
+   * used to take none on purpose, because the gate calls it from an onClick
+   * and an onClick hands a MouseEvent to the first parameter of whatever it
+   * is given — truthy, every time. That is not a theoretical hazard: it is how
+   * `allowDuplicate` was briefly wired, and it would have disabled the
+   * double-charge guard on every generation (see generationBody).
+   *
+   * TypeScript does not catch it. `onConfirm: () => void` accepts a function
+   * that declares parameters, so the mistake typechecks. So the gate is wired
+   * through an arrow that passes `null`, and the parameter is required rather
+   * than optional — an omitted argument is now a compile error, which is the
+   * only part of this that a future edit cannot quietly undo.
    */
-  async function confirm() {
+  async function confirm(parcel: MatchCandidate | null) {
     setSubmitting(true); setError(null);
     try {
       const res = await fetch('/api/concierge/profiles', {
@@ -553,10 +689,25 @@ export function NewReportModal({ onClose, onCreated }: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(generationBody({
           draft, preparedForName, preparedForCompany, allowDuplicate: freshRequested,
+          parcel: parcel ?? null,
         })),
       });
       const body = await res.json().catch(() => null);
       if (body?.spend) setSpend(body.spend);
+
+      // ─── SiteX asked which property ──────────────────────────────────────
+      //
+      // Before the generic !res.ok branch, because this is not a failure to
+      // report: it is a question with an answer attached, and nothing was
+      // charged. The gate goes first — it is a fixed overlay, and leaving it
+      // up would put the choice behind the dialog the operator just confirmed,
+      // which is the same mistake setTaxProblem had to be moved for.
+      if (body?.reason === 'ambiguous_match' && Array.isArray(body.candidates) && body.candidates.length > 0) {
+        setGateOpen(false);
+        setAmbiguous({ message: body.error as string, candidates: body.candidates as MatchCandidate[] });
+        return;
+      }
+
       if (!res.ok) {
         // A failure still left a row, and it may have cost a credit. Point the
         // operator at the list rather than back to a form that invites a second
@@ -677,6 +828,14 @@ export function NewReportModal({ onClose, onCreated }: {
                 />
               )}
             />
+          ) : ambiguous ? (
+            <MatchCandidatesPanel
+              message={ambiguous.message}
+              candidates={ambiguous.candidates}
+              busy={submitting}
+              onPick={(c) => { void confirm(c); }}
+              onCancel={() => { setAmbiguous(null); setError(null); }}
+            />
           ) : existing ? (
             <AlreadyHavePanel
               message={existing.message}
@@ -795,7 +954,11 @@ export function NewReportModal({ onClose, onCreated }: {
           onPreparedForName={setPreparedForName}
           onPreparedForCompany={setPreparedForCompany}
           onCancel={() => { if (!submitting) { setGateOpen(false); setError(null); } }}
-          onConfirm={confirm}
+          onConfirm={() => {
+            // An arrow, not `confirm` itself: onClick passes a MouseEvent into
+            // the first parameter of whatever it is handed. See confirm().
+            void confirm(null);
+          }}
         />
       ) : null}
     </>

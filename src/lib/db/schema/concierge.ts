@@ -35,6 +35,26 @@ export const conciergeProfiles = pgTable('concierge_profiles', {
   locationCount: integer('location_count'),
   matchMethodCode: varchar('match_method_code', { length: 10 }),
 
+  /**
+   * The parcels SiteX offered when the address matched more than one.
+   *
+   * Kept so the refusal stays answerable. A 300 multi-match costs nothing and
+   * carries an APN and FIPS per candidate; discarding them is what left one
+   * address attempted 14 times in 53 minutes with "SiteX returned HTTP 300"
+   * as the only thing on screen.
+   */
+  matchCandidates: jsonb('match_candidates'),
+
+  /**
+   * The parcel this request was searched BY, when it was.
+   *
+   * Distinct from subjectApn/subjectFips, which are what came BACK. The
+   * difference is the whole answer to "the operator picked a parcel and the
+   * retry still missed — what did we send?"
+   */
+  requestedApn: varchar('requested_apn', { length: 50 }),
+  requestedFips: varchar('requested_fips', { length: 10 }),
+
   rawStorageKey: varchar('raw_storage_key', { length: 500 }),
   rawSha256: char('raw_sha256', { length: 64 }),
   rawBytes: integer('raw_bytes'),

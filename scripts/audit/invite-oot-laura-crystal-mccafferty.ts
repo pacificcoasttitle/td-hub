@@ -112,4 +112,4 @@ main()
     console.error(err);
     process.exitCode = 1;
   })
-  .then(() => scriptExit(process.exitCode ?? 0));
+  .then(() => scriptExit(typeof process.exitCode === 'number' ? process.exitCode : 0));

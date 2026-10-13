@@ -37,14 +37,90 @@ export const AUTH_TIMEOUT_MS = 20_000;
  */
 export const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 
-export function getConfig(): { baseUrl: string; secretKey: string } | null {
+/**
+ * MyNHD's production API, from their own guide. The fallback when
+ * MYNHD_BASE_URL is unset, and the ONLY host allowed on the production target.
+ */
+export const PRODUCTION_BASE_URL = 'https://api.mynhd.com';
+
+/** Why `getConfig()` returned nothing, for a caller that has to explain it. */
+export type ConfigRefusal = 'no_secret' | 'dev_url_on_production';
+
+export interface MyNhdConfig {
+  baseUrl: string;
+  secretKey: string;
+}
+
+const normalize = (url: string) => {
+  const t = url.trim();
+  return t.endsWith('/') ? t.slice(0, -1) : t;
+};
+
+/**
+ * Which Vercel target this is running on.
+ *
+ * `VERCEL_ENV` is 'production' | 'preview' | 'development' on Vercel and
+ * UNSET anywhere else — a local run, a script, a test. Absent therefore means
+ * "not the production deploy", which is correct rather than a hole: the app is
+ * Vercel-hosted, so the production deploy always sets it, and a local run
+ * pointing at the dev server is the intended case.
+ */
+const onProductionTarget = () => process.env.VERCEL_ENV === 'production';
+
+/**
+ * The config, or why there isn't one.
+ *
+ * ─── A DEV KEY AND A PROD DEPLOY MUST NOT BE CROSSABLE ──────────────────────
+ *
+ * MyNHD issued a DEV-ENVIRONMENT key (13 Oct 2026), which belongs on the
+ * preview and development targets with MYNHD_BASE_URL pointing at their dev
+ * server. The crossing to prevent is a deploy on the production target talking
+ * to anything other than MyNHD's production host: that is either a dev key
+ * reaching production, or a production key being sent to a dev server, and
+ * neither is recoverable by noticing afterwards.
+ *
+ * So on the production target the base URL must BE the production URL. A
+ * MYNHD_BASE_URL that is set to anything else there is refused — no call, no
+ * token request, nothing on the wire.
+ *
+ * WHAT THIS CANNOT CHECK, STATED PLAINLY: a key is an opaque string, so there
+ * is no way to tell a dev key from a production one by looking at it. If the
+ * dev key is set on the production target AND no MYNHD_BASE_URL is set there,
+ * this guard passes and the dev key goes to MyNHD's production host, which
+ * will reject it with a 401 or 403. That is the safe direction of the failure
+ * — a refusal from the vendor, not a preview generated against the wrong
+ * environment — but it is a vendor-side refusal, not something caught here.
+ * Keeping the key off the production target is the control that covers it, and
+ * `mynhd-env-check.ts` is how to see where it actually is.
+ */
+export function readConfig(): { ok: true; config: MyNhdConfig } | { ok: false; reason: ConfigRefusal } {
   const secretKey = process.env.MYNHD_SECRET_KEY?.trim();
-  if (!secretKey) return null;
-  const raw = (process.env.MYNHD_BASE_URL ?? 'https://api.mynhd.com').trim();
-  return {
-    baseUrl: raw.endsWith('/') ? raw.slice(0, -1) : raw,
-    secretKey,
-  };
+  if (!secretKey) return { ok: false, reason: 'no_secret' };
+
+  const baseUrl = normalize(process.env.MYNHD_BASE_URL ?? PRODUCTION_BASE_URL);
+
+  if (onProductionTarget() && baseUrl !== PRODUCTION_BASE_URL) {
+    return { ok: false, reason: 'dev_url_on_production' };
+  }
+
+  return { ok: true, config: { baseUrl, secretKey } };
+}
+
+/** The config, or null. Kept for callers that only need "can we call at all". */
+export function getConfig(): MyNhdConfig | null {
+  const r = readConfig();
+  return r.ok ? r.config : null;
+}
+
+export function configRefusalMessage(reason: ConfigRefusal): string {
+  switch (reason) {
+    case 'no_secret':
+      return 'MyNHD is not configured (MYNHD_SECRET_KEY missing). No hazard preview was requested.';
+    case 'dev_url_on_production':
+      return 'MyNHD is pointed at a non-production host on the production deploy. '
+        + 'No request was made: a development key and a production deploy must not be crossable. '
+        + `Either unset MYNHD_BASE_URL on the production target, or set it to ${PRODUCTION_BASE_URL}.`;
+  }
 }
 
 /**
@@ -79,13 +155,14 @@ export class MyNhdAuthError extends Error {
  * the cache again would hand back the same dead string forever.
  */
 export async function getAccessToken(force = false): Promise<string> {
-  const config = getConfig();
-  if (!config) {
-    throw new MyNhdAuthError(
-      'MyNHD is not configured (MYNHD_SECRET_KEY missing). No hazard preview was requested.',
-      null,
-    );
+  const read = readConfig();
+  if (!read.ok) {
+    // The refusal reaches here too, not only the client's own early check: a
+    // token request is a call to the vendor, and the crossing guard has to
+    // cover every door rather than the one the client happens to use.
+    throw new MyNhdAuthError(configRefusalMessage(read.reason), null);
   }
+  const config = read.config;
 
   if (!force && cached && Date.now() < cached.expiresAt) return cached.token;
 

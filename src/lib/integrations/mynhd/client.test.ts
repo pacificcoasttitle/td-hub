@@ -6,7 +6,9 @@ vi.mock('./auth', async (importOriginal) => {
   return { ...real, logRequest: vi.fn(async () => {}) };
 });
 
-import { __resetTokenCacheForTests } from './auth';
+import {
+  PRODUCTION_BASE_URL, __resetTokenCacheForTests, configRefusalMessage, readConfig,
+} from './auth';
 import { fetchFloodFirePreview, isPng, isPreview, saysReAuth } from './client';
 
 // ─── HTTP 200 IS NOT AN ANSWER ───────────────────────────────────────────────
@@ -52,14 +54,29 @@ function answer(...turns: Array<{ status: number; body: string }>) {
   }));
 }
 
+const ENV_KEYS = ['MYNHD_SECRET_KEY', 'MYNHD_BASE_URL', 'VERCEL_ENV'] as const;
+let saved: Record<string, string | undefined> = {};
+
 beforeEach(() => {
   calls = [];
   __resetTokenCacheForTests();
+  // Saved and restored rather than set and left. VERCEL_ENV in particular is
+  // read by other modules, and a test that leaves it as 'production' turns an
+  // unrelated suite into a different environment.
+  saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   process.env.MYNHD_SECRET_KEY = 'test-secret';
   process.env.MYNHD_BASE_URL = 'https://api.mynhd.test';
+  delete process.env.VERCEL_ENV;
 });
 
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  for (const k of ENV_KEYS) {
+    if (saved[k] === undefined) delete process.env[k];
+    else process.env[k] = saved[k];
+  }
+});
 
 describe('a 200 with success:false is not a preview', () => {
   it('refuses a multi_result and names it', async () => {
@@ -258,6 +275,127 @@ describe('unconfigured means no call at all', () => {
     expect(r.ok ? '' : r.reason).toBe('not_configured');
     // No mock, no fallback, and nothing on the wire.
     expect(calls).toHaveLength(0);
+  });
+});
+
+// ─── A dev key and a prod deploy must not be crossable ──────────────────────
+//
+// MyNHD issued a DEV-ENVIRONMENT key on 13 Oct 2026. It belongs on the preview
+// and development targets with MYNHD_BASE_URL pointing at their dev server. The
+// crossing to prevent is the production deploy talking to any other host: that
+// is either a dev key reaching production or a production key being sent to a
+// dev server, and neither is recoverable by noticing afterwards.
+
+describe('the base URL', () => {
+  it('falls back to the documented production host when unset', async () => {
+    delete process.env.MYNHD_BASE_URL;
+    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+    await fetchFloodFirePreview(PARCEL);
+    expect(calls[0]!.url).toBe('https://api.mynhd.com/report/getMultiFloodFirePreview/image');
+    expect(PRODUCTION_BASE_URL).toBe('https://api.mynhd.com');
+  });
+
+  it('is taken from the environment when set', async () => {
+    process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test';
+    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+    await fetchFloodFirePreview(PARCEL);
+    expect(calls[0]!.url).toBe('https://dev-api.mynhd.test/report/getMultiFloodFirePreview/image');
+  });
+
+  it('tolerates a trailing slash rather than doubling it', async () => {
+    process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test/';
+    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+    await fetchFloodFirePreview(PARCEL);
+    expect(calls[0]!.url).not.toContain('//report');
+  });
+});
+
+describe('the production target refuses a non-production host', () => {
+  it('makes no request at all — not even the token', async () => {
+    process.env.VERCEL_ENV = 'production';
+    process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test';
+    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+
+    const r = await fetchFloodFirePreview(PARCEL);
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.reason).toBe('wrong_environment');
+    // NOTHING on the wire, and that includes /getAuthorizationHeader: a token
+    // request sends the secret, so the guard has to sit in front of it.
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not call it "not configured", because it IS configured', () => {
+    // That message would send somebody to look for a missing key on a deploy
+    // where the key is present and the URL is the problem.
+    process.env.VERCEL_ENV = 'production';
+    process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test';
+    const read = readConfig();
+    expect(read.ok).toBe(false);
+    if (read.ok) throw new Error('unreachable');
+    expect(read.reason).toBe('dev_url_on_production');
+    const m = configRefusalMessage(read.reason);
+    expect(m).not.toContain('not configured');
+    expect(m).toContain('must not be crossable');
+    // And it says what to do about it.
+    expect(m).toContain('MYNHD_BASE_URL');
+    expect(m).toContain(PRODUCTION_BASE_URL);
+  });
+
+  it('allows the production host on the production target', () => {
+    process.env.VERCEL_ENV = 'production';
+    process.env.MYNHD_BASE_URL = PRODUCTION_BASE_URL;
+    expect(readConfig().ok).toBe(true);
+  });
+
+  it('allows an unset base URL on the production target — the fallback IS production', () => {
+    process.env.VERCEL_ENV = 'production';
+    delete process.env.MYNHD_BASE_URL;
+    expect(readConfig().ok).toBe(true);
+  });
+
+  it('allows a trailing slash on the production target', () => {
+    // Normalised before comparison. A refusal over one character would read as
+    // a key problem and cost somebody an afternoon.
+    process.env.VERCEL_ENV = 'production';
+    process.env.MYNHD_BASE_URL = `${PRODUCTION_BASE_URL}/`;
+    expect(readConfig().ok).toBe(true);
+  });
+
+  it('allows a dev host on preview, development, and off-Vercel', async () => {
+    // The intended arrangement. A guard that fired here would block the only
+    // environment the dev key is for.
+    for (const env of ['preview', 'development', undefined]) {
+      if (env === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = env;
+      process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test';
+      expect(readConfig().ok, `VERCEL_ENV=${String(env)}`).toBe(true);
+    }
+  });
+
+  it('refuses before the secret is even read, so a missing key is still a missing key', () => {
+    // Order matters for the message: no secret AND a bad URL should say the
+    // secret, because that is the thing to fix first.
+    process.env.VERCEL_ENV = 'production';
+    process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test';
+    delete process.env.MYNHD_SECRET_KEY;
+    const read = readConfig();
+    expect(read.ok).toBe(false);
+    if (read.ok) throw new Error('unreachable');
+    expect(read.reason).toBe('no_secret');
+  });
+});
+
+describe('which MyNHD was called is visible in the log, not only enforced', () => {
+  it('records the host, whether it is production, and the Vercel target', () => {
+    // An invariant nobody can audit from the data is one you have to take on
+    // trust. These three fields are what make a crossing findable afterwards.
+    const src = readSource('src/lib/integrations/mynhd/client.ts', {
+      mustContain: 'const requestMeta = {',
+    });
+    expect(src).toContain('host:');
+    expect(src).toContain('isProductionHost');
+    expect(src).toContain('vercelEnv');
   });
 });
 

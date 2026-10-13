@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import {
-  AUTH_TIMEOUT_MS, MyNhdAuthError, TIMEOUT_MS, VENDOR,
-  getAccessToken, getConfig, logRequest,
+  AUTH_TIMEOUT_MS, MyNhdAuthError, PRODUCTION_BASE_URL, TIMEOUT_MS, VENDOR,
+  configRefusalMessage, getAccessToken, logRequest, readConfig,
 } from './auth';
 
 // ─── MyNHD flood-and-fire preview ────────────────────────────────────────────
@@ -49,6 +49,13 @@ export interface PreviewByApn {
 
 export type PreviewFailure =
   | 'not_configured'
+  /**
+   * The production deploy is pointed at a non-production MyNHD host. Refused
+   * before any request: a development key and a production deploy must not be
+   * crossable. Distinct from `not_configured`, because the key IS set and
+   * saying otherwise sends somebody looking in the wrong place.
+   */
+  | 'wrong_environment'
   | 'auth_failed'
   /** HTTP 403 — the account has no preview entitlement. */
   | 'no_permission'
@@ -137,15 +144,22 @@ export function saysReAuth(status: number, body: { tryReAuth?: unknown } | null)
 export async function fetchFloodFirePreview(params: PreviewByApn): Promise<PreviewResult> {
   const requestId = crypto.randomUUID();
   const startedAt = new Date();
-  const config = getConfig();
+  const read = readConfig();
 
-  if (!config) {
-    // No mock, no fallback. An unconfigured vendor produces no preview.
+  if (!read.ok) {
+    // No mock, no fallback, and NOTHING ON THE WIRE. Two reasons land here and
+    // they are different in kind: no secret is "not set up", while a
+    // non-production host on the production deploy is a misconfiguration that
+    // must not be allowed to reach the vendor at all. Both are reported with
+    // the reason, because "MyNHD is not configured" on a deploy where the key
+    // IS configured would send somebody looking in the wrong place.
+    const refused: PreviewFailure = read.reason === 'no_secret' ? 'not_configured' : 'wrong_environment';
     return {
-      ok: false, reason: 'not_configured', evidence: null, durationMs: 0,
-      message: 'MyNHD is not configured (MYNHD_SECRET_KEY missing). No hazard preview was requested.',
+      ok: false, reason: refused, evidence: null, durationMs: 0,
+      message: configRefusalMessage(read.reason),
     };
   }
+  const config = read.config;
 
   const url = `${config.baseUrl}/report/getMultiFloodFirePreview/image`;
   // `county` is the vendor's name for a five-digit FIPS. Their field, their
@@ -163,6 +177,12 @@ export async function fetchFloodFirePreview(params: PreviewByApn): Promise<Previ
   const requestMeta = {
     endpoint: '/report/getMultiFloodFirePreview/image',
     search: 'apn', apn: payload.apn, county: payload.county, state: payload.state,
+    // WHICH MyNHD. The code refuses a crossing, and this is how one would be
+    // VISIBLE after the fact — an enforced invariant nobody can audit from the
+    // data is an invariant you have to take on trust.
+    host: new URL(config.baseUrl).host,
+    isProductionHost: config.baseUrl === PRODUCTION_BASE_URL,
+    vercelEnv: process.env.VERCEL_ENV ?? null,
   };
 
   try {
@@ -304,7 +324,9 @@ export function failureMessage(reason: PreviewFailure, e: PreviewEvidence | null
   const vendorSaid = e?.error?.trim();
   switch (reason) {
     case 'not_configured':
-      return 'MyNHD is not configured, so no hazard preview was requested.';
+      return configRefusalMessage('no_secret');
+    case 'wrong_environment':
+      return configRefusalMessage('dev_url_on_production');
     case 'auth_failed':
       return 'MyNHD would not accept our credentials, so no hazard preview was added.';
     case 'no_permission':

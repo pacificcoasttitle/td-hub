@@ -3,6 +3,11 @@ import { NextResponse } from 'next/server';
 // and a health endpoint has no business carrying a PDF renderer to answer
 // "is this file here?".
 import { FONT_FILES, missingFonts } from '@/lib/domain/concierge/document/font-files';
+// auth, NOT client: the same reasoning as font-files above — a health
+// endpoint has no business importing the preview client to answer
+// "which host would this deploy call?". auth.ts imports the db for its
+// logger and nothing heavier.
+import { PRODUCTION_BASE_URL, readConfig } from '@/lib/integrations/mynhd/auth';
 
 /**
  * The commit this build was produced from.
@@ -55,6 +60,48 @@ function fontHealth(): { ok: boolean; expected: number; missing: string[] } {
   }
 }
 
+/**
+ * Which MyNHD this deploy would call, as booleans.
+ *
+ * ─── AN ENFORCED INVARIANT NOBODY CAN AUDIT IS ONE YOU TAKE ON TRUST ────────
+ *
+ * MyNHD issued a DEV-ENVIRONMENT key (13 Oct 2026). readConfig() refuses to run
+ * on the production target against any host but MyNHD's production one, so the
+ * crossing cannot happen — but "cannot" is a claim about code, and the thing
+ * worth being able to check is where the key and the URL actually ARE. On the
+ * day the key was issued it went onto the production target instead of preview,
+ * which is precisely the arrangement this makes visible with one curl per
+ * deploy.
+ *
+ * BOOLEANS ONLY, NO HOSTNAME. This endpoint is unauthenticated. `configured`
+ * says a key is present, `productionHost` says which MyNHD would be called,
+ * and `ok` is false exactly when those two disagree with the target — which is
+ * the whole signal. Publishing the dev server's hostname would be giving away
+ * something for no gain; the hostname is in vendor_api_logs for anyone with a
+ * session, which is where it belongs.
+ *
+ * `configured: false` is NOT a problem and `ok` stays true for it. On a target
+ * MyNHD is deliberately not enabled for, no key is the correct state.
+ */
+function mynhdHealth(): { configured: boolean; productionHost: boolean; target: string | null; ok: boolean } {
+  try {
+    const configured = Boolean(process.env.MYNHD_SECRET_KEY?.trim());
+    const read = readConfig();
+    const productionHost = read.ok && read.config.baseUrl === PRODUCTION_BASE_URL;
+    return {
+      configured,
+      productionHost,
+      target: process.env.VERCEL_ENV ?? null,
+      // Unconfigured is fine. Configured-but-refused is not: that is the
+      // crossing, and it is the one state worth a red light here.
+      ok: !configured || read.ok,
+    };
+  } catch (err) {
+    void err;
+    return { configured: false, productionHost: false, target: process.env.VERCEL_ENV ?? null, ok: false };
+  }
+}
+
 export async function GET() {
   return NextResponse.json({
     status: 'ok',
@@ -62,5 +109,6 @@ export async function GET() {
     commit: buildSha(),
     timestamp: new Date().toISOString(),
     conciergeFonts: fontHealth(),
+    mynhd: mynhdHealth(),
   });
 }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { GET, buildSha } from './route';
 
 const ORIGINAL = process.env.VERCEL_GIT_COMMIT_SHA;
@@ -44,7 +44,7 @@ describe('GET /api/health', () => {
     expect(Number.isNaN(Date.parse(body.timestamp))).toBe(false);
     // Exactly the known keys — nothing else leaked into an unauthenticated
     // endpoint. `conciergeFonts` was added deliberately; see below.
-    expect(Object.keys(body).sort()).toEqual(['app', 'commit', 'conciergeFonts', 'status', 'timestamp']);
+    expect(Object.keys(body).sort()).toEqual(['app', 'commit', 'conciergeFonts', 'mynhd', 'status', 'timestamp']);
   });
 });
 
@@ -72,5 +72,74 @@ describe('conciergeFonts — is the deployed bundle carrying the TTFs', () => {
     const blob = JSON.stringify(body.conciergeFonts);
     expect(blob).not.toContain('/');
     expect(blob).not.toContain('\\');
+  });
+});
+
+// ─── mynhd — which MyNHD would this deploy call ──────────────────────────────
+//
+// MyNHD issued a DEV-ENVIRONMENT key (13 Oct 2026). readConfig() refuses the
+// production target against any host but MyNHD's production one, so the
+// crossing cannot happen in code — but "cannot" is a claim about code, and
+// where the key and the URL actually are is the thing worth checking. On the
+// day the key was issued it went onto the production target instead of
+// preview, which is the arrangement this makes visible with one curl.
+
+describe('mynhd — the crossing is auditable, not just enforced', () => {
+  const KEYS = ['MYNHD_SECRET_KEY', 'MYNHD_BASE_URL', 'VERCEL_ENV'] as const;
+  let saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+    for (const k of KEYS) delete process.env[k];
+  });
+  afterEach(() => {
+    for (const k of KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  it('is ok and unconfigured when no key is set — that is a valid state', async () => {
+    // On a target MyNHD is deliberately not enabled for, no key is correct and
+    // must not show as a fault.
+    const body = await (await GET()).json();
+    expect(body.mynhd.configured).toBe(false);
+    expect(body.mynhd.ok).toBe(true);
+  });
+
+  it('reports the production host when a key is set and no URL overrides it', async () => {
+    process.env.MYNHD_SECRET_KEY = 'k';
+    const body = await (await GET()).json();
+    expect(body.mynhd).toMatchObject({ configured: true, productionHost: true, ok: true });
+  });
+
+  it('reports a dev host on preview as configured, not production, and still ok', async () => {
+    // The intended arrangement for the dev key.
+    process.env.MYNHD_SECRET_KEY = 'k';
+    process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test';
+    process.env.VERCEL_ENV = 'preview';
+    const body = await (await GET()).json();
+    expect(body.mynhd).toMatchObject({ configured: true, productionHost: false, ok: true, target: 'preview' });
+  });
+
+  it('goes NOT ok when the production target is pointed at a dev host', async () => {
+    // The one state worth a red light: configured, and refused.
+    process.env.MYNHD_SECRET_KEY = 'k';
+    process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test';
+    process.env.VERCEL_ENV = 'production';
+    const body = await (await GET()).json();
+    expect(body.mynhd).toMatchObject({ configured: true, productionHost: false, ok: false });
+  });
+
+  it('publishes no hostname and no key — booleans and the target only', async () => {
+    // This endpoint is unauthenticated. The dev server's hostname is in
+    // vendor_api_logs for anyone with a session, which is where it belongs.
+    process.env.MYNHD_SECRET_KEY = 'super-secret-value';
+    process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test';
+    const blob = JSON.stringify((await (await GET()).json()).mynhd);
+    expect(blob).not.toContain('super-secret-value');
+    expect(blob).not.toContain('mynhd.test');
+    expect(blob).not.toContain('api.mynhd.com');
+    expect(blob).not.toContain('://');
   });
 });

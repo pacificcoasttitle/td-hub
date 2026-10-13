@@ -4,6 +4,7 @@ import { db } from '@/lib/db/client';
 import { conciergeProfiles } from '@/lib/db/schema';
 import { uploadFile } from '@/lib/integrations/s3/client';
 import { fetchFloodFirePreview } from '@/lib/integrations/mynhd/client';
+import { configRefusalMessage, readConfig } from '@/lib/integrations/mynhd/auth';
 import { claimProperty, propertyRequestKey, releaseClaim, scopedClaimKey } from './claim';
 import { pngSize } from './png-size';
 import { renderProfile } from './render';
@@ -97,6 +98,27 @@ export async function requestHazardPreview(profileId: number): Promise<HazardOut
   // after a render failure or a closed tab.
   if (profile.hazardStatus === 'fetched' && profile.hazardStorageKey) {
     return renderHazardSheet(profileId);
+  }
+
+  // ─── CAN THIS DEPLOY CALL MyNHD AT ALL ───────────────────────────────────
+  //
+  // Checked HERE, before the claim and before anything is written to the row.
+  //
+  // Without this, a click on a deploy with no MyNHD key — which is every
+  // deploy until MyNHD issues a production one — took the claim, set
+  // hazard_requested true and hazard_status 'pending', then got
+  // 'not_configured' back from the client and wrote 'failed' with "MyNHD is
+  // not configured" into hazard_error. So a configuration gap left a
+  // PERMANENT FAILED MARK on a client's profile, and the row action then
+  // offered "Retry hazard preview — last attempt: MyNHD is not configured",
+  // which is a retry of nothing.
+  //
+  // A deploy that cannot make the call has not failed at it. This is the same
+  // kind of refusal as the two above — our own gap, reported as ours, with
+  // nothing written and nothing attempted.
+  const config = readConfig();
+  if (!config.ok) {
+    return refuse(profileId, configRefusalMessage(config.reason));
   }
 
   // ─── APN + FIPS, both required ────────────────────────────────────────────

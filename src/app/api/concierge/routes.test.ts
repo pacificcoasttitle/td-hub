@@ -31,6 +31,12 @@ describe('exactly two routes can spend, and they spend on different vendors', ()
   const free = [
     'profiles/[id]/criteria/route.ts', 'profiles/[id]/render/route.ts',
     'profiles/[id]/pdf/route.ts', 'profiles/[id]/resume/route.ts',
+    // MyNHD's hazard preview. It reaches a VENDOR and still belongs in this
+    // list: Gerard, 12 Oct 2026 — the preview costs PCT nothing. "Free" here
+    // means "spends no money", not "makes no call", and the distinction is
+    // exactly what this file is for. If MyNHD ever starts billing, this entry
+    // is wrong and moving it is a decision somebody has to make on purpose.
+    'profiles/[id]/nhd/route.ts',
   ];
 
   it('only the generate route imports the generator', () => {
@@ -58,6 +64,41 @@ describe('exactly two routes can spend, and they spend on different vendors', ()
       expect(read(f), f).not.toContain('requestTaxDetail');
       expect(read(f), f).not.toMatch(/integrations\/titlepoint/);
     }
+  });
+
+  it('the hazard route reaches MyNHD and nothing else, and records no charge', () => {
+    // A vendor call that costs nothing is still a vendor call, and it must not
+    // be able to reach either of the two that do cost.
+    const nhd = stripComments(read('profiles/[id]/nhd/route.ts'));
+    expect(nhd).toContain('requestHazardPreview');
+    expect(nhd).not.toMatch(/integrations\/sitex|integrations\/titlepoint/);
+    expect(nhd).not.toContain('generateConciergeProfile');
+    expect(nhd).not.toContain('requestTaxDetail');
+
+    // NOTHING THAT READS AS MONEY. `charges` is on the response and is always
+    // 0, so a caller totalling the cost of an action does not have to know
+    // which vendor it was. A credit or a charge COUNT appearing here means
+    // somebody started billing and this test should be the thing that notices.
+    expect(nhd).not.toMatch(/creditsCharged|titlePointCharges|sitexCreditsCharged/);
+    expect(nhd).toMatch(/charges: outcome\.charges/);
+
+    // And neither spender grew a hazard call. A free vendor round trip inside
+    // the request that charges is still a way to make a paid generate fail
+    // after the money is gone.
+    expect(stripComments(generate)).not.toContain('requestHazardPreview');
+    expect(stripComments(tax)).not.toContain('requestHazardPreview');
+  });
+
+  it('only the hazard bridge reaches MyNHD, and it claims on its own scope', () => {
+    const src = stripComments(read('../../../lib/domain/concierge/nhd-bridge.ts'));
+    expect(src).toContain('fetchFloodFirePreview');
+    // Its own scope, so a hazard attempt cannot block a tax purchase on the
+    // same property — the same reason 'tax' is not 'profile'.
+    expect(src).toContain("scopedClaimKey(propertyKey, 'nhd')");
+    // And it buys nothing, so the claim always goes back on failure. That is
+    // the OPPOSITE of tax-bridge, which keeps the claim once the money is gone.
+    expect(src).toContain('releaseClaim');
+    expect(src).not.toMatch(/sitexCreditsCharged|titlePointCharges/);
   });
 
   it('the tax route is gated like a spender, not like a free route', () => {

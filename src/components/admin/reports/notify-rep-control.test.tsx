@@ -9,7 +9,7 @@ const row = (over: Partial<ReportListRow> = {}): ReportListRow => ({
   subject: 'Orange County', subjectDetail: '44 cities', settings: 'August 2026',
   brandedToName: 'Mark Neveu', brandedToEmail: 'mneveu@pct.com', status: 'generated',
   createdAt: '2026-09-21 21:14:00', createdBy: 'ops@pct.com', madeBy: 'Operations', delivery: null, templateVersion: 'cs-v1',
-  groupKey: null, taxStatus: null, ...over,
+  groupKey: null, taxStatus: null, hazardStatus: null, hazardError: null, ...over,
 });
 
 const text = (el: React.ReactElement) => renderToStaticMarkup(el).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();

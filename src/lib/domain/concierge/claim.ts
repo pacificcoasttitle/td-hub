@@ -84,7 +84,15 @@ export function propertyRequestKey(a: PropertyAddress): string {
  * both would silently stop matching them, and the failure would be a second
  * SiteX charge on a property we already hold.
  */
-export type ClaimScope = 'profile' | 'tax';
+/**
+ * `'nhd'` is the MyNHD hazard preview, added 12 Oct 2026. It is FREE, which
+ * does not make it scopeless: two clicks must not make two vendor calls, and
+ * two concurrent attempts on one profile would race each other's PDF upload.
+ * A third scope rather than reuse of `'tax'`, because a hazard attempt must not
+ * block a tax purchase on the same property — the same reason `'tax'` is not
+ * `'profile'`.
+ */
+export type ClaimScope = 'profile' | 'tax' | 'nhd';
 
 /** The 200-char column budget, spent on the property first. */
 export function scopedClaimKey(propertyKey: string, scope: ClaimScope): string {

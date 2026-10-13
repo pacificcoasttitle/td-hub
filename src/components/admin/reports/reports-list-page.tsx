@@ -10,6 +10,7 @@ import { NotifyRepControl } from './notify-rep-control';
 import { ComparablesControl, RefreshDocumentControl, RetryControl } from './row-actions';
 import { MenuItem, RowBadge, RowMenu } from './row-menu';
 import { TaxDetailControl } from './tax-detail-control';
+import { HazardPreviewControl } from './hazard-preview-control';
 // The template a re-render would produce, read from the document itself so the
 // "older layout" hint cannot drift from what the renderer actually makes.
 import { TEMPLATE_VERSION as CONCIERGE_TEMPLATE } from '@/lib/domain/concierge/document/template-version';
@@ -379,6 +380,11 @@ export function ReportRow({
                     <RefreshDocumentControl row={row} currentTemplate={CONCIERGE_TEMPLATE} onChanged={onChanged} />
                     <ComparablesControl row={row} onChanged={onChanged} />
                     <TaxDetailControl row={row} onChanged={onChanged} />
+                    {/* AFTER the priced one, deliberately. The tax item states
+                        a cost; this one states that it is free. Reading them in
+                        that order makes the difference between them obvious
+                        rather than something to infer. */}
+                    <HazardPreviewControl row={row} onChanged={onChanged} />
                   </>
                 ) : (
                   <NotifyRepControl row={row} onChanged={onChanged} />

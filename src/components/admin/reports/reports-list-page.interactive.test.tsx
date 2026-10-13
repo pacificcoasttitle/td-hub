@@ -24,6 +24,7 @@ const row = (over: Partial<ReportListRow> = {}): ReportListRow => ({
   brandedToName: 'Maria Lopez', brandedToEmail: 'mlopez@pct.com', status: 'generated',
   createdAt: '2026-09-16 21:14:00', createdBy: 'ops@pct.com', madeBy: 'Operations',
   delivery: null, templateVersion: 'cs-v1', groupKey: null, taxStatus: null,
+  hazardStatus: null, hazardError: null,
   ...over,
 });
 

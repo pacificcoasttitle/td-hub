@@ -25,7 +25,7 @@ const row = (over: Partial<ReportListRow> = {}): ReportListRow => ({
   brandedToName: 'Maria Lopez', brandedToEmail: 'mlopez@pct.com', status: 'generated',
   createdAt: '2026-09-16 21:14:00', createdBy: 'ops@pct.com', madeBy: 'Operations', delivery: null, templateVersion: 'cs-v1',
   // A county-sales report is not about one property and has no tax detail.
-  groupKey: null, taxStatus: null,
+  groupKey: null, taxStatus: null, hazardStatus: null, hazardError: null,
   ...over,
 });
 

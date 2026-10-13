@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { conciergeProfiles } from '@/lib/db/schema';
 import { uploadFile } from '@/lib/integrations/s3/client';
-import { fetchFloodFirePreview } from '@/lib/integrations/mynhd/client';
+import { fetchFloodFirePreview, type PreviewFailure } from '@/lib/integrations/mynhd/client';
 import { configRefusalMessage, readConfig } from '@/lib/integrations/mynhd/auth';
 import { claimProperty, propertyRequestKey, releaseClaim, scopedClaimKey } from './claim';
 import { pngSize } from './png-size';
@@ -54,6 +54,30 @@ import { renderProfile } from './render';
 // an address an operator had already picked.
 
 export type HazardStatus = 'pending' | 'fetched' | 'ready' | 'failed';
+
+/**
+ * The refusals that say something about THIS PARCEL, and so belong on the row.
+ *
+ * Everything absent from this set is about us or about the moment — no key,
+ * a crossed environment, bad credentials, no entitlement, an unreachable
+ * vendor — and would read identically on every profile in the table. Writing
+ * it onto the one row somebody clicked claims the parcel is at fault and
+ * offers a retry that cannot succeed until a configuration changes.
+ *
+ * A SET RATHER THAN A NEGATED LIST, on purpose. A new PreviewFailure added to
+ * the client defaults to "not about the parcel", which is the safe direction:
+ * the cost of being wrong that way is a refusal nobody can see in the list,
+ * and the cost of the other way is a permanent mark on a client's document.
+ */
+const ABOUT_THIS_PARCEL: ReadonlySet<PreviewFailure> = new Set([
+  // MyNHD found several properties for the parcel. Should not happen on an
+  // APN search, which is why it is worth recording when it does.
+  'multi_result',
+  // success:true and no usable PNG. About the response, and specific to it.
+  'no_image',
+  // The vendor declined and said why. Carries its own message.
+  'api_error',
+]);
 
 export interface HazardOutcome {
   ok: boolean;
@@ -175,6 +199,54 @@ export async function requestHazardPreview(profileId: number): Promise<HazardOut
     // vendor availability both change; a failed attempt must not lock the
     // profile out of trying again.
     await releaseClaim(claimKey);
+
+    // ─── MARK THE ROW ONLY WHEN THE ANSWER IS ABOUT THIS PARCEL ───────────
+    //
+    // The early readConfig() refusal above stops a MISSING key from writing
+    // 'failed' onto a client's profile. It cannot stop a WRONG one: a key is
+    // an opaque string, so a dev key on the production target reads as
+    // perfectly valid configuration and is refused by MyNHD instead of by us.
+    // That was the live state on the production deploy the day this shipped —
+    // health reported configured:true, productionHost:true, ok:true, and a
+    // click would have come back 401.
+    //
+    // Which is the same defect wearing a vendor's status code. An account or
+    // environment problem is identical for EVERY profile: marking the one row
+    // an operator happened to click says the parcel is the problem, offers a
+    // retry that cannot succeed until a config change, and leaves a dozen
+    // rows stained by the time anybody notices.
+    //
+    // So the row records only what is about the parcel or the response:
+    // multi_result, no_image, api_error. Everything else — our configuration,
+    // our credentials, our entitlement, a network blip — is a REFUSAL, with
+    // nothing written.
+    if (!ABOUT_THIS_PARCEL.has(result.reason)) {
+      // PUT THE ROW BACK, rather than leaving the pre-call write in place.
+      //
+      // 'pending' was written before the call, so that a crash mid-flight
+      // leaves a trace the row action can offer to retry. On an account
+      // refusal that same trace is the defect in a different costume: the
+      // control reads 'pending' as "did not finish — try again", which is
+      // exactly the retry-of-nothing this is meant to stop.
+      //
+      // So the row goes back to untouched. A crash still leaves 'pending',
+      // because a crash never reaches this line.
+      await db.update(conciergeProfiles).set({
+        hazardRequested: false,
+        hazardStatus: null,
+        hazardError: null,
+        hazardRequestedAt: null,
+        // The vendor's account of itself is NOT kept. It describes our
+        // configuration, not this property, and the vendor log already has it
+        // with the host and target beside it.
+        hazardSuccess: null,
+        hazardCode: null,
+        hazardHttpStatus: null,
+        hazardDurationMs: null,
+      }).where(eq(conciergeProfiles.id, profileId));
+      return refuse(profileId, result.message);
+    }
+
     await db.update(conciergeProfiles).set({
       ...vendorCols,
       hazardStatus: 'failed',

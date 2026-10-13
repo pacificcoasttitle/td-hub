@@ -40,9 +40,9 @@ vi.mock('./claim', () => ({
   scopedClaimKey: (k: string, s: string) => `${k}|${s}`,
 }));
 
-const fetchPreview = vi.fn(async () => ({
-  ok: false as const, reason: 'api_error' as const, message: 'x', evidence: null, durationMs: 1,
-}));
+type Refusal = { ok: false; reason: string; message: string; evidence: null; durationMs: number };
+let vendorAnswer: Refusal = { ok: false, reason: 'api_error', message: 'x', evidence: null, durationMs: 1 };
+const fetchPreview = vi.fn(async () => vendorAnswer);
 vi.mock('@/lib/integrations/mynhd/client', () => ({ fetchFloodFirePreview: fetchPreview }));
 vi.mock('./render', () => ({ renderProfile: async () => ({ ok: true, message: 'ok' }) }));
 vi.mock('@/lib/integrations/s3/client', () => ({ uploadFile: async () => ({ success: true }) }));
@@ -71,6 +71,7 @@ beforeEach(() => {
   updates.length = 0;
   claims.length = 0;
   fetchPreview.mockClear();
+  vendorAnswer = { ok: false, reason: 'api_error', message: 'x', evidence: null, durationMs: 1 };
   saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
   for (const k of ENV) delete process.env[k];
 });
@@ -154,5 +155,104 @@ describe('the refusal comes before the claim, in the source', () => {
       mustContain: ['readConfig()', 'claimProperty('],
     });
     expect(src.indexOf('readConfig()')).toBeLessThan(src.indexOf('claimProperty('));
+  });
+});
+
+// ─── A wrong key is the same defect as a missing one ────────────────────────
+//
+// The early readConfig() refusal stops a MISSING key from marking a row. It
+// cannot stop a WRONG one: a key is an opaque string, so a dev key on the
+// production target reads as valid configuration and is refused by MyNHD
+// rather than by us. That was the live state on the production deploy the day
+// this shipped — health said configured:true, productionHost:true, ok:true,
+// and a click would have come back 401.
+//
+// An account or environment problem is identical for every profile in the
+// table. Marking the one row somebody clicked says the parcel is at fault,
+// offers a retry that cannot succeed until a config change, and stains a dozen
+// rows before anybody notices.
+
+describe('an account or environment refusal does not mark the row', () => {
+  const vendorRefuses = async (reason: string, message = 'vendor said no') => {
+    process.env.MYNHD_SECRET_KEY = 'k';
+    vendorAnswer = { ok: false, reason, message, evidence: null, durationMs: 5 };
+    return requestHazardPreview(12);
+  };
+
+  /**
+   * The row's END STATE, not the number of writes.
+   *
+   * There are two: 'pending' goes down before the call so that a crash
+   * mid-flight leaves a trace, and it is cleared again on an account refusal.
+   * Asserting "no writes" would have been asserting the implementation, and
+   * it is how the first version of these tests failed — correctly, because the
+   * pre-call write was still leaving the row at 'pending', which the control
+   * reads as "did not finish — try again". The defect in a different costume.
+   */
+  const endState = () => Object.assign({}, ...updates as Record<string, unknown>[]);
+
+  it('a 401 leaves the row untouched, not failed and not pending', async () => {
+    // The live case: a dev key reaching MyNHD's production host.
+    const r = await vendorRefuses('auth_failed', 'MyNHD would not accept our credentials.');
+    expect(r.status).toBe('refused');
+    expect(endState()).toMatchObject({
+      hazardRequested: false, hazardStatus: null, hazardError: null,
+    });
+    expect(JSON.stringify(updates)).not.toContain('failed');
+  });
+
+  it('a 403 — no preview entitlement — is a refusal too', async () => {
+    const r = await vendorRefuses('no_permission');
+    expect(r.status).toBe('refused');
+    expect(endState()).toMatchObject({ hazardStatus: null });
+  });
+
+  it('an unreachable vendor is a refusal, not a mark on one parcel', async () => {
+    const r = await vendorRefuses('network');
+    expect(r.status).toBe('refused');
+    expect(endState()).toMatchObject({ hazardStatus: null });
+  });
+
+  it('does not keep the vendor account fields describing OUR configuration', async () => {
+    // hazard_success / code / http_status describe our credentials, not this
+    // property. The vendor log has them with the host and target beside them,
+    // which is where that belongs.
+    await vendorRefuses('auth_failed');
+    expect(endState()).toMatchObject({
+      hazardSuccess: null, hazardCode: null, hazardHttpStatus: null,
+    });
+  });
+
+  it('but the vendor WAS asked, so the claim was taken and given back', async () => {
+    // Non-vacuity, and the difference from the early refusals: this one gets
+    // all the way to MyNHD and comes back. If it short-circuited earlier these
+    // assertions would pass for the wrong reason.
+    await vendorRefuses('auth_failed');
+    expect(claims).toEqual(['key|nhd']);
+    expect(fetchPreview).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a refusal about the parcel DOES mark the row', () => {
+  const vendorRefuses = async (reason: string) => {
+    process.env.MYNHD_SECRET_KEY = 'k';
+    vendorAnswer = { ok: false, reason, message: 'about this parcel', evidence: null, durationMs: 5 };
+    return requestHazardPreview(12);
+  };
+
+  it('multi_result is recorded — it should not happen on an APN search', async () => {
+    const r = await vendorRefuses('multi_result');
+    expect(r.status).toBe('failed');
+    expect(updates.length).toBeGreaterThan(0);
+  });
+
+  it('no_image is recorded', async () => {
+    expect((await vendorRefuses('no_image')).status).toBe('failed');
+  });
+
+  it('api_error is recorded, with the words the vendor used', async () => {
+    const r = await vendorRefuses('api_error');
+    expect(r.status).toBe('failed');
+    expect(JSON.stringify(updates)).toContain('about this parcel');
   });
 });

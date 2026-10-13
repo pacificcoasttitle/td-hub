@@ -52,6 +52,8 @@ interface RawRow {
   made_by: string | null;
   group_key: string | null;
   tax_status: string | null;
+  hazard_status: string | null;
+  hazard_error: string | null;
 }
 
 /**
@@ -82,7 +84,8 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
              -- Farming reports have no property and no tax detail. Typed nulls,
              -- because a union takes its column types from the first branch and
              -- an untyped null makes them text for everybody.
-             null::varchar as group_key, null::varchar as tax_status
+             null::varchar as group_key, null::varchar as tax_status,
+             null::varchar as hazard_status, null::text as hazard_error
         from sales_activity_reports r
         left join contacts c on c.id = r.branded_to_contact_id
        where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}
@@ -93,7 +96,8 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
              coalesce(c.full_name, r.branded_to_name) as branded_to_name,
              r.branded_to_email,
              r.created_at, r.created_by,
-             null::varchar as group_key, null::varchar as tax_status
+             null::varchar as group_key, null::varchar as tax_status,
+             null::varchar as hazard_status, null::text as hazard_error
         from carrier_route_reports r
         left join contacts c on c.id = r.branded_to_contact_id
        where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}
@@ -104,7 +108,8 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
              coalesce(c.full_name, r.branded_to_name) as branded_to_name,
              r.branded_to_email,
              r.created_at, r.created_by,
-             null::varchar as group_key, null::varchar as tax_status
+             null::varchar as group_key, null::varchar as tax_status,
+             null::varchar as hazard_status, null::text as hazard_error
         from county_sales_reports r
         left join contacts c on c.id = r.branded_to_contact_id
        where ${matches('r.list_subject', 'r.list_settings', 'coalesce(c.full_name, r.branded_to_name)')}
@@ -125,7 +130,8 @@ function unionSql(filter: ReportFilter, search: string | null, forRep: number | 
              -- broken table. Nothing is hidden: each was paid for and each is on
              -- an invoice.
              r.property_key as group_key,
-             r.tax_detail_status as tax_status
+             r.tax_detail_status as tax_status,
+             r.hazard_status, r.hazard_error
         from concierge_profiles r
        where ${matches('r.list_subject', 'r.list_settings', 'r.presenting_rep_name')}`);
   }
@@ -195,6 +201,8 @@ export async function listReports(input: {
       madeBy: r.made_by,
       groupKey: r.group_key,
       taxStatus: r.tax_status,
+      hazardStatus: r.hazard_status,
+      hazardError: r.hazard_error,
       delivery: r.delivery_outcome
         ? {
           outcome: r.delivery_outcome === 'sent' ? 'sent' : 'failed',

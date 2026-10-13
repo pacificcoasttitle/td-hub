@@ -144,6 +144,57 @@ export const conciergeProfiles = pgTable('concierge_profiles', {
   titlePointRequestedAt: timestamp('titlepoint_requested_at'),
   titlePointDurationMs: integer('titlepoint_duration_ms'),
 
+  // ─── MyNHD flood-and-fire hazard preview (migration 0064) ────────────────
+  //
+  // FREE TO PCT, so there is no charges column here and nothing to reconcile
+  // against an invoice. There is still a claim key and still a vendor log: a
+  // vendor call is a vendor call even when nobody bills for it.
+  hazardRequested: boolean('hazard_requested').notNull().default(false),
+  /**
+   * pending | fetched | ready | failed.
+   *
+   * 'fetched' sits between pending and ready for the same reason it does on
+   * tax: 'ready' means the sheet is ON THE DOCUMENT, which is the only thing
+   * an operator can check. No 'empty' — a preview exists or it does not, and
+   * "nothing for this parcel" arrives as a refusal carrying a reason.
+   */
+  hazardStatus: varchar('hazard_status', { length: 20 }),
+  hazardError: text('hazard_error'),
+
+  hazardStorageKey: varchar('hazard_storage_key', { length: 500 }),
+  hazardSha256: char('hazard_sha256', { length: 64 }),
+  hazardBytes: integer('hazard_bytes'),
+  /**
+   * The PNG's own pixel dimensions, read from its IHDR.
+   *
+   * The page layout depends on these: a preview sized for a screen may be too
+   * soft to print at letter width, and that is a thing to measure rather than
+   * assume. Stored per profile because the vendor is free to change it.
+   */
+  hazardWidth: integer('hazard_width'),
+  hazardHeight: integer('hazard_height'),
+
+  /**
+   * Where the homeowner orders the full disclosure, from the same response.
+   * PCT does not resell NHD reports — printed as a plain footnote line, not a
+   * button and not branded.
+   */
+  hazardOrderLink: text('hazard_order_link'),
+
+  /**
+   * MyNHD's own account of what it did, kept so a refusal is explicable later.
+   *
+   * `hazardSuccess` is their `success` field AS SENT — true, false, or null
+   * when absent, which their error bodies often are. A multi-match is HTTP 200
+   * with success:false, so the status alone explains nothing and neither does
+   * our interpretation of it.
+   */
+  hazardSuccess: boolean('hazard_success'),
+  hazardCode: varchar('hazard_code', { length: 40 }),
+  hazardHttpStatus: integer('hazard_http_status'),
+  hazardRequestedAt: timestamp('hazard_requested_at'),
+  hazardDurationMs: integer('hazard_duration_ms'),
+
   /** What we ASKED FOR. The report prints these — never values derived from results. */
   criteriaSameUseCode: boolean('criteria_same_use_code').notNull(),
   criteriaLivingAreaPct: integer('criteria_living_area_pct'),

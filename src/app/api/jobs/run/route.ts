@@ -11,6 +11,7 @@ import { handleSyncContacts } from '@/lib/jobs/handlers/sync-contacts';
 import type { SyncContactsPayload } from '@/lib/jobs/handlers/sync-contacts';
 import { handleTitlePointPoll } from '@/lib/jobs/handlers/titlepoint-poll';
 import { handleConciergeTaxFinish } from '@/lib/jobs/handlers/concierge-tax-finish';
+import { handleConciergeHazardFinish } from '@/lib/jobs/handlers/concierge-hazard-finish';
 import {
   findActiveTitlePointDrain,
   handleTitlePointDrain,
@@ -103,6 +104,8 @@ const JOB_HANDLERS: Record<string, JobHandler> = {
     handleResolveOfficers(),
   'concierge.tax_finish': (payload) =>
     handleConciergeTaxFinish(payload),
+  'concierge.hazard_finish': (payload) =>
+    handleConciergeHazardFinish(payload),
   'titlepoint.poll': (payload) =>
     handleTitlePointPoll(payload),
   'titlepoint.drain': (payload) =>

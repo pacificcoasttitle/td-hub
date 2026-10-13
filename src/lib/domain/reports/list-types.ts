@@ -95,6 +95,26 @@ export interface ReportListRow {
    * already has it would sell the same thing twice.
    */
   taxStatus: string | null;
+  /**
+   * Concierge only: pending | fetched | ready | failed, or null when the MyNHD
+   * hazard preview was never asked for.
+   *
+   * Same job as taxStatus — the row decides whether to offer the preview, put
+   * a stored one on the document, or say it is already there. Fewer states,
+   * because MyNHD answers in one call and nothing is bought: there is no
+   * 'empty' and no 'denied'.
+   */
+  hazardStatus: string | null;
+  /**
+   * Why the last hazard attempt did not produce a preview, in MyNHD's own
+   * words where it gave any.
+   *
+   * On the row rather than fetched on demand because the retry offer prints
+   * it: "the last attempt failed" is not something an operator can act on, and
+   * a multi-match, a missing entitlement and a vendor outage want three
+   * different responses.
+   */
+  hazardError: string | null;
 }
 
 export interface ReportListResult {

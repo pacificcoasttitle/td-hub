@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/security/auth';
-import { canGenerateConcierge, conciergeEnabled } from '@/lib/domain/concierge/access';
+import {
+  canGenerateConcierge, conciergeEnabled, hazardPreviewAvailable,
+} from '@/lib/domain/concierge/access';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,9 +16,27 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET() {
   const session = await getSession();
-  if (!session) return NextResponse.json({ canGenerate: false, featureOn: false });
+  if (!session) {
+    // EVERY FLAG FALSE without a session, including the new one. A caller that
+    // reads one field and ignores the shape must not get a true out of an
+    // unauthenticated request.
+    return NextResponse.json({ canGenerate: false, featureOn: false, hazardAvailable: false });
+  }
   return NextResponse.json({
     canGenerate: canGenerateConcierge(session.role),
     featureOn: conciergeEnabled(),
+    /**
+     * Whether a MyNHD call would be refused before leaving this deploy.
+     *
+     * Not a permission and not a kill switch — a property of the environment.
+     * MyNHD has issued a dev key only, so on a production deploy this is
+     * false and the hazard control hides the actions that would reach the
+     * vendor, instead of offering something that can only be declined.
+     *
+     * Behind the session with the rest, even though the health endpoint
+     * publishes the same fact as a boolean: there is no reason for this one to
+     * be the unauthenticated copy as well.
+     */
+    hazardAvailable: hazardPreviewAvailable(),
   });
 }

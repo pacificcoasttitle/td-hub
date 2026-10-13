@@ -1,3 +1,5 @@
+import { readConfig } from '@/lib/integrations/mynhd/auth';
+
 // ─── Who may generate a concierge profile, and whether the feature is on ────
 //
 // TWO INDEPENDENT CONDITIONS, both visible in this file, because the thing that
@@ -66,4 +68,30 @@ export function denialMessage(d: ConciergeDenial): string {
   return d === 'feature_off'
     ? 'Property profiles are not enabled.'
     : 'You do not have permission to generate property profiles.';
+}
+
+// ─── Can THIS DEPLOY offer the MyNHD hazard preview ─────────────────────────
+//
+// A THIRD condition, and it lives here with the other two for the reason this
+// file opens with: "it can't run because a config value is missing" is not a
+// gate. A gate is something a reviewer can read in a diff.
+//
+// Unlike conciergeEnabled() this is not a kill switch anyone sets on purpose.
+// It answers one question — would a call to MyNHD be refused before it left
+// this deploy? — and the answer is a property of the environment: no key, or
+// the production target pointed at a non-production host. See
+// integrations/mynhd/auth.ts for the crossing guard itself.
+//
+// WHY THE UI NEEDS IT. MyNHD has issued a dev key only, so every production
+// deploy is one where a call would be refused. An offer that can only be
+// declined is worse than no offer: the operator cannot tell a feature that is
+// off from one that is broken, and if the key is ever removed or rotated badly
+// the control should DISAPPEAR rather than start refusing.
+//
+// It is NOT a permission check and must not be used as one. The route re-reads
+// the config itself, and requestHazardPreview refuses before the claim — hiding
+// a control is not a security model, exactly as the comment on conciergeEnabled
+// says of the kill switch.
+export function hazardPreviewAvailable(): boolean {
+  return readConfig().ok;
 }

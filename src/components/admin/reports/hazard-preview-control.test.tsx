@@ -2,7 +2,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { readSource } from '@/test-support/read-source';
 import type { ReportListRow } from '@/lib/domain/reports/list-types';
-import { HazardPreviewControl, hazardOffer } from './hazard-preview-control';
+import {
+  HazardPreviewControl, __resetAvailabilityForTests, hazardOffer, offerNeedsVendor,
+} from './hazard-preview-control';
 
 // Rendered and read as text. Grepping source for UI strings has failed silently
 // in this project before.
@@ -76,32 +78,32 @@ describe('what the menu item says', () => {
     // actions would read as free. This is the same rule in reverse: among a
     // priced item and free ones, saying nothing about cost is ambiguous exactly
     // where it matters.
-    const t = visible(<HazardPreviewControl row={row()} />);
+    const t = visible(<HazardPreviewControl row={row()} available />);
     expect(t.toLowerCase()).toContain('free');
   });
 
   it('calls it a preview and says it is not a disclosure', () => {
     // Gerard's decision 2, and the distinction PCT's exposure rests on.
-    const t = visible(<HazardPreviewControl row={row()} />);
+    const t = visible(<HazardPreviewControl row={row()} available />);
     expect(t).toContain('preview');
     expect(t).toContain('not a Natural Hazard Disclosure');
   });
 
   it('names MyNHD rather than implying PCT produced it', () => {
-    expect(visible(<HazardPreviewControl row={row()} />)).toContain('MyNHD');
+    expect(visible(<HazardPreviewControl row={row()} available />)).toContain('MyNHD');
   });
 
   it('says nothing about a charge, a credit or a search', () => {
-    const t = visible(<HazardPreviewControl row={row()} />).toLowerCase();
+    const t = visible(<HazardPreviewControl row={row()} available />).toLowerCase();
     expect(t).not.toContain('credit');
     expect(t).not.toContain('one search');
     expect(t).not.toContain('charge');
   });
 
   it('is inert and muted once the preview is on the document', () => {
-    const html = renderToStaticMarkup(<HazardPreviewControl row={row({ hazardStatus: 'ready' })} />);
+    const html = renderToStaticMarkup(<HazardPreviewControl row={row({ hazardStatus: 'ready' })} available />);
     expect(html).toContain('disabled');
-    expect(visible(<HazardPreviewControl row={row({ hazardStatus: 'ready' })} />)).toContain('included');
+    expect(visible(<HazardPreviewControl row={row({ hazardStatus: 'ready' })} available />)).toContain('included');
   });
 });
 
@@ -124,5 +126,94 @@ describe('what it posts', () => {
       mustContain: 'Network error',
     });
     expect(src).toContain('nothing was charged');
+  });
+});
+
+// ─── The control disappears rather than refusing ────────────────────────────
+//
+// MyNHD has issued a DEV KEY ONLY, so on a production deploy a call is refused
+// before it leaves the server. An offer that can only be declined is worse than
+// no offer: an operator cannot tell a feature that is off from one that is
+// broken. And if the key is ever removed or rotated badly, the control should
+// vanish on its own rather than start failing.
+
+describe('which offers need the vendor', () => {
+  it('the ones that would call MyNHD, and only those', () => {
+    expect(offerNeedsVendor('add')).toBe(true);
+    expect(offerNeedsVendor('retry')).toBe(true);
+    // 'finish' puts an ALREADY FETCHED PNG on the document — renderProfile,
+    // no vendor. requestHazardPreview returns on that branch before it ever
+    // reads the MyNHD config, so a deploy that cannot call MyNHD can still
+    // finish what it already holds.
+    expect(offerNeedsVendor('finish')).toBe(false);
+    // 'none' is a statement about the document, not an offer.
+    expect(offerNeedsVendor('none')).toBe(false);
+  });
+});
+
+describe('on a deploy that cannot call MyNHD', () => {
+  const gated = (over: Partial<ReportListRow> = {}) =>
+    renderToStaticMarkup(<HazardPreviewControl row={row(over)} available={false} />);
+
+  it('shows nothing at all where it would otherwise offer to fetch one', () => {
+    expect(gated()).toBe('');
+  });
+
+  it('shows nothing for a retry either — that would call MyNHD too', () => {
+    expect(gated({ hazardStatus: 'failed', hazardError: 'MyNHD could not be reached.' })).toBe('');
+    expect(gated({ hazardStatus: 'pending' })).toBe('');
+  });
+
+  it('STILL offers to put an already-fetched preview on the document', () => {
+    // The bytes are ours and rendering them reaches nobody. Hiding this would
+    // strand a preview that was already fetched successfully.
+    const html = gated({ hazardStatus: 'fetched' });
+    expect(html).not.toBe('');
+    expect(visible(<HazardPreviewControl row={row({ hazardStatus: 'fetched' })} available={false} />))
+      .toContain('add it to the document');
+  });
+
+  it('STILL says a profile has one, because that describes the document', () => {
+    const html = gated({ hazardStatus: 'ready' });
+    expect(html).not.toBe('');
+    expect(visible(<HazardPreviewControl row={row({ hazardStatus: 'ready' })} available={false} />))
+      .toContain('included');
+  });
+});
+
+describe('while it does not yet know', () => {
+  it('renders nothing rather than an offer it may have to withdraw', () => {
+    // Showing the offer and then removing it is worse than a menu that gains
+    // an item a moment later: the operator may already have clicked.
+    //
+    // No `available` prop and no fetch resolved yet, which is the first paint
+    // on every real page load.
+    __resetAvailabilityForTests();
+    expect(renderToStaticMarkup(<HazardPreviewControl row={row()} />)).toBe('');
+  });
+
+  it('is the same for a retry', () => {
+    __resetAvailabilityForTests();
+    expect(renderToStaticMarkup(<HazardPreviewControl row={row({ hazardStatus: 'failed' })} />)).toBe('');
+  });
+});
+
+describe('the gate fails closed', () => {
+  it('does not offer a vendor action when availability cannot be determined', () => {
+    // The catch in askAvailability returns false, not true. Guessing
+    // "available" produces exactly the refusing button this prevents.
+    const src = readSource('src/components/admin/reports/hazard-preview-control.tsx', {
+      mustContain: 'function askAvailability',
+    });
+    expect(src).toMatch(/\.catch\(\(\) => false\)/);
+  });
+
+  it('asks once for the whole page, not once per row', () => {
+    // Twenty rows asking the same question is a thundering herd that looks
+    // free in development.
+    const src = readSource('src/components/admin/reports/hazard-preview-control.tsx', {
+      mustContain: 'let availability',
+    });
+    expect(src).toContain('availability ??=');
   });
 });

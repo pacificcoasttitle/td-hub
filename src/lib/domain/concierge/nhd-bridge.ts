@@ -7,7 +7,7 @@ import { fetchFloodFirePreview, type PreviewFailure } from '@/lib/integrations/m
 import { configRefusalMessage, readConfig } from '@/lib/integrations/mynhd/auth';
 import { claimProperty, propertyRequestKey, releaseClaim, scopedClaimKey } from './claim';
 import { pngSize } from './png-size';
-import { rasterizeFirstPage } from './rasterize-pdf';
+import { encodeForSheet, rasterizeFirstPage } from './rasterize-pdf';
 import { renderProfile } from './render';
 
 // ─── The MyNHD hazard bridge: the hazard sheet ───────────────────────────────
@@ -298,8 +298,21 @@ export async function requestHazardPreview(profileId: number): Promise<HazardOut
     };
   }
 
-  const key = `concierge/${profileId}/mynhd-hazard.png`;
-  const up = await uploadFile({ key, buffer: raster.png, contentType: 'image/png' });
+  // ─── JPEG, under a budget ────────────────────────────────────────────────
+  //
+  // These profiles get emailed, so the document has a size it has to live
+  // inside — Gerard, 15 Oct 2026: the whole profile under 3 MB. The 300dpi PNG
+  // took profile 42 from 1.26 MB to 6.43 MB, and PNG is the wrong compression
+  // for a page that is half aerial photography.
+  //
+  // The quality is MEASURED rather than picked: the ladder is tried highest
+  // first and the first result inside the budget wins.
+  const encoded = await encodeForSheet(raster.png);
+  // The extension follows what the encoder actually chose, so the object in
+  // storage is not misdescribed. @react-pdf places either format.
+  const ext = encoded.contentType === 'image/png' ? 'png' : 'jpg';
+  const key = `concierge/${profileId}/mynhd-hazard.${ext}`;
+  const up = await uploadFile({ key, buffer: encoded.buffer, contentType: encoded.contentType });
 
   if (!up.success) {
     await releaseClaim(claimKey);
@@ -315,8 +328,9 @@ export async function requestHazardPreview(profileId: number): Promise<HazardOut
     };
   }
 
-  // Dimensions read from the RASTERISED file's own header, not from the
-  // rasteriser's return value — the thing the sheet places is the file.
+  // Dimensions from the RASTER, which is what was drawn. The JPEG is the same
+  // pixels re-encoded, so its dimensions are the raster's — read from the PNG
+  // header rather than trusting the rasteriser's own return value.
   const size = pngSize(raster.png);
 
   await db.update(conciergeProfiles).set({
@@ -324,8 +338,8 @@ export async function requestHazardPreview(profileId: number): Promise<HazardOut
     hazardStatus: 'fetched',
     hazardStorageKey: key,
     hazardPdfStorageKey: pdfUp.success ? pdfKey : null,
-    hazardSha256: crypto.createHash('sha256').update(raster.png).digest('hex'),
-    hazardBytes: raster.png.length,
+    hazardSha256: crypto.createHash('sha256').update(encoded.buffer).digest('hex'),
+    hazardBytes: encoded.bytes,
     hazardWidth: size?.width ?? null,
     hazardHeight: size?.height ?? null,
     hazardDpi: raster.dpi,

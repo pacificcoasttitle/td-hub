@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { looksLikePdf, rasterizeFirstPage } from './rasterize-pdf';
+import {
+  SHEET_JPEG_LADDER, SHEET_MAX_BYTES, encodeForSheet, looksLikePdf, rasterizeFirstPage,
+} from './rasterize-pdf';
 import { pngSize, effectiveDpi } from './png-size';
 
 // ─── The thing that makes the hazard sheet legible ──────────────────────────
@@ -116,5 +118,75 @@ describe('why not sharp', () => {
     const sharp = (await import('sharp')).default;
     expect(sharp.format.tiff.input.buffer).toBe(true);
     expect(sharp.format.pdf?.input?.buffer ?? false).toBe(false);
+  });
+});
+
+// ─── The sheet has a size it must live inside ───────────────────────────────
+//
+// These profiles get emailed. Gerard, 15 Oct 2026: the whole profile under
+// 3 MB. The 300dpi PNG took profile 42 from 1.26 MB to 6.43 MB, and PNG is
+// the wrong compression for a page that is half aerial photography.
+
+describe('encoding the sheet', () => {
+  it('prefers lossless PNG when it is no larger — JPEG is not always smaller', async () => {
+    // THE ASSUMPTION THIS TEST KILLED. "The page is photographic, so JPEG"
+    // was about to be applied to every page. On this one — a flat-colour
+    // document of navy bands, white and type — the 300dpi PNG is ~632 KB and
+    // JPEG q92 is ~706 KB. Larger, and lossy.
+    const r = await rasterizeFirstPage(readFileSync(SAMPLE), { dpi: 300 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const sharp = (await import('sharp')).default;
+    const jpeg = await sharp(r.png).jpeg({ quality: 92, chromaSubsampling: '4:4:4' }).toBuffer();
+    expect(jpeg.length).toBeGreaterThan(r.png.length);
+
+    const e = await encodeForSheet(r.png);
+    expect(e.contentType).toBe('image/png');
+    expect(e.quality).toBeNull();
+  });
+
+  it('comes in under the budget', async () => {
+    const r = await rasterizeFirstPage(readFileSync(SAMPLE), { dpi: 300 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const e = await encodeForSheet(r.png);
+    expect(e.withinBudget).toBe(true);
+    expect(e.bytes).toBeLessThanOrEqual(SHEET_MAX_BYTES);
+  });
+
+  it('falls to JPEG when the PNG does not fit, highest quality first', async () => {
+    const r = await rasterizeFirstPage(readFileSync(SAMPLE), { dpi: 300 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // A budget under the PNG forces the ladder, and the top rung that fits
+    // wins — fidelity is the goal, the budget is only the constraint.
+    const e = await encodeForSheet(r.png, { maxBytes: r.png.length - 1 });
+    expect(e.contentType).toBe('image/jpeg');
+    expect([e.buffer[0], e.buffer[1]]).toEqual([0xff, 0xd8]);
+    expect(SHEET_JPEG_LADDER).toContain(e.quality!);
+    expect(e.bytes).toBeLessThanOrEqual(r.png.length - 1);
+  });
+
+  it('steps further down as the budget tightens', async () => {
+    const r = await rasterizeFirstPage(readFileSync(SAMPLE), { dpi: 300 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const loose = await encodeForSheet(r.png, { maxBytes: r.png.length - 1 });
+    const tight = await encodeForSheet(r.png, { maxBytes: loose.bytes - 1 });
+    expect(tight.quality!).toBeLessThan(loose.quality!);
+    expect(tight.bytes).toBeLessThan(loose.bytes);
+  });
+
+  it('still returns an image when nothing fits, and SAYS it did not fit', async () => {
+    // A sheet slightly over budget beats no sheet — but silently shipping one
+    // while a caller believes the budget held is how a 6 MB document happens.
+    const r = await rasterizeFirstPage(readFileSync(SAMPLE), { dpi: 300 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const e = await encodeForSheet(r.png, { maxBytes: 1_000 });
+    expect(e.withinBudget).toBe(false);
+    expect(e.bytes).toBeGreaterThan(1_000);
+    // The smallest thing on offer, so "did not fit" still means "tried".
+    expect(e.quality).toBe(SHEET_JPEG_LADDER[SHEET_JPEG_LADDER.length - 1]);
   });
 });

@@ -8,6 +8,8 @@ import { FONT_FILES, missingFonts } from '@/lib/domain/concierge/document/font-f
 // "which host would this deploy call?". auth.ts imports the db for its
 // logger and nothing heavier.
 import { PRODUCTION_BASE_URL, readConfig, resolveBaseUrl } from '@/lib/integrations/mynhd/auth';
+// The rasteriser's native binary is the one thing only a deploy can prove.
+import { rasterizerHealth } from '@/lib/domain/concierge/rasterize-pdf';
 
 /**
  * The commit this build was produced from.
@@ -103,12 +105,24 @@ function mynhdHealth(): { configured: boolean; productionHost: boolean; target: 
 }
 
 export async function GET() {
+  const raster = await rasterizerHealth();
   return NextResponse.json({
     status: 'ok',
     app: 'td-hub',
     commit: buildSha(),
     timestamp: new Date().toISOString(),
     conciergeFonts: fontHealth(),
-    mynhd: mynhdHealth(),
+    mynhd: {
+      ...mynhdHealth(),
+      // ─── Does the native canvas binary resolve on THIS deploy? ──────────
+      //
+      // The hazard sheet is MyNHD's PDF rasterised at 300dpi, and the
+      // rasteriser is a native module whose platform build npm picks at
+      // install time. A Windows laptop proves nothing about Vercel's Linux
+      // runtime. Without this the first symptom is a 500 from a row action
+      // after an operator has clicked — one curl after a deploy instead.
+      rasterizer: raster.ok,
+      ...(raster.ok ? {} : { rasterizerDetail: raster.detail }),
+    },
   });
 }

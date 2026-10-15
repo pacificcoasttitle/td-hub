@@ -130,3 +130,135 @@ export async function rasterizeFirstPage(
     };
   }
 }
+
+/**
+ * Can this deploy rasterise at all?
+ *
+ * ─── THE ONE THING ONLY THE DEPLOY CAN ANSWER ───────────────────────────────
+ *
+ * @napi-rs/canvas is a NATIVE module. npm resolves a different binary per
+ * platform — a Windows laptop installs `canvas-win32-x64-msvc`, Vercel's build
+ * needs `canvas-linux-x64-gnu` — so "it works here" says nothing about there.
+ * Without this, the first anyone would know is a 500 from a row action after
+ * an operator clicked, which is the worst place to learn it.
+ *
+ * It checks the NATIVE part only, deliberately. pdfjs's legacy build is plain
+ * JavaScript and will always resolve; loading it here would add several
+ * hundred milliseconds to every health poll to prove something that cannot
+ * fail. Creating a canvas and encoding one pixel exercises the binary, the
+ * 2D context and the PNG encoder, which is the whole of the risk.
+ */
+export async function rasterizerHealth(): Promise<{ ok: boolean; detail?: string }> {
+  try {
+    const canvasMod = await import('@napi-rs/canvas');
+    const canvas = canvasMod.createCanvas(2, 2);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, 2, 2);
+    const out = canvas.toBuffer('image/png');
+    if (!out || out.length === 0) return { ok: false, detail: 'the canvas encoded no bytes' };
+    return { ok: true };
+  } catch (err) {
+    // The message names the missing platform package when that is the cause,
+    // which is the thing somebody needs in order to fix it.
+    return { ok: false, detail: err instanceof Error ? err.message.slice(0, 200) : 'unknown' };
+  }
+}
+
+// ─── Encoding for the sheet: JPEG, under a budget ───────────────────────────
+//
+// THESE PROFILES GET EMAILED, so the document has a size the feature has to
+// live inside. Gerard, 15 Oct 2026: the whole profile under 3 MB. A courtesy
+// report that bounces is not a courtesy.
+//
+// The 300dpi PNG took profile 42 from 1.26 MB to 6.43 MB. PNG is lossless and
+// is the wrong compression for this page: MyNHD's preview is half aerial
+// photography, and photography is what JPEG is for. 4:4:4 chroma, not the
+// default 4:2:0 — the colour resolution 4:2:0 throws away is exactly where the
+// thin coloured rules and the green parcel outline live, and that outline is
+// the one mark that says which parcel this is.
+//
+// QUALITY IS CHOSEN BY MEASURING, NOT BY PICKING. The ladder is tried highest
+// first and the first result inside the budget wins, so a simple page keeps a
+// high quality and a dense one steps down only as far as it must. If none fit,
+// the smallest is returned WITH that stated — a sheet slightly over budget is
+// better than no sheet, but the caller should know.
+export const SHEET_JPEG_LADDER = [92, 85, 78, 70] as const;
+
+/**
+ * The image's share of the 3 MB document.
+ *
+ * The rest of a profile is about 1.26 MB measured on profile 42 — eight sheets
+ * with a cover photograph, a comp map and a plat map. 1.5 MB for the hazard
+ * sheet leaves roughly a quarter of a megabyte of headroom, and a profile with
+ * twelve comparables is bigger than one with five.
+ */
+export const SHEET_MAX_BYTES = 1_500_000;
+
+export interface EncodedSheet {
+  buffer: Buffer;
+  contentType: 'image/png' | 'image/jpeg';
+  /** Null for PNG, which has no quality setting — it is lossless. */
+  quality: number | null;
+  bytes: number;
+  /** False when nothing on offer fitted. */
+  withinBudget: boolean;
+}
+
+/**
+ * The smallest encoding that fits, preferring lossless when it is no larger.
+ *
+ * ─── "ALWAYS JPEG" WAS A GUESS, AND IT WAS WRONG HALF THE TIME ──────────────
+ *
+ * MyNHD's page is half aerial photography, so JPEG is obviously right for it —
+ * and that reasoning was about to be applied to every page. The test caught
+ * it: on a flat-colour document (navy bands, white, type) the 300dpi PNG is
+ * 632 KB and JPEG q92 is 706 KB. JPEG is LARGER, and lossy, for that input.
+ *
+ * So nothing is assumed about the content. PNG is measured alongside the JPEG
+ * ladder and wins ties, because at equal size lossless is strictly better. For
+ * a photographic page JPEG will win on its own merits, which is the only
+ * reason it should.
+ */
+export async function encodeForSheet(
+  png: Buffer,
+  opts: { maxBytes?: number } = {},
+): Promise<EncodedSheet> {
+  const maxBytes = opts.maxBytes ?? SHEET_MAX_BYTES;
+  const sharp = (await import('sharp')).default;
+
+  const candidates: EncodedSheet[] = [{
+    buffer: png,
+    contentType: 'image/png',
+    quality: null,
+    bytes: png.length,
+    withinBudget: png.length <= maxBytes,
+  }];
+
+  for (const quality of SHEET_JPEG_LADDER) {
+    // 4:4:4, not the default 4:2:0 — the colour resolution 4:2:0 discards is
+    // where the thin coloured rules and the green parcel outline live, and
+    // that outline is the one mark saying which parcel this is.
+    const buf = await sharp(png).jpeg({ quality, chromaSubsampling: '4:4:4' }).toBuffer();
+    candidates.push({
+      buffer: buf,
+      contentType: 'image/jpeg',
+      quality,
+      bytes: buf.length,
+      withinBudget: buf.length <= maxBytes,
+    });
+  }
+
+  const fitting = candidates.filter((c) => c.withinBudget);
+  if (fitting.length > 0) {
+    // Among those that fit, the best QUALITY, not the smallest file: the
+    // budget is the constraint and fidelity is the goal. PNG is lossless so it
+    // ranks top, then the ladder in descending quality — which is the order
+    // candidates were built in, so the first fitting one is the answer.
+    return fitting[0]!;
+  }
+
+  // Nothing fitted. The smallest is better than no sheet, and `withinBudget`
+  // false is how the caller knows it is over.
+  return candidates.reduce((a, b) => (b.bytes < a.bytes ? b : a));
+}

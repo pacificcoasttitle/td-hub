@@ -40,14 +40,39 @@ const nextConfig: NextConfig = {
    * tracing change that drops them fails loudly instead of changing how the
    * document looks.
    */
+  /**
+   * ─── AND pdfjs's WORKER, for the same reason ──────────────────────────────
+   *
+   * The hazard sheet rasterises MyNHD's PDF, and pdfjs loads its worker with a
+   * DYNAMIC import of a path it builds at runtime. Nothing static points at
+   * the file, so Next does not trace it, and the deployed function died on the
+   * first real fetch:
+   *
+   *   Setting up fake worker failed: "Cannot find module
+   *   '/var/task/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'"
+   *
+   * Exactly the shape of the fonts above — a file reached by a runtime path
+   * rather than an import — which is why both live in one list per route.
+   *
+   * ONE ENTRY PER ROUTE, not two. The first version of this added a second
+   * '/api/concierge/**' key below the first; in an object literal the later
+   * one silently wins, so the fonts entry became dead and nothing said so.
+   */
   outputFileTracingIncludes: {
-    '/api/concierge/**': ['./src/lib/domain/concierge/document/fonts/**'],
+    // /api/health is in this list because its rasteriser check does a REAL
+    // rasterisation and its font check reads the TTFs, and tracing is PER
+    // ROUTE — without its own entry it would report both broken on a deploy
+    // where the Concierge routes work.
+    '/api/health/**': [
+      './src/lib/domain/concierge/document/fonts/**',
+      './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
+    ],
+    '/api/concierge/**': [
+      './src/lib/domain/concierge/document/fonts/**',
+      './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
+    ],
+    // Reports renders the same document but never rasterises a vendor PDF.
     '/api/reports/**': ['./src/lib/domain/concierge/document/fonts/**'],
-    // /api/health reports whether the TTFs are present, and tracing is PER
-    // ROUTE — without this entry it would report them missing from its own
-    // bundle while the Concierge routes had them, which is a false alarm that
-    // costs more than the few hundred KB.
-    '/api/health/**': ['./src/lib/domain/concierge/document/fonts/**'],
   },
 };
 

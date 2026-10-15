@@ -132,37 +132,82 @@ export async function rasterizeFirstPage(
 }
 
 /**
+ * A real one-page PDF, small enough to live in a string.
+ *
+ * It has a content stream that draws a filled rectangle, so rasterising it
+ * exercises the actual path — parse, worker, canvas, encode — rather than a
+ * document pdfjs could short-circuit.
+ */
+const TINY_PDF = Buffer.from([
+  '%PDF-1.4',
+  '1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj',
+  '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj',
+  '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 9 9]/Contents 4 0 R>>endobj',
+  '4 0 obj<</Length 44>>stream',
+  '0 0 1 rg 1 1 7 7 re f',
+  'endstream',
+  'endobj',
+  'trailer<</Size 5/Root 1 0 R>>',
+  '%%EOF',
+  '',
+].join('\n'), 'latin1');
+
+let cached: { ok: boolean; detail?: string } | null = null;
+
+/** Visible for tests. The per-process cache otherwise leaks between them. */
+export function __resetRasterizerHealthForTests(): void {
+  cached = null;
+}
+
+/**
  * Can this deploy rasterise at all?
  *
- * ─── THE ONE THING ONLY THE DEPLOY CAN ANSWER ───────────────────────────────
+ * ─── IT RASTERISES. IT DOES NOT CHECK A PROXY FOR RASTERISING ───────────────
  *
- * @napi-rs/canvas is a NATIVE module. npm resolves a different binary per
- * platform — a Windows laptop installs `canvas-win32-x64-msvc`, Vercel's build
- * needs `canvas-linux-x64-gnu` — so "it works here" says nothing about there.
- * Without this, the first anyone would know is a 500 from a row action after
- * an operator clicked, which is the worst place to learn it.
+ * The first version loaded @napi-rs/canvas, drew on a 2x2 canvas and called
+ * that a pass. The reasoning was that the native binary is the only part that
+ * can differ between a Windows laptop and Vercel's Linux runtime, and that
+ * "pdfjs is plain JavaScript and cannot fail to resolve".
  *
- * It checks the NATIVE part only, deliberately. pdfjs's legacy build is plain
- * JavaScript and will always resolve; loading it here would add several
- * hundred milliseconds to every health poll to prove something that cannot
- * fail. Creating a canvas and encoding one pixel exercises the binary, the
- * 2D context and the PNG encoder, which is the whole of the risk.
+ * IT REPORTED `rasterizer: true` ON A DEPLOY THAT COULD NOT RASTERISE. The
+ * module resolved exactly as predicted; its WORKER did not, because pdfjs
+ * loads that with a dynamic import of a runtime path and Next had not traced
+ * the file:
+ *
+ *   Setting up fake worker failed: "Cannot find module
+ *   '/var/task/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'"
+ *
+ * So the check proved the half that was not at risk and skipped the half that
+ * was — a green light over a broken feature, which is the thing this codebase
+ * spends its time removing. The only honest check is the whole operation on a
+ * real document.
+ *
+ * CACHED PER PROCESS. The answer is a property of the deployment and cannot
+ * change under a running instance, so the first health call pays for it and
+ * the rest are free — and a poll every few seconds does not re-parse a PDF.
  */
-export async function rasterizerHealth(): Promise<{ ok: boolean; detail?: string }> {
+export async function rasterizerHealth(
+  /**
+   * The rasteriser, injectable ONLY so that the red path is provable.
+   *
+   * A health check that cannot be shown to go red is a green light. The
+   * failure this exists for — pdfjs's worker missing from the traced bundle —
+   * cannot be reproduced in-process, and spying on a dynamic import's
+   * namespace does not reach the binding. A default parameter is the smallest
+   * seam that lets a test assert the thing that actually went wrong.
+   */
+  raster: typeof rasterizeFirstPage = rasterizeFirstPage,
+): Promise<{ ok: boolean; detail?: string }> {
+  if (cached) return cached;
   try {
-    const canvasMod = await import('@napi-rs/canvas');
-    const canvas = canvasMod.createCanvas(2, 2);
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, 2, 2);
-    const out = canvas.toBuffer('image/png');
-    if (!out || out.length === 0) return { ok: false, detail: 'the canvas encoded no bytes' };
-    return { ok: true };
+    const r = await raster(TINY_PDF, { dpi: 72 });
+    cached = r.ok
+      ? { ok: true }
+      : { ok: false, detail: `${r.reason}: ${r.detail}`.slice(0, 200) };
   } catch (err) {
-    // The message names the missing platform package when that is the cause,
-    // which is the thing somebody needs in order to fix it.
-    return { ok: false, detail: err instanceof Error ? err.message.slice(0, 200) : 'unknown' };
+    cached = { ok: false, detail: err instanceof Error ? err.message.slice(0, 200) : 'unknown' };
   }
+  return cached;
 }
 
 // ─── Encoding for the sheet: JPEG, under a budget ───────────────────────────

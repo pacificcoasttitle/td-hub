@@ -101,10 +101,22 @@ describe('mynhd — the crossing is auditable, not just enforced', () => {
 
   it('is ok and unconfigured when no key is set — that is a valid state', async () => {
     // On a target MyNHD is deliberately not enabled for, no key is correct and
-    // must not show as a fault.
+    // must not show as a fault. The URL still resolves to the production
+    // fallback; productionHost must not change meaning when a key arrives.
     const body = await (await GET()).json();
-    expect(body.mynhd.configured).toBe(false);
-    expect(body.mynhd.ok).toBe(true);
+    expect(body.mynhd).toMatchObject({ configured: false, productionHost: true, ok: true });
+  });
+
+  it('classifies a configured dev URL without requiring a key', async () => {
+    process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test';
+    process.env.VERCEL_ENV = 'preview';
+    const body = await (await GET()).json();
+    expect(body.mynhd).toMatchObject({
+      configured: false,
+      productionHost: false,
+      ok: true,
+      target: 'preview',
+    });
   });
 
   it('reports the production host when a key is set and no URL overrides it', async () => {

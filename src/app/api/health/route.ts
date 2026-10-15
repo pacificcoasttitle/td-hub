@@ -7,7 +7,7 @@ import { FONT_FILES, missingFonts } from '@/lib/domain/concierge/document/font-f
 // endpoint has no business importing the preview client to answer
 // "which host would this deploy call?". auth.ts imports the db for its
 // logger and nothing heavier.
-import { PRODUCTION_BASE_URL, readConfig } from '@/lib/integrations/mynhd/auth';
+import { PRODUCTION_BASE_URL, readConfig, resolveBaseUrl } from '@/lib/integrations/mynhd/auth';
 
 /**
  * The commit this build was produced from.
@@ -74,11 +74,11 @@ function fontHealth(): { ok: boolean; expected: number; missing: string[] } {
  * deploy.
  *
  * BOOLEANS ONLY, NO HOSTNAME. This endpoint is unauthenticated. `configured`
- * says a key is present, `productionHost` says which MyNHD would be called,
- * and `ok` is false exactly when those two disagree with the target — which is
- * the whole signal. Publishing the dev server's hostname would be giving away
- * something for no gain; the hostname is in vendor_api_logs for anyone with a
- * session, which is where it belongs.
+ * says a key is present, `productionHost` classifies the URL independently of
+ * the key, and `ok` is false exactly when configured credentials disagree with
+ * the target. Keeping URL classification independent matters before a
+ * production key arrives: otherwise the same URL means something different
+ * merely because an unrelated variable is absent.
  *
  * `configured: false` is NOT a problem and `ok` stays true for it. On a target
  * MyNHD is deliberately not enabled for, no key is the correct state.
@@ -87,7 +87,7 @@ function mynhdHealth(): { configured: boolean; productionHost: boolean; target: 
   try {
     const configured = Boolean(process.env.MYNHD_SECRET_KEY?.trim());
     const read = readConfig();
-    const productionHost = read.ok && read.config.baseUrl === PRODUCTION_BASE_URL;
+    const productionHost = resolveBaseUrl() === PRODUCTION_BASE_URL;
     return {
       configured,
       productionHost,

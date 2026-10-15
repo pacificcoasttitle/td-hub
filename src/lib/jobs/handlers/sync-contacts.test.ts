@@ -85,6 +85,13 @@ vi.mock('@/lib/db/client', () => {
   };
 });
 
+vi.mock('@/lib/domain/users/sales-rep-login-sync', () => ({
+  listSalesRepContactIds: vi.fn(async () => []),
+  runSalesRepLoginSync: vi.fn(async () => ({ summary: 'Sales rep logins: no changes.' })),
+  leftoverInviteContactIds: vi.fn(() => []),
+  failedLoginSyncResult: (error: string) => ({ summary: error, failed: [] }),
+}));
+
 vi.mock('@/lib/db/schema', () => ({
   companies: {
     id: 'companies.id',

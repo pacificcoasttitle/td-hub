@@ -22,6 +22,12 @@ import {
 import { formatDayLabel, previousPacificDay, type CalendarDayWindow } from './calendar-day';
 import { db } from '@/lib/db/client';
 import { sql } from 'drizzle-orm';
+import {
+  composeSalesRepLoginLine,
+  loginProvisioningFromJobPayload,
+  mergeSalesRepLoginResults,
+  type SalesRepLoginSyncResult,
+} from '@/lib/domain/users/sales-rep-login-policy';
 
 /** Per-section cap. Generous — sections measure well under a second in practice. */
 export const SECTION_TIMEOUT_MS = 15_000;
@@ -81,6 +87,29 @@ function plural(n: number, one: string, many: string): string {
   return n === 1 ? one : many;
 }
 
+/** Named sales-rep login changes from yesterday's roster sync — never silent. */
+export async function getSalesRepLoginSection(
+  windowStart: Date,
+  windowEnd: Date,
+): Promise<SectionResult<SalesRepLoginSyncResult>> {
+  try {
+    const rows = await db.execute(sql`
+      select payload
+      from jobs
+      where job_type = 'softpro.sync_contacts.sales_rep'
+        and created_at >= ${windowStart.toISOString()}
+        and created_at < ${windowEnd.toISOString()}
+        and status = 'completed'
+    `) as unknown as Array<{ payload: unknown }>;
+    const merged = mergeSalesRepLoginResults(
+      rows.map((row) => loginProvisioningFromJobPayload(row.payload)),
+    );
+    return { ok: true, data: merged };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Sales-rep login counts unavailable' };
+  }
+}
+
 /**
  * Emails actually sent, counted from the SendGrid call log.
  *
@@ -123,6 +152,7 @@ export function composeAttention(input: {
   syncHealth: SectionResult<{ rows: Array<{ jobType: string; failed: number; completedWithErrors?: number }> }>;
   vendorApiHealth: SectionResult<{ rows: Array<{ vendor: string; successRate: number; calls: number }> }>;
   cpls: SectionResult<{ failedByVendor: Array<{ vendor: string; count: number }> }>;
+  salesRepLogins?: SectionResult<SalesRepLoginSyncResult>;
 }): string[] {
   const out: string[] = [];
 
@@ -160,6 +190,11 @@ export function composeAttention(input: {
     for (const v of failed) {
       out.push(`${v.count} CPL ${plural(v.count, 'document', 'documents')} could not be generated through ${v.vendor}.`);
     }
+  }
+
+  if (input.salesRepLogins?.ok) {
+    const line = composeSalesRepLoginLine(input.salesRepLogins.data);
+    if (line) out.push(line);
   }
 
   if (input.syncHealth.ok) {
@@ -245,7 +280,7 @@ export async function buildDailySummary(now: Date = new Date()): Promise<DailySu
   const window = previousPacificDay(now);
   const { start, end } = window;
 
-  const [orderFlow, prelims, cpls, notifications, emails, syncHealth, vendorApiHealth] = await Promise.all([
+  const [orderFlow, prelims, cpls, notifications, emails, syncHealth, vendorApiHealth, salesRepLogins] = await Promise.all([
     withTimeout('Orders', getOrderFlowSection(start, end)),
     withTimeout('Title reports', getPrelimsSection(start, end)),
     withTimeout('CPLs', getCplsSection(start, end)),
@@ -253,6 +288,7 @@ export async function buildDailySummary(now: Date = new Date()): Promise<DailySu
     withTimeout('Emails', getEmailsSection(start, end)),
     withTimeout('Background jobs', getSyncHealthSection(start, end)),
     withTimeout('Vendor health', getVendorApiHealthSection(start, end)),
+    withTimeout('Sales rep logins', getSalesRepLoginSection(start, end)),
   ]);
 
   const sections: Array<[string, SectionResult<unknown>]> = [
@@ -263,6 +299,7 @@ export async function buildDailySummary(now: Date = new Date()): Promise<DailySu
     ['Emails', emails],
     ['Background jobs', syncHealth],
     ['Vendor health', vendorApiHealth],
+    ['Sales rep logins', salesRepLogins],
   ];
   const unavailable = sections.filter(([, s]) => !s.ok).map(([name]) => name);
 
@@ -270,7 +307,7 @@ export async function buildDailySummary(now: Date = new Date()): Promise<DailySu
     dayLabel: formatDayLabel(window.ymd),
     window,
     generatedAt: now,
-    attention: composeAttention({ orderFlow, notifications, emails, syncHealth, vendorApiHealth, cpls }),
+    attention: composeAttention({ orderFlow, notifications, emails, syncHealth, vendorApiHealth, cpls, salesRepLogins }),
     numbers: {
       ordersFromSoftPro: orderFlow.ok ? orderFlow.data.syncedFromSoftPro : null,
       ordersCreatedHere: orderFlow.ok ? orderFlow.data.createdInTdHub : null,

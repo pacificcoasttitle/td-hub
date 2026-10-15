@@ -5,6 +5,12 @@ import { getLookupTable, getSalesReps } from '@/lib/integrations/softpro';
 import type { SoftProLookupItem } from '@/lib/integrations/softpro';
 import { COMPANY_TYPE_MAP } from '@/lib/domain/contacts/company-constants';
 import {
+  failedLoginSyncResult,
+  listSalesRepContactIds,
+  runSalesRepLoginSync,
+  type SalesRepLoginSyncResult,
+} from '@/lib/domain/users/sales-rep-login-sync';
+import {
   ESCROW_OFFICER_ROW_FIELDS,
   describeOfficerRowRejection,
   validateOfficerRowShape,
@@ -35,6 +41,8 @@ export interface SyncContactsResult {
    * "0 successes" tripwire in handleSyncContactType is watching for.
    */
   rejected?: Array<{ lookupCode: string; reasons: string[] }>;
+  /** Set after a Sales Rep roster write. Named people, never silent. */
+  loginProvisioning?: SalesRepLoginSyncResult;
 }
 
 type SyncRow = SoftProLookupItem;
@@ -1008,9 +1016,23 @@ export async function handleSyncContacts(
     return emptyResult(entityType, fetched.error);
   }
 
+  const priorSalesRepContactIds = entityType === 'Sales Rep'
+    ? new Set(await listSalesRepContactIds())
+    : null;
+
   const result = await syncContactRows(entityType, fetched.items, {
     deactivateExistingSalesReps: entityType === 'Sales Rep',
   });
+
+  if (priorSalesRepContactIds) {
+    try {
+      result.loginProvisioning = await runSalesRepLoginSync({ priorSalesRepContactIds });
+    } catch (err) {
+      result.loginProvisioning = failedLoginSyncResult(
+        err instanceof Error ? err.message : 'Sales-rep login sync failed',
+      );
+    }
+  }
 
   await reconcileEscrowOfficerFlagsFromOrders();
   return result;

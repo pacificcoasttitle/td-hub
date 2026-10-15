@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  SHEET_JPEG_LADDER, SHEET_MAX_BYTES, encodeForSheet, looksLikePdf, rasterizeFirstPage,
+  SHEET_JPEG_LADDER, SHEET_MAX_BYTES, __resetRasterizerHealthForTests, encodeForSheet,
+  looksLikePdf, rasterizeFirstPage, rasterizerHealth,
 } from './rasterize-pdf';
 import { pngSize, effectiveDpi } from './png-size';
 
@@ -188,5 +189,63 @@ describe('encoding the sheet', () => {
     expect(e.bytes).toBeGreaterThan(1_000);
     // The smallest thing on offer, so "did not fit" still means "tried".
     expect(e.quality).toBe(SHEET_JPEG_LADDER[SHEET_JPEG_LADDER.length - 1]);
+  });
+});
+
+// ─── The health check must actually rasterise ───────────────────────────────
+//
+// Its first version loaded @napi-rs/canvas, drew on a 2x2 canvas, and called
+// that a pass — reasoning that the native binary is the only part that can
+// differ between a laptop and Vercel, and that pdfjs "cannot fail to resolve".
+//
+// It reported rasterizer:true on a deploy that could not rasterise. pdfjs
+// resolved exactly as predicted; its WORKER did not, because pdfjs loads that
+// with a dynamic import of a runtime path that Next had not traced. The check
+// proved the half that was not at risk.
+
+describe('rasterizerHealth', () => {
+  beforeEach(() => { __resetRasterizerHealthForTests(); });
+
+  it('passes here, where the worker is present', async () => {
+    const h = await rasterizerHealth();
+    expect(h.ok, h.detail).toBe(true);
+    expect(h.detail).toBeUndefined();
+  });
+
+  it('FAILS when rasterisation fails — it is not a proxy check', async () => {
+    // THE PROPERTY THAT WAS MISSING, and the reason the seam exists. The real
+    // failure was pdfjs's worker absent from the traced bundle, which cannot
+    // be reproduced in-process — so the rasteriser is injected and made to
+    // fail exactly as the deploy did.
+    const failing: typeof rasterizeFirstPage = async () => ({
+      ok: false,
+      reason: 'render_failed',
+      detail: 'Setting up fake worker failed: Cannot find module pdf.worker.mjs',
+    });
+    const h = await rasterizerHealth(failing);
+    expect(h.ok).toBe(false);
+    // And it carries the real words, which is what somebody needs to fix it.
+    expect(h.detail).toContain('fake worker');
+  });
+
+  it('passes the WHOLE operation, not a canvas smoke test', async () => {
+    // The first version drew on a 2x2 canvas and called it a pass. What it is
+    // given must be a real PDF that is really parsed and drawn.
+    let seen: Buffer | null = null;
+    const spy: typeof rasterizeFirstPage = async (pdf, opts) => {
+      seen = pdf;
+      return rasterizeFirstPage(pdf, opts);
+    };
+    const h = await rasterizerHealth(spy);
+    expect(h.ok).toBe(true);
+    expect(seen).not.toBeNull();
+    expect(looksLikePdf(seen!)).toBe(true);
+  });
+
+  it('is cached per process, so a poll does not re-parse a PDF', async () => {
+    const first = await rasterizerHealth();
+    const second = await rasterizerHealth();
+    // Same object identity: the second call did no work at all.
+    expect(second).toBe(first);
   });
 });

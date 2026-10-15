@@ -169,7 +169,11 @@ describe('encoding the sheet', () => {
   });
 
   it('steps further down as the budget tightens', async () => {
-    const r = await rasterizeFirstPage(readFileSync(SAMPLE), { dpi: 300 });
+    // 150dpi, not 300: this is about the LADDER, and the resolution is
+    // irrelevant to it. At 300 each of these tests is four 2550x3300 JPEG
+    // encodes, which timed out under a full-suite run — the property is the
+    // same and a quarter of the pixels proves it.
+    const r = await rasterizeFirstPage(readFileSync(SAMPLE), { dpi: 150 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const loose = await encodeForSheet(r.png, { maxBytes: r.png.length - 1 });
@@ -181,7 +185,7 @@ describe('encoding the sheet', () => {
   it('still returns an image when nothing fits, and SAYS it did not fit', async () => {
     // A sheet slightly over budget beats no sheet — but silently shipping one
     // while a caller believes the budget held is how a 6 MB document happens.
-    const r = await rasterizeFirstPage(readFileSync(SAMPLE), { dpi: 300 });
+    const r = await rasterizeFirstPage(readFileSync(SAMPLE), { dpi: 150 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const e = await encodeForSheet(r.png, { maxBytes: 1_000 });
@@ -247,5 +251,48 @@ describe('rasterizerHealth', () => {
     const second = await rasterizerHealth();
     // Same object identity: the second call did no work at all.
     expect(second).toBe(first);
+  });
+});
+
+describe('the health check is about CONTENT, not completion', () => {
+  beforeEach(() => { __resetRasterizerHealthForTests(); });
+
+  it('FAILS on a blank page even though rasterisation succeeded', async () => {
+    // The third version of this check. The first tested the canvas and not
+    // pdfjs, and passed while the worker was missing. A version that only
+    // asked "did the call complete" would pass over a blank canvas — which is
+    // what a missing standard-fonts directory produces, another runtime path
+    // tracing cannot see.
+    const sharp = (await import('sharp')).default;
+    const white = await sharp({
+      create: { width: 8, height: 8, channels: 3, background: { r: 255, g: 255, b: 255 } },
+    }).png().toBuffer();
+
+    const blankButOk: typeof rasterizeFirstPage = async () => ({
+      ok: true, png: white, width: 8, height: 8, dpi: 72,
+    });
+    const h = await rasterizerHealth(blankButOk);
+    expect(h.ok).toBe(false);
+    expect(h.detail).toContain('blank');
+  });
+
+  it('passes when there is ink on the page', async () => {
+    const sharp = (await import('sharp')).default;
+    const inked = await sharp({
+      create: { width: 8, height: 8, channels: 3, background: { r: 0, g: 0, b: 255 } },
+    }).png().toBuffer();
+
+    const drew: typeof rasterizeFirstPage = async () => ({
+      ok: true, png: inked, width: 8, height: 8, dpi: 72,
+    });
+    expect((await rasterizerHealth(drew)).ok).toBe(true);
+  });
+
+  it('the real test PDF actually draws something, or the check is vacuous', async () => {
+    // If TINY_PDF ever stopped drawing, the check above would start failing
+    // for the wrong reason — and someone would "fix" it by loosening the
+    // assertion. This says the fixture is doing its job.
+    const h = await rasterizerHealth();
+    expect(h.ok, h.detail).toBe(true);
   });
 });

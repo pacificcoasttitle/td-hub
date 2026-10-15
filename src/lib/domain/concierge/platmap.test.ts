@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertPlatMap, toDataUri } from './platmap';
+import { convertPlatMap, imageMime, toDataUri } from './platmap';
 
 /** A genuine TIFF, produced by sharp so the happy path is exercised for real. */
 async function realTiff(): Promise<string> {
@@ -18,7 +18,7 @@ describe('plat map conversion', () => {
       expect(r.height).toBe(180);
       // PNG magic number — proves it is genuinely re-encoded, not passed through.
       expect(r.png.subarray(0, 4).toString('hex')).toBe('89504e47');
-      expect(toDataUri(r.png).startsWith('data:image/png;base64,')).toBe(true);
+      expect(toDataUri(r.png)?.startsWith('data:image/png;base64,')).toBe(true);
     }
   });
 
@@ -56,5 +56,56 @@ describe('plat map conversion', () => {
   it('treats status case-insensitively', async () => {
     const r = await convertPlatMap({ filename: 'x.tif', status: 'available', content: await realTiff() });
     expect(r.ok).toBe(true);
+  });
+});
+
+// ─── The MIME comes from the BYTES ──────────────────────────────────────────
+//
+// toDataUri hardcoded image/png for a year, which was true by accident because
+// everything it placed was a PNG. Then the MyNHD hazard sheet began choosing
+// between PNG and JPEG by measuring which was smaller: profile 42 stored a
+// good 2479x3508 JPEG, this handed the document a data URI claiming PNG, and
+// react-pdf renders an <Image> it cannot decode as EMPTY RATHER THAN FAILING.
+//
+// Page 4 came out with its footnote, its footer and its page number, and
+// nothing in the middle. Nothing threw. Nothing logged. The row said ready and
+// it was — the image was simply mislabelled.
+
+describe('toDataUri labels what it was actually given', () => {
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  // A real JPEG: SOI, a minimal APP0/JFIF header, EOI.
+  const JPEG = Buffer.from([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00,
+    0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xff, 0xd9,
+  ]);
+
+  it('says png for a PNG', () => {
+    expect(imageMime(PNG)).toBe('image/png');
+    expect(toDataUri(PNG)).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it('says jpeg for a JPEG — the case that shipped a blank page', () => {
+    expect(imageMime(JPEG)).toBe('image/jpeg');
+    expect(toDataUri(JPEG)).toMatch(/^data:image\/jpeg;base64,/);
+    // The specific bug: JPEG bytes must never be announced as PNG.
+    expect(toDataUri(JPEG)).not.toContain('image/png');
+  });
+
+  it('returns null rather than guessing, so the absence is visible', () => {
+    // The old behaviour labelled anything PNG, which is how a mislabelled
+    // image became an invisible blank page. Every caller treats null as "no
+    // image" and renders the gap — worse looking, far better to debug.
+    expect(imageMime(Buffer.from('not an image'))).toBeNull();
+    expect(toDataUri(Buffer.from('not an image'))).toBeNull();
+    expect(toDataUri(Buffer.alloc(0))).toBeNull();
+    // A PDF is the realistic wrong input: the bridge archives one beside the
+    // raster and the two keys differ by one column.
+    expect(toDataUri(Buffer.from('%PDF-1.4 ...'))).toBeNull();
+  });
+
+  it('carries the bytes through unchanged', () => {
+    const uri = toDataUri(JPEG)!;
+    const back = Buffer.from(uri.slice(uri.indexOf(',') + 1), 'base64');
+    expect(back.equals(JPEG)).toBe(true);
   });
 });

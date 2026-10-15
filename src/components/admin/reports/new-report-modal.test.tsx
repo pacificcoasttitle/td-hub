@@ -485,18 +485,23 @@ describe('the modal as wired', () => {
   const src = () => strip(join(HERE, 'new-report-modal.tsx'));
   const src2 = src;
 
-  it('posts to exactly these three routes, and no others', () => {
-    // THREE POSTs now, and the third is new (2026-09-30). Enumerated rather than
-    // counted, because the useful question is not "how many" but "which":
+  it('posts to exactly these four routes, and no others', () => {
+    // FOUR destinations now, and the fourth is new (2026-10-15). Enumerated
+    // rather than counted, because the useful question is not "how many" but
+    // "which", and above all WHICH ONES SPEND:
     //
     //   /api/concierge/profiles          SiteX. Buys the property. One credit.
     //   /api/concierge/profiles/{id}/tax TitlePoint. Buys page 4, on a property
     //                                    already paid for. Opt-in, default off.
+    //   /api/concierge/profiles/{id}/nhd MyNHD. FREE — which is why it is
+    //                                    opt-in default ON while tax is off.
+    //                                    routes.test.ts asserts it is not a
+    //                                    spender.
     //   /api/reports/farming             Free.
     //
-    // This guard caught the tax POST the moment it was added, which is what it is
-    // for. Adding the string was not the fix — naming what it buys is, so that a
-    // fourth entry has to be justified the same way.
+    // This guard caught the tax POST the moment it was added, which is what it
+    // is for. Adding the string was not the fix — naming what it buys is, so
+    // that a fifth entry has to be justified the same way.
     const s = src();
     const posts = [...s.matchAll(/fetch\((['`])([^'`]+)\1,\s*\{[^}]*method: 'POST'/g)].map((m) => m[2]);
     // THE TAX ROUTE APPEARS TWICE and that is the design, not a duplicate: the
@@ -505,6 +510,7 @@ describe('the modal as wired', () => {
     // cannot buy a second one, which routes.test.ts holds on the bridge itself.
     expect(posts.sort()).toEqual([
       '/api/concierge/profiles',
+      '/api/concierge/profiles/${profileId}/nhd',
       '/api/concierge/profiles/${profileId}/tax',
       '/api/concierge/profiles/${profileId}/tax',
       '/api/reports/farming',
@@ -512,6 +518,7 @@ describe('the modal as wired', () => {
     // Distinct destinations, so a fourth URL still has to be justified here.
     expect([...new Set(posts)].sort()).toEqual([
       '/api/concierge/profiles',
+      '/api/concierge/profiles/${profileId}/nhd',
       '/api/concierge/profiles/${profileId}/tax',
       '/api/reports/farming',
     ].sort());

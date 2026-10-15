@@ -6,6 +6,7 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import { describe, expect, it } from 'vitest';
 import { readSource } from '@/test-support/read-source';
 import {
+  HAZARD_FOOTNOTE,
   INSURANCE_DISCLAIMER, ProfileDocument, TEMPLATE_VERSION, pageNo, pagesFor,
   pricePerSqft, typeOf,
 } from './profile-document';
@@ -522,6 +523,96 @@ const big = () => input({
     criteria: { sameUseCode: true, livingAreaPct: 30, bedDelta: 1, bathDelta: 1, radiusMiles: 1, months: 12, maxComps: 12 },
     counts: { returned: 25, qualified: 12, shown: 12 },
   } as unknown as ProfileDocumentInput['filter'],
+});
+
+// ─── The hazard sheet ───────────────────────────────────────────────────────
+//
+// THESE EXIST BECAUSE 'ready' ONCE MEANT NOTHING. The bridge, the schema and
+// the row control all defined ready as "on the document", citing profile 9 —
+// a tax status that said ready over a PDF written before its own search
+// started. Then the hazard feature shipped with a bridge that could reach
+// ready while profile-document.tsx had no hazard sheet at all. Gerard clicked,
+// every part of the fetch worked, and the PDF came out byte-identical.
+//
+// The runtime check is renderProfile reporting what it drew. This is the other
+// half: the sheet is rendered and read back out of the PDF, so deleting it
+// from the template fails here rather than in production.
+
+describe('the hazard sheet', () => {
+  const withHazard = () => input({ hazardImage: PIXEL });
+
+  it('renders, and carries Gerard\'s wording verbatim', async () => {
+    const { text } = await render(withHazard());
+    expect(text).toContain(sq(HAZARD_FOOTNOTE));
+  });
+
+  it('is omitted entirely when there is no preview', async () => {
+    // The normal case — most profiles have no preview, and an absent optional
+    // page is not a gap to report the way a missing plat map is.
+    const { text, pages } = await render(input());
+    expect(text).not.toContain(sq('Natural hazard preview'));
+    const withIt = await render(withHazard());
+    expect(withIt.pages).toBe(pages + 1);
+  });
+
+  it('sits immediately after the property details', async () => {
+    // Gerard, 15 Oct 2026. It is MyNHD's report about the same property, so it
+    // belongs beside the property facts rather than at the back with the maps.
+    const { parts } = await render(withHazard());
+    const details = parts.findIndex((p) => sq(p).includes(sq('OWNER, ADDRESS')));
+    const hazard = parts.findIndex((p) => sq(p).includes(sq(HAZARD_FOOTNOTE)));
+    expect(details).toBeGreaterThan(-1);
+    expect(hazard).toBe(details + 1);
+  });
+
+  it('has NO navy band — it is a whole page of MyNHD\'s', async () => {
+    // The band would push their page down the sheet and squeeze it, and it
+    // would read as PCT's page with a picture on it. Every other sheet has the
+    // band; this one must not.
+    const { parts } = await render(withHazard());
+    const hazard = parts.find((p) => sq(p).includes(sq(HAZARD_FOOTNOTE)))!;
+    expect(sq(hazard)).not.toContain(sq('CONCIERGE PROPERTY PROFILE'));
+  });
+
+  it('keeps the footer and the page number, so it is inside the numbering', async () => {
+    const { parts } = await render(withHazard());
+    const hazard = parts.find((p) => sq(p).includes(sq(HAZARD_FOOTNOTE)))!;
+    expect(hazard).toMatch(/\d+\s+of\s+\d+/);
+    expect(sq(hazard)).toContain(sq('Data deemed reliable'));
+  });
+
+  it('renumbers everything after it, with no number used twice', async () => {
+    const { parts } = await render(withHazard());
+    const footers = parts
+      .map((p) => /(\d+)\s+of\s+(\d+)/.exec(p.replace(/\s+/g, ' ')))
+      .filter((m): m is RegExpExecArray => m !== null);
+    expect(footers.length).toBeGreaterThan(5);
+    for (const f of footers) expect(Number(f[2])).toBe(parts.length);
+    const nums = footers.map((f) => Number(f[1]));
+    expect(new Set(nums).size).toBe(nums.length);
+  });
+
+  it('never prints the order link', async () => {
+    // It points at dev.mynhd.com on the dev key, and the image carries MyNHD's
+    // own order prompt anyway — a second one would be PCT appearing to sell a
+    // report it does not sell.
+    const { text } = await render(withHazard());
+    expect(text).not.toContain('mynhd.com/ffprevorder');
+    expect(text.toLowerCase()).not.toContain('ffprevorder');
+  });
+
+  it('counts the page in pagesFor, and renumbers what follows', () => {
+    expect(pagesFor({ tax: true, hazard: true })).toHaveLength(9);
+    expect(pagesFor({ tax: true, hazard: false })).toHaveLength(8);
+    expect(pageNo('hazard', { tax: true, hazard: true })).toBe(4);
+    expect(pageNo('hazard', { tax: true, hazard: false })).toBeNull();
+    // Tax moves from 4 to 5 when the hazard sheet is present.
+    expect(pageNo('tax', { tax: true, hazard: false })).toBe(4);
+    expect(pageNo('tax', { tax: true, hazard: true })).toBe(5);
+    // And the old boolean form still means "has tax", so existing callers read
+    // the same answer they always did.
+    expect(pagesFor(true)).toEqual(pagesFor({ tax: true, hazard: false }));
+  });
 });
 
 describe('a document that overflows its sheets', () => {

@@ -33,6 +33,12 @@ const props = (over: Partial<CostGateProps> = {}): CostGateProps => ({
   error: null,
   taxDetail: false,
   onTaxDetail: () => {},
+  // The hazard preview is free, so it defaults ON in the modal. These
+  // existing tests are about the TAX control, so the default here keeps
+  // it available and ticked — a hidden control cannot be asserted about.
+  hazard: true,
+  onHazard: () => {},
+  hazardAvailable: true,
   onPreparedForName: () => {},
   onPreparedForCompany: () => {},
   onCancel: () => {},
@@ -41,7 +47,13 @@ const props = (over: Partial<CostGateProps> = {}): CostGateProps => ({
 });
 
 const confirmButton = () => screen.getByRole('button', { name: /Generate profile/i });
-const taxBox = () => screen.getByRole('checkbox');
+// TWO checkboxes since 2026-10-15 — tax and the free hazard preview — so
+// these are selected by their accessible name rather than by role alone.
+// getByRole('checkbox') now throws "found multiple elements", which is the
+// right failure: a test that silently picked the first one would start
+// asserting the wrong control the next time the order changes.
+const taxBox = () => screen.getByRole('checkbox', { name: /tax detail/i });
+const hazardBox = () => screen.getByRole('checkbox', { name: /hazard preview/i });
 
 describe('the tax detail is opt-in and says what it costs', () => {
   it('is unticked when the dialog opens', () => {
@@ -125,12 +137,26 @@ describe('the four guards that were only ever read, not driven', () => {
     expect((confirmButton() as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('has no acknowledgement tick to get in the way', () => {
+  it('has no acknowledgement tick — every checkbox here changes what happens', () => {
     // Removed 2026-09-30. All five duplicate profiles on one parcel were
-    // generated WITH it ticked. The only checkbox on this dialog now is one that
-    // changes what happens.
+    // generated WITH it ticked, which is the whole argument: a box that only
+    // confirms a decision already made gets ticked every time and protects
+    // nothing.
+    //
+    // THIS USED TO ASSERT "exactly one checkbox", and a second legitimate
+    // control broke it on 2026-10-15. The count was a proxy for the rule, and
+    // the rule is that every box on this dialog CHANGES WHAT HAPPENS. So the
+    // boxes are enumerated by their accessible name: a third one that does
+    // something still passes, and an acknowledgement tick fails whatever the
+    // count.
     render(<ConciergeCostGate {...props()} />);
-    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    const names = screen.getAllByRole('checkbox')
+      .map((el) => el.getAttribute('aria-label')
+        ?? el.closest('label')?.textContent?.trim().slice(0, 40) ?? '(unnamed)');
+    for (const n of names) {
+      expect(n, `a checkbox reading "${n}" does not say what it does`).toMatch(/tax detail|hazard preview/i);
+    }
     expect(screen.queryByText(/I have checked/i)).toBeNull();
+    expect(screen.queryByText(/I confirm|I acknowledge|I understand/i)).toBeNull();
   });
 });

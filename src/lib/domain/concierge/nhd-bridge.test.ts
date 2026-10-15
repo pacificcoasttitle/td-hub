@@ -246,8 +246,8 @@ describe('a refusal about the parcel DOES mark the row', () => {
     expect(updates.length).toBeGreaterThan(0);
   });
 
-  it('no_image is recorded', async () => {
-    expect((await vendorRefuses('no_image')).status).toBe('failed');
+  it('no_document is recorded', async () => {
+    expect((await vendorRefuses('no_document')).status).toBe('failed');
   });
 
   it('api_error is recorded, with the words the vendor used', async () => {

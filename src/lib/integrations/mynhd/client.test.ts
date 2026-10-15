@@ -9,7 +9,7 @@ vi.mock('./auth', async (importOriginal) => {
 import {
   PRODUCTION_BASE_URL, __resetTokenCacheForTests, configRefusalMessage, readConfig,
 } from './auth';
-import { fetchFloodFirePreview, isPng, isPreview, saysReAuth } from './client';
+import { fetchFloodFirePreview, isPdf, isPreview, saysReAuth } from './client';
 
 // ─── HTTP 200 IS NOT AN ANSWER ───────────────────────────────────────────────
 //
@@ -25,8 +25,18 @@ import { fetchFloodFirePreview, isPng, isPreview, saysReAuth } from './client';
 
 const PARCEL = { apn: '8381-021-001', fips: '06037', state: 'CA' };
 
-/** A real one-pixel PNG, so the signature check has something valid to pass. */
-const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+/**
+ * A minimal but REAL PDF, so the %PDF- signature check has something valid to
+ * pass. The source moved from /image to /pdf on 15 Oct 2026: MyNHD's PNG is
+ * 1024px wide, which is 140dpi across the sheet, and their PDF is vector.
+ */
+const PDF_B64 = Buffer.from([
+  '%PDF-1.4',
+  '1 0 obj<</Type/Catalog>>endobj',
+  'trailer<</Root 1 0 R>>',
+  '%%EOF',
+  '',
+].join('\n')).toString('base64');
 
 const MULTI_RESULT = JSON.stringify({
   success: false,
@@ -104,7 +114,7 @@ describe('a 200 with success:false is not a preview', () => {
     // non-empty string or a 1 through. The guide: "consider a preview
     // successful only when … success is exactly true".
     for (const success of ['true', 1, {}, [], 'yes']) {
-      answer({ status: 200, body: JSON.stringify({ success, image_data: PNG_B64 }) });
+      answer({ status: 200, body: JSON.stringify({ success, pdf_data: PDF_B64 }) });
       const r = await fetchFloodFirePreview(PARCEL);
       expect(r.ok, `success: ${JSON.stringify(success)} was accepted`).toBe(false);
     }
@@ -122,20 +132,20 @@ describe('a 200 with success:false is not a preview', () => {
     expect(r.evidence!.success).toBeNull();
   });
 
-  it('a 200 saying success:true with NO image is not a preview either', async () => {
+  it('a 200 saying success:true with NO document is not a preview either', async () => {
     answer({ status: 200, body: JSON.stringify({ success: true, order_link: 'https://x/y' }) });
     const r = await fetchFloodFirePreview(PARCEL);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error('unreachable');
-    expect(r.reason).toBe('no_image');
+    expect(r.reason).toBe('no_document');
   });
 
-  it('a 200 whose image_data is not a PNG is not a preview', async () => {
+  it('a 200 whose pdf_data is not a PDF is not a preview', async () => {
     // Buffer.from(..., 'base64') drops invalid characters and returns whatever
     // it managed, so a decoded error string would otherwise become an "image".
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: Buffer.from('not an image at all').toString('base64') }) });
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: Buffer.from('not a pdf at all').toString('base64') }) });
     const r = await fetchFloodFirePreview(PARCEL);
-    expect(r.ok ? '' : r.reason).toBe('no_image');
+    expect(r.ok ? '' : r.reason).toBe('no_document');
   });
 });
 
@@ -155,24 +165,24 @@ describe('isPreview, on its own', () => {
 
 describe('a real preview', () => {
   it('decodes the PNG and keeps the order link', async () => {
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64, order_link: 'https://www.mynhd.com/ffprevorder/123/abc' }) });
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: PDF_B64, order_link: 'https://www.mynhd.com/ffprevorder/123/abc' }) });
     const r = await fetchFloodFirePreview(PARCEL);
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error(r.message);
-    expect(isPng(r.png)).toBe(true);
+    expect(isPdf(r.pdf)).toBe(true);
     expect(r.orderLink).toBe('https://www.mynhd.com/ffprevorder/123/abc');
   });
 
   it('returns bytes, not base64 — the caller stores a file', async () => {
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: PDF_B64 }) });
     const r = await fetchFloodFirePreview(PARCEL);
-    expect(Buffer.isBuffer(r.ok ? r.png : null)).toBe(true);
+    expect(Buffer.isBuffer(r.ok ? r.pdf : null)).toBe(true);
     // And a missing order_link is null rather than ''.
     expect(r.ok ? r.orderLink : 'x').toBeNull();
   });
 
   it('tolerates a data: prefix the guide says will not be there', async () => {
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: `data:image/png;base64,${PNG_B64}` }) });
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: `data:application/pdf;base64,${PDF_B64}` }) });
     const r = await fetchFloodFirePreview(PARCEL);
     // Trusted it, and it decodes to leading garbage rather than failing — so it
     // is stripped. Being wrong about this silently produces a corrupt sheet.
@@ -182,23 +192,24 @@ describe('a real preview', () => {
 
 describe('searching by parcel', () => {
   it('sends search:apn with the FIPS in the vendor\'s `county` field', async () => {
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: PDF_B64 }) });
     await fetchFloodFirePreview({ apn: ' 8381-021-001 ', fips: ' 06037 ', state: 'ca' });
     expect(calls[0]!.body).toEqual({
       search: 'apn', apn: '8381-021-001', county: '06037', state: 'CA',
     });
   });
 
-  it('hits the /image endpoint, not the URL-based one', async () => {
-    // POST /report/getMultiFloodFirePreview returns pdf_url/img_url and
-    // ffprevorderlink, and not the bytes. The guide says not to use it.
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+  it('hits the /pdf endpoint, not /image and not the URL-based one', async () => {
+    // Two wrong endpoints to avoid: the URL-based one returns links rather
+    // than bytes, and /image returns a 1024px raster that is 140dpi on the
+    // sheet. The vector PDF is what makes a full-width page legible.
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: PDF_B64 }) });
     await fetchFloodFirePreview(PARCEL);
-    expect(calls[0]!.url).toBe('https://api.mynhd.test/report/getMultiFloodFirePreview/image');
+    expect(calls[0]!.url).toBe('https://api.mynhd.test/report/getMultiFloodFirePreview/pdf');
   });
 
   it('carries the bearer token', async () => {
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: PDF_B64 }) });
     await fetchFloodFirePreview(PARCEL);
     expect(calls[0]!.auth).toMatch(/^Bearer tok-/);
   });
@@ -208,7 +219,7 @@ describe('401 + tryReAuth', () => {
   it('gets a new token and retries exactly once', async () => {
     answer(
       { status: 401, body: JSON.stringify({ error: 'JWT Token is wrong.', tryReAuth: true }) },
-      { status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) },
+      { status: 200, body: JSON.stringify({ success: true, pdf_data: PDF_B64 }) },
     );
     const r = await fetchFloodFirePreview(PARCEL);
     expect(r.ok).toBe(true);
@@ -270,7 +281,7 @@ describe('the other documented statuses', () => {
 describe('unconfigured means no call at all', () => {
   it('refuses without reaching the vendor', async () => {
     delete process.env.MYNHD_SECRET_KEY;
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: PDF_B64 }) });
     const r = await fetchFloodFirePreview(PARCEL);
     expect(r.ok ? '' : r.reason).toBe('not_configured');
     // No mock, no fallback, and nothing on the wire.
@@ -289,22 +300,22 @@ describe('unconfigured means no call at all', () => {
 describe('the base URL', () => {
   it('falls back to the documented production host when unset', async () => {
     delete process.env.MYNHD_BASE_URL;
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: PDF_B64 }) });
     await fetchFloodFirePreview(PARCEL);
-    expect(calls[0]!.url).toBe('https://api.mynhd.com/report/getMultiFloodFirePreview/image');
+    expect(calls[0]!.url).toBe('https://api.mynhd.com/report/getMultiFloodFirePreview/pdf');
     expect(PRODUCTION_BASE_URL).toBe('https://api.mynhd.com');
   });
 
   it('is taken from the environment when set', async () => {
     process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test';
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: PDF_B64 }) });
     await fetchFloodFirePreview(PARCEL);
-    expect(calls[0]!.url).toBe('https://dev-api.mynhd.test/report/getMultiFloodFirePreview/image');
+    expect(calls[0]!.url).toBe('https://dev-api.mynhd.test/report/getMultiFloodFirePreview/pdf');
   });
 
   it('tolerates a trailing slash rather than doubling it', async () => {
     process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test/';
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: PDF_B64 }) });
     await fetchFloodFirePreview(PARCEL);
     expect(calls[0]!.url).not.toContain('//report');
   });
@@ -314,7 +325,7 @@ describe('the production target refuses a non-production host', () => {
   it('makes no request at all — not even the token', async () => {
     process.env.VERCEL_ENV = 'production';
     process.env.MYNHD_BASE_URL = 'https://dev-api.mynhd.test';
-    answer({ status: 200, body: JSON.stringify({ success: true, image_data: PNG_B64 }) });
+    answer({ status: 200, body: JSON.stringify({ success: true, pdf_data: PDF_B64 }) });
 
     const r = await fetchFloodFirePreview(PARCEL);
     expect(r.ok).toBe(false);

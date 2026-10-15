@@ -2,6 +2,31 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /**
+   * @napi-rs/canvas is a NATIVE module and must not be bundled.
+   *
+   * Turbopack refused the build outright:
+   *
+   *   ./node_modules/@napi-rs/canvas/js-binding.js
+   *   asset is not placeable in ESM chunks, so it doesn't have a module id
+   *
+   * js-binding.js loads a platform-specific `.node` binary, which is not
+   * JavaScript and cannot become part of an ESM chunk. Listing it here leaves
+   * it as a real `require` at runtime and lets Next trace the binary into the
+   * function instead.
+   *
+   * THIS IS THE RUNG BELOW verify. `npm run verify` typechecks and tests but
+   * does not bundle — AGENTS.md says so, with a 2026-09-30 precedent where a
+   * client component dragged @react-pdf into the browser bundle and only
+   * Vercel saw it. Same shape here: 297 files and 3,110 tests green, and the
+   * deploy was the first thing to object.
+   *
+   * pdfjs-dist is listed with it. It is plain JavaScript and builds fine, but
+   * it is what loads the canvas and bundling the two apart is how a loader
+   * ends up holding a copy the externalised binary is not in.
+   */
+  serverExternalPackages: ['@napi-rs/canvas', 'pdfjs-dist'],
+
+  /**
    * The Concierge document's fonts must be inside the serverless function.
    *
    * @react-pdf/renderer reads a TTF from the filesystem at render time. Next

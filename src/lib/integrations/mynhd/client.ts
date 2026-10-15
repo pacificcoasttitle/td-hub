@@ -61,8 +61,8 @@ export type PreviewFailure =
   | 'no_permission'
   /** HTTP 200 + success:false + code:multi_result. */
   | 'multi_result'
-  /** 2xx and success true, but no image bytes came with it. */
-  | 'no_image'
+  /** 2xx and success true, but no usable document came with it. */
+  | 'no_document'
   | 'api_error'
   | 'network';
 
@@ -82,8 +82,18 @@ export interface PreviewEvidence {
 export type PreviewResult =
   | {
     ok: true;
-    /** Decoded PNG bytes. Not base64 — callers store a file, not a string. */
-    png: Buffer;
+    /**
+     * Decoded PDF bytes. Not base64 — callers store a file, not a string.
+     *
+     * THE PDF, NOT THE PNG. Both endpoints return the same one-page hazard
+     * preview; `/image` sends it as a 1024px-wide raster, which across the
+     * document's 528pt content width is 140 dpi and puts the disclaimer type
+     * at about 5pt, blurred. Measured, not guessed —
+     * fixtures/first-real-preview.json. `/pdf` sends it with vector text, so
+     * rasterising it ourselves at 300 dpi gives a sheet that is sharp at full
+     * width. The caller does that; see domain/concierge/rasterize-pdf.ts.
+     */
+    pdf: Buffer;
     /** Where the homeowner can order the full report, from the same response. */
     orderLink: string | null;
     evidence: PreviewEvidence;
@@ -101,7 +111,7 @@ interface RawPreview {
   success?: unknown;
   code?: unknown;
   error?: unknown;
-  image_data?: unknown;
+  pdf_data?: unknown;
   order_link?: unknown;
   tryReAuth?: unknown;
 }
@@ -161,7 +171,7 @@ export async function fetchFloodFirePreview(params: PreviewByApn): Promise<Previ
   }
   const config = read.config;
 
-  const url = `${config.baseUrl}/report/getMultiFloodFirePreview/image`;
+  const url = `${config.baseUrl}/report/getMultiFloodFirePreview/pdf`;
   // `county` is the vendor's name for a five-digit FIPS. Their field, their
   // spelling — the mismatch is theirs and renaming it here would hide it.
   const payload = {
@@ -175,7 +185,7 @@ export async function fetchFloodFirePreview(params: PreviewByApn): Promise<Previ
   // 2026-09-09 that a request log omitting the field under test cannot verify
   // the change; the inverse rule is that a log must never carry a credential.
   const requestMeta = {
-    endpoint: '/report/getMultiFloodFirePreview/image',
+    endpoint: '/report/getMultiFloodFirePreview/pdf',
     search: 'apn', apn: payload.apn, county: payload.county, state: payload.state,
     // WHICH MyNHD. The code refuses a crossing, and this is how one would be
     // VISIBLE after the fact — an enforced invariant nobody can audit from the
@@ -223,18 +233,18 @@ export async function fetchFloodFirePreview(params: PreviewByApn): Promise<Previ
       return { ok: false, reason, message, evidence, durationMs };
     }
 
-    const b64 = typeof body?.image_data === 'string' ? body.image_data : '';
-    const png = b64 === '' ? null : decodeBase64(b64);
+    const b64 = typeof body?.pdf_data === 'string' ? body.pdf_data : '';
+    const pdf = b64 === '' ? null : decodeBase64(b64);
 
-    if (!png || png.length === 0) {
+    if (!pdf || pdf.length === 0) {
       // success:true and no bytes. Not a preview, whatever it says about itself.
-      const message = 'MyNHD reported a successful preview but sent no image data.';
+      const message = 'MyNHD reported a successful preview but sent no document.';
       await logRequest({
         operation: 'mynhd_preview', requestId, startedAt, success: false,
-        errorCategory: 'no_image', requestMeta,
-        responseMeta: { httpStatus: evidence.httpStatus, success: true, imageDataChars: b64.length, reAuthed, durationMs },
+        errorCategory: 'no_document', requestMeta,
+        responseMeta: { httpStatus: evidence.httpStatus, success: true, pdfDataChars: b64.length, reAuthed, durationMs },
       });
-      return { ok: false, reason: 'no_image', message, evidence, durationMs };
+      return { ok: false, reason: 'no_document', message, evidence, durationMs };
     }
 
     const orderLink = typeof body?.order_link === 'string' && body.order_link.trim() !== ''
@@ -245,12 +255,12 @@ export async function fetchFloodFirePreview(params: PreviewByApn): Promise<Previ
       operation: 'mynhd_preview', requestId, startedAt, success: true,
       requestMeta,
       responseMeta: {
-        httpStatus: evidence.httpStatus, success: true, pngBytes: png.length,
+        httpStatus: evidence.httpStatus, success: true, pdfBytes: pdf.length,
         hasOrderLink: orderLink !== null, reAuthed, durationMs,
       },
     });
 
-    return { ok: true, png, orderLink, evidence, durationMs };
+    return { ok: true, pdf, orderLink, evidence, durationMs };
   } catch (err) {
     const durationMs = Date.now() - startedAt.getTime();
     const authFailure = err instanceof MyNhdAuthError;
@@ -299,16 +309,24 @@ function decodeBase64(b64: string): Buffer | null {
   if (cleaned === '') return null;
   const buf = Buffer.from(cleaned, 'base64');
   // Buffer.from is forgiving: it drops invalid characters and returns whatever
-  // it managed. An eight-byte PNG signature is the cheap check that we have an
-  // image rather than a decoded error string.
-  return isPng(buf) ? buf : null;
+  // it managed. The five-byte PDF signature is the cheap check that we have a
+  // document rather than a decoded error string.
+  return isPdf(buf) ? buf : null;
 }
 
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+/**
+ * `%PDF-`, the five bytes every PDF starts with.
+ *
+ * This replaced an eight-byte PNG signature check when the source moved from
+ * `/image` to `/pdf`. The check itself is the point rather than the bytes: a
+ * success response carrying something that is not the document it claims is
+ * not a preview, and without this it becomes a blank sheet on a client's
+ * report instead of a refusal.
+ */
+const PDF_SIGNATURE = Buffer.from('%PDF-', 'latin1');
 
-/** The eight-byte PNG signature. Exported for the fixture guard. */
-export function isPng(buf: Buffer): boolean {
-  return buf.length > 8 && buf.subarray(0, 8).equals(PNG_SIGNATURE);
+export function isPdf(buf: Buffer): boolean {
+  return buf.length > PDF_SIGNATURE.length && buf.subarray(0, PDF_SIGNATURE.length).equals(PDF_SIGNATURE);
 }
 
 function classify(status: number, e: PreviewEvidence): PreviewFailure {
@@ -333,8 +351,8 @@ export function failureMessage(reason: PreviewFailure, e: PreviewEvidence | null
       return 'This MyNHD account does not have preview access. MyNHD has to enable it.';
     case 'multi_result':
       return 'MyNHD found more than one property for this parcel, so no preview was generated.';
-    case 'no_image':
-      return 'MyNHD reported a successful preview but sent no image data.';
+    case 'no_document':
+      return 'MyNHD reported a successful preview but sent no document.';
     case 'network':
       return 'MyNHD could not be reached, so no hazard preview was added.';
     case 'api_error':

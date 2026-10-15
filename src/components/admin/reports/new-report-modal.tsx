@@ -46,6 +46,14 @@ export interface TypeOption {
 export interface ConciergeAccess {
   canGenerate: boolean;
   featureOn: boolean;
+  /**
+   * Whether a MyNHD call would be refused before leaving this deploy.
+   *
+   * Optional because an older cached response will not carry it, and a missing
+   * field must read as "not available" rather than crash — the control hides,
+   * which is the safe direction.
+   */
+  hazardAvailable?: boolean;
 }
 
 /**
@@ -544,6 +552,19 @@ export function NewReportModal({ onClose, onCreated }: {
    */
   const [taxDetail, setTaxDetail] = useState(false);
   /**
+   * The MyNHD hazard preview. DEFAULTS TRUE — Gerard, 12 Oct 2026 — because
+   * it costs PCT nothing. The tax box above defaults false for the opposite
+   * reason, and the two sitting side by side with different defaults is the
+   * point rather than an inconsistency: the default follows the price.
+   *
+   * openGate() does NOT reset this the way it resets taxDetail. That reset
+   * exists so a spend cannot survive a cancel; there is no spend here, and
+   * resetting a free opt-in that defaults on would be a no-op anyway.
+   */
+  const [hazard, setHazard] = useState(true);
+  /** Whether this deploy can reach MyNHD. Null until /access answers. */
+  const [hazardAvailable, setHazardAvailable] = useState(false);
+  /**
    * The profile was made and the tax search was NOT started. Held on screen,
    * like repWarning, rather than flashed — it is the only notice an operator
    * gets that something they asked for did not happen.
@@ -577,6 +598,9 @@ export function NewReportModal({ onClose, onCreated }: {
       .then((r) => (r.ok ? r.json() : null))
       .then((d: ConciergeAccess | null) => {
         if (!cancelled) setAccess(d ?? { canGenerate: false, featureOn: false });
+        // Same field the row action reads, so the two controls cannot
+        // disagree about whether MyNHD is reachable from this deploy.
+        if (!cancelled) setHazardAvailable(d?.hazardAvailable === true);
       })
       .catch(() => { if (!cancelled) setAccess({ canGenerate: false, featureOn: false }); });
     fetch('/api/reports/access')
@@ -738,6 +762,28 @@ export function NewReportModal({ onClose, onCreated }: {
       // A FAILURE STILL DOES NOT FAIL THE PROFILE. It is generated, paid for
       // and complete without page 4. So this reports that the tax search could
       // not be STARTED, and leaves the profile alone.
+      // ─── The hazard preview, BEFORE the tax wait ─────────────────────────
+      //
+      // Fired first because it is free and fast — one round trip, no polling —
+      // and because the tax step below deliberately HOLDS the gate open for up
+      // to fifteen seconds. Running this after that wait would delay a free
+      // sheet behind a paid search for no reason.
+      //
+      // ITS FAILURE NEVER FAILS THE PROFILE, and never blocks delivery. The
+      // profile is generated, paid for and complete without a hazard sheet, so
+      // a refusal is reported the same way a tax failure is — held on screen
+      // after the gate closes — and nothing is retried here. The row action
+      // adds it later.
+      if (hazard && hazardAvailable) {
+        const got = await startHazardPreview(profileId);
+        if (!got.ok) {
+          onCreated(profileId);
+          setGateOpen(false);
+          setTaxProblem(got.message);
+          return;
+        }
+      }
+
       if (taxDetail) {
         const started = await startTaxSearch(profileId);
         if (!started.ok) {
@@ -949,6 +995,9 @@ export function NewReportModal({ onClose, onCreated }: {
           submitting={submitting}
           error={error}
           taxDetail={taxDetail}
+          hazard={hazard}
+          onHazard={setHazard}
+          hazardAvailable={hazardAvailable}
           taxWaiting={taxWaiting}
           onTaxDetail={setTaxDetail}
           onPreparedForName={setPreparedForName}
@@ -972,6 +1021,41 @@ export function NewReportModal({ onClose, onCreated }: {
 // search already paid for is polled and re-rendered, never re-bought.
 
 interface TaxStep { ok: boolean; status?: string; message: string }
+
+/**
+ * Fetch the hazard preview. FREE, and it finishes inside the request.
+ *
+ * Unlike the tax search there is nothing to poll: MyNHD answers in one round
+ * trip, the bridge rasterises and re-renders, and the route returns when the
+ * sheet is on the document. So there is no waiting state and no spinner —
+ * either the sheet is there when the modal closes or the message says why not.
+ *
+ * `keepalive` for the same reason as the tax call: a close must not cancel a
+ * request the operator has already asked for. It spends nothing, but a
+ * half-finished fetch would leave the row needing the sweeper.
+ */
+async function startHazardPreview(profileId: number): Promise<TaxStep> {
+  try {
+    const res = await fetch(`/api/concierge/profiles/${profileId}/nhd`, {
+      method: 'POST',
+      keepalive: true,
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || body?.ok === false) {
+      return {
+        ok: false,
+        message: body?.message
+          ?? `The hazard preview could not be added (${res.status}). You can add it from the report’s row in Reports.`,
+      };
+    }
+    return { ok: true, status: String(body?.hazardStatus ?? 'ready'), message: '' };
+  } catch {
+    return {
+      ok: false,
+      message: 'The request did not reach the server, so no hazard preview was added. Nothing was charged. You can add it from the report’s row in Reports.',
+    };
+  }
+}
 
 /** Buy it. Fast — this returns as soon as TitlePoint has accepted the search. */
 async function startTaxSearch(profileId: number): Promise<TaxStep> {

@@ -1,0 +1,29 @@
+{
+  "_comment": [
+    "PROVISIONAL. The first real MyNHD preview, fetched by the DEPLOYED function",
+    "on 2026-10-15 with the DEV key against api.mynhd.com — the only base URL",
+    "MyNHD has given us. Dev may serve sample data, so these dimensions are not",
+    "final: re-measure when the production key arrives before the layout is.",
+    "image_data is not stored here; the bytes are in the PNG beside it and",
+    "sha256 identifies them."
+  ],
+  "provisional": true,
+  "measuredAt": "2026-10-15T18:30:38.259Z",
+  "profileId": 42,
+  "apn": "6268-039-032",
+  "fips": "06037",
+  "httpStatus": 200,
+  "success": true,
+  "order_link": "https://dev.mynhd.com/ffprevorder/100373/9aab96500438dddaa6b832c176da0666a19f7b5e47dd278d5e9add3a032aaa1f",
+  "png": {
+    "bytes": 691184,
+    "width": 1024,
+    "height": 1363,
+    "sha256": "058ef3e1fb289255aaf6322b8ffd353755523b4fa88106ec9819ba8eeeb466cc",
+    "aspect": 0.7513,
+    "contentWidthPt": 528,
+    "dpiAtContentWidth": 140,
+    "widthPtFor300Dpi": 246,
+    "drawnHeightAtFullWidthPt": 703
+  }
+}

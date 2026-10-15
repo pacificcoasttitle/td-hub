@@ -97,17 +97,42 @@ const BODY_TOP_PT = 19.5;
 
 // ─── Page order ─────────────────────────────────────────────────────────────
 
-const PAGE_ORDER = ['cover', 'thanks', 'details', 'tax', 'transfers', 'compSummary', 'compDetail', 'plat'] as const;
+// `hazard` sits immediately after `details` — Gerard, 15 Oct 2026. It is
+// MyNHD's own one-page report about the same property, so it belongs beside
+// the property facts rather than at the back with the maps.
+const PAGE_ORDER = [
+  'cover', 'thanks', 'details', 'hazard', 'tax', 'transfers',
+  'compSummary', 'compDetail', 'plat',
+] as const;
 export type PageKey = typeof PAGE_ORDER[number];
 
-/** The pages this document will actually have, in order. */
-export function pagesFor(hasTax: boolean): PageKey[] {
-  return PAGE_ORDER.filter((p) => p !== 'tax' || hasTax);
+/** Which optional pages this document actually has. */
+export interface OptionalPages {
+  tax: boolean;
+  hazard: boolean;
+}
+
+/**
+ * The pages this document will actually have, in order.
+ *
+ * TWO OPTIONAL PAGES NOW, which is why this takes an object. It used to take a
+ * bare `hasTax` boolean, and a second boolean beside it would be two
+ * same-typed positional arguments that transpose silently — `pagesFor(hazard,
+ * tax)` typechecks and is wrong. Named fields cannot be swapped by accident.
+ */
+export function pagesFor(opts: OptionalPages | boolean): PageKey[] {
+  // A bare boolean still means "has tax", so the existing guards keep reading.
+  const o: OptionalPages = typeof opts === 'boolean' ? { tax: opts, hazard: false } : opts;
+  return PAGE_ORDER.filter((p) => {
+    if (p === 'tax') return o.tax;
+    if (p === 'hazard') return o.hazard;
+    return true;
+  });
 }
 
 /** 1-based number of a page, or null when it is not in this document. */
-export function pageNo(key: PageKey, hasTax: boolean): number | null {
-  const i = pagesFor(hasTax).indexOf(key);
+export function pageNo(key: PageKey, opts: OptionalPages | boolean): number | null {
+  const i = pagesFor(opts).indexOf(key);
   return i < 0 ? null : i + 1;
 }
 
@@ -194,6 +219,16 @@ export interface ProfileDocumentInput {
   compMapImage: string | null;
   platMapImage: string | null;
   platMapStatus: string | null;
+  /**
+   * MyNHD's hazard preview, already rasterised at 300 dpi, as a data URI.
+   *
+   * Null is the normal case and draws no sheet at all — most profiles have no
+   * preview, and an absent optional page is not a gap to report the way a
+   * missing plat map is. There is deliberately no `hazardStatus` beside it:
+   * the document draws what it was given, and a status the renderer could
+   * contradict is how `ready` came to mean nothing.
+   */
+  hazardImage?: string | null;
   /** The cover photograph, identical on every profile. Never the comp map. */
   brandPhoto?: string | null;
   brandLogo?: string | null;
@@ -251,6 +286,58 @@ function Sheet({ band, children }: { band: BandProps; children: React.ReactNode 
     <Page size="LETTER" style={s.page}>
       <Band address={band.address} sub={band.sub} logo={band.logo} fixed />
       <View style={s.body}>{children}</View>
+      <Footer />
+    </Page>
+  );
+}
+
+/**
+ * Gerard's wording for the hazard sheet, verbatim (15 Oct 2026).
+ *
+ * The distinction it draws is the one PCT's exposure rests on, so it is a
+ * constant rather than inline JSX: a test asserts the rendered page contains
+ * it, and prose edited in place is prose that drifts.
+ */
+export const HAZARD_FOOTNOTE =
+  'Natural hazard preview — provided by MyNHD. This is not a Natural Hazard '
+  + 'Disclosure; a full disclosure report is a separate document.';
+
+/**
+ * The hazard sheet. A WHOLE PAGE OF SOMEBODY ELSE'S, so it gets no band.
+ *
+ * ─── WHY NO BAND ────────────────────────────────────────────────────────────
+ *
+ * MyNHD's preview is a complete one-page document — their letterhead, their
+ * title, their disclaimers top and bottom. The navy band would push it down
+ * the sheet and squeeze it, and it would read as PCT's page with a picture on
+ * it. Without the band it reads as what it is: their page, inside our
+ * document. Gerard's call, and the layout follows from it rather than the
+ * other way round.
+ *
+ * ─── WHAT STAYS ─────────────────────────────────────────────────────────────
+ *
+ * The footer and its page number, so the sheet is inside the document's
+ * numbering rather than an insert. react-pdf numbers from the real rendered
+ * sheets, so a page that comes and goes renumbers everything after it with no
+ * arithmetic here.
+ *
+ * ─── THE ORDER LINK IS NOT PRINTED ──────────────────────────────────────────
+ *
+ * `hazardOrderLink` is stored but never drawn. On the dev key it points at
+ * dev.mynhd.com, which must not reach a client document — and the image
+ * carries MyNHD's own "order the official report" prompt anyway, so a second
+ * one would be PCT appearing to sell a report it does not sell.
+ */
+function HazardSheet({ image }: { image: string }) {
+  return (
+    <Page size="LETTER" style={s.page}>
+      <View style={{ flexGrow: 1, paddingHorizontal: SIDE, paddingTop: SIDE * 0.5 }}>
+        {/* objectFit contain, not cover: the page must never be cropped, and
+            a preview whose aspect changes should letterbox rather than lose
+            its own disclaimers off the edge. */}
+        <Image src={image} style={{ width: '100%', flexGrow: 1, objectFit: 'contain' }} />
+        <Text style={s.footnote}>{HAZARD_FOOTNOTE}</Text>
+      </View>
       <Footer />
     </Page>
   );
@@ -472,7 +559,13 @@ export function ProfileDocument(input: ProfileDocumentInput) {
         <Footnote>{`${DASH_NOTE} Price per sq ft is the sale price divided by living area.`}</Footnote>
       </Sheet>
 
-      {/* ── 4 · Property tax ─────────────────────────────────────────────── */}
+      {/* ── 4 · Natural hazard preview ───────────────────────────────────── */}
+      {/* Immediately after the property details, and OMITTED ENTIRELY when
+          there is no preview — like the tax page. Everything after it
+          renumbers on its own, because the footer numbers real sheets. */}
+      {input.hazardImage ? <HazardSheet image={input.hazardImage} /> : null}
+
+      {/* ── 5 · Property tax ─────────────────────────────────────────────── */}
       {taxLayer ? (
         <Sheet band={band}>
           <TaxPage layer={taxLayer} subject={subject} captured={captured} />

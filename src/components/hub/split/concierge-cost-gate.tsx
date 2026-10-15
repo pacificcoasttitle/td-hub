@@ -41,6 +41,17 @@ export interface CostGateProps {
   /** Opt-in, and it is a second billable search. Default off. */
   taxDetail: boolean;
   onTaxDetail: (v: boolean) => void;
+  /**
+   * The MyNHD hazard preview. FREE, so it defaults ON — the opposite of the
+   * tax search, and for the only reason that matters: nothing is spent.
+   */
+  hazard: boolean;
+  onHazard: (v: boolean) => void;
+  /**
+   * Whether this deploy can reach MyNHD at all. False hides the control
+   * rather than offering a box that would silently do nothing.
+   */
+  hazardAvailable: boolean;
   /** The profile is made and the county is being searched. */
   taxWaiting?: boolean;
   onPreparedForName: (v: string) => void;
@@ -164,6 +175,42 @@ export function ConciergeCostGate(p: CostGateProps) {
               </span>
             </span>
           </label>
+
+          {/* ─── The hazard preview. FREE, DEFAULTS ON ──────────────────────
+              Gerard, 12 Oct 2026: MyNHD's preview costs PCT nothing, so unlike
+              the tax search above it starts ticked.
+
+              WHICH IS WHY IT STILL SAYS "free" OUT LOUD. The item directly
+              above states a price, and a second checkbox beside it that said
+              nothing about cost would read as priced too — the same reasoning
+              as the row menu, where the tax item names a cost and this one
+              names its absence.
+
+              IT HIDES RATHER THAN REFUSES when this deploy cannot reach MyNHD.
+              A ticked box that silently does nothing is worse than no box: the
+              operator would believe a sheet was coming. Same condition the row
+              action uses — /api/concierge/access, hazardAvailable. */}
+          {p.hazardAvailable ? (
+            <label className="flex items-start gap-2 cursor-pointer select-none rounded-md border border-[#EDEFF3] bg-[#FAFAFB] px-3 py-2">
+              <input
+                type="checkbox"
+                checked={p.hazard}
+                disabled={p.submitting}
+                onChange={(e) => p.onHazard(e.target.checked)}
+                className="mt-[2px] w-[14px] h-[14px] rounded border-gray-300 text-brand-orange"
+              />
+              <span className="text-[11.5px] text-[#3C4557]">
+                <strong className="font-semibold">Add natural hazard preview</strong>
+                {' — free.'}
+                <span className="block text-[10.5px] text-[#6B7280] mt-[2px]">
+                  A one-page flood and fire hazard preview from MyNHD, added as its own
+                  sheet after the property details. It is a preview, not a Natural Hazard
+                  Disclosure — a full disclosure report is a separate document. It runs
+                  after the profile is delivered and costs nothing.
+                </span>
+              </span>
+            </label>
+          ) : null}
 
           {/* ─── A SPINNER, NOT A PROGRESS BAR ──────────────────────────────
               We do not know how far along it is. A bar would have to invent a

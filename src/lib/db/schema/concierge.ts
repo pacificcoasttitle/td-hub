@@ -162,8 +162,22 @@ export const conciergeProfiles = pgTable('concierge_profiles', {
   hazardError: text('hazard_error'),
 
   hazardStorageKey: varchar('hazard_storage_key', { length: 500 }),
+  /**
+   * MyNHD's own PDF, archived unchanged before anything transforms it.
+   *
+   * The same rule the raw SiteX payload follows. hazardStorageKey is what we
+   * made from it — a 300 dpi raster — and if that turns out wrong, the source
+   * is here and no second vendor call is needed to get it back.
+   */
+  hazardPdfStorageKey: varchar('hazard_pdf_storage_key', { length: 500 }),
   hazardSha256: char('hazard_sha256', { length: 64 }),
   hazardBytes: integer('hazard_bytes'),
+  /**
+   * What the stored PNG was rasterised at, so "is this sheet print quality?"
+   * is answerable from the row rather than inferred from a pixel count and an
+   * assumption about the page size.
+   */
+  hazardDpi: integer('hazard_dpi'),
   /**
    * The PNG's own pixel dimensions, read from its IHDR.
    *

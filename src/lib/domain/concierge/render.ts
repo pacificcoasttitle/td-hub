@@ -39,6 +39,25 @@ export interface RenderOutcome {
   pageCount?: number;
   compsShown?: number;
   message?: string;
+  /**
+   * Whether this render actually placed the MyNHD hazard sheet.
+   *
+   * It exists because `ready` once meant nothing. The bridge set
+   * hazard_status='ready' as soon as renderProfile returned ok — and for a
+   * while the document had no hazard sheet at all, so every "ready" profile
+   * was a status over a PDF that did not show it. The same shape as profile 9
+   * on the tax side, written by the person who documented profile 9.
+   *
+   * So the bridge now requires THIS, not merely ok. It is the renderer's own
+   * report of what it drew, and it is derived from the same value the sheet is
+   * keyed on, so the two cannot disagree.
+   *
+   * WHAT IT STILL CANNOT CATCH: the sheet being deleted from the template
+   * again. Nothing short of reading the rendered bytes back would, and that
+   * is a test's job — profile-document.test.ts renders the sheet and reads the
+   * footnote out of the PDF.
+   */
+  hazardPlaced?: boolean;
 }
 
 const num = (v: unknown): number | null => {
@@ -107,6 +126,10 @@ export async function renderProfile(
   // a broken map on an old profile even if it were free.
   const platMapImage = profile.platmapStorageKey ? await loadImage(profile.platmapStorageKey) : null;
   const compMapImage = profile.compMapStorageKey ? await loadImage(profile.compMapStorageKey) : null;
+  // MyNHD's hazard preview, already rasterised at 300dpi when it was
+  // fetched. Loaded like the other two: the renderer places bytes we
+  // already hold and never reaches a vendor.
+  const hazardImage = profile.hazardStorageKey ? await loadImage(profile.hazardStorageKey) : null;
 
   // Subject, tax and transfers are re-derived from the STORED RAW PAYLOAD
   // rather than from promoted columns.
@@ -161,7 +184,7 @@ export async function renderProfile(
     subject, tax, taxReport,
     transfers,
     filter, metrics, criteria: applied,
-    compMapImage, platMapImage,
+    compMapImage, platMapImage, hazardImage,
     platMapStatus: profile.platmapStatus,
     preparedFor: {
       name: profile.preparedForName ?? '',
@@ -237,7 +260,12 @@ export async function renderProfile(
     ));
   }
 
-  return { ok: true, profileId, pdfStorageKey: key, pdfBytes: buf.length, pageCount, compsShown: filter.counts.shown };
+  return {
+    ok: true, profileId, pdfStorageKey: key, pdfBytes: buf.length, pageCount,
+    compsShown: filter.counts.shown,
+    // The same value the sheet is keyed on, reported back.
+    hazardPlaced: hazardImage !== null,
+  };
 }
 
 async function loadImage(key: string): Promise<string | null> {

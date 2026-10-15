@@ -155,3 +155,41 @@ describe('mynhd — the crossing is auditable, not just enforced', () => {
     expect(blob).not.toContain('://');
   });
 });
+
+// ─── The rasteriser's native binary ─────────────────────────────────────────
+//
+// @napi-rs/canvas is native, and npm picks a different build per platform —
+// canvas-win32-x64-msvc here, canvas-linux-x64-gnu on Vercel. "It works on my
+// machine" is literally uninformative about the deploy. Without this line the
+// first symptom of a missing binary is a 500 from a row action after an
+// operator clicked, which is the worst place to learn it.
+
+describe('mynhd.rasterizer — can this deploy draw the hazard sheet', () => {
+  it('is reported, and is true in this checkout', async () => {
+    const body = await (await GET()).json();
+    expect(body.mynhd).toHaveProperty('rasterizer');
+    expect(body.mynhd.rasterizer).toBe(true);
+  });
+
+  it('carries no detail while it is working', async () => {
+    // The detail is the failure message, and a field that is always present
+    // stops meaning anything. It appears only when there is something wrong.
+    const body = await (await GET()).json();
+    expect(body.mynhd.rasterizerDetail).toBeUndefined();
+  });
+
+  it('is independent of whether MyNHD is configured', async () => {
+    // A deploy with no key can still be asked whether it COULD rasterise.
+    // Conflating the two is the mistake #221 fixed for productionHost.
+    const saved = process.env.MYNHD_SECRET_KEY;
+    delete process.env.MYNHD_SECRET_KEY;
+    try {
+      const body = await (await GET()).json();
+      expect(body.mynhd.configured).toBe(false);
+      expect(body.mynhd.rasterizer).toBe(true);
+    } finally {
+      if (saved === undefined) delete process.env.MYNHD_SECRET_KEY;
+      else process.env.MYNHD_SECRET_KEY = saved;
+    }
+  });
+});

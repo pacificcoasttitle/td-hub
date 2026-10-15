@@ -7,6 +7,7 @@ import { fetchFloodFirePreview, type PreviewFailure } from '@/lib/integrations/m
 import { configRefusalMessage, readConfig } from '@/lib/integrations/mynhd/auth';
 import { claimProperty, propertyRequestKey, releaseClaim, scopedClaimKey } from './claim';
 import { pngSize } from './png-size';
+import { encodeForSheet, rasterizeFirstPage } from './rasterize-pdf';
 import { renderProfile } from './render';
 
 // ─── The MyNHD hazard bridge: the hazard sheet ───────────────────────────────
@@ -53,6 +54,14 @@ import { renderProfile } from './render';
 // never" is not a guard, and the SiteX 300 was also a case nobody expected on
 // an address an operator had already picked.
 
+/**
+ * 300 dpi — the usual print floor, and the reason the source is the PDF.
+ *
+ * A letter page at 300 dpi is 2550 x 3300, which is 348 dpi across the
+ * document's 528pt content width. MyNHD's own PNG would be 140.
+ */
+export const HAZARD_DPI = 300;
+
 export type HazardStatus = 'pending' | 'fetched' | 'ready' | 'failed';
 
 /**
@@ -74,7 +83,7 @@ const ABOUT_THIS_PARCEL: ReadonlySet<PreviewFailure> = new Set([
   // APN search, which is why it is worth recording when it does.
   'multi_result',
   // success:true and no usable PNG. About the response, and specific to it.
-  'no_image',
+  'no_document',
   // The vendor declined and said why. Carries its own message.
   'api_error',
 ]);
@@ -255,15 +264,55 @@ export async function requestHazardPreview(profileId: number): Promise<HazardOut
     return { ok: false, profileId, status: 'failed', charges: 0, message: result.message };
   }
 
-  // ─── The bytes, measured and stored before anything lays them out ─────────
+  // ─── THE VENDOR'S BYTES GO TO STORAGE FIRST, UNCHANGED ───────────────────
   //
-  // Same ordering as the raw SiteX payload in generate.ts: what the vendor sent
-  // goes to storage before anything parses or renders it. The dimensions come
-  // from the PNG's own IHDR, because the sheet's layout depends on them and
-  // "it looked fine on screen" is not a measurement.
-  const size = pngSize(result.png);
-  const key = `concierge/${profileId}/mynhd-hazard.png`;
-  const up = await uploadFile({ key, buffer: result.png, contentType: 'image/png' });
+  // Same ordering as the raw SiteX payload in generate.ts: what the vendor
+  // sent is archived before anything transforms it. If the rasteriser is
+  // wrong, or a later version wants a different resolution, the source is
+  // here and no second vendor call is needed to get it.
+  const pdfKey = `concierge/${profileId}/mynhd-hazard.pdf`;
+  const pdfUp = await uploadFile({ key: pdfKey, buffer: result.pdf, contentType: 'application/pdf' });
+
+  // ─── Then rasterise at print resolution ──────────────────────────────────
+  //
+  // MyNHD's own PNG is 1024px wide, which is 140 dpi across the sheet and puts
+  // their disclaimer type at about 5pt, blurred. Their PDF has vector text, so
+  // redrawing it at 300 dpi is what makes a full-width sheet legible. This is
+  // the ONE place it happens: re-rendering a profile reuses the stored image
+  // and never rasterises again, exactly as the plat map converts once.
+  const raster = await rasterizeFirstPage(result.pdf, { dpi: HAZARD_DPI });
+
+  if (!raster.ok) {
+    await releaseClaim(claimKey);
+    await db.update(conciergeProfiles).set({
+      ...vendorCols,
+      hazardStatus: 'failed',
+      hazardError: `The hazard preview arrived but could not be rasterised: ${raster.detail}`.slice(0, 2000),
+      // The source is kept even on a rasterisation failure — it is what
+      // somebody will need to work out why.
+      hazardPdfStorageKey: pdfUp.success ? pdfKey : null,
+    }).where(eq(conciergeProfiles.id, profileId));
+    return {
+      ok: false, profileId, status: 'failed', charges: 0,
+      message: `MyNHD returned a preview but it could not be prepared for the document: ${raster.detail}`,
+    };
+  }
+
+  // ─── JPEG, under a budget ────────────────────────────────────────────────
+  //
+  // These profiles get emailed, so the document has a size it has to live
+  // inside — Gerard, 15 Oct 2026: the whole profile under 3 MB. The 300dpi PNG
+  // took profile 42 from 1.26 MB to 6.43 MB, and PNG is the wrong compression
+  // for a page that is half aerial photography.
+  //
+  // The quality is MEASURED rather than picked: the ladder is tried highest
+  // first and the first result inside the budget wins.
+  const encoded = await encodeForSheet(raster.png);
+  // The extension follows what the encoder actually chose, so the object in
+  // storage is not misdescribed. @react-pdf places either format.
+  const ext = encoded.contentType === 'image/png' ? 'png' : 'jpg';
+  const key = `concierge/${profileId}/mynhd-hazard.${ext}`;
+  const up = await uploadFile({ key, buffer: encoded.buffer, contentType: encoded.contentType });
 
   if (!up.success) {
     await releaseClaim(claimKey);
@@ -271,6 +320,7 @@ export async function requestHazardPreview(profileId: number): Promise<HazardOut
       ...vendorCols,
       hazardStatus: 'failed',
       hazardError: 'The hazard preview was fetched but could not be stored.',
+      hazardPdfStorageKey: pdfUp.success ? pdfKey : null,
     }).where(eq(conciergeProfiles.id, profileId));
     return {
       ok: false, profileId, status: 'failed', charges: 0,
@@ -278,14 +328,21 @@ export async function requestHazardPreview(profileId: number): Promise<HazardOut
     };
   }
 
+  // Dimensions from the RASTER, which is what was drawn. The JPEG is the same
+  // pixels re-encoded, so its dimensions are the raster's — read from the PNG
+  // header rather than trusting the rasteriser's own return value.
+  const size = pngSize(raster.png);
+
   await db.update(conciergeProfiles).set({
     ...vendorCols,
     hazardStatus: 'fetched',
     hazardStorageKey: key,
-    hazardSha256: crypto.createHash('sha256').update(result.png).digest('hex'),
-    hazardBytes: result.png.length,
+    hazardPdfStorageKey: pdfUp.success ? pdfKey : null,
+    hazardSha256: crypto.createHash('sha256').update(encoded.buffer).digest('hex'),
+    hazardBytes: encoded.bytes,
     hazardWidth: size?.width ?? null,
     hazardHeight: size?.height ?? null,
+    hazardDpi: raster.dpi,
     hazardOrderLink: result.orderLink,
     hazardError: null,
   }).where(eq(conciergeProfiles.id, profileId));
@@ -313,6 +370,27 @@ export async function requestHazardPreview(profileId: number): Promise<HazardOut
  */
 export async function renderHazardSheet(profileId: number): Promise<HazardOutcome> {
   const rendered = await renderProfile(profileId);
+
+  // ─── 'ready' MEANS ON THE DOCUMENT, AND IS NOW CHECKED ──────────────────
+  //
+  // This used to be `if (!rendered.ok)`. A render that succeeded set
+  // hazard_status='ready' — and while the document had no hazard sheet at all,
+  // every "ready" profile was a status over a PDF that did not show it.
+  // Gerard clicked, everything worked, and the document came out identical.
+  //
+  // Exactly profile 9 on the tax side, which this file's own comments cite
+  // three times. So the renderer now reports what it DREW, and 'ready'
+  // requires it.
+  if (rendered.ok && rendered.hazardPlaced === false) {
+    await db.update(conciergeProfiles).set({
+      hazardError: 'The document re-rendered but the hazard sheet was not placed on it.',
+    }).where(eq(conciergeProfiles.id, profileId));
+    return {
+      ok: false, profileId, status: 'fetched', charges: 0,
+      message: 'The hazard preview is stored, but the document re-rendered without its sheet. '
+        + 'The preview is kept; nothing was charged.',
+    };
+  }
 
   if (!rendered.ok) {
     // STAYS 'fetched', with the reason recorded. tax-bridge's lesson: the

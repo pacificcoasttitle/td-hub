@@ -72,7 +72,51 @@ export async function convertPlatMap(raw: RawPlatMap | null): Promise<PlatMapOut
   }
 }
 
-/** Data URI for react-pdf's <Image src>. */
-export function toDataUri(png: Buffer): string {
-  return `data:image/png;base64,${png.toString('base64')}`;
+/**
+ * Data URI for react-pdf's `<Image src>`, with the MIME the BYTES say.
+ *
+ * ─── IT USED TO HARDCODE image/png, AND THAT SHIPPED A BLANK PAGE ───────────
+ *
+ * Every image this placed was a PNG, so `data:image/png` was true by accident
+ * for a year. Then the MyNHD hazard sheet began choosing between PNG and JPEG
+ * by measuring which was smaller — the storage key's extension was updated and
+ * this, the one place that declares the format, was not. Profile 42 stored a
+ * perfectly good 2479x3508 JPEG and the document was handed a data URI
+ * claiming it was a PNG.
+ *
+ * react-pdf renders an `<Image>` it cannot decode as EMPTY RATHER THAN
+ * FAILING. So page 4 came out with its band, its footnote and its page
+ * number, and nothing in the middle. Nothing threw, nothing logged, the row
+ * said ready and it was — the image was simply mislabelled.
+ *
+ * ─── NULL RATHER THAN A GUESS ───────────────────────────────────────────────
+ *
+ * Bytes this cannot identify return null, and every caller already treats null
+ * as "no image" and renders the absence. The old behaviour — label anything
+ * as PNG — is precisely how a mislabelled image became an invisible blank
+ * page. A missing sheet is a worse-looking document and a better one to
+ * debug.
+ */
+export function toDataUri(image: Buffer): string | null {
+  const mime = imageMime(image);
+  if (!mime) return null;
+  return `data:${mime};base64,${image.toString('base64')}`;
+}
+
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/**
+ * The format, from the bytes. PNG and JPEG only — they are what react-pdf
+ * accepts, and what this codebase produces.
+ */
+export function imageMime(buf: Buffer): 'image/png' | 'image/jpeg' | null {
+  if (buf.length > PNG_MAGIC.length && buf.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC)) {
+    return 'image/png';
+  }
+  // JPEG: SOI marker, and every JPEG ends EOI — the start is enough to tell it
+  // apart from the only other thing we produce.
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  return null;
 }

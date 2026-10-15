@@ -201,9 +201,30 @@ export async function rasterizerHealth(
   if (cached) return cached;
   try {
     const r = await raster(TINY_PDF, { dpi: 72 });
-    cached = r.ok
-      ? { ok: true }
-      : { ok: false, detail: `${r.reason}: ${r.detail}`.slice(0, 200) };
+    if (!r.ok) {
+      cached = { ok: false, detail: `${r.reason}: ${r.detail}`.slice(0, 200) };
+      return cached;
+    }
+
+    // ─── AND IT DREW SOMETHING ───────────────────────────────────────────
+    //
+    // "It rendered" and "it rendered the content" are different, and this
+    // feature has now had a green check over a broken step twice. The first
+    // version of this function tested the canvas and not pdfjs, and passed
+    // while the worker was missing. A version that only checks the call
+    // completed would pass over a BLANK canvas — which is exactly what a
+    // missing standard-fonts directory produces, another runtime path that
+    // tracing cannot see.
+    //
+    // TINY_PDF fills a blue rectangle over most of its page, so a working
+    // render leaves a measurable amount of non-white. An all-white result
+    // means pdfjs ran and drew nothing.
+    const sharp = (await import('sharp')).default;
+    const stats = await sharp(r.png).stats();
+    const blank = stats.channels.every((c) => c.min === 255);
+    cached = blank
+      ? { ok: false, detail: 'rasterised, but the page came out blank — pdfjs drew nothing' }
+      : { ok: true };
   } catch (err) {
     cached = { ok: false, detail: err instanceof Error ? err.message.slice(0, 200) : 'unknown' };
   }

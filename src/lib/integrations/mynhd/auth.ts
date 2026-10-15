@@ -57,6 +57,17 @@ const normalize = (url: string) => {
 };
 
 /**
+ * The base URL this deploy would use, independent of whether a key is present.
+ *
+ * Health needs to classify URL placement before production credentials arrive.
+ * Keep that answer separate from readConfig(), whose job is to decide whether
+ * a vendor request is allowed.
+ */
+export function resolveBaseUrl(): string {
+  return normalize(process.env.MYNHD_BASE_URL ?? PRODUCTION_BASE_URL);
+}
+
+/**
  * Which Vercel target this is running on.
  *
  * `VERCEL_ENV` is 'production' | 'preview' | 'development' on Vercel and
@@ -97,7 +108,7 @@ export function readConfig(): { ok: true; config: MyNhdConfig } | { ok: false; r
   const secretKey = process.env.MYNHD_SECRET_KEY?.trim();
   if (!secretKey) return { ok: false, reason: 'no_secret' };
 
-  const baseUrl = normalize(process.env.MYNHD_BASE_URL ?? PRODUCTION_BASE_URL);
+  const baseUrl = resolveBaseUrl();
 
   if (onProductionTarget() && baseUrl !== PRODUCTION_BASE_URL) {
     return { ok: false, reason: 'dev_url_on_production' };

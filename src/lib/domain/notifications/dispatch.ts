@@ -47,7 +47,7 @@ export interface DispatchResult {
 
 export async function insertNotificationLog(entry: {
   eventType: string;
-  orderId: number;
+  orderId?: number | null;
   channel: string;
   recipientEmail?: string | null;
   recipientPhone?: string | null;
@@ -64,7 +64,7 @@ export async function insertNotificationLog(entry: {
 }): Promise<number> {
   const [row] = await db.insert(notificationLogs).values({
     eventType: entry.eventType,
-    orderId: entry.orderId,
+    orderId: entry.orderId ?? null,
     channel: entry.channel,
     recipientEmail: entry.recipientEmail ?? null,
     recipientPhone: entry.recipientPhone ?? null,

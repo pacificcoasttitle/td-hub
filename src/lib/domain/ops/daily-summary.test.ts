@@ -77,6 +77,38 @@ describe('composeAttention', () => {
     expect(out[0]).toBe('2 CPL documents could not be generated through westcor.');
   });
 
+  it('names sales-rep logins the job created, linked, or deactivated', () => {
+    const out = composeAttention({
+      ...CLEAN,
+      salesRepLogins: ok({
+        invited: [{ contactId: 1, name: 'Phan, Jane', email: 'jphan@pct.com' }],
+        linked: [{ contactId: 23287, name: 'Kessler, Kenny', email: 'kkessler@pct.com' }],
+        deactivated: [{ contactId: 3, name: 'Old, Rep', email: 'oldrep@pct.com' }],
+        reactivated: [],
+        refusedExternal: [],
+        capped: [],
+        skippedExisting: 0,
+        skippedNoEmail: 0,
+        failed: [],
+        summary: 'unused',
+      }),
+    });
+    expect(out[0]).toBe(
+      'Sales rep logins: invited Phan, Jane; linked Kessler, Kenny; deactivated Old, Rep.',
+    );
+  });
+
+  it('stays quiet about sales-rep logins when the job changed none', () => {
+    expect(composeAttention({
+      ...CLEAN,
+      salesRepLogins: ok({
+        invited: [], linked: [], deactivated: [], reactivated: [],
+        refusedExternal: [], capped: [], skippedExisting: 47, skippedNoEmail: 0,
+        failed: [], summary: 'Sales rep logins: no changes.',
+      }),
+    })).toEqual([]);
+  });
+
   it('stays quiet about sections it could not read', () => {
     expect(composeAttention({
       orderFlow: bad('timed out'),

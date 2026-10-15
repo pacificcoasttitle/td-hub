@@ -12,6 +12,12 @@ import {
   type SyncContactEntityType,
   type SyncContactsResult,
 } from './sync-contacts';
+import {
+  failedLoginSyncResult,
+  leftoverInviteContactIds,
+  listSalesRepContactIds,
+  runSalesRepLoginSync,
+} from '@/lib/domain/users/sales-rep-login-sync';
 
 /** Sales Rep only: one request, synced whole, then left alone this long. */
 const CONTACT_SYNC_COOLDOWN_MS = 16 * 60 * 60 * 1000;
@@ -264,7 +270,7 @@ export async function handleSyncContactType(
 
   try {
     const response = entityType === 'Sales Rep'
-      ? await syncSalesRepRoster(jobType, entityType, now)
+      ? await syncSalesRepRoster(jobType, entityType, now, state)
       : await syncPagedRun(jobType, entityType, state, now);
     await recordRun(payload, response);
     return response;
@@ -293,14 +299,30 @@ async function syncSalesRepRoster(
   jobType: string,
   entityType: SyncContactEntityType,
   now: () => number,
+  state: SyncState | undefined,
 ): Promise<SyncContactTypeResult> {
   const fetched = await fetchSyncContactRows(entityType);
   if (fetched.error) throw new Error(`${jobType}: ${fetched.error}`);
 
   const rows = sortSyncContactRows(entityType, fetched.items)
     .filter((item) => getSyncContactLookupCode(entityType, item) !== null);
+  // Capture who was already a sales rep BEFORE the roster write, so a first
+  // run of this login hook cannot invite the back catalogue.
+  const priorSalesRepContactIds = new Set(await listSalesRepContactIds());
+  const leftoverContactIds = leftoverInviteContactIds(state?.lastResult);
   const result = await syncContactRows(entityType, rows, { deactivateExistingSalesReps: true });
   assertNotSystemic(jobType, rows.length, result);
+
+  try {
+    result.loginProvisioning = await runSalesRepLoginSync({
+      priorSalesRepContactIds,
+      leftoverContactIds,
+    });
+  } catch (err) {
+    result.loginProvisioning = failedLoginSyncResult(
+      err instanceof Error ? err.message : 'Sales-rep login sync failed',
+    );
+  }
 
   const nextAllowedAt = new Date(now() + CONTACT_SYNC_COOLDOWN_MS);
   const response: SyncContactTypeResult = {

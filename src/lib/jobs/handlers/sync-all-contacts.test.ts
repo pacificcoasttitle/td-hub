@@ -11,6 +11,9 @@ const {
   updateWhereMock,
   updateSets,
   clock,
+  listSalesRepContactIdsMock,
+  runSalesRepLoginSyncMock,
+  leftoverInviteContactIdsMock,
 } = vi.hoisted(() => ({
   fetchSyncContactPageMock: vi.fn(),
   fetchSyncContactRowsMock: vi.fn(),
@@ -20,6 +23,9 @@ const {
   updateWhereMock: vi.fn(),
   updateSets: [] as Record<string, unknown>[],
   clock: { t: Date.parse('2026-09-15T18:00:00Z') },
+  listSalesRepContactIdsMock: vi.fn(),
+  runSalesRepLoginSyncMock: vi.fn(),
+  leftoverInviteContactIdsMock: vi.fn(),
 }));
 
 vi.mock('drizzle-orm', () => ({ eq: vi.fn(() => ({})) }));
@@ -40,6 +46,18 @@ vi.mock('@/lib/db/client', () => ({
       }),
     })),
   },
+}));
+
+vi.mock('@/lib/domain/users/sales-rep-login-sync', () => ({
+  listSalesRepContactIds: () => listSalesRepContactIdsMock(),
+  runSalesRepLoginSync: (...a: unknown[]) => runSalesRepLoginSyncMock(...a),
+  leftoverInviteContactIds: (r: unknown) => leftoverInviteContactIdsMock(r),
+  failedLoginSyncResult: (error: string) => ({
+    invited: [], linked: [], deactivated: [], reactivated: [],
+    refusedExternal: [], capped: [], skippedExisting: 0, skippedNoEmail: 0,
+    failed: [{ contactId: 0, name: 'sales-rep login sync', email: '', error }],
+    summary: error,
+  }),
 }));
 
 vi.mock('./sync-contacts', () => ({
@@ -95,12 +113,21 @@ function midSweep(overrides: Record<string, unknown> = {}) {
 const cursorSaves = () => updateSets.filter((s) => 'nextPage' in s);
 const finalState = () => updateSets.filter((s) => 'lastResult' in s).at(-1)!;
 
+const emptyLogin = {
+  invited: [], linked: [], deactivated: [], reactivated: [],
+  refusedExternal: [], capped: [], skippedExisting: 0, skippedNoEmail: 0,
+  failed: [], summary: 'Sales rep logins: no changes.',
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   updateSets.length = 0;
   clock.t = Date.parse('2026-09-15T18:00:00Z');
   insertOnConflictDoUpdateMock.mockResolvedValue(undefined);
   updateWhereMock.mockResolvedValue(undefined);
+  listSalesRepContactIdsMock.mockResolvedValue([]);
+  runSalesRepLoginSyncMock.mockResolvedValue(emptyLogin);
+  leftoverInviteContactIdsMock.mockReturnValue([]);
   cleanWrite();
 });
 
@@ -353,6 +380,37 @@ describe('Sales Rep stays a single pass', () => {
     expect(syncContactRowsMock).toHaveBeenCalledWith('Sales Rep', expect.any(Array), { deactivateExistingSalesReps: true });
     expect(result.status).toBe('completed');
     expect(result.nextAllowedAt).not.toBeNull();
+  });
+
+  it('captures the prior sales-rep ids before the roster write, then records loginProvisioning', async () => {
+    listSalesRepContactIdsMock.mockResolvedValueOnce([22140, 23287]);
+    leftoverInviteContactIdsMock.mockReturnValueOnce([40005]);
+    runSalesRepLoginSyncMock.mockResolvedValueOnce({
+      ...emptyLogin,
+      linked: [{ contactId: 23287, name: 'Kessler, Kenny', email: 'kkessler@pct.com' }],
+      summary: 'Sales rep logins: linked Kessler, Kenny.',
+    });
+    selectLimitMock.mockResolvedValueOnce([]);
+    fetchSyncContactRowsMock.mockResolvedValueOnce({ items: [{ LookupCode: 'REP-1' }], error: null });
+
+    const result = await handleSyncContactType('softpro.sync_contacts.sales_rep', {}, { now });
+
+    expect(listSalesRepContactIdsMock.mock.invocationCallOrder[0]!).toBeLessThan(
+      syncContactRowsMock.mock.invocationCallOrder[0]!,
+    );
+    expect(syncContactRowsMock.mock.invocationCallOrder[0]!).toBeLessThan(
+      runSalesRepLoginSyncMock.mock.invocationCallOrder[0]!,
+    );
+    expect(runSalesRepLoginSyncMock).toHaveBeenCalledWith({
+      priorSalesRepContactIds: new Set([22140, 23287]),
+      leftoverContactIds: [40005],
+    });
+    expect(result.loginProvisioning?.linked).toEqual([
+      { contactId: 23287, name: 'Kessler, Kenny', email: 'kkessler@pct.com' },
+    ]);
+    expect(finalState().lastResult).toEqual(expect.objectContaining({
+      loginProvisioning: expect.objectContaining({ summary: 'Sales rep logins: linked Kessler, Kenny.' }),
+    }));
   });
 });
 

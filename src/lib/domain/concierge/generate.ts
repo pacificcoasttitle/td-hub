@@ -1,40 +1,58 @@
 import crypto from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { conciergeProfiles, conciergeProfileComps, conciergeProfileTransfers } from '@/lib/db/schema';
-import { uploadFile } from '@/lib/integrations/s3/client';
+import { conciergeProfiles } from '@/lib/db/schema';
+import { downloadFile, uploadFile } from '@/lib/integrations/s3/client';
 import {
   fetchConciergeProfile, getConciergeFeedId, guardMessage, type MatchCandidate,
 } from '@/lib/integrations/sitex/concierge-feed';
-import {
-  normalizeComps, normalizePlatMap, normalizeSubject, normalizeTax, normalizeTransfers,
-} from './normalize';
-import { convertPlatMap } from './platmap';
-import { DEFAULT_CRITERIA, selectComps } from './comp-filter';
+import { normalizeSubject } from './normalize';
+import { DEFAULT_CRITERIA, type CompCriteria } from './comp-filter';
 import { criteriaSummary, profileListSubject } from './list-line';
 import { claimProperty, propertyRequestKey, recordClaimOutcome, releaseClaim } from './claim';
-import { alreadyHaveMessage, findProfileForProperty, type ExistingProfile } from './already-have';
+import {
+  alreadyHaveMessage, findProfileForProperty, findResolvedForProperty, type ExistingProfile,
+} from './already-have';
 import { TEMPLATE_VERSION } from './document/profile-document';
-import { compRowValues } from './comp-row';
-import { subjectFactsFromPayload } from './subject-facts';
-import { renderProfile } from './render';
+import { NO_PAYLOAD_MESSAGE, resumeFromStored } from './retry';
 
-// ─── Generation: the ONLY path that spends a credit ─────────────────────────
-//
-// Exactly one SiteX call, made once, guarded before it is trusted. Everything
-// the call returned is stored before anything is computed from it, so no later
-// operation ever needs to buy it again — which is what makes the render path
-// free and unlimited.
-//
-// Order of operations is deliberate:
-//   1. row first, status 'pending'      so a crash leaves a record, not a gap
-//   2. the call
-//   3. guard — a failure stores the evidence and produces NO document
-//   4. raw payload to storage BEFORE parsing
-//   5. comps, transfers, maps — EACH COMP ROW WRITTEN ALREADY DECIDED
-//   6. render, which is a separate module that cannot call the vendor
+/**
+ * Re-exported, not re-implemented: it moved to ingest.ts when the resolve and
+ * finalise halves were split apart, and every existing caller asks generate.ts
+ * for it. The direction of the dependency is generate → ingest, never back.
+ */
+export { ingestPayload } from './ingest';
 
-export interface GenerateInput {
+// ─── Resolve, then finalise ─────────────────────────────────────────────────
+//
+// RESOLVE spends the credit. FINALISE renders from what resolve stored and can
+// never reach the vendor. The split is the whole point: the question "which
+// property is this?" is answered and paid for ONCE, up front, and everything
+// the operator does afterwards — prepared-for name, rep, criteria, add-ons —
+// is free and repeatable.
+//
+// Before this split, the gate came first and Generate did both. An operator
+// filled in six fields, clicked Generate, and only then discovered the address
+// matched four parcels — having already been charged. The picker then re-sent
+// the whole form and charged again.
+//
+// resolveProperty:                        finaliseProfile:
+//   0a. already generated? → offer it       1. the stored payload
+//   0b. already resolved?  → reuse, free    2. ingest: comps, transfers, maps
+//   0c. claim — one caller through          3. render
+//   1.  row first, status 'pending'
+//   2.  THE CALL
+//   3.  guard — evidence kept either way
+//   4.  raw to storage, status 'retrieved'
+//
+// 'retrieved' is not a new word for this. It already meant exactly this state —
+// payload archived, nothing rendered — and held zero rows in production; it was
+// simply transient, lasting the milliseconds between the upload and the ingest.
+// Resolve-first makes it durable and operator-visible. A resolved row and a
+// half-finished generation are the same row, which is why `resume` already
+// finishes one.
+
+export interface PropertyLookup {
   orderId?: number | null;
   street: string;
   city: string;
@@ -48,13 +66,64 @@ export interface GenerateInput {
    * The parcel the operator picked out of a multi-match. Searched by in
    * preference to the address.
    *
-   * Absent on a first attempt and that is not a gap: there is no free
-   * resolution step, so no APN exists before a call has been made (claim.ts
-   * explains why the duplicate guard cannot key on it either). These arrive
-   * only from a 300, which charges nothing.
+   * Absent on a first attempt and that is not a gap: no APN exists before an
+   * address has matched something (claim.ts explains why the duplicate guard
+   * cannot key on it either). These arrive only from a 300, which charges
+   * nothing — and since the resolve step is the spend, picking a parcel out of
+   * a 300 now costs exactly one credit in total rather than two.
    */
   apn?: string | null;
   fips?: string | null;
+  createdBy?: string | null;
+  /**
+   * The operator was shown what we already hold for this property and asked
+   * for a fresh lookup anyway.
+   *
+   * Skips BOTH the generated-profile check and the resolution reuse: someone
+   * who has explicitly asked for a fresh lookup is asking for a fresh call,
+   * and handing them a resolution from this morning would quietly refuse them.
+   */
+  allowDuplicate?: boolean;
+}
+
+/** What resolve found, and what the gate shows the operator before they commit. */
+export interface ResolvedProperty {
+  profileId: number;
+  creditsCharged: number;
+  /**
+   * This resolution was already paid for — by this operator's earlier attempt,
+   * or by someone else within the window.
+   */
+  reused: boolean;
+  apn: string | null;
+  fips: string | null;
+  county: string | null;
+  /** The address SiteX holds, which is not always the one that was typed. */
+  siteAddress: string | null;
+  siteCityState: string | null;
+  /** Recorded owner, verbatim. The operator's main way of recognising a unit. */
+  primaryOwner: string | null;
+  useDescription: string | null;
+  /** The handle that reconciles the charge against an invoice line. */
+  searchId: number | null;
+}
+
+export type ResolveOutcome =
+  | { ok: true; resolved: ResolvedProperty }
+  | {
+    ok: false; profileId: number | null; creditsCharged: number; message: string;
+    /**
+     * The parcels to choose between, when the address matched more than one.
+     * The caller shows these and resolves again with `apn`/`fips`. That second
+     * resolve is the one that charges — the 300 itself was free.
+     */
+    candidates?: MatchCandidate[];
+  }
+  | { ok: false; duplicate: true; profileId: number | null; creditsCharged: 0; message: string }
+  | { ok: false; alreadyHave: ExistingProfile; profileId: number; creditsCharged: 0; message: string };
+
+/** The gate: everything collected AFTER the property is known, none of it billable. */
+export interface FinaliseInput {
   preparedForName: string;
   preparedForCompany?: string | null;
   preparedForEmail?: string | null;
@@ -64,14 +133,25 @@ export interface GenerateInput {
     phone?: string | null;
     title?: string | null;
   };
-  createdBy?: string | null;
-  /**
-   * The operator was shown the profile we already hold for this property and
-   * asked for a fresh one anyway. Absent, an existing profile stops the spend
-   * and is returned instead.
-   */
-  allowDuplicate?: boolean;
+  criteria?: CompCriteria;
 }
+
+export type FinaliseOutcome =
+  | { ok: true; profileId: number; compsShown: number }
+  | {
+    ok: false; profileId: number; message: string;
+    /** Already a document. Not an error worth a red banner — open it. */
+    alreadyGenerated?: boolean;
+  };
+
+/**
+ * Both halves at once, for the single-shot path.
+ *
+ * Still used by the orders flow, where the property is already known from the
+ * order and there is no gate to fill in, and by every test that asserts the
+ * whole sequence. The Reports modal resolves and finalises separately.
+ */
+export type GenerateInput = PropertyLookup & FinaliseInput;
 
 export type GenerateOutcome =
   | { ok: true; profileId: number; creditsCharged: number; compsShown: number }
@@ -95,7 +175,14 @@ export type GenerateOutcome =
    */
   | { ok: false; alreadyHave: ExistingProfile; profileId: number; creditsCharged: 0; message: string };
 
-export async function generateConciergeProfile(input: GenerateInput): Promise<GenerateOutcome> {
+/**
+ * THE ONLY FUNCTION THAT SPENDS A CREDIT.
+ *
+ * Answers "which property is this?", pays for the answer, and stores it. No
+ * document, no prepared-for name, no criteria — none of that is known yet, and
+ * none of it costs anything.
+ */
+export async function resolveProperty(input: PropertyLookup): Promise<ResolveOutcome> {
   const feedId = getConciergeFeedId();
 
   // 0. THE GUARD, BEFORE ANYTHING. Keyed on the property, not the order: the
@@ -115,9 +202,22 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
         creditsCharged: 0, message: alreadyHaveMessage(existing),
       };
     }
+
+    // 0b. ALREADY RESOLVED AND NOT YET FINALISED? Then it is paid for, and
+    //     finishing it is free. This is the whole answer to two operators
+    //     working the same property minutes apart: the first one's claim was
+    //     released the moment their lookup succeeded, so without this the
+    //     second one buys the same parcel again at full price.
+    const held = await findResolvedForProperty(requestKey);
+    if (held) {
+      const reused = await readResolution(held.id, held.rawStorageKey);
+      // Unreadable storage falls through to a fresh call rather than failing:
+      // a resolution we cannot read is a resolution we do not have.
+      if (reused) return { ok: true, resolved: reused };
+    }
   }
 
-  // 0b. THE RACE GUARD. Two clicks a second apart both read nothing above; this
+  // 0c. THE RACE GUARD. Two clicks a second apart both read nothing above; this
   //     is the statement that lets exactly one of them through.
   const claim = await claimProperty(requestKey);
   if (!claim.held) {
@@ -148,13 +248,11 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
     criteriaRadiusMiles: DEFAULT_CRITERIA.radiusMiles === null ? null : String(DEFAULT_CRITERIA.radiusMiles),
     criteriaMonths: DEFAULT_CRITERIA.months,
     criteriaMaxComps: DEFAULT_CRITERIA.maxComps,
-    preparedForName: input.preparedForName,
-    preparedForCompany: input.preparedForCompany ?? null,
-    preparedForEmail: input.preparedForEmail ?? null,
-    presentingRepName: input.presentingRep.name,
-    presentingRepEmail: input.presentingRep.email ?? null,
-    presentingRepPhone: input.presentingRep.phone ?? null,
-    presentingRepTitle: input.presentingRep.title ?? null,
+    // NO prepared-for name and NO rep. They are not known yet and that is the
+    // design: the operator fills them in after seeing which property this is.
+    // Both columns are nullable, so a resolution is a legal row rather than a
+    // row padded with placeholders that would print on a document if finalise
+    // ever forgot to overwrite them.
     templateVersion: TEMPLATE_VERSION,
     status: 'pending',
     // The property, as the guard keys it (migration 0059).
@@ -269,156 +367,173 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
     return { ok: false, profileId, creditsCharged: result.creditsCharged, message };
   }
 
-  const { apn } = await ingestPayload(profileId, result.payload);
+  // 5. WHICH PROPERTY IT TURNED OUT TO BE. Identity only — the APN, the county,
+  //    what it is. Not the valuations, the comparables or the transfers: those
+  //    are derived work, and derived work belongs to finalise, which can redo
+  //    it for nothing as often as the criteria change.
+  const subject = normalizeSubject((result.payload.Feed ?? {}) as Record<string, unknown>);
+  await db.update(conciergeProfiles).set({
+    subjectApn: subject.apn, subjectFips: subject.fips, subjectCounty: subject.county,
+    subjectUseCode: subject.useCode, subjectUseDescription: subject.useDescription,
+  }).where(eq(conciergeProfiles.id, profileId));
 
   // The property this address turned out to be. Evidence on the claim, not the
   // pre-spend key — the APN does not exist until the call has been paid for.
-  await recordClaimOutcome(requestKey, profileId, apn);
+  await recordClaimOutcome(requestKey, profileId, subject.apn ?? null);
 
-  // 6. Render. Separate module, no vendor access — see render.ts.
-  const rendered = await renderProfile(profileId, DEFAULT_CRITERIA);
-  if (!rendered.ok) {
-    return {
-      ok: false, profileId, creditsCharged: result.creditsCharged,
-      message: `${rendered.message ?? 'The document could not be produced.'} The property data is stored, so retrying the render costs nothing.`,
-    };
-  }
-
-  return { ok: true, profileId, creditsCharged: result.creditsCharged, compsShown: rendered.compsShown ?? 0 };
-}
-
-
-/**
- * Everything that happens to a payload we have already paid for.
- *
- * SEPARATE FROM THE CALL ON PURPOSE. The raw response is in storage before this
- * runs, so a profile whose ingest failed can be completed from what is stored —
- * without going back to the vendor and without spending a second credit. That
- * is what raw_storage_key was always for; nothing exercised it until profile 3.
- *
- * ─── THE FILTER RUNS BEFORE THE WRITE ───────────────────────────────────────
- *
- * Every comp row is inserted ALREADY DECIDED: selected with a display position,
- * or excluded with the rule that rejected it. The check constraint
- * `concierge_comps_exclusion_shape` requires exactly that, and it is the reason
- * the stored set can explain itself months later — every comparable either
- * appears at a position or carries why it does not.
- *
- * Writing candidates undecided and filtering afterwards is what failed on the
- * first real generation: `selected = false, exclusion_reason = NULL` is a third
- * state the schema does not allow, and it should not — it is a row that means
- * nothing. selectComps is pure and takes no I/O, so there is no reason to write
- * first and decide second.
- */
-export async function ingestPayload(
-  profileId: number,
-  /** The parsed SiteX response — from the call, or from stored raw on a resume. */
-  payload: { Feed?: Record<string, unknown> },
-  now: Date = new Date(),
-): Promise<{ apn: string | null; compsReturned: number }> {
-  const feed = (payload.Feed ?? {}) as Record<string, unknown>;
-  const subject = normalizeSubject(feed);
-  const tax = normalizeTax(feed);
-  const comps = normalizeComps(feed);
-  const transfers = normalizeTransfers(feed);
-  const platmapRaw = normalizePlatMap(feed);
-
-  // 5a. Decide, then write. The render step re-runs this whenever the criteria
-  //     move; these are the decisions the FIRST document was built from.
-  const decisions = selectComps(comps, subjectFactsFromPayload(subject), DEFAULT_CRITERIA, now);
-  const byPosition = new Map(decisions.decisions.map((d) => [d.candidate.sourcePosition, d]));
-
-  if (comps.length > 0) {
-    await db.insert(conciergeProfileComps).values(comps.map((c) => {
-      // One decision per candidate, so this cannot miss. If it ever does, stop:
-      // the row would have to be written undecided, and an undecided row is the
-      // thing the constraint exists to refuse. The payload is already stored,
-      // so the profile is resumable rather than lost.
-      const d = byPosition.get(c.sourcePosition);
-      if (!d) throw new Error(`Comparable ${c.sourcePosition} came back without a decision.`);
-      // ONE MAPPING, BOTH DIRECTIONS (comp-row.ts). The inverse is what the
-      // re-render path reads, and a round-trip test holds them together — a
-      // field written here and not read back there is how a re-rendered
-      // profile printed "Comparable 1" instead of an address.
-      return compRowValues(c, d, profileId);
-    }));
-  }
-
-  if (transfers.length > 0) {
-    await db.insert(conciergeProfileTransfers).values(transfers.map((t) => ({
-      profileId,
-      sourcePosition: t.sourcePosition,
-      transactionType: t.transactionType, documentType: t.documentType,
-      recordingDate: t.recordingDate, contractDate: t.contractDate,
-      documentNumber: t.documentNumber, bookNumber: t.bookNumber, pageNumber: t.pageNumber,
-      currentOwnerFlag: t.currentOwnerFlag, isForeclosure: t.isForeclosure,
-      raw: t.raw,
-    })));
-  }
-
-  // 5b. Maps are SNAPSHOTTED, not linked. SiteX's map URL is time-bound, so a
-  //     profile re-rendered in three years would otherwise show a broken image.
-  const platmapCols = await storePlatMap(profileId, platmapRaw);
-  const compMapCols = await storeCompMap(profileId, feed);
-
-  await db.update(conciergeProfiles).set({
-    ...platmapCols, ...compMapCols,
-    subjectApn: subject.apn, subjectFips: subject.fips, subjectCounty: subject.county,
-    subjectUseCode: subject.useCode, subjectUseDescription: subject.useDescription,
-    subjectBeds: subject.beds,
-    subjectBaths: subject.baths === null ? null : String(subject.baths),
-    subjectBuildingArea: subject.buildingArea, subjectLotSize: subject.lotSize,
-    subjectYearBuilt: subject.yearBuilt,
-    subjectLatitude: subject.latitude === null ? null : String(subject.latitude),
-    subjectLongitude: subject.longitude === null ? null : String(subject.longitude),
-    subjectLastSaleDate: subject.lastSaleDate,
-    subjectLastSalePrice: subject.lastSalePrice === null ? null : String(subject.lastSalePrice),
-    taxYear: tax.year,
-    taxAssessedValue: tax.assessedValue === null ? null : String(tax.assessedValue),
-    taxLandValue: tax.landValue === null ? null : String(tax.landValue),
-    taxImprovementValue: tax.improvementValue === null ? null : String(tax.improvementValue),
-    taxMarketValue: tax.marketValue === null ? null : String(tax.marketValue),
-    taxAmount: tax.taxAmount === null ? null : String(tax.taxAmount),
-    taxStatus: tax.status,
-    compsReturned: comps.length,
-  }).where(eq(conciergeProfiles.id, profileId));
-
-  return { apn: subject.apn ?? null, compsReturned: comps.length };
-}
-
-async function storePlatMap(profileId: number, raw: ReturnType<typeof normalizePlatMap>) {
-  if (!raw) return { platmapFilename: null, platmapStatus: null };
-  const converted = await convertPlatMap(raw);
-  if (!converted.ok) {
-    // The absence and its reason are recorded; the document renders the gap.
-    return { platmapFilename: raw.filename, platmapStatus: raw.status ?? converted.reason };
-  }
-  const key = `concierge/${profileId}/platmap.png`;
-  const up = await uploadFile({ key, buffer: converted.png, contentType: 'image/png' });
   return {
-    platmapFilename: raw.filename,
-    platmapStatus: raw.status,
-    platmapStorageKey: up.success ? key : null,
-    platmapSha256: crypto.createHash('sha256').update(converted.png).digest('hex'),
+    ok: true,
+    resolved: {
+      profileId,
+      creditsCharged: result.creditsCharged,
+      reused: false,
+      searchId: result.guard?.searchId ?? null,
+      ...displayFields(subject),
+    },
   };
 }
 
-async function storeCompMap(profileId: number, feed: Record<string, unknown>) {
-  const url = typeof feed.PropertyMapURL === 'string' ? feed.PropertyMapURL : null;
-  if (!url) return { compMapUrl: null };
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-    if (!res.ok) return { compMapUrl: url };
-    const buf = Buffer.from(await res.arrayBuffer());
-    const key = `concierge/${profileId}/comp-map.png`;
-    const up = await uploadFile({ key, buffer: buf, contentType: 'image/png' });
-    return {
-      compMapUrl: url,
-      compMapStorageKey: up.success ? key : null,
-      compMapSha256: crypto.createHash('sha256').update(buf).digest('hex'),
-    };
-  } catch {
-    // A map we could not fetch is a gap on the page, not a failed profile.
-    return { compMapUrl: url };
-  }
+/** The property as the gate shows it. One mapping, used by both resolve paths. */
+function displayFields(subject: ReturnType<typeof normalizeSubject>) {
+  return {
+    apn: subject.apn,
+    fips: subject.fips,
+    county: subject.county,
+    siteAddress: subject.siteAddress,
+    siteCityState: subject.siteCityState,
+    primaryOwner: subject.primaryOwner,
+    useDescription: subject.useDescription,
+  };
 }
+
+/**
+ * A resolution read back off storage, for the operator who did not pay for it.
+ *
+ * Returns null on anything unreadable, which the caller treats as "no
+ * resolution" and pays for a fresh one. Deliberately not an error: a stored
+ * object we cannot parse must not be able to block a property from ever being
+ * looked up again.
+ */
+async function readResolution(
+  profileId: number,
+  rawStorageKey: string,
+): Promise<ResolvedProperty | null> {
+  const raw = await downloadFile(rawStorageKey);
+  if (!raw.success || !raw.data) return null;
+
+  let payload: { Feed?: Record<string, unknown>; OrderInfo?: { SearchId?: number } };
+  try {
+    payload = JSON.parse(raw.data.toString('utf8')) as typeof payload;
+  } catch {
+    return null;
+  }
+
+  const subject = normalizeSubject((payload.Feed ?? {}) as Record<string, unknown>);
+  return {
+    profileId,
+    // Nothing was charged for THIS request. The credit is on the row that
+    // first resolved it, where the metering already counts it once.
+    creditsCharged: 0,
+    reused: true,
+    searchId: payload.OrderInfo?.SearchId ?? null,
+    ...displayFields(subject),
+  };
+}
+
+/**
+ * Turn a resolution into a document. FREE, and it cannot reach the vendor —
+ * nothing below this line imports the SiteX client.
+ *
+ * Takes the gate the operator filled in after seeing the property, writes it
+ * to the row, then does exactly what `resumeFromStored` does: ingest the stored
+ * payload and render. That is not a coincidence — a resolution awaiting its
+ * gate and a generation that died after the upload are the same row in the same
+ * state, so they are finished by the same code.
+ */
+export async function finaliseProfile(
+  profileId: number,
+  gate: FinaliseInput,
+): Promise<FinaliseOutcome> {
+  const [profile] = await db.select({
+    id: conciergeProfiles.id,
+    status: conciergeProfiles.status,
+    rawStorageKey: conciergeProfiles.rawStorageKey,
+    pdfStorageKey: conciergeProfiles.pdfStorageKey,
+  }).from(conciergeProfiles).where(eq(conciergeProfiles.id, profileId)).limit(1);
+
+  if (!profile) return { ok: false, profileId, message: 'Profile not found.' };
+
+  // Already a document. Not an error — the second operator in the window, or a
+  // double-click on Generate. Say so and let the caller open it.
+  if (profile.pdfStorageKey) {
+    return {
+      ok: false, profileId, alreadyGenerated: true,
+      message: 'This property has already been generated. Opening that document — nothing was charged.',
+    };
+  }
+
+  // THE LINE BETWEEN FINISHING AND BUYING IT AGAIN. A row with no stored
+  // payload cannot be finalised, and finalise has no way to go and get one.
+  if (!profile.rawStorageKey) {
+    return { ok: false, profileId, message: NO_PAYLOAD_MESSAGE };
+  }
+
+  const criteria = gate.criteria ?? DEFAULT_CRITERIA;
+
+  // The gate, onto the row, BEFORE the render reads it. The document prints
+  // these names; a render that ran first would print nulls.
+  await db.update(conciergeProfiles).set({
+    preparedForName: gate.preparedForName,
+    preparedForCompany: gate.preparedForCompany ?? null,
+    preparedForEmail: gate.preparedForEmail ?? null,
+    presentingRepName: gate.presentingRep.name,
+    presentingRepEmail: gate.presentingRep.email ?? null,
+    presentingRepPhone: gate.presentingRep.phone ?? null,
+    presentingRepTitle: gate.presentingRep.title ?? null,
+    criteriaSameUseCode: criteria.sameUseCode,
+    criteriaLivingAreaPct: criteria.livingAreaPct,
+    criteriaBedDelta: criteria.bedDelta,
+    criteriaBathDelta: criteria.bathDelta,
+    criteriaRadiusMiles: criteria.radiusMiles === null ? null : String(criteria.radiusMiles),
+    criteriaMonths: criteria.months,
+    criteriaMaxComps: criteria.maxComps,
+    listSettings: criteriaSummary(criteria),
+  }).where(eq(conciergeProfiles.id, profileId));
+
+  // Shared with `resume` and the Reports list's "Try again", which is the point:
+  // one implementation of "finish what is stored", exercised by three callers.
+  const finished = await resumeFromStored(profileId, criteria);
+  if (!finished.ok) {
+    return { ok: false, profileId, message: finished.message };
+  }
+
+  const [done] = await db.select({ compsShown: conciergeProfiles.compsShown })
+    .from(conciergeProfiles).where(eq(conciergeProfiles.id, profileId)).limit(1);
+  return { ok: true, profileId, compsShown: done?.compsShown ?? 0 };
+}
+
+/**
+ * Resolve and finalise in one call.
+ *
+ * The orders flow's entry point, where the property comes off the order and
+ * there is no gate to put in front of anyone. The Reports modal calls the two
+ * halves separately so the operator sees the property before committing.
+ */
+export async function generateConciergeProfile(input: GenerateInput): Promise<GenerateOutcome> {
+  const resolved = await resolveProperty(input);
+  if (!resolved.ok) return resolved;
+
+  const { profileId, creditsCharged } = resolved.resolved;
+  const finished = await finaliseProfile(profileId, input);
+  if (!finished.ok) {
+    return {
+      ok: false, profileId, creditsCharged,
+      message: finished.alreadyGenerated
+        ? finished.message
+        : `${finished.message} The property data is stored, so finishing it again costs nothing.`,
+    };
+  }
+  return { ok: true, profileId, creditsCharged, compsShown: finished.compsShown };
+}
+
+

@@ -22,7 +22,7 @@ vi.mock('@/lib/db/client', () => ({
 vi.mock('@/lib/integrations/s3/client', () => ({
   downloadFile: vi.fn(async () => ({ success: true, data: Buffer.from('{"Feed":{}}') })),
 }));
-vi.mock('./generate', () => ({
+vi.mock('./ingest', () => ({
   ingestPayload: vi.fn(async () => { s.calls.push('ingest'); return { apn: null, compsReturned: 25 }; }),
 }));
 vi.mock('./render', () => ({

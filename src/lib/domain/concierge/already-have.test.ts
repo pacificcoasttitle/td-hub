@@ -8,7 +8,9 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-const { alreadyHaveMessage, findProfileForProperty } = await import('./already-have');
+const {
+  alreadyHaveMessage, findProfileForProperty, findResolvedForProperty, RESOLUTION_TTL_MS,
+} = await import('./already-have');
 const { propertyRequestKey } = await import('./claim');
 
 const NOW = new Date('2026-09-18T12:00:00Z');
@@ -44,6 +46,62 @@ describe('do we already have this property', () => {
     // would tell an operator we hold a property we have never bought.
     rows.value = [row()];
     expect(await findProfileForProperty('', NOW)).toBeNull();
+  });
+});
+
+// ─── A resolution: paid for, not yet a document ─────────────────────────────
+//
+// The gap the resolve-first flow opens. Between the credit being spent and the
+// operator filling in the gate, the claim has already been released — it is
+// released the moment the lookup succeeds — so there is a window in which the
+// same property can be bought a second time by anyone. This is what closes it.
+
+describe('a resolution already paid for', () => {
+  const KEY = '1358 5th st|la verne|ca|91750';
+  const resolvedRow = (over: Record<string, unknown> = {}) => ({
+    id: 11, createdAt: new Date(NOW.getTime() - 10 * 60_000),
+    rawStorageKey: 'concierge/11/sitex-raw.json', ...over,
+  });
+
+  it('is found within the window, with how long ago it was bought', async () => {
+    rows.value = [resolvedRow()];
+    const found = await findResolvedForProperty(KEY, NOW);
+    expect(found).toMatchObject({ id: 11, ageMinutes: 10, rawStorageKey: 'concierge/11/sitex-raw.json' });
+  });
+
+  it('EXPIRES, because the payload is a snapshot and the document is dated', async () => {
+    // A month-old payload finalised today prints month-old assessed values
+    // under today's date, which is worse than paying again.
+    rows.value = [resolvedRow({ createdAt: new Date(NOW.getTime() - RESOLUTION_TTL_MS - 1000) })];
+    expect(await findResolvedForProperty(KEY, NOW)).toBeNull();
+  });
+
+  it('survives an interruption long enough to be useful', async () => {
+    // The point of a day rather than the claim's fifteen minutes: an operator
+    // resolves an address, gets pulled onto a closing, and comes back after
+    // lunch. Fifteen minutes would charge them twice for that.
+    rows.value = [resolvedRow({ createdAt: new Date(NOW.getTime() - 3 * 60 * 60_000) })];
+    expect(await findResolvedForProperty(KEY, NOW)).not.toBeNull();
+  });
+
+  it('is NOT offered when the payload never reached storage', async () => {
+    // A 'retrieved' row whose upload failed has nothing to finalise FROM.
+    // Offering it would strand the second operator on a row that can never
+    // produce a document — and they would have no way to buy the property.
+    rows.value = [resolvedRow({ rawStorageKey: null })];
+    expect(await findResolvedForProperty(KEY, NOW)).toBeNull();
+  });
+
+  it('never matches on an empty key', async () => {
+    rows.value = [resolvedRow()];
+    expect(await findResolvedForProperty('', NOW)).toBeNull();
+  });
+
+  it('ignores a row from the future rather than treating it as fresh', async () => {
+    // Clock skew between the app and the database. A negative age read as
+    // "within the window" would reuse a row whose payload may not be written.
+    rows.value = [resolvedRow({ createdAt: new Date(NOW.getTime() + 60_000) })];
+    expect(await findResolvedForProperty(KEY, NOW)).toBeNull();
   });
 });
 

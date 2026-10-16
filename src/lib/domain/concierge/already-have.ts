@@ -81,6 +81,86 @@ export async function findProfileForProperty(
   };
 }
 
+/**
+ * How long a paid-for resolution may be finalised without buying it again.
+ *
+ * ─── WHY IT EXPIRES AT ALL ──────────────────────────────────────────────────
+ *
+ * A resolution is a payload with a timestamp: assessed values, comparables and
+ * transfer history as they stood when the credit was spent. Finalising it next
+ * month would print month-old data under today's date, which is worse than
+ * paying again. So it expires, and the expiry is short enough that the
+ * document is from the day the property was looked up.
+ *
+ * ─── WHY A DAY, AND NOT FIFTEEN MINUTES ─────────────────────────────────────
+ *
+ * The claim's fifteen minutes defeat a double-click. This window has a
+ * different job: an operator resolves an address, gets pulled onto a closing,
+ * and comes back after lunch to fill in the prepared-for name. Fifteen minutes
+ * would charge them twice for that. A day covers the interruption without
+ * letting the payload go stale.
+ *
+ * `findProfileForProperty` above still covers the longer horizon — it finds a
+ * GENERATED profile over all time and offers it.
+ */
+export const RESOLUTION_TTL_MS = 24 * 60 * 60 * 1000;
+
+export interface ResolvedProfile {
+  id: number;
+  createdAt: string;
+  /** Whole minutes since the credit was spent. */
+  ageMinutes: number;
+  rawStorageKey: string;
+}
+
+/**
+ * A resolution already paid for and not yet turned into a document.
+ *
+ * This is the second operator's answer to "has this already been bought?" in
+ * the window where the first operator has spent the credit but not yet filled
+ * in the gate. Without it, two people resolving the same property five minutes
+ * apart buy it twice — the claim has nothing to say, because the first
+ * operator's claim was released the moment their lookup succeeded.
+ *
+ * Requires the stored payload, not merely the status: a 'retrieved' row whose
+ * upload failed has nothing to finalise FROM, and offering it would strand the
+ * second operator on a row that can never produce a document.
+ */
+export async function findResolvedForProperty(
+  propertyKey: string,
+  now: Date = new Date(),
+): Promise<ResolvedProfile | null> {
+  if (!propertyKey) return null;
+
+  const [row] = await db.select({
+    id: conciergeProfiles.id,
+    createdAt: conciergeProfiles.createdAt,
+    rawStorageKey: conciergeProfiles.rawStorageKey,
+  })
+    .from(conciergeProfiles)
+    .where(and(
+      eq(conciergeProfiles.propertyKey, propertyKey),
+      eq(conciergeProfiles.status, 'retrieved'),
+      isNotNull(conciergeProfiles.rawStorageKey),
+    ))
+    .orderBy(desc(conciergeProfiles.createdAt))
+    .limit(1);
+
+  if (!row?.rawStorageKey) return null;
+
+  const created = new Date(row.createdAt);
+  const age = now.getTime() - created.getTime();
+  // Expired is the same as absent: the caller resolves afresh and pays.
+  if (age > RESOLUTION_TTL_MS || age < 0) return null;
+
+  return {
+    id: row.id,
+    createdAt: created.toISOString(),
+    ageMinutes: Math.max(0, Math.floor(age / 60_000)),
+    rawStorageKey: row.rawStorageKey,
+  };
+}
+
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
 

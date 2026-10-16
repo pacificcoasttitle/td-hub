@@ -45,7 +45,24 @@ describe('the Report column sub-line', () => {
 
   it('says Generating while a profile is still being fetched', () => {
     expect(sourceLineFor('concierge_profile', 'pending', 0)).toBe('Generating');
-    expect(sourceLineFor('concierge_profile', 'retrieved', 1)).toBe('Generating');
+    // A rep means the gate was filled in, so this one IS in flight: it is a
+    // generation between the upload and the ingest, which is what 'retrieved'
+    // used to mean exclusively.
+    expect(sourceLineFor('concierge_profile', 'retrieved', 1, 'Justin Nouri')).toBe('Generating');
+  });
+
+  it('tells a RESOLUTION apart from a generation in flight', () => {
+    // Both are status 'retrieved' holding a paid-for payload. Only one has
+    // anything working on it. Before resolve-first (16 Oct 2026) the state
+    // lasted milliseconds and "Generating" was true of all of it; now the row
+    // can sit for hours waiting for someone to say who it is for.
+    expect(sourceLineFor('concierge_profile', 'retrieved', 1, null))
+      .toBe('Looked up — not yet generated');
+    expect(sourceLineFor('concierge_profile', 'retrieved', 1, undefined))
+      .toBe('Looked up — not yet generated');
+    // And it does not claim the lookup never happened, which is the other way
+    // to get this wrong — the credit IS spent and the payload IS on the row.
+    expect(sourceLineFor('concierge_profile', 'retrieved', 1, null)).not.toMatch(/No lookup|Failed/);
   });
 
   it('names all four types', () => {

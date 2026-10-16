@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyNonOkBody } from './client';
+import { readSource } from '@/test-support/read-source';
 
 // Payload shapes below are taken verbatim from production vendor_api_logs.
 
@@ -75,5 +76,40 @@ describe('classifyNonOkBody', () => {
   it('does not mistake a NotFound payload on a 500 for a no-match', () => {
     // Status is part of the decision — a server error stays an error.
     expect(classifyNonOkBody(500, NOT_FOUND_BODY).kind).toBe('error');
+  });
+});
+
+// ─── A charged search has to be reconcilable ────────────────────────────────
+//
+// property_search logged { match, locationCount } on a 200 — no SearchId, no
+// credit, no feed id. So a charged address search left no handle that joins to
+// an invoice line and no record of which feed it was billed under. The
+// concierge logger has recorded all three since it shipped; these two readings
+// of the same response had drifted apart.
+
+describe('the property_search log says what a search cost', () => {
+  const src = readSource('src/lib/integrations/sitex/client.ts', {
+    mustContain: "operation: 'property_search'",
+  });
+
+  it('records SearchId on the charged path', () => {
+    // The ONLY handle that reconciles against an invoice line.
+    expect(src).toContain('searchId: raw.OrderInfo?.SearchId');
+  });
+
+  it('records the credit on every outcome, not only the charged one', () => {
+    // "What did this cost" must not need a reader who already knows the rule.
+    // A 2xx charges one and a non-2xx charges nothing — measured on UAT.
+    const charged = (src.match(/creditsCharged: 1/g) ?? []).length;
+    const free = (src.match(/creditsCharged: 0/g) ?? []).length;
+    expect(charged, 'the 200 path must say it charged').toBeGreaterThanOrEqual(1);
+    expect(free, 'no_match and multi_match must say they did not').toBeGreaterThanOrEqual(2);
+  });
+
+  it('records WHICH FEED it was billed under', () => {
+    // Concierge and the order flow are both 100001 today and are separate
+    // variables on purpose. A charge logged without its feed cannot be
+    // attributed if that ever stops being true.
+    expect(src).toMatch(/requestMeta: \{ addr: params\.street, lastLine, feedId: config\.feedId \}/);
   });
 });

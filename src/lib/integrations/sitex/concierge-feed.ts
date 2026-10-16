@@ -108,6 +108,19 @@ export type ConciergeFetchResult =
      * reason.
      */
     candidates?: MatchCandidate[];
+    /**
+     * The vendor's body, on a refusal that STILL COST A CREDIT.
+     *
+     * A charged call whose bytes are thrown away is the worst outcome
+     * available: unrecoverable and undiagnosable. 25651 Paseo La Cresta
+     * bought 65,265 bytes of real property data and the guard discarded all
+     * of it, so what SiteX had actually said could only be inferred from a
+     * length in a log line.
+     *
+     * The guard protects the DOCUMENT, not the evidence. Present whenever
+     * there is a body to keep.
+     */
+    raw?: string;
   };
 
 function readGuard(payload: ConciergeFeedPayload): GuardEvidence {
@@ -124,12 +137,34 @@ function readGuard(payload: ConciergeFeedPayload): GuardEvidence {
 /**
  * THE ANTI-WRONG-HOUSE GUARD.
  *
- * All three must hold. This is stricter than anything the legacy system had —
- * it had a fallback property, so a failed match produced a confident document
- * about the wrong house. A guard failure here produces an error and no report.
+ * Stricter than anything the legacy system had — it had a fallback property,
+ * so a failed match produced a confident document about the wrong house. A
+ * guard failure here produces an error and no report.
+ *
+ * ─── IsValidAddress IS ABOUT AN ADDRESS, AND A PARCEL SEARCH HAS NONE ───────
+ *
+ * 25651 Paseo La Cresta, Laguna Niguel. A condo: SiteX answered the address
+ * with a 300, the operator picked the unit, and the retry went out as
+ * apn=930-371-05 + fips=06059. SiteX returned 65,265 bytes — the real property
+ * — with locationCount 1, outsideCoverage false, matchMethodCode "FA", and
+ * IsValidAddress FALSE, because no address was sent for it to validate.
+ *
+ * This guard then refused it as "SiteX did not recognise this address",
+ * discarded a payload we had just paid for, and charged the credit anyway. So
+ * the pick-then-retry path built in #216 has never once succeeded, and each
+ * attempt cost a dollar.
+ *
+ * The rule is kept for address searches, where a false means exactly what it
+ * says. On a parcel search it is not evidence about anything, so it is not
+ * consulted — and the other two rules still are: an out-of-coverage parcel is
+ * still refused, and a parcel that resolves to no property or to several is
+ * still refused.
+ *
+ * The caller must say which kind of search it made. A default would be a
+ * silent choice about when to drop a safety check.
  */
-export function evaluateGuard(g: GuardEvidence): ConciergeGuardFailure | null {
-  if (g.isValidAddress === false) return 'invalid_address';
+export function evaluateGuard(g: GuardEvidence, searchedBy: 'address' | 'parcel'): ConciergeGuardFailure | null {
+  if (searchedBy === 'address' && g.isValidAddress === false) return 'invalid_address';
   if (g.outsideCoverage === true) return 'outside_coverage';
   if (g.locationCount === 0) return 'no_match';
   if (g.locationCount !== null && g.locationCount > 1) return 'ambiguous_match';
@@ -271,12 +306,17 @@ export async function fetchConciergeProfile(
       return { ok: false, reason: 'empty_feed', guard, durationMs, creditsCharged, message: 'SiteX returned no feed data.' };
     }
 
-    const failure = evaluateGuard(guard!);
+    const failure = evaluateGuard(guard!, byParcel ? 'parcel' : 'address');
     // Log the guard values either way — they are the evidence that the guard ran.
     await logRequest({
       operation: 'concierge_profile', requestId, startedAt, success: failure === null,
       errorCategory: failure ?? undefined,
-      requestMeta: { feedId },
+      // THE FULL requestMeta, not { feedId }. This branch kept the older
+      // literal, so the log for the Paseo La Cresta refusal recorded only the
+      // feed id — the parcel under test was the one field missing from the
+      // log of the call that tested it. Same lesson as the orders flow on
+      // 2026-09-09.
+      requestMeta,
       responseMeta: {
         searchId: guard!.searchId, creditsCharged, bytes: raw.length, durationMs,
         isValidAddress: guard!.isValidAddress, outsideCoverage: guard!.outsideCoverage,
@@ -295,6 +335,8 @@ export async function fetchConciergeProfile(
         : undefined;
       return {
         ok: false, reason: failure, guard, durationMs, creditsCharged, candidates,
+        // Carried out so a charged refusal can be archived. See `raw` above.
+        raw,
         message: failure === 'ambiguous_match'
           ? ambiguousMessage(guard!.locationCount ?? 0)
           : guardMessage(failure),
@@ -322,7 +364,19 @@ export async function fetchConciergeProfile(
  * got "SiteX returned HTTP 300". A status code is not an instruction.
  */
 export function ambiguousMessage(count: number): string {
-  const n = count > 0 ? `${count} properties` : 'more than one property';
+  // ─── ONE CANDIDATE IS A CONFIRMATION, NOT A CHOICE ──────────────────────
+  //
+  // 25651 Paseo La Cresta came back as a 300 with exactly ONE candidate, and
+  // this said "This address matches 1 properties" — ungrammatical, and asking
+  // the wrong question. SiteX had found the unit; it wanted the parcel
+  // confirmed, not disambiguated. A one-row "picker" under a sentence about
+  // multiple matches is most of the distance between what a rep saw and what
+  // we thought we had built.
+  if (count === 1) {
+    return 'SiteX found one property at this address and needs it confirmed before '
+      + 'the lookup runs. Check it is the right one — nothing has been charged.';
+  }
+  const n = count > 1 ? `${count} properties` : 'more than one property';
   return `This address matches ${n}. Pick the one you want — nothing has been charged.`;
 }
 

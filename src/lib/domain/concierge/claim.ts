@@ -44,7 +44,8 @@ export interface PropertyAddress {
   street: string;
   city: string;
   state: string;
-  zip: string;
+  /** Absent on a parcel search, which has no postal address. */
+  zip?: string;
 }
 
 /**
@@ -58,7 +59,7 @@ export function propertyRequestKey(a: PropertyAddress): string {
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
-  const zip = part(a.zip).slice(0, 5);
+  const zip = part(a.zip ?? '').slice(0, 5);
   return [part(a.street), part(a.city), part(a.state), zip].join('|').slice(0, 200);
 }
 

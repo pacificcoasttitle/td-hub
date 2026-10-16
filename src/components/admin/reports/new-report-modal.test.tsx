@@ -24,7 +24,11 @@ function visible(el: React.ReactElement): string {
 
 const ON = { canGenerate: true, featureOn: true };
 const draft = (over: Partial<ConciergeDraft> = {}): ConciergeDraft => ({
+  // 'address' is the default mode, which is what these existing tests are
+  // about. The APN mode has its own describe below.
+  mode: 'address',
   street: '1358 5th St', city: 'La Verne', state: 'CA', zip: '91750',
+  apn: '', fips: '',
   repContactId: 412, repName: 'Justin Nouri', ...over,
 });
 
@@ -583,5 +587,117 @@ describe('the modal as wired', () => {
     for (const role of CONCIERGE_GENERATE_ROLES) {
       expect(CONTACT_BOOK_READ_ROLES).toContain(role);
     }
+  });
+});
+
+// ─── Searching by parcel ────────────────────────────────────────────────────
+//
+// The order-creation flow has always had this and Concierge did not, so an
+// operator holding an APN had nowhere to put it. It is also the escape hatch
+// for an address SiteX will not resolve: a parcel search cannot multi-match.
+
+describe('APN mode', () => {
+  const apnDraft = (over: Partial<ConciergeDraft> = {}) =>
+    draft({ mode: 'apn', apn: '930-371-05', fips: '06059', ...over });
+
+  it('sends the parcel and NO fabricated ZIP', () => {
+    const b = generationBody({
+      draft: apnDraft(), preparedForName: 'Maria Lopez', preparedForCompany: '',
+      allowDuplicate: false, parcel: null,
+    });
+    expect(b).toMatchObject({ apn: '930-371-05', fips: '06059' });
+    // A made-up postcode on the row would be a claim about the property, and
+    // the claim key is built from these strings.
+    expect('zip' in b).toBe(false);
+  });
+
+  it('describes the row by what was actually asked for', () => {
+    const b = generationBody({
+      draft: apnDraft(), preparedForName: 'x', preparedForCompany: '', allowDuplicate: false, parcel: null,
+    });
+    // The Reports list prints this before the vendor answers.
+    expect(b.street).toBe('APN 930-371-05');
+    expect(b.city).toBe('Orange');
+    expect(b.state).toBe('CA');
+  });
+
+  it('address mode is untouched — still sends the address and the ZIP', () => {
+    const b = generationBody({
+      draft: draft(), preparedForName: 'x', preparedForCompany: '', allowDuplicate: false, parcel: null,
+    });
+    expect(b).toMatchObject({ street: '1358 5th St', city: 'La Verne', zip: '91750' });
+    expect('apn' in b).toBe(false);
+  });
+
+  it('validates the APN loosely, because counties differ', () => {
+    // Orange writes 930-371-05, Los Angeles 6268-039-032, others run the
+    // digits together. A strict pattern would reject real parcels, and the
+    // vendor is the only authority on whether one exists.
+    expect(draftProblem(apnDraft({ apn: '930-371-05' }))).toBeNull();
+    expect(draftProblem(apnDraft({ apn: '6268-039-032' }))).toBeNull();
+    expect(draftProblem(apnDraft({ apn: '930371050000' }))).toBeNull();
+    expect(draftProblem(apnDraft({ apn: '123.456.789' }))).toBeNull();
+  });
+
+  it('still rejects what cannot be a parcel at all', () => {
+    expect(draftProblem(apnDraft({ apn: '' }))).toContain('Enter the parcel number');
+    expect(draftProblem(apnDraft({ apn: '25651 Paseo La Cresta' }))).toContain('digits');
+    expect(draftProblem(apnDraft({ apn: '12' }))).toContain('too short');
+  });
+
+  it('requires the county, which is where the FIPS comes from', () => {
+    expect(draftProblem(apnDraft({ fips: '' }))).toContain('Choose the county');
+  });
+
+  it('does not ask for a street, city or ZIP in APN mode', () => {
+    // The whole point: an operator with a parcel has no address to type.
+    expect(draftProblem(apnDraft({ street: '', city: '', zip: '' }))).toBeNull();
+  });
+
+  it('labels the gate with the parcel and the county', () => {
+    expect(fullAddress(apnDraft())).toBe('APN 930-371-05 · Orange County');
+  });
+});
+
+describe('the single-candidate panel asks for confirmation', () => {
+  const ONE: MatchCandidate[] = [{
+    address: '25651 PASEO LA CRESTA', city: 'LAGUNA NIGUEL', state: 'CA', zip: '92677',
+    apn: '930-371-05', unitType: '#', unitNumber: '45', fips: '06059',
+    useCodeDescription: 'Condominium Unit (Residential)',
+    owner: 'LIPSITZ, DAVID A; LIPSITZ, MICHELLE M',
+  }];
+
+  const panel = (candidates: MatchCandidate[]) => visible(
+    <MatchCandidatesPanel
+      message="SiteX found one property at this address and needs it confirmed before the lookup runs."
+      candidates={candidates}
+      busy={false}
+      onPick={() => {}}
+      onCancel={() => {}}
+    />,
+  );
+
+  it('gives the single row a verb', () => {
+    // A lone unlabelled row under "pick one" does not look like a control at
+    // all — which is what the rep was shown and reported as no picker.
+    expect(panel(ONE)).toContain('Confirm this property');
+  });
+
+  it('shows the parcel, the unit and the owner', () => {
+    const t = panel(ONE);
+    expect(t).toContain('#45');
+    expect(t).toContain('LIPSITZ, DAVID A');
+    expect(t).toContain('930-371-05');
+  });
+
+  it('offers a way out that says what it means', () => {
+    expect(panel(ONE)).toContain('Not this property');
+  });
+
+  it('does NOT say Confirm when there are several to choose between', () => {
+    const two = [...ONE, { ...ONE[0]!, apn: '930-371-06', unitNumber: '46' }];
+    const t = panel(two);
+    expect(t).not.toContain('Confirm this property');
+    expect(t).toContain('Picking one spends a single lookup');
   });
 });

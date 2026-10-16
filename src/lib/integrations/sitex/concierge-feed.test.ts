@@ -10,7 +10,7 @@ vi.mock('./auth', async (importOriginal) => {
 });
 
 import {
-  ambiguousMessage, fetchConciergeProfile, guardMessage,
+  ambiguousMessage, evaluateGuard, fetchConciergeProfile, guardMessage,
 } from './concierge-feed';
 
 // ─── A multi-match is an answer, not an error ───────────────────────────────
@@ -225,5 +225,89 @@ describe('the wording', () => {
     const m = ambiguousMessage(2);
     expect(m).toContain('Pick the one you want');
     expect(m).toContain('nothing has been charged');
+  });
+});
+
+// ─── 25651 Paseo La Cresta, Laguna Niguel ───────────────────────────────────
+//
+// A rep reported the condo unit picker not appearing. It appeared, and the rep
+// used it. The PICK then failed, and had failed every time since the picker
+// shipped in #216 — charging a credit on each attempt.
+//
+// SiteX answered the parcel search with 65,265 bytes of real property data,
+// locationCount 1, outsideCoverage false, matchMethodCode "FA" — and
+// IsValidAddress FALSE, because a parcel search sends no address for it to
+// validate. evaluateGuard read that as "SiteX did not recognise this address".
+
+describe('IsValidAddress is about an address, and a parcel search has none', () => {
+  const parcelAnswer = {
+    isValidAddress: false,
+    outsideCoverage: false,
+    locationCount: 1,
+    matchMethodCode: 'FA',
+    searchId: 1426628348,
+  };
+
+  it('does not refuse a parcel search for having no valid address', () => {
+    expect(evaluateGuard(parcelAnswer, 'parcel')).toBeNull();
+  });
+
+  it('STILL refuses it on an address search, where false means what it says', () => {
+    // The guard is not weakened, it is scoped. An address that SiteX does not
+    // recognise is still a refusal.
+    expect(evaluateGuard(parcelAnswer, 'address')).toBe('invalid_address');
+  });
+
+  it('keeps every other rule on a parcel search', () => {
+    // Out of coverage, no match and several matches are all still refusals —
+    // they are evidence about the PROPERTY, not about an address string.
+    expect(evaluateGuard({ ...parcelAnswer, outsideCoverage: true }, 'parcel')).toBe('outside_coverage');
+    expect(evaluateGuard({ ...parcelAnswer, locationCount: 0 }, 'parcel')).toBe('no_match');
+    expect(evaluateGuard({ ...parcelAnswer, locationCount: 2 }, 'parcel')).toBe('ambiguous_match');
+  });
+
+  it('is unchanged for an address search that passes', () => {
+    const good = { ...parcelAnswer, isValidAddress: true };
+    expect(evaluateGuard(good, 'address')).toBeNull();
+  });
+});
+
+describe('one candidate is a confirmation, not a choice', () => {
+  it('does not say "1 properties"', () => {
+    // What the rep was shown. Ungrammatical, and the wrong question: SiteX
+    // had found the unit and wanted it confirmed.
+    const m = ambiguousMessage(1);
+    expect(m).not.toContain('1 properties');
+    expect(m).not.toContain('Pick the one');
+    expect(m).toContain('found one property');
+    expect(m).toContain('confirmed');
+  });
+
+  it('still asks which one when there are several', () => {
+    expect(ambiguousMessage(3)).toContain('3 properties');
+    expect(ambiguousMessage(3)).toContain('Pick the one you want');
+  });
+
+  it('says nothing was charged either way', () => {
+    for (const n of [1, 2, 5]) expect(ambiguousMessage(n)).toContain('nothing has been charged');
+  });
+});
+
+describe('a charged refusal keeps what it bought', () => {
+  it('carries the body out on a guard failure', async () => {
+    // Paseo La Cresta bought 65,265 bytes and the guard discarded all of them,
+    // so what SiteX had said could only be inferred from a length in a log.
+    // The guard protects the document, not the evidence.
+    answer(200, JSON.stringify({
+      Locations: [{ FIPS: '06059', APN: '930-371-05', Address: '25651 PASEO LA CRESTA' }],
+      Feed: { PropertyProfile: { APN: '930-371-05', PrimaryOwnerName: 'LIPSITZ, DAVID A' } },
+      OrderInfo: { IsValidAddress: false, OutsideCoverage: true, SearchId: 1 },
+    }));
+    const r = await fetchConciergeProfile({ ...PARAMS, apn: '930-371-05', fips: '06059' });
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.reason).toBe('outside_coverage');
+    expect(r.raw, 'the bytes were thrown away').toBeDefined();
+    expect(r.raw).toContain('LIPSITZ');
   });
 });

@@ -1,42 +1,40 @@
 /**
  * SPENDS ONE SiteX CREDIT. Approved by Gerard, 16 Oct 2026, for this parcel.
  *
- * Verifies the fix for the defect a rep hit on 25651 Paseo La Cresta: the
- * condo picker appeared, the rep picked the unit, and fetching that unit BY
- * PARCEL was refused by our own IsValidAddress check — which a parcel search
- * has no address to satisfy. It had failed that way since the picker shipped,
+ * Verifies the defect a rep hit on 25651 Paseo La Cresta: the condo picker
+ * appeared, the rep picked the unit, and fetching that unit BY PARCEL was
+ * refused by our own IsValidAddress check — which a parcel search has no
+ * address to satisfy. It had failed that way since the picker shipped,
  * charging a credit each time.
  *
- * ─── WHAT IT EXERCISES ──────────────────────────────────────────────────────
+ * ─── WHAT THIS PROVES, AND WHAT IT CANNOT ───────────────────────────────────
  *
- * generateConciergeProfile() with apn + fips, which is exactly what the
- * picker's Confirm and the new APN mode both send. That is the path that was
- * broken: the guard, the archive-on-charge, and the render.
+ * It calls fetchConciergeProfile() with apn + fips — the exact call the
+ * picker's Confirm and the new APN mode both make — and then runs
+ * evaluateGuard() over the evidence SiteX returns. That is precisely the
+ * defect: SiteX answered with the property and the guard threw it away.
  *
- * It does NOT go through the HTTP route, because that needs an operator
- * session. The route is a thin wrapper over this call and routes.test.ts holds
- * its shape; the UI is covered by its own tests. What could only be proven
- * against the live vendor is whether SiteX's parcel answer now passes.
+ * IT DOES NOT go through generateConciergeProfile(), and not by choice.
+ * generate.ts imports through `@/` aliases, which sends tsx down its CJS
+ * resolver, where @react-pdf/textkit's import of hyphenate/en-us has no
+ * `require` condition — the script dies at import before it can run. A patch
+ * for that was tried once and CHANGED WHAT THE RENDERER PRODUCED (it enabled
+ * hyphenation), so it is not coming back for a verification run.
  *
- * ─── IT WILL ONLY RUN AGAINST THE APPROVED PARCEL ───────────────────────────
+ * So the archive-on-charge path and the render are NOT exercised here. They
+ * need one click on the deployed route, which is said plainly in the output
+ * rather than glossed.
  *
- * One parcel, named here. A credit is real money and a typo is somebody's
- * property, so the allow-list is in the code rather than in the operator's
- * care.
+ * ─── ONE PARCEL, NAMED IN THE CODE ──────────────────────────────────────────
  *
- * RELATIVE IMPORTS AND .mts: `@/` aliases send tsx through its CJS resolver,
- * where @react-pdf/textkit's import of hyphenate/en-us has no `require`
- * condition and the script dies before rendering. Same reason as
- * concierge-render-preview.mts.
+ * A credit is real money and a typo is somebody else's property.
  *
  *   npx tsx --env-file=.env.local scripts/audit/verify-parcel-search.mts --spend
  */
-import { eq } from 'drizzle-orm';
-import { db } from '../../src/lib/db/client';
-import { conciergeProfiles } from '../../src/lib/db/schema/concierge';
-import { generateConciergeProfile } from '../../src/lib/domain/concierge/generate';
+import {
+  evaluateGuard, fetchConciergeProfile,
+} from '../../src/lib/integrations/sitex/concierge-feed';
 
-/** The one parcel this may be run against. */
 const APPROVED = {
   apn: '930-371-05',
   fips: '06059',
@@ -45,79 +43,67 @@ const APPROVED = {
 };
 
 (async () => {
-  const spend = process.argv.includes('--spend');
-  if (!spend) {
+  if (!process.argv.includes('--spend')) {
     console.log('\nThis SPENDS ONE SiteX CREDIT. Re-run with --spend to confirm.\n');
     console.log(`  parcel : APN ${APPROVED.apn}, FIPS ${APPROVED.fips} (${APPROVED.county} County)`);
     console.log(`  that is: ${APPROVED.describedAs}\n`);
     process.exit(0);
   }
 
-  console.log(`\n=== BEFORE ===`);
-  const before = await db.select({
-    id: conciergeProfiles.id,
-    status: conciergeProfiles.status,
-    credits: conciergeProfiles.sitexCreditsCharged,
-    error: conciergeProfiles.errorMessage,
-  }).from(conciergeProfiles).where(eq(conciergeProfiles.requestedApn, APPROVED.apn));
-  console.log(`  profiles already on this parcel: ${before.length}`);
-  for (const b of before) console.log(`    ${b.id}  ${b.status}  credits=${b.credits}  ${b.error ?? ''}`);
+  console.log('\n=== the call SiteX refused for three weeks ===');
+  console.log(`  apn ${APPROVED.apn}  fips ${APPROVED.fips}\n`);
 
-  console.log('\n=== THE CALL — one credit, by parcel ===');
   const started = Date.now();
-  const outcome = await generateConciergeProfile({
-    // What APN mode sends: no postal address, the parcel and the county.
-    street: `APN ${APPROVED.apn}`,
-    city: APPROVED.county,
-    state: 'CA',
+  const r = await fetchConciergeProfile({
+    // No postal address — that is the whole point of a parcel search.
+    street: '', city: '', state: 'CA', zip: '',
     apn: APPROVED.apn,
     fips: APPROVED.fips,
-    preparedForName: 'Verification run',
-    preparedForCompany: null,
-    presentingRep: { name: 'Mark Neveu', email: null, phone: null, title: null },
-    createdBy: 'script:verify-parcel-search',
-    // The same parcel has three failed rows on it. Those are not profiles we
-    // hold, but say so explicitly rather than rely on the duplicate check
-    // ignoring failures.
-    allowDuplicate: true,
   });
   const took = Date.now() - started;
 
-  console.log(`  took      : ${(took / 1000).toFixed(1)}s`);
-  console.log(`  ok        : ${outcome.ok}`);
-  console.log(`  profileId : ${'profileId' in outcome ? outcome.profileId : '-'}`);
-  console.log(`  credits   : ${outcome.creditsCharged}`);
-  console.log(`  message   : ${'message' in outcome ? outcome.message : '(none)'}`);
+  console.log(`  took          : ${(took / 1000).toFixed(1)}s`);
+  console.log(`  ok            : ${r.ok}`);
+  console.log(`  credits       : ${r.creditsCharged}`);
+  if (!r.ok) console.log(`  reason        : ${r.reason}\n  message       : ${r.message}`);
 
-  const id = 'profileId' in outcome ? outcome.profileId : null;
-  if (!id) { console.log('\nNo profile row. Nothing further to read.'); process.exit(1); }
+  const g = r.guard;
+  console.log('\n=== what SiteX said about the parcel ===');
+  console.log(`  searchId        : ${g?.searchId ?? '-'}`);
+  console.log(`  isValidAddress  : ${g?.isValidAddress}   <- false on a parcel search, and meaningless`);
+  console.log(`  outsideCoverage : ${g?.outsideCoverage}`);
+  console.log(`  locationCount   : ${g?.locationCount}`);
+  console.log(`  matchMethodCode : ${g?.matchMethodCode}`);
+  console.log(`  bytes returned  : ${r.ok ? r.raw.length.toLocaleString() : ('raw' in r && r.raw ? r.raw.length.toLocaleString() : 'none')}`);
 
-  const [row] = await db.select().from(conciergeProfiles).where(eq(conciergeProfiles.id, id)).limit(1);
-  if (!row) { console.log('\nRow vanished.'); process.exit(1); }
+  if (g) {
+    // The fix, stated as a comparison rather than a claim.
+    const asParcel = evaluateGuard(g, 'parcel');
+    const asAddress = evaluateGuard(g, 'address');
+    console.log('\n=== the guard, both ways ===');
+    console.log(`  evaluateGuard(evidence, 'parcel')  = ${asParcel ?? 'PASS'}`);
+    console.log(`  evaluateGuard(evidence, 'address') = ${asAddress ?? 'PASS'}   <- what it used to do`);
+  }
 
-  console.log('\n=== THE ROW ===');
-  console.log(`  status        : ${row.status}`);
-  console.log(`  asked for     : ${row.requestedAddress} / ${row.requestedCity ?? ''}`);
-  console.log(`  searched by   : apn=${row.requestedApn ?? '-'} fips=${row.requestedFips ?? '-'}`);
-  console.log(`  guard         : isValid=${row.isValidAddress} outside=${row.outsideCoverage} count=${row.locationCount} method=${row.matchMethodCode}`);
-  console.log(`  subject       : apn=${row.subjectApn ?? '-'} fips=${row.subjectFips ?? '-'} county=${row.subjectCounty ?? '-'}`);
-  console.log(`  resolved addr : ${row.listSubject ?? '-'} / ${row.listSubjectDetail ?? '-'}`);
-  console.log(`  owner         : ${row.subjectUseDescription ?? '-'}`);
-  console.log(`  raw archived  : ${row.rawStorageKey ?? 'NOT STORED'}  ${row.rawBytes ?? 0} bytes`);
-  console.log(`  pdf           : ${row.pdfStorageKey ?? '-'}  ${row.pdfPageCount ?? 0} pages`);
-  console.log(`  credits       : ${row.sitexCreditsCharged}`);
-  console.log(`  error         : ${row.errorMessage ?? '(none)'}`);
-
-  // What the fix was for, stated as the pass condition rather than inferred.
-  const guardPassed = row.status !== 'failed' || row.errorMessage?.includes('recognise') === false;
-  const archived = Boolean(row.rawStorageKey);
-  const rendered = Boolean(row.pdfStorageKey);
+  if (r.ok) {
+    // Read the property back out of the payload: the point is that it is the
+    // right unit, not merely that something came back.
+    const feed = (r.payload.Feed ?? {}) as Record<string, unknown>;
+    const pp = (feed.PropertyProfile ?? {}) as Record<string, unknown>;
+    console.log('\n=== the property SiteX returned ===');
+    for (const k of ['APN', 'FIPS', 'PrimaryOwnerName', 'SiteAddress', 'SiteCity', 'SiteZip', 'UseCodeDescription']) {
+      if (k in pp) console.log(`  ${k.padEnd(18)}: ${JSON.stringify(pp[k])}`);
+    }
+    const right = String(pp.APN ?? '').replace(/\D/g, '') === APPROVED.apn.replace(/\D/g, '');
+    console.log(`\n  the parcel we asked for: ${right}`);
+  }
 
   console.log('\n=== VERDICT ===');
-  console.log(`  parcel search accepted (was "did not recognise this address") : ${guardPassed}`);
-  console.log(`  payload archived even though a credit was charged             : ${archived}`);
-  console.log(`  document rendered                                             : ${rendered}`);
-  console.log(`\n${outcome.ok && archived && rendered ? 'VERIFIED.' : 'NOT VERIFIED — read the row above.'}`);
+  console.log(`  parcel search accepted : ${r.ok}`);
+  console.log('\n  NOT PROVEN HERE, and needs one click on the deployed route:');
+  console.log('    - the archive-on-charge path (generate.ts)');
+  console.log('    - the document render');
+  console.log('    - the confirmation panel as an operator sees it');
   console.log('');
-  process.exit(outcome.ok ? 0 : 1);
+  process.exit(r.ok ? 0 : 1);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -5,32 +5,48 @@ import { stripComments } from '@/test-support/read-source';
 
 const read = (p: string) => readFileSync(join(__dirname, p), 'utf8');
 
-// ─── TWO routes may spend. The rest may not. ─────────────────────────────────
+// ─── THREE routes may spend, and ONE function does the spending. ────────────
 //
-// This described ONE spender until 2026-09-30, and it said so by name. The tax
-// bridge adds a second, so the rule is being CHANGED ON PURPOSE (Gerard): named,
-// enumerated, and still asserted against the source.
+// This described ONE spender until 2026-09-30 and TWO until 2026-10-16, each
+// time by name. The resolve-first flow adds a third, so the rule is being
+// CHANGED ON PURPOSE (Gerard): named, enumerated, and still asserted against
+// the source.
 //
 // It was not loosened. The temptation with a guard that starts failing is to
-// widen it until it passes — drop the count, match a pattern, allow a directory —
-// and a guard relaxed to accommodate a change stops being a guard. So the two
-// spenders are listed, they are checked to spend on DIFFERENT vendors, and every
-// other route is still checked to spend on neither.
+// widen it until it passes — drop the count, match a pattern, allow a
+// directory — and a guard relaxed to accommodate a change stops being a guard.
+// So the three are listed, and every other route is still checked to spend on
+// nothing.
 //
-// The two are different in kind, which is why each is named rather than the pair
-// being treated as "the spenders":
-//
-//   profiles/route.ts            SiteX. One credit. Buys the property.
+//   resolve/route.ts             SiteX. One credit. Buys the property, with
+//                                nothing filled in and no document.
+//   profiles/route.ts            SiteX. One credit. The orders flow's
+//                                single-shot: resolve and finalise together,
+//                                where the property comes off the order and
+//                                there is no gate to put in front of anyone.
 //   profiles/[id]/tax/route.ts   TitlePoint. One call. Buys page 4, on a
 //                                property already paid for.
 //
-// A third one appearing should break this file.
-describe('exactly two routes can spend, and they spend on different vendors', () => {
+// ─── THE COUNT IS NOT THE REAL GUARD ANY MORE ───────────────────────────────
+//
+// Two of the three now spend on the SAME vendor, which is what the previous
+// version of this file checked. Rather than drop that check for a weaker one,
+// it is replaced by the stronger fact underneath it: both SiteX spenders reach
+// the vendor through resolveProperty, and resolveProperty holds the only call
+// in the codebase. The number of routes is incidental; the number of places a
+// credit can leave is one, and that is asserted below.
+//
+// A fourth route appearing should break this file.
+describe('exactly three routes can spend, and one function does the spending', () => {
   const generate = read('profiles/route.ts');
+  const resolve = read('resolve/route.ts');
   const tax = read('profiles/[id]/tax/route.ts');
   const free = [
     'profiles/[id]/criteria/route.ts', 'profiles/[id]/render/route.ts',
     'profiles/[id]/pdf/route.ts', 'profiles/[id]/resume/route.ts',
+    // The second half of the resolve-first flow. It renders a property that
+    // was already paid for and cannot reach the vendor to buy another.
+    'profiles/[id]/finalise/route.ts',
     // MyNHD's hazard preview. It reaches a VENDOR and still belongs in this
     // list: Gerard, 12 Oct 2026 — the preview costs PCT nothing. "Free" here
     // means "spends no money", not "makes no call", and the distinction is
@@ -41,10 +57,96 @@ describe('exactly two routes can spend, and they spend on different vendors', ()
 
   it('only the generate route imports the generator', () => {
     expect(generate).toContain('generateConciergeProfile');
-    for (const f of [...free, 'profiles/[id]/tax/route.ts']) {
+    for (const f of [...free, 'resolve/route.ts', 'profiles/[id]/tax/route.ts']) {
       expect(read(f), f).not.toContain('generateConciergeProfile');
       expect(read(f), f).not.toMatch(/integrations\/sitex/);
     }
+  });
+
+  it('only the resolve route buys a property on its own', () => {
+    expect(resolve).toContain('resolveProperty');
+    // And it buys ONLY that. No render, no gate, no second vendor — a route
+    // that spends should do one thing, so there is nothing after the money
+    // that can fail and leave the credit unaccounted for.
+    expect(resolve).not.toContain('renderProfile');
+    expect(resolve).not.toContain('finaliseProfile');
+    expect(resolve).not.toMatch(/requestTaxDetail|requestHazardPreview/);
+    // It cannot be handed a prepared-for name, because at this point in the
+    // flow nobody has typed one. Accepting it here is how the gate creeps back
+    // in front of the lookup.
+    expect(stripComments(resolve)).not.toContain('preparedForName');
+
+    for (const f of [...free, 'profiles/[id]/tax/route.ts']) {
+      expect(read(f), f).not.toContain('resolveProperty');
+    }
+  });
+
+  it('ONE function holds the only call to SiteX', () => {
+    // The real guard, now that two routes spend on the same vendor. Counting
+    // routes stopped being the invariant; counting the calls did not.
+    //
+    // Both SiteX spenders reach the vendor through resolveProperty, and
+    // generateConciergeProfile is resolve-then-finalise rather than a second
+    // implementation — so "the same call" is true by construction instead of
+    // by coincidence.
+    const resolve = stripComments(read('../../../lib/domain/concierge/resolve.ts'));
+    const calls = resolve.match(/fetchConciergeProfile\(/g) ?? [];
+    expect(calls, 'exactly one call site, in resolveProperty').toHaveLength(1);
+    expect(resolve).toContain('export async function resolveProperty');
+
+    // ─── AND IT LIVES WHERE A SCRIPT CAN REACH IT ───────────────────────────
+    //
+    // resolve.ts must not import the renderer, and this is not tidiness.
+    // @react-pdf/textkit imports `@react-pdf/hyphenate/en-us`, which that
+    // package does not list in its `exports`, so any module that transitively
+    // reaches @react-pdf dies at import under tsx. While the spend shared a
+    // file with the render, the one function that charges could not be driven
+    // from a verification script — which is exactly why the Paseo La Cresta
+    // run could only exercise the feed client and had to state that the
+    // archive path was unproven.
+    //
+    // A patch for the resolver was tried once and CHANGED WHAT THE RENDERER
+    // PRODUCED — it enabled hyphenation — so the fix is this separation, and
+    // this is the assertion that keeps it.
+    expect(resolve).not.toMatch(/from '\.\/document\/profile-document'/);
+    expect(resolve).not.toMatch(/from '\.\/render'/);
+    expect(resolve).not.toMatch(/from '\.\/retry'/);
+
+    // The finalise half calls resolve and does not re-implement it.
+    const generate = stripComments(read('../../../lib/domain/concierge/generate.ts'));
+    expect(generate).not.toContain('fetchConciergeProfile(');
+    expect(generate).toContain("from './resolve'");
+
+    // No other domain module may import the feed client at all. Matched on the
+    // IMPORT PATH, not the word: render.ts legitimately reads the
+    // `sitexSearchId` and `sitexRequestedAt` columns off a stored row, and a
+    // guard that forbade the word would have to be deleted the first time
+    // somebody printed the search id on the document.
+    for (const m of ['retry.ts', 'render.ts', 'ingest.ts', 'already-have.ts']) {
+      expect(stripComments(read(`../../../lib/domain/concierge/${m}`)), m)
+        .not.toMatch(/from '[^']*integrations\/sitex/);
+    }
+
+    // generate.ts is the one exception and it is a TYPE. `import type` is
+    // erased at compile time, so it cannot carry a call — but the import is
+    // still named here rather than the rule being widened to "anything from
+    // concierge-feed", which would have let a real client import in beside it.
+    const sitexImports = generate.match(/import[^;]*from '[^']*integrations\/sitex[^']*'/g) ?? [];
+    expect(sitexImports).toHaveLength(1);
+    expect(sitexImports[0]).toMatch(/^import type /);
+  });
+
+  it('finalise renders a paid-for property and cannot buy another', () => {
+    // "Generate renders only, never looks up" (Gerard, 16 Oct 2026). The half
+    // the operator can get wrong is the half that costs nothing.
+    const fin = stripComments(read('profiles/[id]/finalise/route.ts'));
+    expect(fin).toContain('finaliseProfile');
+    expect(fin).toContain('creditsCharged: 0');
+    expect(fin).not.toMatch(/integrations\/sitex|resolveProperty|generateConciergeProfile/);
+    // A profile with no stored payload must be refused, not re-fetched. The
+    // refusal lives in the domain; this is the message that proves it is wired.
+    const domain = stripComments(read('../../../lib/domain/concierge/generate.ts'));
+    expect(domain).toContain('NO_PAYLOAD_MESSAGE');
   });
 
   it('only the tax route reaches TitlePoint, and it never reaches SiteX', () => {
@@ -211,7 +313,9 @@ describe('exactly two routes can spend, and they spend on different vendors', ()
     // The entry point moved to the Reports page, where a request carries no
     // order — an order-keyed guard would protect nothing there.
     expect(generate).not.toContain('getProfileForOrder');
-    const claim = read('../../../lib/domain/concierge/generate.ts');
+    // In resolve.ts, with the call it guards. A claim in one module and the
+    // spend in another could not be checked for order at all.
+    const claim = read('../../../lib/domain/concierge/resolve.ts');
     expect(claim).toContain('claimProperty(requestKey)');
     const guard = claim.indexOf('claimProperty(');
     const vendor = claim.indexOf('fetchConciergeProfile(');
@@ -251,7 +355,7 @@ describe('exactly two routes can spend, and they spend on different vendors', ()
   });
 
   it('the parcel reaches the vendor call rather than being parsed and dropped', () => {
-    const gen = stripComments(read('../../../lib/domain/concierge/generate.ts'));
+    const gen = stripComments(read('../../../lib/domain/concierge/resolve.ts'));
     // Passed INTO the one call that spends, not merely accepted by the route.
     const call = gen.indexOf('fetchConciergeProfile({');
     expect(call).toBeGreaterThan(-1);
@@ -265,7 +369,7 @@ describe('exactly two routes can spend, and they spend on different vendors', ()
 
   it('the candidates are written to the row, not only returned to the browser', () => {
     // Closing the modal must not throw away the only answer to the question.
-    const gen = stripComments(read('../../../lib/domain/concierge/generate.ts'));
+    const gen = stripComments(read('../../../lib/domain/concierge/resolve.ts'));
     expect(gen).toContain('matchCandidates');
   });
 

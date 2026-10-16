@@ -287,12 +287,23 @@ export function ReportRow({
   /** This row is itself one of the earlier ones, shown indented. */
   isEarlier?: boolean;
 }) {
-  const building = row.status === 'pending' || row.status === 'retrieved';
+  // A RESOLUTION: the property was looked up and paid for, and nobody has said
+  // who the document is for yet. No rep means the gate was never filled in.
+  //
+  // It is deliberately not "Building…". 'retrieved' used to last the
+  // milliseconds between the upload and the ingest, so a spinner was honest;
+  // under resolve-first the row can sit here for hours with nothing working on
+  // it, and a spinner on a row nothing is touching is how a list starts lying
+  // to the people who read it all day.
+  const resolved = row.status === 'retrieved' && !row.brandedToName;
+  const building = !resolved && (row.status === 'pending' || row.status === 'retrieved');
   const failed = row.status === 'failed';
   const isProfile = row.type === 'concierge_profile';
   const stale = row.templateVersion !== null && row.templateVersion !== CONCIERGE_TEMPLATE;
   const href = pdfHref(row);
-  const openable = !building && !failed;
+  // A resolution has no document, so it is not openable either — the same
+  // reason a building row is not.
+  const openable = !building && !resolved && !failed;
 
   // ─── CLICKABLE ROW (Gerard), without breaking the table ───────────────────
   //
@@ -368,6 +379,14 @@ export function ReportRow({
       <td className="px-4 py-3 text-right whitespace-nowrap">
         {building ? (
           <span className="text-xs text-[#6B7280]">Building…</span>
+        ) : resolved ? (
+          // No action here, and that is correct rather than missing: finishing
+          // it needs the prepared-for name and the rep, which is the New report
+          // form. Typing the same address there finds this resolution and
+          // finishes it FOR NOTHING — the credit is already spent.
+          <span className="text-xs text-[#6B7280]" title="Already paid for. Start a new report on this address to finish it — it will not be looked up again.">
+            Awaiting details
+          </span>
         ) : (
           <RowMenu>
             {failed ? (

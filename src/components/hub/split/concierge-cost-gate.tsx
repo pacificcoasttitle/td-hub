@@ -30,8 +30,36 @@ import { PreparedForField } from './prepared-for-field';
  */
 export interface CostGateProps {
   address: string;
+  /**
+   * WHETHER CONFIRMING HERE SPENDS ANYTHING. Defaults true, which is the
+   * orders flow: the property comes off the order, one dialog, one call.
+   *
+   * False in the Reports flow since 16 Oct 2026, where the lookup has already
+   * happened and been paid for at the address step — this dialog collects the
+   * details and renders. The wording follows the fact rather than describing a
+   * cost that is no longer here: a dialog that says "one property lookup" when
+   * nothing will be looked up teaches the operator to ignore the sentence, and
+   * then it cannot warn them on the flow where it is true.
+   */
+  spends?: boolean;
+  /**
+   * What the lookup turned out to be — the parcel number, the recorded owner.
+   * Shown under the address, because in the resolve-first flow the operator is
+   * confirming a property that has already been identified, and the owner name
+   * is how they recognise a condominium unit.
+   */
+  resolvedNote?: React.ReactNode;
   preparedForName: string;
   preparedForCompany: string;
+  /**
+   * The rep CHOOSER, for the flow that collects it here.
+   *
+   * Absent in the orders flow, which resolves the rep from the order and shows
+   * it read-only below. Present in the Reports flow, where the rep is part of
+   * the free half: it moved off the address step so that nothing a document
+   * needs is collected before the property is known.
+   */
+  repPicker?: React.ReactNode;
   presentingRepName: string;
   presentingRepProblem: string | null;
   criteriaSummary: string;
@@ -66,6 +94,9 @@ export function ConciergeCostGate(p: CostGateProps) {
   const missingPreparedFor = p.preparedForName.trim() === '';
   const missingRep = p.presentingRepName.trim() === '';
   const blocked = missingPreparedFor || missingRep || p.submitting;
+  // Defaults to the dialog this has always been, so the orders flow is
+  // unchanged by the resolve-first split.
+  const spends = p.spends !== false;
 
   return (
     <div
@@ -88,13 +119,19 @@ export function ConciergeCostGate(p: CostGateProps) {
               button on this profile's row in Reports; saying so is the
               difference between a promise and an instruction. */}
           <p className="text-[11.5px] text-[#6B7280] mt-[3px]">
-            One property lookup per profile. You can adjust the comparables afterwards from
+            {spends
+              ? 'One property lookup per profile. '
+              : 'This property has already been looked up — nothing further is charged. '}
+            You can adjust the comparables afterwards from
             the report&rsquo;s row in Reports, as often as you like — re-rendering looks nothing up.
           </p>
         </div>
 
         <div className="px-5 py-4 space-y-3">
           <GateRow label="Property" value={p.address} />
+          {p.resolvedNote ? (
+            <div className="-mt-1.5 text-[11px] text-[#6B7280]">{p.resolvedNote}</div>
+          ) : null}
 
           {/* Suggestions, not a picker. A new client must stay typeable — see
               PreparedForField. Nothing about the gate's guards changes: the
@@ -106,12 +143,18 @@ export function ConciergeCostGate(p: CostGateProps) {
             onCompany={p.onPreparedForCompany}
           />
 
-          <GateRow
-            label="Presenting representative"
-            value={p.presentingRepName || p.presentingRepProblem
-              || 'No presenting representative — the profile goes out under their name.'}
-            warn={missingRep}
-          />
+          {/* The chooser where the flow collects it here, the resolved value
+              read-only where the order already decided it. Both are blocked by
+              `missingRep` below, so neither can produce a document with no rep
+              on the cover. */}
+          {p.repPicker ?? (
+            <GateRow
+              label="Presenting representative"
+              value={p.presentingRepName || p.presentingRepProblem
+                || 'No presenting representative — the profile goes out under their name.'}
+              warn={missingRep}
+            />
+          )}
           <GateRow label="Comparable criteria" value={p.criteriaSummary} />
 
           {/* ─── The spend panel is GONE from here (Gerard, 2026-09-23) ─────
@@ -248,7 +291,10 @@ export function ConciergeCostGate(p: CostGateProps) {
 
         <div className="px-5 py-3 border-t border-[#F0F1F3] flex items-center justify-end gap-2">
           <button
-            // Focus lands on CANCEL. Never on the button that spends money.
+            // Focus lands on CANCEL, on both flows. It is kept even where this
+            // dialog no longer spends: the generation is still the thing that
+            // commits a document to a named client, and a pre-focused confirm
+            // is a button that fires on a stray Return.
             autoFocus
             type="button"
             onClick={p.onCancel}

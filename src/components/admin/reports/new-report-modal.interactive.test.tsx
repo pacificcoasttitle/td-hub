@@ -27,7 +27,16 @@ function stubApi(over: Record<string, unknown> = {}) {
     '/api/concierge/prepared-for': { results: [] },
     '/api/concierge/spend': { thisMonth: 3, allTime: 6 },
     '/api/concierge/for-property': {},
-    '/api/concierge/profiles': { profileId: 9 },
+    // THE SPEND. Answers with the resolution: a profile row holding a paid-for
+    // payload and no document.
+    '/api/concierge/resolve': {
+      profileId: 9, creditsCharged: 1, reused: false,
+      apn: '8378-014-021', county: 'Los Angeles',
+      siteAddress: '1358 5TH ST', siteCityState: 'LA VERNE, CA 91750',
+      primaryOwner: 'CONTRERAS', useDescription: 'Single Family Residence',
+    },
+    // THE FREE HALF.
+    '/api/concierge/profiles/9/finalise': { profileId: 9, compsShown: 6, creditsCharged: 0 },
     ...over,
   };
   // LONGEST PREFIX WINS. Plain startsWith made '/api/concierge/profiles' swallow
@@ -47,33 +56,65 @@ function stubApi(over: Record<string, unknown> = {}) {
 
 beforeEach(() => { vi.unstubAllGlobals(); });
 
-/** Type step → details step → fill the address and rep → open the gate. */
-async function reachTheGate() {
-  render(<NewReportModal onClose={() => {}} onCreated={() => {}} />);
+/**
+ * Type step → address step → CONFIRM THE LOOKUP (this is the spend) → the
+ * gate, where the rep and the prepared-for name are now collected.
+ *
+ * ─── THE ORDER CHANGED, AND THE ORDER IS THE POINT ──────────────────────────
+ *
+ * This used to fill in the rep on the address step and then open the gate
+ * directly. Under resolve-first (Gerard, 16 Oct 2026) the lookup happens in
+ * between: the address step asks only what identifies the property, the lookup
+ * is confirmed on its own, and everything a DOCUMENT needs is collected
+ * afterwards, where getting it wrong costs nothing.
+ */
+async function reachTheGate(
+  handlers: { onClose?: () => void; onCreated?: (id: number) => void } = {},
+) {
+  render(
+    <NewReportModal
+      onClose={handlers.onClose ?? (() => {})}
+      onCreated={handlers.onCreated ?? (() => {})}
+    />,
+  );
 
   await waitFor(() => expect(screen.getByText('Concierge Profile')).toBeTruthy());
   fireEvent.click(screen.getByText('Concierge Profile'));
   fireEvent.click(screen.getByRole('button', { name: /^Continue$/ }));
 
-  await waitFor(() => expect(screen.getByLabelText('Presenting representative')).toBeTruthy());
+  // The address step, anchored on a field that is still ON it. The rep used to
+  // be the anchor here and has moved to the gate.
+  await waitFor(() => expect(screen.getByLabelText('City')).toBeTruthy());
 
   const street = screen.getByPlaceholderText(/Start typing an address/i);
   fireEvent.change(street, { target: { value: '1358 5th St' } });
   fireEvent.change(screen.getByLabelText('City'), { target: { value: 'La Verne' } });
   fireEvent.change(screen.getByLabelText('ZIP'), { target: { value: '91750' } });
 
+  // NO REP HERE. If this step ever asks for one again, the next line fails
+  // rather than the test quietly filling it in.
+  expect(screen.queryByLabelText('Presenting representative')).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: /^Continue$/ }));
+
+  // ─── The lookup confirmation. THE ONE SPEND. ──────────────────────────────
+  await waitFor(() => expect(screen.getByRole('button', { name: /Look up property/i })).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: /Look up property/i }));
+
+  // The gate, which cannot spend. Anchored on the prepared-for field, because
+  // both dialogs are role="dialog" and waiting for a dialog would match the
+  // one we just left.
+  await waitFor(() => expect(screen.getByLabelText('Prepared for')).toBeTruthy());
+
+  // Generate is blocked without both of these, so every test that reaches the
+  // confirm button needs them. Leaving one out made the first run look like
+  // "the POST never fired" when the button was simply disabled.
+  fireEvent.change(screen.getByLabelText('Prepared for'), { target: { value: 'Dana Whitfield' } });
+
   const rep = screen.getByLabelText('Presenting representative');
   fireEvent.focus(rep);
   await waitFor(() => expect(screen.queryAllByRole('option').length).toBeGreaterThan(0));
   fireEvent.pointerDown(screen.getAllByRole('option')[0]!);
-
-  fireEvent.click(screen.getByRole('button', { name: /Continue|Generate/i }));
-  await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
-
-  // Generate is blocked without a prepared-for, so every test that reaches the
-  // confirm button needs this. Leaving it out made the first run look like "the
-  // POST never fired" when the button was simply disabled.
-  fireEvent.change(screen.getByLabelText('Prepared for'), { target: { value: 'Dana Whitfield' } });
 }
 
 /**
@@ -109,7 +150,7 @@ describe('a ticked tax search cannot survive a cancel', () => {
     await reachTheGate();
 
     fireEvent.click(screen.getByRole('button', { name: /Generate profile/i }));
-    await waitFor(() => expect(calls.some((u) => u === '/api/concierge/profiles')).toBe(true));
+    await waitFor(() => expect(calls.some((u) => u.endsWith('/finalise'))).toBe(true));
 
     expect(calls.some((u) => u.includes('/tax'))).toBe(false);
   });
@@ -134,6 +175,9 @@ describe('a ticked tax search cannot survive a cancel', () => {
       if (url.startsWith('/api/concierge/access')) return { ok: true, json: async () => ({ canGenerate: true, featureOn: true }) };
       if (url.startsWith('/api/reports/access')) return { ok: true, json: async () => ({ farming: false }) };
       if (url.startsWith('/api/concierge/reps')) return { ok: true, json: async () => ({ reps: [{ id: 412, label: 'Justin Nouri', name: 'Justin Nouri', email: null, company: null, detail: null, hasLogin: true }] }) };
+      // The spend, which now happens before the gate and supplies the id the
+      // tax and hazard calls below are keyed on.
+      if (url.startsWith('/api/concierge/resolve')) return { ok: true, json: async () => ({ profileId: 9, creditsCharged: 1, reused: false, apn: '8378-014-021', county: 'Los Angeles', siteAddress: '1358 5TH ST', siteCityState: 'LA VERNE, CA 91750', primaryOwner: 'CONTRERAS', useDescription: null }) };
       if (url.startsWith('/api/concierge/profiles')) return { ok: true, json: async () => ({ profileId: 9 }) };
       return { ok: true, json: async () => ({}) };
     }));
@@ -147,10 +191,14 @@ describe('a ticked tax search cannot survive a cancel', () => {
     // Finished cleanly, so no notice and the modal is free to close.
     expect(screen.queryByText(/taking longer than usual/i)).toBeNull();
 
-    // The profile id from the generate response, not a guess — and AFTER it.
+    // The profile id from the RESOLVE response, not a guess — and after it.
     expect(calls.filter((u) => u.includes('/tax')))
       .toEqual(['/api/concierge/profiles/9/tax', '/api/concierge/profiles/9/tax']);
-    expect(calls.indexOf('/api/concierge/profiles')).toBeLessThan(calls.findIndex((u) => u.includes('/tax')));
+    expect(calls.indexOf('/api/concierge/resolve')).toBeLessThan(calls.findIndex((u) => u.includes('/tax')));
+    // And the lookup happened EXACTLY ONCE for this profile. A tax search is a
+    // second vendor on a property already paid for; a flow that re-resolved on
+    // the way to it would be buying the property twice to add page 4.
+    expect(calls.filter((u) => u === '/api/concierge/resolve')).toHaveLength(1);
   });
 
   it('does not hold the operator when the search is already finished', async () => {
@@ -182,6 +230,9 @@ describe('a ticked tax search cannot survive a cancel', () => {
       if (url.startsWith('/api/concierge/access')) return { ok: true, json: async () => ({ canGenerate: true, featureOn: true }) };
       if (url.startsWith('/api/reports/access')) return { ok: true, json: async () => ({ farming: false }) };
       if (url.startsWith('/api/concierge/reps')) return { ok: true, json: async () => ({ reps: [{ id: 412, label: 'Justin Nouri', name: 'Justin Nouri', email: null, company: null, detail: null, hasLogin: true }] }) };
+      // The spend, which now happens before the gate and supplies the id the
+      // tax and hazard calls below are keyed on.
+      if (url.startsWith('/api/concierge/resolve')) return { ok: true, json: async () => ({ profileId: 9, creditsCharged: 1, reused: false, apn: '8378-014-021', county: 'Los Angeles', siteAddress: '1358 5TH ST', siteCityState: 'LA VERNE, CA 91750', primaryOwner: 'CONTRERAS', useDescription: null }) };
       if (url.startsWith('/api/concierge/profiles')) return { ok: true, json: async () => ({ profileId: 9 }) };
       return { ok: true, json: async () => ({}) };
     }));
@@ -223,25 +274,19 @@ describe('a ticked tax search cannot survive a cancel', () => {
       if (url.startsWith('/api/concierge/access')) return { ok: true, json: async () => ({ canGenerate: true, featureOn: true }) };
       if (url.startsWith('/api/reports/access')) return { ok: true, json: async () => ({ farming: false }) };
       if (url.startsWith('/api/concierge/reps')) return { ok: true, json: async () => ({ reps: [{ id: 412, label: 'Justin Nouri', name: 'Justin Nouri', email: null, company: null, detail: null, hasLogin: true }] }) };
+      // The spend, which now happens before the gate and supplies the id the
+      // tax and hazard calls below are keyed on.
+      if (url.startsWith('/api/concierge/resolve')) return { ok: true, json: async () => ({ profileId: 9, creditsCharged: 1, reused: false, apn: '8378-014-021', county: 'Los Angeles', siteAddress: '1358 5TH ST', siteCityState: 'LA VERNE, CA 91750', primaryOwner: 'CONTRERAS', useDescription: null }) };
       if (url.startsWith('/api/concierge/profiles')) return { ok: true, json: async () => ({ profileId: 9 }) };
       return { ok: true, json: async () => ({}) };
     }));
 
-    render(<NewReportModal onClose={onClose} onCreated={onCreated} />);
-    await waitFor(() => expect(screen.getByText('Concierge Profile')).toBeTruthy());
-    fireEvent.click(screen.getByText('Concierge Profile'));
-    fireEvent.click(screen.getByRole('button', { name: /^Continue$/ }));
-    await waitFor(() => expect(screen.getByLabelText('Presenting representative')).toBeTruthy());
-    fireEvent.change(screen.getByPlaceholderText(/Start typing an address/i), { target: { value: '1358 5th St' } });
-    fireEvent.change(screen.getByLabelText('City'), { target: { value: 'La Verne' } });
-    fireEvent.change(screen.getByLabelText('ZIP'), { target: { value: '91750' } });
-    const rep = screen.getByLabelText('Presenting representative');
-    fireEvent.focus(rep);
-    await waitFor(() => expect(screen.queryAllByRole('option').length).toBeGreaterThan(0));
-    fireEvent.pointerDown(screen.getAllByRole('option')[0]!);
-    fireEvent.click(screen.getByRole('button', { name: /Continue|Generate/i }));
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
-    fireEvent.change(screen.getByLabelText('Prepared for'), { target: { value: 'Dana Whitfield' } });
+    // The shared helper, rather than a second copy of the same sequence. The
+    // copy that used to be here went stale the moment the rep moved off the
+    // address step: it failed looking for a label on a step that no longer has
+    // one, which is a test breaking on the flow's shape rather than on this
+    // test's subject.
+    await reachTheGate({ onClose, onCreated });
 
     fireEvent.click(taxBox());
     fireEvent.click(screen.getByRole('button', { name: /Generate profile/i }));

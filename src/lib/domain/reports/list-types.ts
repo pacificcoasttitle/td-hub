@@ -145,10 +145,32 @@ export const REPORTS_PAGE_SIZE = 25;
  * longer mention credits. Spend itself is untouched in the database and on the
  * admin usage view.
  */
-export function sourceLineFor(type: ReportType, status: string, creditsCharged: number | null): string {
+export function sourceLineFor(
+  type: ReportType,
+  status: string,
+  creditsCharged: number | null,
+  /**
+   * The presenting rep, which is how we know whether the GATE has been filled
+   * in. Absent on a RESOLUTION — a property looked up and paid for, waiting
+   * for someone to say who it is for.
+   *
+   * Already on the row, so this needed no new column and no change to the
+   * union query. It is the right discriminator rather than a convenient one:
+   * resolve writes no rep because at that point nobody has chosen one, and a
+   * single-shot generation that dies before finalise is ALSO a payload waiting
+   * to be finished — which is what this label says, and what it is.
+   */
+  brandedToName?: string | null,
+): string {
   if (type !== 'concierge_profile') return 'Dataset';
   const lookedUp = Boolean(creditsCharged && creditsCharged > 0);
   if (status === 'failed') return lookedUp ? 'Failed after the lookup' : 'Failed before the lookup';
+  // 'retrieved' used to last milliseconds, between the upload and the ingest,
+  // so calling it "Generating" was true. Resolve-first makes it durable: the
+  // row can sit here for hours while an operator decides. A spinner and the
+  // word "Generating" on a row that nothing is working on is how a list starts
+  // lying to the people who read it all day.
+  if (status === 'retrieved' && !brandedToName) return 'Looked up — not yet generated';
   if (status === 'pending' || status === 'retrieved') return 'Generating';
   return lookedUp ? 'Property lookup' : 'No lookup';
 }

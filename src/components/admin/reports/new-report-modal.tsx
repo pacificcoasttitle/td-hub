@@ -143,7 +143,22 @@ export interface ConciergeDraft {
  * thrown so the button can be disabled AND the reason shown — a disabled button
  * with no explanation is a dead end.
  */
-export function draftProblem(d: ConciergeDraft): string | null {
+/**
+ * What is still missing BEFORE THE LOOKUP, which is the step that spends.
+ *
+ * ─── THE REP IS NOT CHECKED HERE ANY MORE ───────────────────────────────────
+ *
+ * It used to be, because the lookup and the document were one request. Under
+ * resolve-first (Gerard, 16 Oct 2026) the lookup happens first and on its own,
+ * so this checks only what identifies the PROPERTY. Asking for a presenting
+ * rep before we can even say which parcel this is was the old flow's whole
+ * problem in miniature: six fields filled in, then "that address matches four
+ * properties", and a credit already gone.
+ *
+ * The rep and the prepared-for name are checked by `gateProblem` instead,
+ * after the property is known and where getting them wrong costs nothing.
+ */
+export function lookupProblem(d: ConciergeDraft): string | null {
   if (d.mode === 'apn') {
     // LOOSELY VALIDATED ON PURPOSE. APN formats differ by county — Orange
     // writes 930-371-05, Los Angeles 6268-039-032, others run digits
@@ -158,14 +173,24 @@ export function draftProblem(d: ConciergeDraft): string | null {
     }
     if (apn.replace(/\D/g, '').length < 5) return 'That parcel number looks too short.';
     if (!/^\d{5}$/.test(d.fips.trim())) return 'Choose the county.';
-    if (!d.repContactId) return 'Choose the representative this profile goes out under.';
     return null;
   }
   if (d.street.trim() === '') return 'Enter the property street address.';
   if (d.city.trim() === '') return 'Enter the city.';
   if (!/^\d{5}(-\d{4})?$/.test(d.zip.trim())) return 'Enter a 5-digit ZIP code.';
   if (d.state.trim().length !== 2) return 'Enter a 2-letter state.';
-  if (!d.repContactId) return 'Choose the representative this profile goes out under.';
+  return null;
+}
+
+/**
+ * What is still missing before the DOCUMENT, none of which costs anything.
+ *
+ * Both of these end up printed on the cover, which is why they are required at
+ * all — and why they are required here rather than before the lookup.
+ */
+export function gateProblem(g: { preparedForName: string; repContactId: number | null }): string | null {
+  if (g.preparedForName.trim() === '') return 'Enter who this profile is prepared for.';
+  if (!g.repContactId) return 'Choose the representative this profile goes out under.';
   return null;
 }
 
@@ -218,10 +243,8 @@ export const DEFAULT_CRITERIA_SUMMARY = criteriaSummary(DEFAULT_CRITERIA);
  * every time. That would have sent allowDuplicate: true on every generation and
  * quietly disabled the guard this exists to enforce.
  */
-export function generationBody(input: {
+export function resolveBody(input: {
   draft: ConciergeDraft;
-  preparedForName: string;
-  preparedForCompany: string;
   allowDuplicate: boolean;
   /**
    * The parcel picked out of a multi-match, on a retry.
@@ -256,13 +279,197 @@ export function generationBody(input: {
     state: byApn ? 'CA' : d.state.trim().toUpperCase(),
     ...(byApn ? {} : { zip: d.zip.trim() }),
     ...(byApn ? { apn: d.apn.trim(), fips: d.fips.trim() } : {}),
-    preparedForName: input.preparedForName.trim(),
-    preparedForCompany: input.preparedForCompany.trim() || null,
-    // Which contact, never their name, email or phone.
-    presentingRepContactId: d.repContactId,
+    // NO prepared-for name and NO rep. Neither is known at this point in the
+    // flow, and neither has anything to do with which property to look up.
     ...(input.allowDuplicate ? { allowDuplicate: true } : {}),
     ...(usable ? { apn: usable.apn.trim(), fips: usable.fips!.trim() } : {}),
   };
+}
+
+/**
+ * The body of the free half: who the document is for, and under whose name.
+ *
+ * Separate from `resolveBody` because the two requests go to different routes
+ * for a reason that is about money rather than tidiness — one spends and one
+ * cannot. Keeping them as one object was how a prepared-for name ended up
+ * being required before anyone knew which parcel they were buying.
+ */
+export function finaliseBody(input: {
+  draft: ConciergeDraft;
+  preparedForName: string;
+  preparedForCompany: string;
+}): Record<string, unknown> {
+  return {
+    preparedForName: input.preparedForName.trim(),
+    preparedForCompany: input.preparedForCompany.trim() || null,
+    // Which contact, never their name, email or phone. The document's cover is
+    // resolved server-side from the order, never accepted from the browser.
+    presentingRepContactId: input.draft.repContactId,
+  };
+}
+
+// ─── What the lookup bought ─────────────────────────────────────────────────
+
+/**
+ * The property the resolve step identified and paid for. Mirrors what
+ * /api/concierge/resolve returns.
+ */
+export interface ResolvedProperty {
+  profileId: number;
+  creditsCharged: number;
+  /** It was already paid for — by an earlier attempt, or by another operator. */
+  reused: boolean;
+  apn: string | null;
+  county: string | null;
+  siteAddress: string | null;
+  siteCityState: string | null;
+  primaryOwner: string | null;
+  useDescription: string | null;
+}
+
+/**
+ * What the operator reads back before the one call that spends.
+ *
+ * ─── IT IS A SEPARATE DIALOG FROM THE GATE, ON PURPOSE ──────────────────────
+ *
+ * The gate used to be the only confirmation, and it confirmed both things at
+ * once: buy this property, and produce this document. That is why a
+ * multi-match was so expensive — the operator had already filled in six
+ * fields, so the question "which of these four parcels?" arrived after the
+ * money was gone, and answering it charged again.
+ *
+ * So the two confirmations are split along the line that costs money. This one
+ * shows the property and nothing else; there is nothing on it to get wrong
+ * except the address, which is the only thing that matters here.
+ *
+ * The four properties the gate enforces are kept, for the same reasons:
+ *   1. Cancel has focus, never the button that spends.
+ *   2. Enter never confirms.
+ *   3. Disabled in flight, so a double-click cannot double-spend.
+ *   4. Escape cancels.
+ */
+export function LookupConfirm({ address, byApn, submitting, error, onCancel, onConfirm }: {
+  address: string;
+  byApn: boolean;
+  /**
+   * NO SPEND COUNT HERE, for the reason it was taken off the gate (Gerard,
+   * 2026-09-23): operators hold no budget and cannot read a balance, so a
+   * running total asked them to weigh something that was never theirs. What
+   * makes this deliberate is the dialog existing at all, plus the duplicate
+   * check keyed on the normalised property over all time.
+   */
+  submitting: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="concierge-lookup-title"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && !submitting) { e.stopPropagation(); onCancel(); }
+        // Enter never confirms. The operator must click the button.
+        if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); }
+      }}
+    >
+      <div className="bg-white rounded-[10px] w-full max-w-[460px] shadow-xl border border-[#E5E5E5]">
+        <div className="px-5 py-4 border-b border-[#F0F1F3]">
+          <h2 id="concierge-lookup-title" className="text-[15px] font-semibold text-[#171717]">
+            Look up this property
+          </h2>
+          <p className="text-[11.5px] text-[#6B7280] mt-[3px]">
+            One property lookup. The report itself — who it is for, the rep, the comparables
+            and the extras — comes next and is free.
+          </p>
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
+          <div>
+            <p className="text-[9.5px] font-semibold uppercase tracking-[0.09em] text-[#9AA0AA]">
+              {byApn ? 'Parcel' : 'Address'}
+            </p>
+            <p className="text-[12px] text-[#171717]">{address}</p>
+          </div>
+
+          {/* SAID HERE BECAUSE IT IS TRUE HERE, and it is the sentence that
+              makes the new flow worth having. An address matching several
+              parcels used to cost a lookup before the operator ever saw the
+              list; now that answer is free and only the parcel they pick is
+              paid for. */}
+          <p className="text-[11px] text-[#6B7280]">
+            If this address matches more than one property, you will be asked which one and
+            nothing will be charged for the question.
+          </p>
+
+          {error && (
+            <p className="text-[11.5px] text-[#8E2A1E] bg-[#FDECEA] border border-[#F2C4BD] rounded-md px-3 py-2">
+              {error}
+            </p>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-[#F0F1F3] flex items-center justify-end gap-2">
+          <button
+            // Focus lands on CANCEL. Never on the button that spends.
+            autoFocus
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="h-8 px-[13px] rounded-md text-[11.5px] font-semibold border border-[#E5E5E5] bg-white text-[#3C4557] hover:bg-[#FAFAFB] disabled:opacity-50 outline-none focus-visible:ring-1 focus-visible:ring-brand-orange/30"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={submitting}
+            className="h-8 px-[13px] rounded-md text-[11.5px] font-semibold bg-brand-orange text-white hover:bg-brand-orange-hover disabled:opacity-40 outline-none focus-visible:ring-1 focus-visible:ring-brand-orange/30"
+          >
+            {submitting ? 'Looking up…' : 'Look up property'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What the lookup actually found, under the address on the gate.
+ *
+ * ─── THE OWNER IS HERE FOR A REASON ─────────────────────────────────────────
+ *
+ * It is how an operator recognises a condominium unit. 25651 Paseo La Cresta
+ * matched one candidate reading the same street line as the others; the thing
+ * that identified it was `"Owner": "LIPSITZ"`. A parcel number alone asks the
+ * operator to already know which unit they wanted.
+ *
+ * ─── AND IT SAYS WHEN NOTHING WAS CHARGED ───────────────────────────────────
+ *
+ * A reused resolution is good news and is said out loud. Hiding it would make
+ * the lookup look like it had been skipped, and an operator who thinks a step
+ * was skipped goes looking for a way to redo it.
+ */
+export function ResolvedNote({ resolved }: { resolved: ResolvedProperty }) {
+  const site = [resolved.siteAddress, resolved.siteCityState].filter(Boolean).join(', ');
+  const bits = [
+    resolved.apn ? `APN ${resolved.apn}` : null,
+    resolved.primaryOwner,
+    resolved.useDescription,
+  ].filter(Boolean) as string[];
+  return (
+    <>
+      {site ? <p>{site}</p> : null}
+      {bits.length > 0 ? <p>{bits.join(' · ')}</p> : null}
+      {resolved.reused ? (
+        <p className="text-[#3F7D58]">
+          Already looked up — nothing was charged for this one.
+        </p>
+      ) : null}
+    </>
+  );
 }
 
 // ─── A multi-match is a question, not an error ───────────────────────────────
@@ -441,7 +648,20 @@ export function ConciergeStep({ draft, problem, onField, onAddress, repPicker, c
   onField: (k: keyof ConciergeDraft, v: string) => void;
   /** One pick fills street, city, state and zip together. */
   onAddress: (a: ParsedAddress) => void;
-  repPicker: React.ReactNode;
+  /**
+   * OMITTED SINCE RESOLVE-FIRST (16 Oct 2026), and the omission is the change.
+   *
+   * The rep is printed on the document, so it belongs with the other things
+   * the document needs — collected at the gate, after the property is known
+   * and where getting it wrong costs nothing. Asking for it here meant an
+   * operator chose a rep, then found out the address matched four parcels.
+   *
+   * Kept as an optional prop rather than deleted because the step is still
+   * rendered by a flow that has a rep to show; a required prop would have
+   * forced a placeholder, and a placeholder here is a field that looks like it
+   * is being asked for.
+   */
+  repPicker?: React.ReactNode;
   /** The comparable criteria, set before generating. */
   criteriaControl: React.ReactNode;
 }) {
@@ -567,12 +787,14 @@ export function ConciergeStep({ draft, problem, onField, onAddress, repPicker, c
       </>
       )}
 
-      <Field label="Presenting representative">
-        {repPicker}
-        <p className="mt-1 text-[10.5px] text-[#9AA0AA]">
-          The profile goes out under their name, with their phone and email on it.
-        </p>
-      </Field>
+      {repPicker ? (
+        <Field label="Presenting representative">
+          {repPicker}
+          <p className="mt-1 text-[10.5px] text-[#9AA0AA]">
+            The profile goes out under their name, with their phone and email on it.
+          </p>
+        </Field>
+      ) : null}
 
       {/* ─── The criteria live in BOTH places, and here is why ──────────────
           THE CRITERIA NEVER REACH SiteX. fetchConciergeProfile sends exactly
@@ -730,6 +952,39 @@ export function NewReportModal({ onClose, onCreated }: {
    * was charged for the attempt that produced it.
    */
   const [ambiguous, setAmbiguous] = useState<{ message: string; candidates: MatchCandidate[] } | null>(null);
+  /**
+   * The confirmation in front of THE LOOKUP, which is the step that spends.
+   *
+   * It is a separate dialog from the gate, because they now confirm different
+   * things: this one confirms buying a property, the gate confirms producing a
+   * document for a named client. Folding them back together is how the old
+   * flow charged for a multi-match the operator had not seen yet.
+   */
+  const [lookupConfirm, setLookupConfirm] = useState(false);
+  /**
+   * The property the lookup found, and the id of the row holding its payload.
+   *
+   * Everything from here on is free. Cancelling the gate leaves this resolution
+   * on the Reports list as "Looked up — not yet generated", and starting again
+   * on the same address finds it and finishes it without a second lookup.
+   */
+  const [resolved, setResolved] = useState<ResolvedProperty | null>(null);
+  /**
+   * The address the resolution in hand was for.
+   *
+   * Cancelling the gate and pressing Continue again must not ask SiteX
+   * anything: we are holding the answer. The server would hand the same
+   * resolution back for nothing — the reuse path exists precisely for this —
+   * but a request that cannot change the outcome should not be made, and a
+   * lookup confirmation in front of it would tell the operator a lookup is
+   * about to happen when it is not.
+   *
+   * Keyed on the address rather than a boolean so that EDITING the address
+   * invalidates it. A stale yes here would generate a document for the
+   * previous property under the new address, which is the one mistake this
+   * modal cannot take back.
+   */
+  const [resolvedFor, setResolvedFor] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [freshRequested, setFreshRequested] = useState(false);
   const [farming, setFarming] = useState<boolean | null>(null);
@@ -755,7 +1010,9 @@ export function NewReportModal({ onClose, onCreated }: {
     return () => { cancelled = true; };
   }, []);
 
-  const problem = draftProblem(draft);
+  // The address step's own problem. The rep and the prepared-for name are
+  // checked by gateProblem, after the property is known — see lookupProblem.
+  const problem = lookupProblem(draft);
   const farmingType = isFarming(selected) ? selected : null;
   const fProblem = farmingType ? farmingProblem(farmingType, farmingDraft) : null;
 
@@ -815,7 +1072,14 @@ export function NewReportModal({ onClose, onCreated }: {
     } finally {
       setChecking(false);
     }
-    openGate();
+    // ALREADY HOLDING THE ANSWER for this exact address — the operator backed
+    // out of the gate and came back. Straight to the gate: nothing to ask, so
+    // no confirmation in front of a lookup that is not going to happen.
+    if (resolved && resolvedFor === fullAddress(draft)) { openGate(); return; }
+
+    // THE LOOKUP CONFIRMATION, not the gate. This is where the spend is now,
+    // so this is where the operator reads the property back before it happens.
+    setLookupConfirm(true);
   }
 
   function openGate() {
@@ -850,15 +1114,36 @@ export function NewReportModal({ onClose, onCreated }: {
    * than optional — an omitted argument is now a compile error, which is the
    * only part of this that a future edit cannot quietly undo.
    */
-  async function confirm(parcel: MatchCandidate | null) {
+  /**
+   * THE ONLY CALL IN THIS FILE THAT SPENDS. Which property is this?
+   *
+   * IT TAKES ITS ARGUMENT EXPLICITLY, AND EVERY CALLER PASSES ONE. The
+   * previous version of this function took none on purpose, because the gate
+   * called it from an onClick and an onClick hands a MouseEvent to the first
+   * parameter of whatever it is given — truthy, every time. That is not a
+   * theoretical hazard: it is how `allowDuplicate` was briefly wired, and it
+   * would have disabled the double-charge guard on every generation.
+   *
+   * TypeScript does not catch it. `onConfirm: () => void` accepts a function
+   * that declares parameters, so the mistake typechecks. So the parameter is
+   * required rather than optional and every call site passes it, which is the
+   * only part of this a future edit cannot quietly undo.
+   *
+   * ─── WHAT CHANGED, AND WHY IT IS NOT THE GATE ANY MORE ──────────────────
+   *
+   * This used to run from inside the confirmation gate, after the operator had
+   * typed a prepared-for name, chosen a rep and picked their add-ons. A
+   * multi-match then threw all of that back at them having already charged.
+   * Now it runs from the address step, and the gate below it cannot spend.
+   */
+  async function resolve(parcel: MatchCandidate | null) {
     setSubmitting(true); setError(null);
     try {
-      const res = await fetch('/api/concierge/profiles', {
+      const res = await fetch('/api/concierge/resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(generationBody({
-          draft, preparedForName, preparedForCompany, allowDuplicate: freshRequested,
-          parcel: parcel ?? null,
+        body: JSON.stringify(resolveBody({
+          draft, allowDuplicate: freshRequested, parcel: parcel ?? null,
         })),
       });
       const body = await res.json().catch(() => null);
@@ -867,25 +1152,77 @@ export function NewReportModal({ onClose, onCreated }: {
       // ─── SiteX asked which property ──────────────────────────────────────
       //
       // Before the generic !res.ok branch, because this is not a failure to
-      // report: it is a question with an answer attached, and nothing was
-      // charged. The gate goes first — it is a fixed overlay, and leaving it
-      // up would put the choice behind the dialog the operator just confirmed,
-      // which is the same mistake setTaxProblem had to be moved for.
+      // report: it is a question with an answer attached, and NOTHING WAS
+      // CHARGED. Answering it now costs one lookup in total — under the old
+      // flow the address search charged, and so did the pick.
       if (body?.reason === 'ambiguous_match' && Array.isArray(body.candidates) && body.candidates.length > 0) {
-        setGateOpen(false);
+        setLookupConfirm(false);
         setAmbiguous({ message: body.error as string, candidates: body.candidates as MatchCandidate[] });
         return;
       }
 
+      // We already hold a finished profile for this property. Nothing spent.
+      if (res.status === 409 && body?.reason === 'already_have' && body?.existing) {
+        setLookupConfirm(false);
+        setExisting({ message: body.error as string, existing: body.existing as ExistingProfileNotice });
+        return;
+      }
+
       if (!res.ok) {
-        // A failure still left a row, and it may have cost a credit. Point the
-        // operator at the list rather than back to a form that invites a second
-        // click at the same property.
-        setError(body?.error ?? `Generation failed (${res.status}).`);
+        // A refusal may still have left a row and may still have cost a
+        // lookup. Point the operator at the list rather than back to a form
+        // that invites a second click at the same property.
+        setError(body?.error ?? `The property could not be looked up (${res.status}).`);
+        setLookupConfirm(false);
         if (body?.profileId) onCreated(body.profileId as number);
         return;
       }
-      const profileId = body.profileId as number;
+
+      // PAID FOR AND STORED. Everything from here is free, which is what makes
+      // the gate below safe to get wrong and cancel out of.
+      setResolved(body as ResolvedProperty);
+      setResolvedFor(fullAddress(draft));
+      setLookupConfirm(false);
+      openGate();
+    } catch {
+      setError('Network error — the property may or may not have been looked up. Check the list before trying again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  /**
+   * Turn the resolution into a document. FREE — it cannot reach the vendor.
+   *
+   * Takes the profile id explicitly for the same reason `resolve` takes its
+   * parcel explicitly: it is called from an onClick, and an onClick passes a
+   * MouseEvent to the first parameter of whatever it is handed.
+   */
+  async function finalise(profileId: number) {
+    setSubmitting(true); setError(null);
+    try {
+      const res = await fetch(`/api/concierge/profiles/${profileId}/finalise`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(finaliseBody({ draft, preparedForName, preparedForCompany })),
+      });
+      const body = await res.json().catch(() => null);
+
+      // Somebody else finished this property while the gate was open — the
+      // second operator in the window. Not a failure: open it.
+      if (res.status === 409 && body?.reason === 'already_generated') {
+        setGateOpen(false);
+        onCreated(profileId);
+        onClose();
+        return;
+      }
+
+      if (!res.ok) {
+        // The property is bought and stored, so this is retryable for nothing.
+        setError(body?.error ?? `The document could not be produced (${res.status}).`);
+        onCreated(profileId);
+        return;
+      }
 
       // ─── The tax search, AFTER the profile exists ────────────────────────
       //
@@ -1024,7 +1361,10 @@ export function NewReportModal({ onClose, onCreated }: {
               message={ambiguous.message}
               candidates={ambiguous.candidates}
               busy={submitting}
-              onPick={(c) => { void confirm(c); }}
+              // THE PICK IS THE SPEND. The question was free; resolving the
+              // chosen parcel is the one lookup. Under the old flow the
+              // address search had already charged before this list appeared.
+              onPick={(c) => { void resolve(c); }}
               onCancel={() => { setAmbiguous(null); setError(null); }}
             />
           ) : existing ? (
@@ -1035,7 +1375,11 @@ export function NewReportModal({ onClose, onCreated }: {
                 window.open(`/api/concierge/profiles/${existing.existing.id}/pdf`, '_blank');
                 onClose();
               }}
-              onFresh={() => { setFreshRequested(true); setExisting(null); openGate(); }}
+              // A fresh one means a fresh LOOKUP now, so it goes to the lookup
+              // confirmation rather than the gate — and `freshRequested` also
+              // skips reuse of any resolution we already hold, because someone
+              // who asked for fresh data should not be handed this morning's.
+              onFresh={() => { setFreshRequested(true); setExisting(null); setLookupConfirm(true); }}
             />
           ) : (
             <ConciergeStep
@@ -1044,17 +1388,7 @@ export function NewReportModal({ onClose, onCreated }: {
               onField={(k, v) => setDraft((d) => ({ ...d, [k]: v }))}
               onAddress={(a) => setDraft((d) => applyPickedAddress(d, a))}
               criteriaControl={<CriteriaFields criteria={criteria} onChange={setCriteria} />}
-              repPicker={(
-                /* `r.name`, never `r.label`. The label carries the
-                   disambiguation — "Kevin Cameron · #8821" — which exists to
-                   help the operator choose and must never reach the document's
-                   cover, where it would read as the rep's name. */
-                <RepCombobox
-                  chosenName={draft.repName}
-                  onChoose={(r) => setDraft((d) => ({ ...d, repContactId: r.id, repName: r.name }))}
-                  onClear={() => setDraft((d) => ({ ...d, repContactId: null, repName: '' }))}
-                />
-              )}
+              /* NO repPicker. It moved to the gate — see ConciergeStep. */
             />
           )}
 
@@ -1110,7 +1444,11 @@ export function NewReportModal({ onClose, onCreated }: {
           >
             {step === 'type' ? 'Cancel' : 'Back'}
           </button>
-          {existing ? null : (
+          {/* Hidden while either panel is up. Both are choices with their own
+              buttons, and a Continue beside them would start the flow again
+              from the address — on the multi-match panel that means asking
+              SiteX the same question whose answer is already on screen. */}
+          {existing || ambiguous ? null : (
             <button
               type="button"
               disabled={(step === 'type' && selected === null) || checking || (farmingType !== null && submitting)}
@@ -1128,13 +1466,51 @@ export function NewReportModal({ onClose, onCreated }: {
       {/* MOUNTED ONLY WHILE OPEN, so nothing about a spend survives a cancel and
           pre-arms the next generation. taxDetail is the one flag that has to live
           outside — openGate() resets it for exactly this reason. */}
-      {gateOpen ? (
+      {lookupConfirm ? (
+        <LookupConfirm
+          address={fullAddress(draft)}
+          byApn={draft.mode === 'apn'}
+          submitting={submitting}
+          error={error}
+          onCancel={() => { if (!submitting) { setLookupConfirm(false); setError(null); } }}
+          onConfirm={() => {
+            // An arrow, not `resolve` itself: onClick passes a MouseEvent into
+            // the first parameter of whatever it is handed. See resolve().
+            void resolve(null);
+          }}
+        />
+      ) : null}
+
+      {gateOpen && resolved ? (
         <ConciergeCostGate
           address={fullAddress(draft)}
+          // NOTHING FURTHER IS CHARGED, and the dialog says so instead of
+          // repeating a lookup warning that is no longer true here.
+          spends={false}
+          resolvedNote={<ResolvedNote resolved={resolved} />}
           preparedForName={preparedForName}
           preparedForCompany={preparedForCompany}
           presentingRepName={draft.repName}
           presentingRepProblem={null}
+          repPicker={(
+            /* `r.name`, never `r.label`. The label carries the disambiguation —
+               "Kevin Cameron · #8821" — which exists to help the operator
+               choose and must never reach the document's cover, where it would
+               read as the rep's name. */
+            <div>
+              <p className="text-[9.5px] font-semibold uppercase tracking-[0.09em] text-[#9AA0AA] mb-1">
+                Presenting representative
+              </p>
+              <RepCombobox
+                chosenName={draft.repName}
+                onChoose={(r) => setDraft((d) => ({ ...d, repContactId: r.id, repName: r.name }))}
+                onClear={() => setDraft((d) => ({ ...d, repContactId: null, repName: '' }))}
+              />
+              <p className="mt-1 text-[10.5px] text-[#9AA0AA]">
+                The profile goes out under their name, with their phone and email on it.
+              </p>
+            </div>
+          )}
           criteriaSummary={DEFAULT_CRITERIA_SUMMARY}
           spend={spend}
           submitting={submitting}
@@ -1147,11 +1523,17 @@ export function NewReportModal({ onClose, onCreated }: {
           onTaxDetail={setTaxDetail}
           onPreparedForName={setPreparedForName}
           onPreparedForCompany={setPreparedForCompany}
+          // CANCELLING HERE THROWS AWAY NOTHING THAT WAS PAID FOR. The
+          // resolution stays on the Reports list as "Looked up — not yet
+          // generated", and starting again on the same address finds it and
+          // finishes it without a second lookup.
           onCancel={() => { if (!submitting) { setGateOpen(false); setError(null); } }}
           onConfirm={() => {
-            // An arrow, not `confirm` itself: onClick passes a MouseEvent into
-            // the first parameter of whatever it is handed. See confirm().
-            void confirm(null);
+            // An arrow, not `finalise` itself: onClick passes a MouseEvent
+            // into the first parameter of whatever it is handed. See
+            // finalise(), and the `resolved` guard on this whole block, which
+            // is what makes the id safe to assert here.
+            void finalise(resolved.profileId);
           }}
         />
       ) : null}

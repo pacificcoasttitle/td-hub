@@ -188,7 +188,7 @@ export async function listReports(input: {
       type: r.type as ReportType,
       id: r.id,
       typeLabel: REPORT_TYPE_LABELS[r.type as ReportType] ?? r.type,
-      sourceLine: sourceLineFor(r.type as ReportType, r.status, r.credits_charged),
+      sourceLine: sourceLineFor(r.type as ReportType, r.status, r.credits_charged, r.branded_to_name),
       templateVersion: r.template_version,
       subject: r.list_subject,
       subjectDetail: r.list_subject_detail,

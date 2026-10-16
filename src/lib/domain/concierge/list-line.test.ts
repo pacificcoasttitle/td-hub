@@ -44,7 +44,10 @@ describe('who writes these columns', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 
   it('is stamped on the row when the profile is created, before the vendor answers', () => {
-    const src = strip('generate.ts');
+    // resolve.ts since 16 Oct 2026: the row is inserted by the step that does
+    // the lookup, which is also the step that must leave a legible line behind
+    // if the lookup fails.
+    const src = strip('resolve.ts');
     expect(src).toContain('...profileListSubject(input)');
     expect(src).toContain('listSettings: criteriaSummary(DEFAULT_CRITERIA)');
   });

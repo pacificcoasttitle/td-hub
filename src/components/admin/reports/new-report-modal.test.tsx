@@ -7,7 +7,8 @@ import { CONCIERGE_GENERATE_ROLES } from '@/lib/domain/concierge/access';
 import { CONTACT_BOOK_READ_ROLES } from '@/lib/security/contact-book-access';
 import {
   AlreadyHavePanel, ConciergeStep, MatchCandidatesPanel, TypeCard,
-  applyPickedAddress, candidateUnit, draftProblem, fullAddress, generationBody, typeOptions,
+  applyPickedAddress, candidateUnit, finaliseBody, fullAddress, gateProblem, lookupProblem,
+  resolveBody, typeOptions,
   type ConciergeDraft, type MatchCandidate,
 } from './new-report-modal';
 
@@ -112,25 +113,52 @@ describe('the type picker', () => {
 });
 
 describe('what has to be filled in before a credit can be spent', () => {
-  it('accepts a complete property with a rep on it', () => {
-    expect(draftProblem(draft())).toBeNull();
+  it('accepts a complete property', () => {
+    expect(lookupProblem(draft())).toBeNull();
   });
 
   it('asks for the pieces of the address it is missing', () => {
-    expect(draftProblem(draft({ street: '  ' }))).toContain('street');
-    expect(draftProblem(draft({ city: '' }))).toContain('city');
-    expect(draftProblem(draft({ zip: '917' }))).toContain('ZIP');
+    expect(lookupProblem(draft({ street: '  ' }))).toContain('street');
+    expect(lookupProblem(draft({ city: '' }))).toContain('city');
+    expect(lookupProblem(draft({ zip: '917' }))).toContain('ZIP');
   });
 
-  it('requires a presenting representative — there is no order to take one from', () => {
-    // resolvePresentingRep(null, undefined) fails with 'no_order'. Blocking here
-    // means the operator is told before the click, not after the 400.
-    const problem = draftProblem(draft({ repContactId: null, repName: '' }));
-    expect(problem).toContain('representative');
+  it('does NOT ask for a rep before the property is known', () => {
+    // CHANGED ON PURPOSE (Gerard, 16 Oct 2026). It used to block here, which
+    // read as helpful — tell the operator before the click rather than after
+    // the 400 — but the click it was protecting was the one that charged, and
+    // asking for a rep is the step that made the whole form precede the
+    // lookup. Six fields filled in, then "that address matches four
+    // properties", and a credit already gone.
+    //
+    // The requirement did not go away; it moved to where it costs nothing to
+    // get wrong. The test below is the other half of this one.
+    expect(lookupProblem(draft({ repContactId: null, repName: '' }))).toBeNull();
   });
 
   it('builds the address the gate shows from the fields as typed', () => {
     expect(fullAddress(draft({ state: 'ca' }))).toBe('1358 5th St, La Verne, CA 91750');
+  });
+});
+
+describe('what has to be filled in before a DOCUMENT, none of it billable', () => {
+  // The other half of the split. Both of these are printed on the cover, which
+  // is why they are required at all — and why they are required here, after
+  // the property is known, rather than in front of the lookup.
+  it('requires a presenting representative — there is no order to take one from', () => {
+    // resolvePresentingRep(null, undefined) fails with 'no_order'. Blocking in
+    // the browser means the operator is told before the click, not after a 400.
+    expect(gateProblem({ preparedForName: 'Maria Lopez', repContactId: null }))
+      .toContain('representative');
+  });
+
+  it('requires who it is prepared for', () => {
+    expect(gateProblem({ preparedForName: '   ', repContactId: 412 }))
+      .toContain('prepared for');
+  });
+
+  it('is satisfied by both together', () => {
+    expect(gateProblem({ preparedForName: 'Maria Lopez', repContactId: 412 })).toBeNull();
   });
 });
 
@@ -223,23 +251,23 @@ describe('a picked address fills the whole address', () => {
     const secondPickNoZip = { ...picked, street: '1 Rural Route', city: 'Hayfork', zip: '' };
     const next = applyPickedAddress(afterFirstPick, secondPickNoZip);
     expect(next.zip).toBe('');
-    expect(draftProblem(next)).toContain('ZIP');
+    expect(lookupProblem(next)).toContain('ZIP');
   });
 
   it('does not touch draftProblem — autocomplete is an input method, not a check', () => {
     // Every rule still applies to a picked address.
     const noZip = applyPickedAddress(draft(), { ...picked, zip: '' });
-    expect(draftProblem(noZip)).toContain('ZIP');
+    expect(lookupProblem(noZip)).toContain('ZIP');
     const noCity = applyPickedAddress(draft(), { ...picked, city: '' });
-    expect(draftProblem(noCity)).toContain('city');
+    expect(lookupProblem(noCity)).toContain('city');
     const noStreet = applyPickedAddress(draft(), { ...picked, street: '' });
-    expect(draftProblem(noStreet)).toContain('street');
+    expect(lookupProblem(noStreet)).toContain('street');
   });
 
   it('accepts a fully hand-typed address with no pick at all', () => {
     // The rural / new-construction case. Nothing here requires a selection.
     const typed = draft({ street: '11200 Bachelor Valley Rd', city: 'Witter Springs', state: 'CA', zip: '95493' });
-    expect(draftProblem(typed)).toBeNull();
+    expect(lookupProblem(typed)).toBeNull();
   });
 });
 
@@ -250,8 +278,8 @@ describe('a picked address fills the whole address', () => {
 // combobox replaced.
 
 describe('the flag that allows a second credit', () => {
-  const body = (allowDuplicate: boolean) => generationBody({
-    draft: draft(), preparedForName: ' Maria Lopez ', preparedForCompany: '', allowDuplicate,
+  const body = (allowDuplicate: boolean) => resolveBody({
+    draft: draft(), allowDuplicate,
   });
 
   it('is ABSENT unless the operator chose to buy another', () => {
@@ -268,17 +296,31 @@ describe('the flag that allows a second credit', () => {
     // It was briefly wired as confirm(allowDuplicate = freshRequested) passed
     // to the gate's onClick, which hands its handler a MouseEvent — truthy,
     // every time, on every generation.
-    const asEvent = generationBody({
-      draft: draft(), preparedForName: 'x', preparedForCompany: '',
+    const asEvent = resolveBody({
+      draft: draft(),
       allowDuplicate: Boolean({ type: 'click' }) && false,
     });
     expect('allowDuplicate' in asEvent).toBe(false);
   });
 
-  it('sends the contact id and trims what was typed', () => {
+  it('sends the property and nothing a document needs', () => {
     expect(body(false)).toMatchObject({
       street: '1358 5th St', city: 'La Verne', state: 'CA', zip: '91750',
-      preparedForName: 'Maria Lopez', preparedForCompany: null,
+    });
+    // THE SPLIT, ASSERTED. The request that spends carries no prepared-for
+    // name and no rep, because at that point in the flow nobody has chosen
+    // either — and neither has anything to do with which property to look up.
+    expect('preparedForName' in body(false)).toBe(false);
+    expect('presentingRepContactId' in body(false)).toBe(false);
+  });
+
+  it('the free half carries the names, trimmed', () => {
+    expect(finaliseBody({
+      draft: draft(), preparedForName: ' Maria Lopez ', preparedForCompany: '',
+    })).toEqual({
+      preparedForName: 'Maria Lopez',
+      preparedForCompany: null,
+      // Which contact, never their name, email or phone.
       presentingRepContactId: 412,
     });
   });
@@ -298,15 +340,15 @@ describe('the parcel picked out of a multi-match', () => {
     useCodeDescription: 'Condominium Unit (Residential)', owner: 'DIAZ, OMAR',
   };
 
-  const body = (parcel: MatchCandidate | null) => generationBody({
-    draft: draft(), preparedForName: 'Maria Lopez', preparedForCompany: '',
-    allowDuplicate: false, parcel,
+  const body = (parcel: MatchCandidate | null) => resolveBody({
+    draft: draft(), allowDuplicate: false, parcel,
   });
 
   it('is absent on a first attempt, when no parcel exists yet', () => {
-    // There is no free resolution step, so nothing can supply an APN before a
-    // call has been made. The address is not a degraded choice here, it is the
-    // only one.
+    // A first attempt has only an address: an APN exists only once SiteX has
+    // said an address matches several parcels. That answer is FREE (a 300
+    // charges nothing), so picking one and resolving it costs one lookup in
+    // total — it used to cost two, because the address search charged first.
     const b = body(null);
     expect('apn' in b).toBe(false);
     expect('fips' in b).toBe(false);
@@ -325,10 +367,10 @@ describe('the parcel picked out of a multi-match', () => {
   });
 
   it('cannot be set by a stray click event either', () => {
-    // confirm() takes this parameter now, and the gate calls confirm from an
-    // onClick. A MouseEvent arriving here must not become a parcel.
-    const asEvent = generationBody({
-      draft: draft(), preparedForName: 'x', preparedForCompany: '', allowDuplicate: false,
+    // resolve() takes this parameter, and the multi-match panel calls it from
+    // an onClick. A MouseEvent arriving here must not become a parcel.
+    const asEvent = resolveBody({
+      draft: draft(), allowDuplicate: false,
       parcel: { type: 'click', bubbles: true } as unknown as MatchCandidate,
     });
     expect('apn' in asEvent).toBe(false);
@@ -489,12 +531,17 @@ describe('the modal as wired', () => {
   const src = () => strip(join(HERE, 'new-report-modal.tsx'));
   const src2 = src;
 
-  it('posts to exactly these four routes, and no others', () => {
-    // FOUR destinations now, and the fourth is new (2026-10-15). Enumerated
-    // rather than counted, because the useful question is not "how many" but
-    // "which", and above all WHICH ONES SPEND:
+  it('posts to exactly these five routes, and no others', () => {
+    // FIVE destinations now. Enumerated rather than counted, because the
+    // useful question is not "how many" but "which", and above all WHICH ONES
+    // SPEND:
     //
-    //   /api/concierge/profiles          SiteX. Buys the property. One credit.
+    //   /api/concierge/resolve           SiteX. Buys the property. One lookup,
+    //                                    and THE ONLY SPEND IN THIS FILE.
+    //   /api/concierge/profiles/{id}/finalise
+    //                                    FREE. Renders the document from the
+    //                                    payload resolve already paid for; it
+    //                                    cannot reach the vendor at all.
     //   /api/concierge/profiles/{id}/tax TitlePoint. Buys page 4, on a property
     //                                    already paid for. Opt-in, default off.
     //   /api/concierge/profiles/{id}/nhd MyNHD. FREE — which is why it is
@@ -503,9 +550,17 @@ describe('the modal as wired', () => {
     //                                    spender.
     //   /api/reports/farming             Free.
     //
+    // ─── /api/concierge/profiles IS GONE FROM HERE (16 Oct 2026) ───────────
+    //
+    // It still exists and still spends — the orders flow posts to it, where
+    // the property comes off the order and there is no gate to put in front of
+    // anyone. This modal no longer uses it, because the whole point of the
+    // split is that the thing which costs money happens on its own, before
+    // anything the operator has to fill in.
+    //
     // This guard caught the tax POST the moment it was added, which is what it
     // is for. Adding the string was not the fix — naming what it buys is, so
-    // that a fifth entry has to be justified the same way.
+    // that a sixth entry has to be justified the same way.
     const s = src();
     const posts = [...s.matchAll(/fetch\((['`])([^'`]+)\1,\s*\{[^}]*method: 'POST'/g)].map((m) => m[2]);
     // THE TAX ROUTE APPEARS TWICE and that is the design, not a duplicate: the
@@ -513,30 +568,43 @@ describe('the modal as wired', () => {
     // again — the route polls a search already paid for and re-renders — and it
     // cannot buy a second one, which routes.test.ts holds on the bridge itself.
     expect(posts.sort()).toEqual([
-      '/api/concierge/profiles',
+      '/api/concierge/resolve',
+      '/api/concierge/profiles/${profileId}/finalise',
       '/api/concierge/profiles/${profileId}/nhd',
       '/api/concierge/profiles/${profileId}/tax',
       '/api/concierge/profiles/${profileId}/tax',
       '/api/reports/farming',
     ].sort());
-    // Distinct destinations, so a fourth URL still has to be justified here.
+    // Distinct destinations, so a sixth URL still has to be justified here.
     expect([...new Set(posts)].sort()).toEqual([
-      '/api/concierge/profiles',
+      '/api/concierge/resolve',
+      '/api/concierge/profiles/${profileId}/finalise',
       '/api/concierge/profiles/${profileId}/nhd',
       '/api/concierge/profiles/${profileId}/tax',
       '/api/reports/farming',
     ].sort());
+    // AND THE SPENDER IS ONE OF THEM. The others are free, and the file must
+    // not grow a second way to buy a property.
+    expect(posts.filter((u) => u === '/api/concierge/resolve')).toHaveLength(1);
+    expect(s).not.toContain("'/api/concierge/profiles'");
   });
 
   it('asks for the tax detail only after the profile exists, and never unasked', () => {
     const s = src();
-    // The tax POST must be inside confirm(), AFTER the generate response has
-    // yielded a profile id — never built from the draft, which would mean
-    // guessing at an id, and never at generate time, which would put a
+    // The tax POST must be inside finalise(), which is handed the profile id
+    // of a property ALREADY PAID FOR — never built from the draft, which would
+    // mean guessing at an id, and never inside resolve(), which would put a
     // create/poll/fetch taking minutes inside the request that charges.
-    expect(s).toMatch(/const profileId = body\.profileId as number/);
-    expect(s.indexOf('const profileId = body.profileId'))
+    expect(s).toMatch(/async function finalise\(profileId: number\)/);
+    expect(s.indexOf('async function finalise(profileId: number)'))
       .toBeLessThan(s.indexOf('/tax'));
+    // And it is NOT in resolve. That function ends before any of this.
+    const resolveAt = s.indexOf('async function resolve(parcel');
+    const finaliseAt = s.indexOf('async function finalise(profileId');
+    expect(resolveAt).toBeGreaterThan(-1);
+    expect(finaliseAt).toBeGreaterThan(resolveAt);
+    expect(s.slice(resolveAt, finaliseAt)).not.toContain('/tax');
+    expect(s.slice(resolveAt, finaliseAt)).not.toContain('/nhd');
     // And it is conditional on the opt-in. An unconditional call would spend on
     // every generation.
     expect(s).toMatch(/if \(taxDetail\) \{/);
@@ -601,10 +669,7 @@ describe('APN mode', () => {
     draft({ mode: 'apn', apn: '930-371-05', fips: '06059', ...over });
 
   it('sends the parcel and NO fabricated ZIP', () => {
-    const b = generationBody({
-      draft: apnDraft(), preparedForName: 'Maria Lopez', preparedForCompany: '',
-      allowDuplicate: false, parcel: null,
-    });
+    const b = resolveBody({ draft: apnDraft(), allowDuplicate: false, parcel: null });
     expect(b).toMatchObject({ apn: '930-371-05', fips: '06059' });
     // A made-up postcode on the row would be a claim about the property, and
     // the claim key is built from these strings.
@@ -612,9 +677,7 @@ describe('APN mode', () => {
   });
 
   it('describes the row by what was actually asked for', () => {
-    const b = generationBody({
-      draft: apnDraft(), preparedForName: 'x', preparedForCompany: '', allowDuplicate: false, parcel: null,
-    });
+    const b = resolveBody({ draft: apnDraft(), allowDuplicate: false, parcel: null });
     // The Reports list prints this before the vendor answers.
     expect(b.street).toBe('APN 930-371-05');
     expect(b.city).toBe('Orange');
@@ -622,9 +685,7 @@ describe('APN mode', () => {
   });
 
   it('address mode is untouched — still sends the address and the ZIP', () => {
-    const b = generationBody({
-      draft: draft(), preparedForName: 'x', preparedForCompany: '', allowDuplicate: false, parcel: null,
-    });
+    const b = resolveBody({ draft: draft(), allowDuplicate: false, parcel: null });
     expect(b).toMatchObject({ street: '1358 5th St', city: 'La Verne', zip: '91750' });
     expect('apn' in b).toBe(false);
   });
@@ -633,25 +694,25 @@ describe('APN mode', () => {
     // Orange writes 930-371-05, Los Angeles 6268-039-032, others run the
     // digits together. A strict pattern would reject real parcels, and the
     // vendor is the only authority on whether one exists.
-    expect(draftProblem(apnDraft({ apn: '930-371-05' }))).toBeNull();
-    expect(draftProblem(apnDraft({ apn: '6268-039-032' }))).toBeNull();
-    expect(draftProblem(apnDraft({ apn: '930371050000' }))).toBeNull();
-    expect(draftProblem(apnDraft({ apn: '123.456.789' }))).toBeNull();
+    expect(lookupProblem(apnDraft({ apn: '930-371-05' }))).toBeNull();
+    expect(lookupProblem(apnDraft({ apn: '6268-039-032' }))).toBeNull();
+    expect(lookupProblem(apnDraft({ apn: '930371050000' }))).toBeNull();
+    expect(lookupProblem(apnDraft({ apn: '123.456.789' }))).toBeNull();
   });
 
   it('still rejects what cannot be a parcel at all', () => {
-    expect(draftProblem(apnDraft({ apn: '' }))).toContain('Enter the parcel number');
-    expect(draftProblem(apnDraft({ apn: '25651 Paseo La Cresta' }))).toContain('digits');
-    expect(draftProblem(apnDraft({ apn: '12' }))).toContain('too short');
+    expect(lookupProblem(apnDraft({ apn: '' }))).toContain('Enter the parcel number');
+    expect(lookupProblem(apnDraft({ apn: '25651 Paseo La Cresta' }))).toContain('digits');
+    expect(lookupProblem(apnDraft({ apn: '12' }))).toContain('too short');
   });
 
   it('requires the county, which is where the FIPS comes from', () => {
-    expect(draftProblem(apnDraft({ fips: '' }))).toContain('Choose the county');
+    expect(lookupProblem(apnDraft({ fips: '' }))).toContain('Choose the county');
   });
 
   it('does not ask for a street, city or ZIP in APN mode', () => {
     // The whole point: an operator with a parcel has no address to type.
-    expect(draftProblem(apnDraft({ street: '', city: '', zip: '' }))).toBeNull();
+    expect(lookupProblem(apnDraft({ street: '', city: '', zip: '' }))).toBeNull();
   });
 
   it('labels the gate with the parcel and the county', () => {

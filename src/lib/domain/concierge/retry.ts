@@ -15,9 +15,9 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { conciergeProfiles, conciergeProfileComps } from '@/lib/db/schema';
 import { downloadFile } from '@/lib/integrations/s3/client';
-import { ingestPayload } from './generate';
+import { ingestPayload } from './ingest';
 import { renderProfile } from './render';
-import { DEFAULT_CRITERIA } from './comp-filter';
+import { DEFAULT_CRITERIA, type CompCriteria } from './comp-filter';
 
 export const NO_PAYLOAD_MESSAGE =
   'This profile has no stored payload, so it cannot be finished without buying it again.';
@@ -31,7 +31,15 @@ export type ResumeOutcome =
  * its comparables — running ingest again would double every row; what that one
  * needs is a re-render, which is also free.
  */
-export async function resumeFromStored(id: number): Promise<ResumeOutcome> {
+export async function resumeFromStored(
+  id: number,
+  /**
+   * The criteria to render under. Supplied by `finaliseProfile`, where the
+   * operator chose them at the gate; defaulted for `resume` and "Try again",
+   * which are recovering a profile rather than configuring one.
+   */
+  criteria: CompCriteria = DEFAULT_CRITERIA,
+): Promise<ResumeOutcome> {
   const [profile] = await db.select().from(conciergeProfiles).where(eq(conciergeProfiles.id, id)).limit(1);
   if (!profile) return { ok: false, reason: 'not_found', message: 'Profile not found.' };
   if (!profile.rawStorageKey) return { ok: false, reason: 'no_payload', message: NO_PAYLOAD_MESSAGE };
@@ -53,7 +61,7 @@ export async function resumeFromStored(id: number): Promise<ResumeOutcome> {
   }
 
   const { compsReturned } = await ingestPayload(id, payload);
-  const rendered = await renderProfile(id, DEFAULT_CRITERIA);
+  const rendered = await renderProfile(id, criteria);
   if (!rendered.ok) {
     return { ok: false, reason: 'render', message: `${rendered.message} The data is stored, so rendering again costs nothing.` };
   }

@@ -121,7 +121,7 @@ describe('the order of operations', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 
   it('filters before it inserts, not after', async () => {
-    const src = strip('generate.ts');
+    const src = strip('ingest.ts');
     const filterAt = src.indexOf('selectComps(');
     const insertAt = src.indexOf('insert(conciergeProfileComps)');
     expect(filterAt).toBeGreaterThan(-1);
@@ -131,7 +131,15 @@ describe('the order of operations', () => {
   it('keeps the call and the ingest separable, so a spent credit can be resumed', () => {
     // The payload is in storage before ingest runs; completing a profile from it
     // must never need the vendor again.
-    expect(strip('generate.ts')).toContain('export async function ingestPayload');
+    expect(strip('ingest.ts')).toContain('export async function ingestPayload');
+  });
+
+  it('cannot reach the vendor, as a property of the module and not a habit', () => {
+    // Stronger than where the function happens to live. Before the
+    // resolve/finalise split this was a comment in generate.ts asking the next
+    // reader not to add a lookup to the ingest path; now the derived half is a
+    // module that does not import the client, so adding one fails here.
+    expect(strip('ingest.ts')).not.toContain('sitex');
   });
 
   it('re-render leaves a row alone rather than writing it undecided', () => {

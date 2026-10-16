@@ -99,13 +99,29 @@ vi.mock('./normalize', () => ({
 vi.mock('./platmap', () => ({ convertPlatMap: async () => null }));
 vi.mock('./already-have', async () => {
   const actual = await vi.importActual<typeof import('./already-have')>('./already-have');
-  return { ...actual, findProfileForProperty: vi.fn(async () => owned.value) };
+  return {
+    ...actual,
+    findProfileForProperty: vi.fn(async () => owned.value),
+    // Null by default, so these tests stay about the CLAIM. The reuse path has
+    // its own tests in resolve.test.ts — if it answered here, the second
+    // request of every pair below would be served a free resolution and never
+    // reach the claim statement these tests exist to exercise.
+    findResolvedForProperty: vi.fn(async () => null),
+  };
 });
 vi.mock('./render', () => ({ renderProfile: async () => ({ ok: true, compsShown: 6 }) }));
 
 import { claimProperty, propertyRequestKey, releaseClaim, scopedClaimKey } from './claim';
 import type { ExistingProfile } from './already-have';
-import { generateConciergeProfile } from './generate';
+// RESOLVE, not generate. The claim guards the spend, the spend is the lookup,
+// and the lookup is all of resolveProperty. Driving the whole generate here
+// meant the fake database also had to answer the ingest and the render — work
+// that happens after the credit is gone and cannot affect whether it was spent.
+import { resolveProperty } from './generate';
+
+/** The profile id out of a successful resolve, which now nests it. */
+const idOf = (r: Awaited<ReturnType<typeof resolveProperty>>) =>
+  (r.ok ? r.resolved.profileId : r.profileId);
 
 const ADDRESS = { street: '1358 5th St', city: 'La Verne', state: 'CA', zip: '91750' };
 const input = () => ({
@@ -138,7 +154,7 @@ describe('a property we already hold', () => {
 
   it('does not reach the vendor at all', async () => {
     owned.value = HELD;
-    const result = await generateConciergeProfile(input());
+    const result = await resolveProperty(input());
     expect(vendor.calls).toBe(0);
     expect(result.ok).toBe(false);
     expect((result as { creditsCharged: number }).creditsCharged).toBe(0);
@@ -146,7 +162,7 @@ describe('a property we already hold', () => {
 
   it('returns the profile we already have, so the caller can offer it', async () => {
     owned.value = HELD;
-    const result = await generateConciergeProfile(input()) as { alreadyHave?: ExistingProfile; message: string };
+    const result = await resolveProperty(input()) as { alreadyHave?: ExistingProfile; message: string };
     expect(result.alreadyHave?.id).toBe(3);
     expect(result.message).toContain('12 September');
   });
@@ -154,26 +170,26 @@ describe('a property we already hold', () => {
   it('does not take the claim, so the property is not locked for fifteen minutes', async () => {
     // Refusing AND claiming would block the deliberate re-run that follows.
     owned.value = HELD;
-    await generateConciergeProfile(input());
+    await resolveProperty(input());
     expect(state.claims.size).toBe(0);
   });
 
   it('writes no row — a refusal is not an attempt', async () => {
     owned.value = HELD;
-    await generateConciergeProfile(input());
+    await resolveProperty(input());
     expect(state.inserted.length).toBe(0);
   });
 
   it('spends when the operator asked for a fresh one, having been shown it', async () => {
     owned.value = HELD;
-    const result = await generateConciergeProfile({ ...input(), allowDuplicate: true });
+    const result = await resolveProperty({ ...input(), allowDuplicate: true });
     expect(result.ok).toBe(true);
     expect(vendor.calls).toBe(1);
   });
 
   it('stamps the property key on the row, or the next lookup finds nothing', async () => {
     owned.value = null;
-    await generateConciergeProfile(input());
+    await resolveProperty(input());
     expect(state.inserted[0]).toMatchObject({ propertyKey: propertyRequestKey(ADDRESS) });
   });
 });
@@ -236,52 +252,52 @@ describe('scoping the claim to what is being bought', () => {
 
 describe('two requests for the same property, seconds apart', () => {
   it('spend ONE credit, not two', async () => {
-    const first = await generateConciergeProfile(input());
-    const second = await generateConciergeProfile(input());
+    const first = await resolveProperty(input());
+    const second = await resolveProperty(input());
 
     expect(vendor.calls).toBe(1);
-    expect(first).toMatchObject({ ok: true, creditsCharged: 1 });
+    expect(first).toMatchObject({ ok: true, resolved: { creditsCharged: 1, reused: false } });
     expect(second).toMatchObject({ ok: false, duplicate: true, creditsCharged: 0 });
   });
 
   it('returns the first profile rather than a bare refusal', async () => {
-    const first = await generateConciergeProfile(input());
-    const second = await generateConciergeProfile(input()) as { profileId: number | null; message: string };
+    const first = await resolveProperty(input());
+    const second = await resolveProperty(input()) as { profileId: number | null; message: string };
 
-    expect(second.profileId).toBe((first as { profileId: number }).profileId);
+    expect(second.profileId).toBe(idOf(first));
     expect(second.message).toContain('nothing was charged');
   });
 
   it('holds even when the address is typed differently the second time', async () => {
-    await generateConciergeProfile(input());
-    const second = await generateConciergeProfile({ ...input(), street: '1358  5TH ST.', city: 'LA VERNE', zip: '91750-1234' });
+    await resolveProperty(input());
+    const second = await resolveProperty({ ...input(), street: '1358  5TH ST.', city: 'LA VERNE', zip: '91750-1234' });
 
     expect(vendor.calls).toBe(1);
     expect(second).toMatchObject({ duplicate: true });
   });
 
   it('does not block a different property', async () => {
-    await generateConciergeProfile(input());
-    const other = await generateConciergeProfile({ ...input(), street: '1360 5th St' });
+    await resolveProperty(input());
+    const other = await resolveProperty({ ...input(), street: '1360 5th St' });
 
     expect(vendor.calls).toBe(2);
     expect(other).toMatchObject({ ok: true });
   });
 
   it('is not keyed on the order — two orders for one property still spend once', async () => {
-    await generateConciergeProfile({ ...input(), orderId: 111 });
-    const second = await generateConciergeProfile({ ...input(), orderId: 222 });
+    await resolveProperty({ ...input(), orderId: 111 });
+    const second = await resolveProperty({ ...input(), orderId: 222 });
 
     expect(vendor.calls).toBe(1);
     expect(second).toMatchObject({ duplicate: true });
   });
 
   it('lets a genuine re-run through once the window has passed', async () => {
-    await generateConciergeProfile(input());
+    await resolveProperty(input());
     const held = state.claims.get(propertyRequestKey(ADDRESS))!;
     held.claimedAt -= state.windowMs + 1000;
 
-    const later = await generateConciergeProfile(input());
+    const later = await resolveProperty(input());
 
     expect(vendor.calls).toBe(2);
     expect(later).toMatchObject({ ok: true });
@@ -295,11 +311,11 @@ describe('a claim is given back only when nothing was spent', () => {
       ok: false, reason: 'network', message: 'fetch failed', guard: null, durationMs: 5, creditsCharged: 0,
     } as never);
 
-    const failed = await generateConciergeProfile(input());
+    const failed = await resolveProperty(input());
     expect(failed).toMatchObject({ ok: false, creditsCharged: 0 });
     expect(state.claims.has(propertyRequestKey(ADDRESS))).toBe(false);
 
-    const retry = await generateConciergeProfile(input());
+    const retry = await resolveProperty(input());
     expect(retry).toMatchObject({ ok: true });
   });
 
@@ -311,10 +327,10 @@ describe('a claim is given back only when nothing was spent', () => {
       durationMs: 9, creditsCharged: 1,
     } as never);
 
-    const refused = await generateConciergeProfile(input());
+    const refused = await resolveProperty(input());
     expect(refused).toMatchObject({ ok: false, creditsCharged: 1 });
 
-    const second = await generateConciergeProfile(input());
+    const second = await resolveProperty(input());
     expect(second).toMatchObject({ duplicate: true });
     expect(vendor.calls).toBe(0);
   });

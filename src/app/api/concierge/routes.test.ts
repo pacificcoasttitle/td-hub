@@ -89,19 +89,33 @@ describe('exactly three routes can spend, and one function does the spending', (
     // generateConciergeProfile is resolve-then-finalise rather than a second
     // implementation — so "the same call" is true by construction instead of
     // by coincidence.
-    const domain = stripComments(read('../../../lib/domain/concierge/generate.ts'));
-    const calls = domain.match(/fetchConciergeProfile\(/g) ?? [];
+    const resolve = stripComments(read('../../../lib/domain/concierge/resolve.ts'));
+    const calls = resolve.match(/fetchConciergeProfile\(/g) ?? [];
     expect(calls, 'exactly one call site, in resolveProperty').toHaveLength(1);
+    expect(resolve).toContain('export async function resolveProperty');
 
-    // And it is inside resolve, above finalise — not in the combined path,
-    // which must get there through resolve or not at all.
-    const resolveAt = domain.indexOf('export async function resolveProperty');
-    const finaliseAt = domain.indexOf('export async function finaliseProfile');
-    const callAt = domain.indexOf('fetchConciergeProfile(');
-    expect(resolveAt).toBeGreaterThan(-1);
-    expect(finaliseAt).toBeGreaterThan(resolveAt);
-    expect(callAt).toBeGreaterThan(resolveAt);
-    expect(callAt).toBeLessThan(finaliseAt);
+    // ─── AND IT LIVES WHERE A SCRIPT CAN REACH IT ───────────────────────────
+    //
+    // resolve.ts must not import the renderer, and this is not tidiness.
+    // @react-pdf/textkit imports `@react-pdf/hyphenate/en-us`, which that
+    // package does not list in its `exports`, so any module that transitively
+    // reaches @react-pdf dies at import under tsx. While the spend shared a
+    // file with the render, the one function that charges could not be driven
+    // from a verification script — which is exactly why the Paseo La Cresta
+    // run could only exercise the feed client and had to state that the
+    // archive path was unproven.
+    //
+    // A patch for the resolver was tried once and CHANGED WHAT THE RENDERER
+    // PRODUCED — it enabled hyphenation — so the fix is this separation, and
+    // this is the assertion that keeps it.
+    expect(resolve).not.toMatch(/from '\.\/document\/profile-document'/);
+    expect(resolve).not.toMatch(/from '\.\/render'/);
+    expect(resolve).not.toMatch(/from '\.\/retry'/);
+
+    // The finalise half calls resolve and does not re-implement it.
+    const generate = stripComments(read('../../../lib/domain/concierge/generate.ts'));
+    expect(generate).not.toContain('fetchConciergeProfile(');
+    expect(generate).toContain("from './resolve'");
 
     // No other domain module may import the feed client at all. Matched on the
     // IMPORT PATH, not the word: render.ts legitimately reads the
@@ -112,6 +126,14 @@ describe('exactly three routes can spend, and one function does the spending', (
       expect(stripComments(read(`../../../lib/domain/concierge/${m}`)), m)
         .not.toMatch(/from '[^']*integrations\/sitex/);
     }
+
+    // generate.ts is the one exception and it is a TYPE. `import type` is
+    // erased at compile time, so it cannot carry a call — but the import is
+    // still named here rather than the rule being widened to "anything from
+    // concierge-feed", which would have let a real client import in beside it.
+    const sitexImports = generate.match(/import[^;]*from '[^']*integrations\/sitex[^']*'/g) ?? [];
+    expect(sitexImports).toHaveLength(1);
+    expect(sitexImports[0]).toMatch(/^import type /);
   });
 
   it('finalise renders a paid-for property and cannot buy another', () => {
@@ -291,7 +313,9 @@ describe('exactly three routes can spend, and one function does the spending', (
     // The entry point moved to the Reports page, where a request carries no
     // order — an order-keyed guard would protect nothing there.
     expect(generate).not.toContain('getProfileForOrder');
-    const claim = read('../../../lib/domain/concierge/generate.ts');
+    // In resolve.ts, with the call it guards. A claim in one module and the
+    // spend in another could not be checked for order at all.
+    const claim = read('../../../lib/domain/concierge/resolve.ts');
     expect(claim).toContain('claimProperty(requestKey)');
     const guard = claim.indexOf('claimProperty(');
     const vendor = claim.indexOf('fetchConciergeProfile(');
@@ -331,7 +355,7 @@ describe('exactly three routes can spend, and one function does the spending', (
   });
 
   it('the parcel reaches the vendor call rather than being parsed and dropped', () => {
-    const gen = stripComments(read('../../../lib/domain/concierge/generate.ts'));
+    const gen = stripComments(read('../../../lib/domain/concierge/resolve.ts'));
     // Passed INTO the one call that spends, not merely accepted by the route.
     const call = gen.indexOf('fetchConciergeProfile({');
     expect(call).toBeGreaterThan(-1);
@@ -345,7 +369,7 @@ describe('exactly three routes can spend, and one function does the spending', (
 
   it('the candidates are written to the row, not only returned to the browser', () => {
     // Closing the modal must not throw away the only answer to the question.
-    const gen = stripComments(read('../../../lib/domain/concierge/generate.ts'));
+    const gen = stripComments(read('../../../lib/domain/concierge/resolve.ts'));
     expect(gen).toContain('matchCandidates');
   });
 

@@ -18,7 +18,17 @@ const bodySchema = z.object({
   street: z.string().min(1),
   city: z.string().min(1),
   state: z.string().min(1).default('CA'),
-  zip: z.string().min(3),
+  /**
+   * OPTIONAL SINCE THE APN SEARCH (15 Oct 2026).
+   *
+   * A parcel search has no postal address, so there is no ZIP to require. It
+   * stays validated when present — a two-character ZIP was always a typo —
+   * and the modal still requires it in address mode, where its absence IS an
+   * error. Making it optional here rather than accepting a fabricated value
+   * is the point: a made-up ZIP on the row would be a claim about the
+   * property.
+   */
+  zip: z.string().min(3).optional().or(z.literal('')),
   /**
    * The parcel the operator picked out of a multi-match.
    *

@@ -38,9 +38,12 @@ export function criteriaSummary(c: {
  * asked for — that is the first question anyone asks of a failed row.
  */
 export function profileListSubject(input: {
-  street: string; city: string; state: string; zip: string;
+  street: string; city: string; state: string; zip?: string;
 }): { listSubject: string; listSubjectDetail: string } {
-  const detail = [`${input.city.trim()},`, input.state.trim(), input.zip.trim()]
+  // The ZIP is absent on a parcel search. Joined out rather than printed as
+  // an empty gap, so the line reads "Orange, CA" instead of "Orange, CA ".
+  const detail = [`${input.city.trim()},`, input.state.trim(), (input.zip ?? '').trim()]
+    .filter((part) => part !== '')
     .join(' ').replace(/\s+/g, ' ').trim();
   return { listSubject: input.street.trim(), listSubjectDetail: detail };
 }

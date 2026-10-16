@@ -12,6 +12,10 @@ import type { ReportType } from '@/lib/domain/reports/list-types';
 import {
   FarmingStep, emptyFarmingDraft, farmingFormData, farmingProblem, isFarming, type FarmingDraft,
 } from './farming-step';
+// A PURE DATA TABLE — fips.ts has no imports of its own, so it carries nothing
+// server-side into the browser bundle. Checked rather than assumed: a client
+// component dragging @react-pdf in is how a deploy broke on 2026-09-30.
+import { CALIFORNIA_COUNTIES } from '@/lib/integrations/titlepoint/fips';
 
 // ─── New Report ─────────────────────────────────────────────────────────────
 //
@@ -110,11 +114,26 @@ export function typeOptions(access: ConciergeAccess | null, farming: boolean | n
   ];
 }
 
+/**
+ * How the operator is identifying the property.
+ *
+ * 'address' is Google autocomplete and is the default. 'apn' is the parcel,
+ * which the order-creation flow has always had and this one did not — and
+ * which is also the escape hatch when SiteX will not resolve an address: a
+ * parcel search CANNOT multi-match.
+ */
+export type PropertyMode = 'address' | 'apn';
+
 export interface ConciergeDraft {
+  mode: PropertyMode;
   street: string;
   city: string;
   state: string;
   zip: string;
+  /** Parcel number, as the county writes it. Formats differ by county. */
+  apn: string;
+  /** The county's five-digit FIPS, chosen from CALIFORNIA_COUNTIES. */
+  fips: string;
   repContactId: number | null;
   repName: string;
 }
@@ -125,6 +144,23 @@ export interface ConciergeDraft {
  * with no explanation is a dead end.
  */
 export function draftProblem(d: ConciergeDraft): string | null {
+  if (d.mode === 'apn') {
+    // LOOSELY VALIDATED ON PURPOSE. APN formats differ by county — Orange
+    // writes 930-371-05, Los Angeles 6268-039-032, others run digits
+    // together. A strict pattern would reject real parcels, and the vendor is
+    // the only authority on whether one exists. So this checks it is
+    // plausibly a parcel and nothing more: digits, with dashes or dots
+    // allowed between them.
+    const apn = d.apn.trim();
+    if (apn === '') return 'Enter the parcel number (APN).';
+    if (!/^[0-9]+([-.][0-9]+)*$/.test(apn)) {
+      return 'A parcel number is digits, optionally separated by dashes or dots.';
+    }
+    if (apn.replace(/\D/g, '').length < 5) return 'That parcel number looks too short.';
+    if (!/^\d{5}$/.test(d.fips.trim())) return 'Choose the county.';
+    if (!d.repContactId) return 'Choose the representative this profile goes out under.';
+    return null;
+  }
   if (d.street.trim() === '') return 'Enter the property street address.';
   if (d.city.trim() === '') return 'Enter the city.';
   if (!/^\d{5}(-\d{4})?$/.test(d.zip.trim())) return 'Enter a 5-digit ZIP code.';
@@ -134,6 +170,10 @@ export function draftProblem(d: ConciergeDraft): string | null {
 }
 
 export function fullAddress(d: ConciergeDraft): string {
+  if (d.mode === 'apn') {
+    const county = CALIFORNIA_COUNTIES.find((c) => c.fips === d.fips.trim());
+    return `APN ${d.apn.trim()}${county ? ` · ${county.name} County` : ''}`;
+  }
   return `${d.street.trim()}, ${d.city.trim()}, ${d.state.trim().toUpperCase()} ${d.zip.trim()}`;
 }
 
@@ -196,12 +236,26 @@ export function generationBody(input: {
 }): Record<string, unknown> {
   const { draft: d, parcel } = input;
   const usable = parcel?.apn?.trim() && parcel.fips?.trim() ? parcel : null;
+
+  // ─── APN MODE HAS NO POSTAL ADDRESS ──────────────────────────────────────
+  //
+  // The row still has to say what was asked for, and the Reports list prints
+  // it. "APN 930-371-05" with the county is exactly that — honest about how
+  // the property was identified, and legible before the vendor answers.
+  //
+  // NO FABRICATED ZIP. The field is optional on the route for this reason: a
+  // made-up postcode on the row would be a claim about the property, and the
+  // claim key is built from these strings.
+  const county = CALIFORNIA_COUNTIES.find((c) => c.fips === d.fips.trim());
+  const byApn = d.mode === 'apn';
+
   return {
     // No order here. The double-charge guard is keyed on the property.
-    street: d.street.trim(),
-    city: d.city.trim(),
-    state: d.state.trim().toUpperCase(),
-    zip: d.zip.trim(),
+    street: byApn ? `APN ${d.apn.trim()}` : d.street.trim(),
+    city: byApn ? (county?.name ?? '') : d.city.trim(),
+    state: byApn ? 'CA' : d.state.trim().toUpperCase(),
+    ...(byApn ? {} : { zip: d.zip.trim() }),
+    ...(byApn ? { apn: d.apn.trim(), fips: d.fips.trim() } : {}),
     preparedForName: input.preparedForName.trim(),
     preparedForCompany: input.preparedForCompany.trim() || null,
     // Which contact, never their name, email or phone.
@@ -264,6 +318,9 @@ export function MatchCandidatesPanel({ message, candidates, busy, onPick, onCanc
   onPick: (c: MatchCandidate) => void;
   onCancel: () => void;
 }) {
+  // SiteX returns a 300 with ONE candidate for a condo it has already
+  // resolved: it wants the parcel confirmed, not disambiguated.
+  const only = candidates.length === 1;
   return (
     <div className="space-y-3">
       <p className="text-[13px] text-[#333]">{message}</p>
@@ -299,14 +356,26 @@ export function MatchCandidatesPanel({ message, candidates, busy, onPick, onCanc
                     SiteX sent no county code for this one — it cannot be looked up by parcel.
                   </div>
                 ) : null}
+                {/* ─── ONE CANDIDATE IS A CONFIRMATION ──────────────────────
+                    25651 Paseo La Cresta returned a 300 with exactly one
+                    candidate. A single unlabelled row under "pick one" does
+                    not look like a control at all — a rep reported the picker
+                    as not appearing, having been shown precisely this. So the
+                    one-candidate case gets a verb. */}
+                {only ? (
+                  <div className="mt-2 inline-block rounded-md bg-brand-orange px-3 py-1.5 text-[12px] font-semibold text-white">
+                    {busy ? 'Working…' : 'Confirm this property'}
+                  </div>
+                ) : null}
               </button>
             </li>
           );
         })}
       </ul>
       <p className="text-[11px] text-[#666]">
-        Picking one spends a single lookup, the same as generating normally. The
-        attempt that produced this list was not charged.
+        {only
+          ? 'Confirming spends a single lookup, the same as generating normally. The attempt that found it was not charged.'
+          : 'Picking one spends a single lookup, the same as generating normally. The attempt that produced this list was not charged.'}
       </p>
       <button
         type="button"
@@ -314,7 +383,7 @@ export function MatchCandidatesPanel({ message, candidates, busy, onPick, onCanc
         disabled={busy}
         className="text-[12px] text-[#666] underline disabled:opacity-50"
       >
-        Back to the address
+        {only ? 'Not this property — back to the address' : 'Back to the address'}
       </button>
     </div>
   );
@@ -377,8 +446,79 @@ export function ConciergeStep({ draft, problem, onField, onAddress, repPicker, c
   criteriaControl: React.ReactNode;
 }) {
   const input = 'w-full h-8 px-[9px] border border-[#E5E5E5] rounded-md text-[12px] outline-none focus:ring-1 focus:ring-brand-orange/30 focus:border-brand-orange';
+  const byApn = draft.mode === 'apn';
+  const tab = (active: boolean) =>
+    `px-3 h-7 text-[12px] rounded-md border transition-colors ${
+      active
+        ? 'border-brand-orange bg-brand-orange/10 text-[#111] font-semibold'
+        : 'border-[#E5E5E5] text-[#666] hover:border-[#CCC]'
+    }`;
+
   return (
     <div className="space-y-3">
+      {/* ─── Address or parcel ────────────────────────────────────────────
+          The order-creation flow has always had a parcel search and this one
+          did not, so an operator holding an APN had nowhere to put it.
+
+          It is also the escape hatch for an address SiteX will not resolve:
+          a PARCEL SEARCH CANNOT MULTI-MATCH. 25651 Paseo La Cresta came back
+          as a 300 because the street address names a whole condominium; the
+          parcel names one unit and nothing else. */}
+      <div className="flex items-center gap-2" role="tablist" aria-label="How to identify the property">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!byApn}
+          className={tab(!byApn)}
+          onClick={() => onField('mode', 'address')}
+        >
+          Address
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={byApn}
+          className={tab(byApn)}
+          onClick={() => onField('mode', 'apn')}
+        >
+          APN
+        </button>
+      </div>
+
+      {byApn ? (
+        <>
+          <Field label="Parcel number (APN)">
+            <input
+              aria-label="Parcel number (APN)"
+              value={draft.apn}
+              onChange={(e) => onField('apn', e.target.value)}
+              placeholder="930-371-05"
+              className={input}
+            />
+          </Field>
+          <Field label="County">
+            {/* The county supplies the FIPS SiteX needs. Derived from the same
+                table the order flow resolves against, so a county cannot
+                exist in this list and not in the resolver. */}
+            <select
+              aria-label="County"
+              value={draft.fips}
+              onChange={(e) => onField('fips', e.target.value)}
+              className={input}
+            >
+              <option value="">Choose a county…</option>
+              {CALIFORNIA_COUNTIES.map((c) => (
+                <option key={c.fips} value={c.fips}>{c.name}</option>
+              ))}
+            </select>
+          </Field>
+          <p className="text-[11px] text-[#666]">
+            A parcel search names one property exactly, so it cannot come back asking
+            which one you meant. Use it when an address will not resolve.
+          </p>
+        </>
+      ) : (
+      <>
       <Field label="Street address">
         {/* Autocomplete is an INPUT METHOD, not a replacement for the checks.
             draftProblem() is untouched: a picked address that came back without
@@ -424,6 +564,8 @@ export function ConciergeStep({ draft, problem, onField, onAddress, repPicker, c
           <input aria-label="ZIP" value={draft.zip} onChange={(e) => onField('zip', e.target.value)} className={input} />
         </Field>
       </div>
+      </>
+      )}
 
       <Field label="Presenting representative">
         {repPicker}
@@ -518,7 +660,10 @@ export function AlreadyHavePanel({ message, existing, onOpen, onFresh }: {
 
 // ─── The modal ──────────────────────────────────────────────────────────────
 
-const EMPTY: ConciergeDraft = { street: '', city: '', state: 'CA', zip: '', repContactId: null, repName: '' };
+const EMPTY: ConciergeDraft = {
+  mode: 'address', street: '', city: '', state: 'CA', zip: '',
+  apn: '', fips: '', repContactId: null, repName: '',
+};
 
 /**
  * MOUNTED ONLY WHILE OPEN. The page renders `{open && <NewReportModal …/>}`, so

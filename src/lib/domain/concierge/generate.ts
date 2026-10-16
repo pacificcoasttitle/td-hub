@@ -39,7 +39,11 @@ export interface GenerateInput {
   street: string;
   city: string;
   state: string;
-  zip: string;
+  /**
+   * Optional since the APN search: a parcel lookup has no postal address, and
+   * a fabricated ZIP on the row would be a claim about the property.
+   */
+  zip?: string;
   /**
    * The parcel the operator picked out of a multi-match. Searched by in
    * preference to the address.
@@ -167,7 +171,7 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
 
   // 2. THE CALL. One, and only here.
   const result = await fetchConciergeProfile({
-    street: input.street, city: input.city, state: input.state, zip: input.zip,
+    street: input.street, city: input.city, state: input.state, zip: input.zip ?? '',
     apn: input.apn ?? null, fips: input.fips ?? null,
   });
 
@@ -197,8 +201,38 @@ export async function generateConciergeProfile(input: GenerateInput): Promise<Ge
     const message = result.reason === 'not_configured' || result.reason === 'api_error' || result.reason === 'network'
       ? result.message
       : guardMessage(result.reason);
+    // ─── ARCHIVE ANYTHING WE PAID FOR, GUARD OR NO GUARD ────────────────
+    //
+    // The guard protects the DOCUMENT; it has no business destroying the
+    // evidence. 25651 Paseo La Cresta bought 65,265 bytes of real property
+    // data and this path discarded every one of them, so what SiteX actually
+    // returned could only be inferred from a length in a log line — on the
+    // very call that proved the guard itself was wrong.
+    //
+    // Charged and refused is the case that most needs the bytes kept: it is
+    // unrecoverable without a second purchase.
+    const refusedRaw = 'raw' in result ? result.raw : undefined;
+    let refusedKey: string | null = null;
+    if (result.creditsCharged > 0 && refusedRaw) {
+      const buf = Buffer.from(refusedRaw, 'utf8');
+      const key = `concierge/${profileId}/sitex-raw.json`;
+      const up = await uploadFile({ key, buffer: buf, contentType: 'application/json' });
+      refusedKey = up.success ? key : null;
+    }
+
     await db.update(conciergeProfiles)
-      .set({ ...guardCols, status: 'failed', errorMessage: message })
+      .set({
+        ...guardCols,
+        status: 'failed',
+        errorMessage: message,
+        // Only when there is something there. A key for an object that failed
+        // to upload is worse than none.
+        ...(refusedKey ? {
+          rawStorageKey: refusedKey,
+          rawSha256: crypto.createHash('sha256').update(Buffer.from(refusedRaw!, 'utf8')).digest('hex'),
+          rawBytes: Buffer.byteLength(refusedRaw!, 'utf8'),
+        } : {}),
+      })
       .where(eq(conciergeProfiles.id, profileId));
     // Nothing spent — give the property back, so a corrected retry is not
     // locked out for the window. If it DID charge, the claim stands: the credit

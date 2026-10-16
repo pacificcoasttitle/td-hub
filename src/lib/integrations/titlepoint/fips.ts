@@ -78,3 +78,21 @@ export function resolveCaliforniaFips(county: string | null | undefined): string
     .trim();
   return CA_COUNTY_FIPS[normalized];
 }
+
+/**
+ * The counties, for a picker. ONE TABLE — Gerard, 15 Oct 2026.
+ *
+ * Derived from CA_COUNTY_FIPS rather than written out again, so a county
+ * cannot exist in a dropdown and not in the resolver, or the other way round.
+ * The Concierge APN search uses this; the order flow already uses the resolver
+ * below it.
+ *
+ * Title Case for display, since the keys are lowercase for matching.
+ */
+export const CALIFORNIA_COUNTIES: ReadonlyArray<{ name: string; fips: string }> =
+  Object.entries(CA_COUNTY_FIPS)
+    .map(([name, fips]) => ({
+      name: name.replace(/\b[a-z]/g, (c) => c.toUpperCase()),
+      fips,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));

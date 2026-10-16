@@ -149,13 +149,13 @@ export async function propertySearch(
       const outcome = await classifyNonOk(response);
 
       if (outcome.kind === 'no_match') {
-        await logRequest({ operation: 'property_search', requestId, startedAt, success: true, requestMeta: { addr: params.street, lastLine }, responseMeta: { match: 'none', matchCode: 'N', httpStatus: response.status } });
+        await logRequest({ operation: 'property_search', requestId, startedAt, success: true, requestMeta: { addr: params.street, lastLine }, responseMeta: { match: 'none', matchCode: 'N', httpStatus: response.status, creditsCharged: 0 } });
         return vendorSuccess<PropertySearchResult>({ match: 'none', property: null, locations: [] }, { requestId, durationMs });
       }
 
       if (outcome.kind === 'multi_match') {
         const locations = mapLocations(outcome.raw);
-        await logRequest({ operation: 'property_search', requestId, startedAt, success: true, requestMeta: { addr: params.street, lastLine }, responseMeta: { match: 'multi', matchCode: 'M', httpStatus: response.status, locationCount: locations.length, candidates: locations.slice(0, 10) } });
+        await logRequest({ operation: 'property_search', requestId, startedAt, success: true, requestMeta: { addr: params.street, lastLine }, responseMeta: { match: 'multi', matchCode: 'M', httpStatus: response.status, creditsCharged: 0, locationCount: locations.length, candidates: locations.slice(0, 10) } });
         return vendorSuccess<PropertySearchResult>({ match: 'multi', property: null, locations }, { requestId, durationMs });
       }
 
@@ -176,7 +176,31 @@ export async function propertySearch(
       result = { match: 'none', property: null, locations: [] };
     }
 
-    await logRequest({ operation: 'property_search', requestId, startedAt, success: true, requestMeta: { addr: params.street, lastLine }, responseMeta: { match: result.match, locationCount: result.locations.length } });
+    // ─── A 200 COSTS A CREDIT, AND THIS DID NOT SAY SO ───────────────────
+    //
+    // responseMeta was { match, locationCount }: no SearchId, no credit, no
+    // feed id. So a charged search left no handle that reconciles against an
+    // invoice line and no record of WHICH FEED it was billed under — the two
+    // things anyone asking "what did this cost" needs.
+    //
+    // The concierge logger has recorded all three since it shipped, for
+    // exactly this reason. Same shape here.
+    //
+    // creditsCharged is the rule stated in concierge-feed.ts and measured on
+    // UAT: a 2xx charges one, a non-2xx charges nothing. The non-2xx branches
+    // above say 0 for the same reason.
+    await logRequest({
+      operation: 'property_search', requestId, startedAt, success: true,
+      requestMeta: { addr: params.street, lastLine, feedId: config.feedId },
+      responseMeta: {
+        match: result.match,
+        locationCount: result.locations.length,
+        httpStatus: response.status,
+        searchId: raw.OrderInfo?.SearchId ?? null,
+        creditsCharged: 1,
+        matchCode,
+      },
+    });
     return vendorSuccess(result, { requestId, durationMs });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';

@@ -39,6 +39,23 @@ export interface SiteXSearchResponse {
     PropertyProfile?: SiteXRawPropertyProfile;
   };
   Locations?: SiteXRawLocation[];
+  /**
+   * SiteX's own id for the search, and the ONLY handle that reconciles a
+   * charge against an invoice line.
+   *
+   * It was absent from this type and from the property_search log, so a
+   * charged address search left nothing to reconcile. The concierge path has
+   * recorded it since it shipped — same response, same field, and the two
+   * readings of it had simply drifted apart.
+   */
+  OrderInfo?: {
+    SearchId?: number;
+    IsValidAddress?: boolean;
+    OutsideCoverage?: boolean;
+    Completed?: string;
+    MatchMethodCode?: string;
+    MatchMethodDescription?: string;
+  };
 }
 
 export interface SiteXRawPropertyProfile {
